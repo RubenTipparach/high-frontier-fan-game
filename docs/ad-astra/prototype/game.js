@@ -46,8 +46,11 @@ const poolFrom = (counts) => shuffle(Object.entries(counts).flatMap(([k, n]) => 
 let _uid = 1;
 
 // ================================================================ star map graph (AA-B6)
-const R = 17.5; // world px per space (25 spaces fit the 1400x900 board world), centred on Sol at (700, 450) like the HF planner map
-function polar([deg, r]) { const a = deg * Math.PI / 180; return { x: 700 + Math.cos(a) * r * R, y: 450 + Math.sin(a) * r * R }; }
+// World px per space, centred on Sol. The renderer never zooms out past 1 and
+// the hand strip covers the bottom of the stage, so the neighbourhood is drawn
+// as a tilted plane: wide, not tall. Distances are counted in spaces (dots).
+const RX = 24, RY = 10.5;
+function polar([deg, r]) { const a = deg * Math.PI / 180; return { x: 700 + Math.cos(a) * r * RX, y: 400 + Math.sin(a) * r * RY }; }
 function buildMap() {
   const nodes = {}; const adj = {};
   const add = (id, o) => { nodes[id] = { id, ...o }; adj[id] = adj[id] || []; };
@@ -234,63 +237,82 @@ function explore(starId, how) { // AA-G12
   log(`Explored ${star.name} by ${how}: ${found.length ? found.join(', ') : 'no worlds of note'}. +1 VP (AA-G12).`, 'good');
   return true;
 }
-function genSystem(starId) { // AA-B7a: a system map in the Sol map idiom
+function genSystem(starId) { // AA-B7a: a gravity well in the Sol map idiom
+  // You arrive at the EDGE of the system and burn DOWN the well: one descent
+  // path with a parking orbit (cyan ring) at each band. Moving around a band
+  // is free (green Hohmann dots); each band further in costs more burns
+  // (magenta pads), and landing costs burns too.
   const star = STAR_BY_ID[starId]; const st = S.stars[starId];
   const nodes = [], edges = [], sites = [];
-  // compact layout opened at zoom 1.5, where HF shows its burn pads
-  const K = 0.8;
-  const P = (deg, r) => ({ x: 700 + Math.cos(deg * Math.PI / 180) * r * K, y: 430 + Math.sin(deg * Math.PI / 180) * r * K });
-  const lerp = (p, q, t) => ({ x: p.x + (q.x - p.x) * t, y: p.y + (q.y - p.y) * t });
-  const node = (id, kind, pos, label, extra = {}) => nodes.push({ id, kind, ...pos, label, ...extra });
+  // a tilted orbital plane, wide not tall, so the whole well fits above the hand
+  const KX = 1.6, KY = 0.8, CY = 420;
+  const P = (deg, r) => ({ x: 700 + Math.cos(deg * Math.PI / 180) * r * KX, y: CY + Math.sin(deg * Math.PI / 180) * r * KY });
+  const node = (id, kind, pos, label, extra = {}) => { nodes.push({ id, kind, ...pos, label, ...extra }); return id; };
   const site = (o) => sites.push({ claimed: false, cubes: 0, pop: 0, step: 0, startStep: 0, ...o, node: o.id });
-  const HIGH = P(270, 285);
-  node('high', 'orbit', HIGH, 'High Orbit');
-  // a leg of `burns` magenta burn pads from High Orbit to a destination node (AA-B7b)
-  const leg = (prefix, destPos, burns, destId) => {
-    let prev = 'high';
-    for (let i = 1; i <= burns; i++) { const id = `${prefix}B${i}`; node(id, 'burn', lerp(HIGH, destPos, i / (burns + 1)), 'Burn pad'); edges.push([prev, id]); prev = id; }
-    edges.push([prev, destId]);
+  const link = (a, b) => edges.push([a, b]);
+  const TRUNK = 270; // the descent path comes in from the top
+  const RINGS = { comp: 250, belt: 195, hz: 135, inner: 72 };
+  // descent: edge -> 2 burns -> companion band -> 1 -> belt -> 2 -> HZ -> 2 -> inner (AA-B7b)
+  node('high', 'orbit', P(TRUNK, 305), 'System edge (arrival)');
+  const descend = (from, toRing, toR, burns, fromR) => {
+    let prev = from;
+    for (let i = 1; i <= burns; i++) prev = (node(`d${toRing}${i}`, 'burn', P(TRUNK, fromR - (fromR - toR) * i / (burns + 1)), 'Burn pad'), link(prev, `d${toRing}${i}`), `d${toRing}${i}`);
+    node(`o_${toRing}`, 'orbit', P(TRUNK, toR), `${toRing === 'comp' ? 'Outer' : toRing === 'belt' ? 'Belt' : toRing === 'hz' ? 'Habitable-zone' : 'Inner'} orbit`);
+    link(prev, `o_${toRing}`);
+    return `o_${toRing}`;
+  };
+  const oComp = descend('high', 'comp', RINGS.comp, 2, 305);
+  const oBelt = descend(oComp, 'belt', RINGS.belt, 1, RINGS.comp);
+  const oHz = descend(oBelt, 'hz', RINGS.hz, 2, RINGS.belt);
+  const oIn = descend(oHz, 'inner', RINGS.inner, 2, RINGS.hz);
+  // free transfer around a band to a body's position (green Hohmann dots)
+  const around = (fromId, r, a1, prefix) => {
+    const span = ((a1 - TRUNK + 540) % 360) - 180; const n = Math.max(1, Math.round(Math.abs(span) / 28));
+    let prev = fromId;
+    for (let i = 1; i <= n; i++) { const id = `${prefix}h${i}`; node(id, 'hohmann', P(TRUNK + span * i / (n + 1), r), 'Transfer'); link(prev, id); prev = id; }
+    return prev;
   };
   const short = star.name.split(' ')[0].replace(/'s$/, '');
-  // the inner rocky world, always
-  const rockPos = P(195, 85);
-  node('rock', 'site', rockPos, `${star.name} I`);
-  site({ id: 'rock', kind: 'world', name: `${star.name} I`, cls: 'Hostile', size: rint(4, 6), hyd: rint(0, 1), spec: ['M', 'V'][rint(0, 1)], terra: true });
-  leg('r', rockPos, 2, 'rock');
-  // the habitable-zone world from its chit
-  if (st.hz && st.hz !== 'None') {
-    const [lo, hi] = CLASS_HYD[st.hz];
-    const pos = P(335, 165); const nm = S.worldNames.pop() || 'World';
-    node('hz', 'site', pos, nm);
-    const step = st.hz === 'Marginal' ? 2 : st.hz === 'Habitable' ? 3 : st.hz === 'Garden' ? 4 : 0;
-    site({ id: 'hz', kind: 'world', name: nm, cls: st.hz, size: rint(6, 9), hyd: rint(lo, hi), spec: SPEC[rint(0, 3)], terra: true, step, startStep: step });
-    leg('h', pos, 2, 'hz');
-  }
-  // the asteroid belt: one burn out to it, then the mines
-  const hubPos = P(112, 205);
-  node('belt', 'hub', hubPos, 'Asteroid belt');
-  leg('b', hubPos, 1, 'belt');
-  const nMines = rint(2, 3);
-  for (let i = 0; i < nMines; i++) {
-    const pos = P(78 + i * 34, 255); const id = `m${i}`;
-    node(id, 'site', pos, `${short} belt ${String.fromCharCode(65 + i)}`);
-    site({ id, kind: 'mine', name: `${short} belt ${String.fromCharCode(65 + i)}`, cls: null, size: rint(3, 6), hyd: rint(0, 4), spec: SPEC[rint(0, 3)] });
-    edges.push(['belt', id]);
-  }
-  // companions at their Lagrange points, with a buried ocean if the chit shows one
+  // companions on the outer band
   st.comps.forEach((cmp, i) => {
-    const ang = i === 0 ? 22 : 218;
-    const lid = `c${i}L`; const lpos = P(ang, 270);
-    node(lid, 'lagrange', lpos, cmp.kind === 'gas' ? 'Gas giant' : cmp.kind === 'brown' ? 'Brown dwarf' : 'White dwarf', { body: cmp.kind });
-    leg(`c${i}`, lpos, 2, lid);
+    const ang = i === 0 ? 330 : 210;
+    const lid = `c${i}L`;
+    const end = around(oComp, RINGS.comp, ang, `c${i}`);
+    node(lid, 'lagrange', P(ang, RINGS.comp), cmp.kind === 'gas' ? 'Gas giant' : cmp.kind === 'brown' ? 'Brown dwarf' : 'White dwarf', { body: cmp.kind });
+    link(end, lid);
     if (cmp.chit === 'Ocean') {
-      const id = `c${i}`; const pos = P(ang + (i === 0 ? 9 : -9), 315);
-      const nm = cmp.kind === 'gas' ? `${short} icy moon` : `${short} dark world`;
-      node(id, 'site', pos, nm);
+      const id = `c${i}`; const nm = cmp.kind === 'gas' ? `${short} icy moon` : `${short} dark world`;
+      const pos = P(ang + (i === 0 ? -8 : 8), RINGS.comp + 42);
+      const b1 = node(`c${i}L1`, 'burn', P(ang + (i === 0 ? -4 : 4), RINGS.comp + 21), 'Landing burn');
+      node(id, 'site', pos, nm); link(lid, b1); link(b1, id);
       site({ id, kind: 'ocean', name: nm, cls: 'Hostile', size: rint(5, 7), hyd: rint(7, 9), spec: 'C', terra: false, body: cmp.kind });
-      edges.push([lid, id]);
     }
   });
+  // the asteroid belt: small bodies, no landing burns
+  const beltEnd = around(oBelt, RINGS.belt, 30, 'b');
+  node('belt', 'hub', P(30, RINGS.belt), 'Asteroid belt'); link(beltEnd, 'belt');
+  const nMines = rint(2, 3);
+  for (let i = 0; i < nMines; i++) {
+    const id = `m${i}`; const nm = `${short} belt ${String.fromCharCode(65 + i)}`;
+    node(id, 'site', P(12 + i * 18, RINGS.belt + (i % 2 ? 26 : -26)), nm); link('belt', id);
+    site({ id, kind: 'mine', name: nm, cls: null, size: rint(3, 6), hyd: rint(0, 4), spec: SPEC[rint(0, 3)] });
+  }
+  // the habitable-zone world: 1 landing burn from its orbit
+  if (st.hz && st.hz !== 'None') {
+    const [lo, hi] = CLASS_HYD[st.hz]; const nm = S.worldNames.pop() || 'World';
+    const end = around(oHz, RINGS.hz, 150, 'h');
+    const lo2 = node('hzLO', 'orbit', P(150, RINGS.hz), `${nm} orbit`); link(end, lo2);
+    const b1 = node('hzL1', 'burn', P(150, RINGS.hz - 22), 'Landing burn'); link(lo2, b1);
+    node('hz', 'site', P(150, RINGS.hz - 44), nm); link(b1, 'hz');
+    const step = st.hz === 'Marginal' ? 2 : st.hz === 'Habitable' ? 3 : st.hz === 'Garden' ? 4 : 0;
+    site({ id: 'hz', kind: 'world', name: nm, cls: st.hz, size: rint(6, 9), hyd: rint(lo, hi), spec: SPEC[rint(0, 3)], terra: true, step, startStep: step });
+  }
+  // the inner rocky world, always: 1 landing burn from the inner orbit
+  const rEnd = around(oIn, RINGS.inner, 20, 'r');
+  const rLO = node('rockLO', 'orbit', P(20, RINGS.inner), `${star.name} I orbit`); link(rEnd, rLO);
+  const rb = node('rockL1', 'burn', P(20, RINGS.inner + 20), 'Landing burn'); link(rLO, rb);
+  node('rock', 'site', P(20, RINGS.inner + 40), `${star.name} I`); link(rb, 'rock');
+  site({ id: 'rock', kind: 'world', name: `${star.name} I`, cls: 'Hostile', size: rint(4, 6), hyd: rint(0, 1), spec: ['M', 'V'][rint(0, 1)], terra: true });
   return { nodes, edges, sites, landfall: [], blueprints: [] };
 }
 const siteById = (starId, id) => sysOf(starId)?.sites.find((x) => x.id === id);
@@ -1018,8 +1040,15 @@ function starMapData() { // AA-B6, drawn in HF node idioms
   const sites = [];
   for (const nd of Object.values(MAP.nodes)) {
     let type = 'unknown', name = 'Deep space', hazard = false;
-    if (nd.kind === 'sol') { type = 'sun'; name = 'Sol'; }
-    else if (nd.kind === 'star') { const st = STAR_BY_ID[nd.star]; type = st.type === 'brown' ? 'dwarf' : 'sun'; name = st.name; }
+    if (nd.kind === 'sol') { type = 'orbit'; name = 'Sol'; sites.push(baseSite({ id: 'sun-sol', name: 'Sol', type: 'sun', x: nd.x, y: nd.y, sunR: 15 })); }
+    else if (nd.kind === 'star') {
+      // The renderer never picks a sun on click, so the star SPACE is a cyan
+      // orbit ring (clickable, the HF "park here" marker) with the sun drawn
+      // behind it as decoration. Brown dwarfs are hexes, clickable already.
+      const st = STAR_BY_ID[nd.star]; name = st.name;
+      if (st.type === 'brown') type = 'dwarf';
+      else { type = 'orbit'; sites.push(baseSite({ id: `sun-${nd.star}`, name: st.name, type: 'sun', x: nd.x, y: nd.y, sunR: 15 })); }
+    }
     else if (nd.kind === 'oort') { type = 'orbit'; name = `Oort cloud of ${nd.of === 'sol' ? 'Sol' : STAR_BY_ID[nd.of].name}`; }
     else if (nd.kind === 'dust') { type = 'radhaz'; name = 'Dust'; hazard = true; }
     else if (nd.kind === 'sunlens') { type = 'lagrange'; name = `Sunlens aimed at ${STAR_BY_ID[nd.target].name}`; }
@@ -1036,8 +1065,8 @@ function systemMapData(starId) { // AA-B7a
   if (_sysData[starId]) return _sysData[starId];
   const sys = sysOf(starId); const star = STAR_BY_ID[starId];
   const siteBy = Object.fromEntries(sys.sites.map((x) => [x.id, x]));
-  const TYPE = { orbit: 'orbit', burn: 'burn', hub: 'unknown', lagrange: 'lagrange' };
-  const sites = [baseSite({ id: 'star', name: star.name, type: star.type === 'brown' ? 'dwarf' : 'sun', x: 700, y: 430 })];
+  const TYPE = { orbit: 'orbit', burn: 'burn', hub: 'unknown', lagrange: 'lagrange', hohmann: 'hohmann' };
+  const sites = [baseSite({ id: 'star', name: star.name, type: star.type === 'brown' ? 'dwarf' : 'sun', x: 700, y: 420, sunR: 22 })];
   for (const n of sys.nodes) {
     const st = siteBy[n.id];
     if (st) sites.push(baseSite({ id: n.id, name: st.name, type: st.kind === 'mine' ? 'asteroid' : st.kind === 'ocean' ? 'moon' : 'planet', x: n.x, y: n.y, siteSize: `${st.size}`, hydration: st.hyd }));
@@ -1057,11 +1086,14 @@ function rendererFor(key) {
   const host = h('div', { class: 'aa-maphost', 'data-map': key });
   $('#aa-maps').append(host);
   const data = key === 'stars' ? starMapData() : key === 'sol' ? SOL_DATA : systemMapData(key);
-  const renderer = new MapRenderer(host, { data, onSelect: (id) => openPopup(key, id) });
+  // the renderer hands onSelect the clicked node OBJECT, not its id
+  const renderer = new MapRenderer(host, { data, onSelect: (hit) => openPopup(key, hit && typeof hit === 'object' ? hit.id : hit) });
   renderer.options.initialZoom = key === 'system' ? 1.5 : 1;
   // open on the whole map (the star neighbourhood, or the whole system), not
   // zoomed onto the rocket the way the Sol board opens
   renderer._initialViewDone = true;
+  // Sol's orbit rings and asteroid-belt dust belong only on the Sol board
+  if (key !== 'sol') renderer.options.solDecor = false;
   // these maps are read zoomed out, so keep site names visible at fit zoom
   // (the Sol board keeps the HF default fade: it has hundreds of sites)
   if (key !== 'sol') { renderer.options.labelFadeMin = 0.4; renderer.options.labelFadeMax = 0.7; }
@@ -1084,7 +1116,7 @@ function syncMaps() {
   if (cur.fresh) {
     cur.fresh = false;
     // open framed on the whole map, inside the area the hand and panel leave free
-    requestAnimationFrame(() => { try { R.reset(); if (key !== 'sol') R.flyToFit(cur.data.sites, { maxZoom: key === 'stars' ? 1.6 : 2.4, pad: 0.9 }); } catch (e) { /* sizing */ } });
+    requestAnimationFrame(() => { try { R.reset(); if (key !== 'sol') R.flyToFit(cur.data.sites, { maxZoom: key === 'stars' ? 1.6 : 2.4, pad: 0.92 }); } catch (e) { /* sizing */ } });
   }
   if (key === 'sol') { // Sol: Home theatre, no movement (AA-S1); the drydock is at LEO
     R.setSandboxRocket(sh.launched ? null : { x: LEO_ANCHOR.x, y: LEO_ANCHOR.y });
@@ -1094,7 +1126,7 @@ function syncMaps() {
   if (key === 'stars') {
     // explored stars carry their world badge as the hex label (G H M X, - none)
     for (const st of STARS) {
-      const site = cur.data.byId[st.id];
+      const site = cur.data.byId[`sun-${st.id}`] || cur.data.byId[st.id];
       if (S.stars[st.id].explored) {
         const ws = sysOf(st.id).sites.filter((x) => x.id === 'hz' || x.kind === 'ocean');
         site.siteSize = ws.length ? ws.map((x) => CLS_LETTER[x.cls]).join('') : '-';
@@ -1148,32 +1180,41 @@ function moveTargets(starId) {
 }
 
 // ---------- popups (the HF site popup + its action buttons)
-function openPopup(key, id) {
+function openPopup(key, id, { center = true } = {}) {
   const ent = RENDERERS[key]; if (!ent || !id) return;
+  if (key === 'stars' && String(id).startsWith('sun-')) id = String(id).slice(4);
   const site = ent.data.byId[id]; if (!site) return;
   POPUP = { key, id };
   const actions = key === 'stars' ? starActions(id) : key === 'sol' ? solActions(site) : systemActions(key, id);
   ent.renderer.setSitePopup(site, actions);
+  // pan so the popup is on screen when a site near the edge is tapped (HF does the same)
+  if (center) { try { ent.renderer.centerSitePopup({ ms: 280 }); } catch (e) { /* older renderer */ } }
 }
 function refreshPopup() {
   if (!POPUP) return;
   const ent = RENDERERS[POPUP.key];
   if (!ent || ent.host.style.display === 'none') return;
-  openPopup(POPUP.key, POPUP.id);
+  openPopup(POPUP.key, POPUP.id, { center: false });
 }
 const act = (fn) => async (ev) => { if (ev) ev.stopPropagation(); await fn(); refreshPopup(); };
 const info = (label) => ({ label, disabled: true, variant: 'secondary' });
 function starActions(id) {
   const nd = MAP.nodes[id]; const sh = S.ship; const out = [];
   const fromShip = sh.launched && !sh.lost ? bfs(sh.orbit || sh.pos) : null;
+  if (nd.kind === 'sol') {
+    out.push({ label: '🪐 View system', variant: 'rocket', onClick: act(() => setMapMode('system', 'sol')) });
+    out.push(info('Sol: your Home empire. Nothing moves here (AA-S1).'));
+  }
   if (nd.kind === 'star') {
     const st = STAR_BY_ID[nd.star]; const ex = S.stars[nd.star].explored;
+    out.push(ex
+      ? { label: '🪐 View system', variant: 'rocket', onClick: act(() => setMapMode('system', nd.star)) }
+      : { label: '🪐 View system (reveals it: debug)', variant: 'rocket', onClick: act(() => { explore(nd.star, 'debug'); log(`[debug] revealed ${st.name} from its popup`); commit(); setMapMode('system', nd.star); }) });
     out.push(info(`${st.type === 'yellow' ? 'Yellow sun' : st.type === 'red' ? 'Red dwarf' : 'Brown dwarf'}${st.comp.length ? ` + ${st.comp.map((c) => ({ gas: 'gas giant', brown: 'brown dwarf', white: 'white dwarf' }[c])).join(', ')}` : ''}${st.hazard ? `, ${st.hazard === 'flare' ? 'flare star' : 'debris disk'}` : ''}`));
     out.push(info(`${MAP.dist[nd.star]} spaces from Sol${fromShip ? `, ${fromShip[nd.star]} from your starship` : ''}`));
     if (st.known) out.push(info(`Known planet: ${st.known}`));
     if (ex) {
       out.push(info(`Worlds: ${sysOf(nd.star).sites.filter((x) => x.kind !== 'mine').map((x) => `${x.name} (${x.cls})`).join(', ')}`));
-      out.push({ label: '🪐 Open system map', variant: 'rocket', onClick: act(() => setMapMode('system', nd.star)) });
     } else {
       out.push(info('Unexplored: fly through it, sit at its sunlens, or Lens Survey it'));
       const range = S.spinoffs.includes('optics') ? 999 : TUNE.lensRangeSpaces;

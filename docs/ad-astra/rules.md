@@ -116,8 +116,12 @@ when the star is first explored (G12) and stay face up for the game.
 
 **B7a. System board.** Every explored star gets a detailed system map in the
 same idiom as the Sol map: flat-top hex sites with Size, Hydration and
-spectral type, magenta burn pads and orange Lagrange rings. Each system has:
-- **High Orbit**, where a ship arrives (G4);
+spectral type, magenta burn pads and orange Lagrange rings. Each system is a
+**gravity well**: you arrive at its **edge** (G4) and burn DOWN a single
+descent path, with a parking orbit at each band. Burns from the edge [TUNE]:
+outer (companion) band 2, belt 3, habitable-zone band 5, inner band 7; one
+more landing burn to a world's surface. Moving around a band to a body is
+free (green Hohmann dots). Each system has:
 - an **inner rocky world** (Hostile, dry), always;
 - the **Habitable-zone world** from its chit, if any;
 - an **asteroid belt** of 2 or 3 mines;
@@ -125,7 +129,8 @@ spectral type, magenta burn pads and orange Lagrange rings. Each system has:
   shows one.
 
 **B7b. In-system moves (free action).** As on the Sol map, entering a magenta
-burn pad costs 1 burn; other nodes are free. Pay each burn in propellant at
+burn pad costs 1 burn; parking orbits, Hohmann dots and Lagrange points are
+free. Pay each burn in propellant at
 the Burn rate (Fuel x weight class, G3), up to your Drive's Thrust in burns
 per Generation. A move may cross several nodes along the cheapest route. Beam and Ramscoop drives cannot
 maneuver inside a system: they work from High Orbit by raygun and Landers.
@@ -634,6 +639,8 @@ itself is still to be drawn [OPEN Z8]. Data from public catalogues as of Nov
   Replicator cube). Each gets a rendered preview for sign-off before use.
 
 ### Changelog
+- **v0.5.2 (2026-11-13):** System maps are gravity wells: arrive at the edge,
+  burn down band by band (B7a). Prototype: tapping a star offers View system.
 - **v0.5.1 (2026-11-13):** In-system moves use the Sol map's burn-pad idiom
   (B7b). Entering Orbit explores the star (G4). The prototype now runs on the
   app's own map renderer, toolbar, sidepanel and hand strip.

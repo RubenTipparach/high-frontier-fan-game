@@ -1039,6 +1039,10 @@ export class MapRenderer {
       zoneOpacity: 0.1,
       zoneCurved: true,
       zoneEditMode: false,
+      // Sol's own backdrop: the heliocentric guide rings and the animated
+      // asteroid belt. Maps of other places (e.g. the Ad Astra star map and
+      // its star systems) turn this off; Sol keeps it.
+      solDecor: true,
     };
     // Canonical zone polygons (the frozen source-of-truth data),
     // wired in from browse.js: { polys: {zone:[[{x,y}]]}, colors, order }.
@@ -2671,7 +2675,7 @@ export class MapRenderer {
     ctx.save();
     ctx.translate(this.pan.x, this.pan.y);
     ctx.scale(eff, eff);
-    this._step('guides', () => this._drawGuides(ctx));
+    if (this.options.solDecor !== false) this._step('guides', () => this._drawGuides(ctx));
     if (this._bodiesVisible) this._step('sun/comet', () => this._drawSiteSunCometWorld(ctx));
     ctx.restore();
 
@@ -2691,7 +2695,7 @@ export class MapRenderer {
     // Delta-v edges over the planets; animated belt + cosmetic traffic +
     // the gameplay route/trail follow on top.
     this._step('edges', () => this._drawEdges(ctx));
-    this._step('belt', () => this._drawAsteroidBelt(ctx));
+    if (this.options.solDecor !== false) this._step('belt', () => this._drawAsteroidBelt(ctx));
     // Battery saver: skip the ambient chibi-ship traffic entirely. With the
     // redraw loop stopped these advance by the whole elapsed gap on each
     // on-demand repaint (e.g. a 5s snapshot poll), so they JUMP across the map
@@ -3701,12 +3705,15 @@ export class MapRenderer {
       if (this._mergedSites.has(site.id)) continue;
       const vis = TYPE_VIS[site.type] || TYPE_VIS.unknown;
       if (vis.kind === 'sun') {
-        if (!offscreen(site.x, site.y, vis.r)) {
+        // A site may carry its own sun radius (sunR, world units); maps with
+        // many stars (the Ad Astra star map) draw them smaller than Sol.
+        const sr = site.sunR || vis.r;
+        if (!offscreen(site.x, site.y, sr)) {
           let g = this._sunGrad;
-          if (!g || g.cx !== site.x || g.cy !== site.y || g.r !== vis.r) {
-            g = this._sunGrad = buildSunGrads(ctx, site.x, site.y, vis.r);
+          if (!g || g.cx !== site.x || g.cy !== site.y || g.r !== sr) {
+            g = this._sunGrad = buildSunGrads(ctx, site.x, site.y, sr);
           }
-          drawSun(ctx, site.x, site.y, vis.r, g);
+          drawSun(ctx, site.x, site.y, sr, g);
         }
         continue;
       }
@@ -5255,7 +5262,7 @@ export class MapRenderer {
       const hasFactory = !!(this._factories && this._factories[site.id]);
       if (labelAlpha > 0 && !hasFactory) {
         ctx.globalAlpha = labelAlpha;
-        const labelOffset = vis.r + 12;
+        const labelOffset = (vis.kind === 'sun' && site.sunR ? site.sunR : vis.r) + 12;
         ctx.font = '500 11px ui-sans-serif, system-ui, sans-serif';
         ctx.strokeStyle = 'rgba(5, 4, 16, 0.85)';
         ctx.lineWidth = 3;
