@@ -534,5 +534,125 @@ export const CARD_ART = {
       "src": "assets/cards/generators/gen_solar_stirling-back.svg",
       "approved": true
     }
+  },
+  "rad_bubble_membrane": {
+    "primary": {
+      "src": "assets/cards/radiators/rad_bubble_membrane-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/radiators/rad_bubble_membrane-back.svg",
+      "approved": false
+    }
+  },
+  "rad_dielectric_x_ray_window": {
+    "primary": {
+      "src": "assets/cards/radiators/rad_dielectric_x_ray_window-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/radiators/rad_dielectric_x_ray_window-back.svg",
+      "approved": false
+    }
+  },
+  "rad_ether_charged_dust": {
+    "primary": {
+      "src": "assets/cards/radiators/rad_ether_charged_dust-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/radiators/rad_ether_charged_dust-back.svg",
+      "approved": false
+    }
+  },
+  "rad_li_heatsink_fountain": {
+    "primary": {
+      "src": "assets/cards/radiators/rad_li_heatsink_fountain-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/radiators/rad_li_heatsink_fountain-back.svg",
+      "approved": false
+    }
+  },
+  "rad_magnetocaloric_refrigerator": {
+    "primary": {
+      "src": "assets/cards/radiators/rad_magnetocaloric_refrigerator-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/radiators/rad_magnetocaloric_refrigerator-back.svg",
+      "approved": false
+    }
+  },
+  "rad_microtube_array": {
+    "primary": {
+      "src": "assets/cards/radiators/rad_microtube_array-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/radiators/rad_microtube_array-back.svg",
+      "approved": false
+    }
+  },
+  "rad_mo_li_heat_pipe": {
+    "primary": {
+      "src": "assets/cards/radiators/rad_mo_li_heat_pipe-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/radiators/rad_mo_li_heat_pipe-back.svg",
+      "approved": false
+    }
+  },
+  "rad_qu_tube": {
+    "primary": {
+      "src": "assets/cards/radiators/rad_qu_tube-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/radiators/rad_qu_tube-back.svg",
+      "approved": false
+    }
+  },
+  "rad_ss_nak_pumped_loop": {
+    "primary": {
+      "src": "assets/cards/radiators/rad_ss_nak_pumped_loop-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/radiators/rad_ss_nak_pumped_loop-back.svg",
+      "approved": false
+    }
+  },
+  "rad_salt_cooled_reflux_tube": {
+    "primary": {
+      "src": "assets/cards/radiators/rad_salt_cooled_reflux_tube-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/radiators/rad_salt_cooled_reflux_tube-back.svg",
+      "approved": false
+    }
+  },
+  "rad_steel_pb_bi_pumped_loop": {
+    "primary": {
+      "src": "assets/cards/radiators/rad_steel_pb_bi_pumped_loop-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/radiators/rad_steel_pb_bi_pumped_loop-back.svg",
+      "approved": false
+    }
+  },
+  "rad_ti_k_heat_pipe": {
+    "primary": {
+      "src": "assets/cards/radiators/rad_ti_k_heat_pipe-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/radiators/rad_ti_k_heat_pipe-back.svg",
+      "approved": false
+    }
   }
 };

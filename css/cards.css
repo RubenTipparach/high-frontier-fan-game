@@ -1271,6 +1271,9 @@
   background-size: 100% 43%;
   background-position: center 50%;
 }
+/* Radiator halves dim their ability text by default; in the dark box over the
+   art band it needs the same light ink as every other card. */
+.card-face.is-radiator.has-bg-art .rad-half .card-blurb { color: #eef2fb; }
 /* No ability text: collapse the box rather than show a bare black bar. */
 .card-face.has-bg-art .card-blurb:empty {
   background: none;

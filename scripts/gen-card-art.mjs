@@ -19,9 +19,10 @@ import * as thrusters from './card-art/thrusters.mjs';
 import * as robonauts from './card-art/robonauts.mjs';
 import * as refineries from './card-art/refineries.mjs';
 import * as generators from './card-art/generators.mjs';
+import * as radiators from './card-art/radiators.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const BACKDROP = /<rect width="300" height="288" fill="url\(#bg\)"\/>/;
+const BACKDROP = /<rect width="300" height="\d+" fill="url\(#bg\)"\/>/;
 const STAR = /<circle [^>]*fill="#eef0ff"[^>]*\/>/g;
 
 // Per deck: its faces, its ship mounts, and which faces are APPROVED to render
@@ -32,6 +33,7 @@ const DECKS = {
   robonauts: { ...robonauts, approved: new Set(['*']) },
   refineries: { ...refineries, approved: new Set(['*']) },
   generators: { ...generators, approved: new Set(['*']) },
+  radiators: { ...radiators, approved: new Set([]) },   // mock-up: awaiting the user's sign-off
 };
 
 const manifest = {};
