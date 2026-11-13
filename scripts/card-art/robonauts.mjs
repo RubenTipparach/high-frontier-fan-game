@@ -452,14 +452,17 @@ ART['rob_kuck_mosquito:primary'] = () => {
 // the ice, pushing the little craft toward the rock.
 ART['rob_kuck_mosquito:secondary'] = () => {
   const b = space('#1a1424', '#050307', '25%', '45%');
+  const at = [54, 116];
+  const ang = Math.atan2(MROCK[1] - at[1], MROCK[0] - at[0]) * 180 / Math.PI;   // nose on the rock
   return svg(b.defs + lin('ice', [[0, '#f0f9ff'], [0.5, '#bae6fd'], [1, '#7dd3fc']], 0, 0, 1, 0), `${b.body}${stars(45, 44)}${mRock('rob_kuck_mosquito', 'secondary', 44)}
-    ${beam(0, 268, 58, 128, '#4ade80', 2.2)}
-    <g transform="translate(66 112) rotate(24)">
-      <ellipse cx="0" cy="22" rx="30" ry="18" fill="#e9d5ff" opacity="0.55" filter="url(#soft)"/>
-      <ellipse cx="0" cy="14" rx="14" ry="8" fill="#ffffff" opacity="0.9" filter="url(#glow)"/>
-      <path d="M-32,8 Q0,-4 32,8 L32,12 Q0,0 -32,12 Z" fill="url(#ice)" stroke="#e0f2fe" stroke-width="1"/>
-      <line x1="-20" y1="6" x2="0" y2="-22" stroke="#94a3b8" stroke-width="2"/><line x1="20" y1="6" x2="0" y2="-22" stroke="#94a3b8" stroke-width="2"/>
+    <g transform="translate(${at[0]} ${at[1]}) rotate(${f(ang + 90)})">
+      ${beam(0, 16, 0, 320, '#4ade80', 2.2)}
+      <ellipse cx="0" cy="22" rx="30" ry="16" fill="#e9d5ff" opacity="0.55" filter="url(#soft)"/>
+      <ellipse cx="0" cy="15" rx="14" ry="7" fill="#ffffff" opacity="0.9" filter="url(#glow)"/>
+      <path d="M-30,8 Q0,-4 30,8 L30,12 Q0,0 -30,12 Z" fill="url(#ice)" stroke="#e0f2fe" stroke-width="1"/>
+      <line x1="-20" y1="6" x2="0" y2="-20" stroke="#94a3b8" stroke-width="2"/><line x1="20" y1="6" x2="0" y2="-20" stroke="#94a3b8" stroke-width="2"/>
       <rect x="-8" y="-34" width="16" height="14" rx="3" fill="#cbd5e1" stroke="#64748b" stroke-width="1.2"/>
+      <path d="M-6,-34 L0,-42 L6,-34 Z" fill="#94a3b8"/>
     </g>`);
 };
 
@@ -531,17 +534,24 @@ ART['rob_nuclear_drill:secondary'] = () => {
 ART['rob_rock_splitter:secondary'] = () => {
   const b = space('#170f2e', '#040208', '30%', '50%');
   const pal = spectral('rob_rock_splitter', 'secondary');
-  return svg(b.defs + lin('mbeam', [[0, '#f5d0fe', 0.9], [1, '#c084fc', 0.6]], 0, 0, 1, 0), `${b.body}${stars(45, 49)}${rock(270, 264, 44, pal, 49)}
-    <path d="M58,170 L214,82 L222,96 L64,182 Z" fill="url(#mbeam)" filter="url(#glow)" opacity="0.8"/>
-    <g transform="translate(238 74)">
-      ${[46, 36, 26].map((r, i) => `<ellipse cx="0" cy="0" rx="${r}" ry="${f(r * 0.8)}" fill="none" stroke="#a5b4fc" stroke-width="1.3" opacity="${0.4 + i * 0.2}"/>`).join('')}
-      <path d="M-40,-14 Q-52,0 -40,18" stroke="#f0abfc" stroke-width="4" fill="none" filter="url(#glow)"/>
-      <ellipse cx="0" cy="0" rx="9" ry="7" fill="none" stroke="#e2e8f0" stroke-width="2.5"/><rect x="-4" y="-4" width="8" height="8" rx="1.5" fill="#94a3b8"/>
+  const st = [34, 214], bub = [214, 98];
+  const ux = (bub[0] - st[0]), uy = (bub[1] - st[1]), L = Math.hypot(ux, uy);
+  const rk = [f(bub[0] + (ux / L) * 84), f(bub[1] + (uy / L) * 84)];
+  const ang = Math.atan2(uy, ux) * 180 / Math.PI;
+  return svg(b.defs + lin('mbeam', [[0, '#f5d0fe', 0.9], [1, '#c084fc', 0.6]], 0, 0, 1, 0), `${b.body}${stars(45, 49)}${rock(rk[0], rk[1], 34, pal, 49)}
+    <g transform="translate(${st[0]} ${st[1]}) rotate(${f(ang)})">
+      <path d="M26,-7 L${f(L - 40)},-9 L${f(L - 40)},9 L26,7 Z" fill="url(#mbeam)" filter="url(#glow)" opacity="0.85"/>
     </g>
-    <g transform="translate(36 180) rotate(-30)">
-      ${solarWing(-40, -42, 34, 22)}${solarWing(-40, 20, 34, 22)}
+    <g transform="translate(${bub[0]} ${bub[1]}) rotate(${f(ang)})">
+      ${[44, 34, 24].map((r, i) => `<ellipse cx="0" cy="0" rx="${r}" ry="${f(r * 0.8)}" fill="none" stroke="#a5b4fc" stroke-width="1.3" opacity="${0.4 + i * 0.2}"/>`).join('')}
+      <path d="M-40,-16 Q-50,0 -40,16" stroke="#f0abfc" stroke-width="4" fill="none" filter="url(#glow)"/>
+      <ellipse cx="0" cy="0" rx="7" ry="9" fill="none" stroke="#e2e8f0" stroke-width="2.5"/>
+      <rect x="4" y="-4" width="12" height="8" rx="1.5" fill="#94a3b8"/><path d="M16,-4 L22,0 L16,4 Z" fill="#cbd5e1"/>
+    </g>
+    <g transform="translate(${st[0]} ${st[1]}) rotate(${f(ang)})">
+      ${solarWing(-40, -44, 34, 22)}${solarWing(-40, 22, 34, 22)}
       <rect x="-30" y="-12" width="30" height="24" rx="3" fill="#cbd5e1" stroke="#64748b" stroke-width="1.5"/>
-      <rect x="0" y="-6" width="34" height="12" fill="#475569"/>${[6, 14, 22].map((x) => `<rect x="${x}" y="-9" width="4" height="18" fill="#c2621f"/>`).join('')}
+      <rect x="0" y="-6" width="28" height="12" fill="#475569"/>${[6, 13, 20].map((x) => `<rect x="${x}" y="-9" width="4" height="18" fill="#c2621f"/>`).join('')}
     </g>`);
 };
 
@@ -551,8 +561,8 @@ ART['rob_rock_splitter:secondary'] = () => {
 ART['rob_tungsten_resistojet:primary'] = () => {
   const b = space('#22180f', '#060403', '30%', '30%');
   return svg(b.defs, `${b.body}${stars(45, 50)}${mRock('rob_tungsten_resistojet', 'primary', 50)}
-    <ellipse cx="96" cy="152" rx="26" ry="14" fill="#e5e7eb" opacity="0.18" filter="url(#soft)"/>
-    <g transform="translate(50 92) rotate(-30)">
+    <g transform="translate(70 100) rotate(${f(Math.atan2(MROCK[1] - 100, MROCK[0] - 70) * 180 / Math.PI - 90)})">
+      <path d="M-6,34 L6,34 L30,${f(Math.hypot(MROCK[0] - 70, MROCK[1] - 100) - MRR + 6)} L-30,${f(Math.hypot(MROCK[0] - 70, MROCK[1] - 100) - MRR + 6)} Z" fill="#e5e7eb" opacity="0.2" filter="url(#soft)"/>
       ${solarWing(-96, -14, 70, 22)}${solarWing(26, -14, 70, 22)}
       <circle cx="0" cy="-26" r="13" fill="#e2e8f0" stroke="#94a3b8" stroke-width="1.5"/>
       <rect x="-9" y="-14" width="18" height="38" rx="3" fill="#cbd5e1" stroke="#64748b" stroke-width="1.2"/>
