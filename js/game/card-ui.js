@@ -416,6 +416,14 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
         thrustHost.appendChild(note);
       }
     }
+    // Crew background art: the faction's launcher on its home pad, painted
+    // behind the whole face below the name bar (both crew faces are cream).
+    // Same approval gate as the patent decks (data/card-art.js).
+    const crewArt = CARD_ART[card.id] && CARD_ART[card.id][sideName];
+    if (crewArt && (crewArt.approved || globalThis.HF_CARD_ART_PREVIEW)) {
+      face.style.backgroundImage = `url("${assetUrl(crewArt.src)}")`;
+      face.classList.add('has-bg-art', 'is-crew-art');
+    }
     return face;
   }
 

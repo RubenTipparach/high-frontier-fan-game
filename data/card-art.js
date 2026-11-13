@@ -1014,5 +1014,65 @@ export const CARD_ART = {
       "src": "assets/cards/gwthrusters/gw-_vista_d_t_inertial_fusion-back.svg",
       "approved": false
     }
+  },
+  "crew_un_b612": {
+    "primary": {
+      "src": "assets/cards/crew/crew_un_b612-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/crew/crew_un_b612-back.svg",
+      "approved": false
+    }
+  },
+  "crew_roscosmos_taikonauts": {
+    "primary": {
+      "src": "assets/cards/crew/crew_roscosmos_taikonauts-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/crew/crew_roscosmos_taikonauts-back.svg",
+      "approved": false
+    }
+  },
+  "crew_nasa_isro": {
+    "primary": {
+      "src": "assets/cards/crew/crew_nasa_isro-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/crew/crew_nasa_isro-back.svg",
+      "approved": false
+    }
+  },
+  "crew_anonp2p_esa": {
+    "primary": {
+      "src": "assets/cards/crew/crew_anonp2p_esa-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/crew/crew_anonp2p_esa-back.svg",
+      "approved": false
+    }
+  },
+  "crew_shimizu_nasrda": {
+    "primary": {
+      "src": "assets/cards/crew/crew_shimizu_nasrda-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/crew/crew_shimizu_nasrda-back.svg",
+      "approved": false
+    }
+  },
+  "crew_spacex_norse": {
+    "primary": {
+      "src": "assets/cards/crew/crew_spacex_norse-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/crew/crew_spacex_norse-back.svg",
+      "approved": false
+    }
   }
 };

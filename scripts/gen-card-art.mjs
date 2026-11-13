@@ -24,6 +24,7 @@ import * as bernals from './card-art/bernals.mjs';
 import * as reactors from './card-art/reactors.mjs';
 import * as freighters from './card-art/freighters.mjs';
 import * as gwthrusters from './card-art/gwthrusters.mjs';
+import * as crew from './card-art/crew.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BACKDROP = /<rect width="300" height="\d+" fill="url\(#bg\)"\/>/;
@@ -42,6 +43,7 @@ const DECKS = {
   reactors: { ...reactors, approved: new Set(['*']) },
   freighters: { ...freighters, approved: new Set([]) },   // mock-up: awaiting the user's sign-off
   gwthrusters: { ...gwthrusters, approved: new Set([]) },   // mock-up: awaiting the user's sign-off
+  crew: { ...crew, approved: new Set([]) },   // mock-up: awaiting the user's sign-off
 };
 
 const manifest = {};

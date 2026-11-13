@@ -1274,6 +1274,13 @@
 /* Radiator halves dim their ability text by default; in the dark box over the
    art band it needs the same light ink as every other card. */
 .card-face.is-radiator.has-bg-art .rad-half .card-blurb { color: #eef2fb; }
+/* Crew art: the launcher scene fills the face from the bottom up, under the
+   name bar; the cream card shows through wherever the scene is empty. */
+.card-face.is-crew-art {
+  background-repeat: no-repeat;
+  background-size: 100% auto;
+  background-position: center bottom;
+}
 /* No ability text: collapse the box rather than show a bare black bar. */
 .card-face.has-bg-art .card-blurb:empty {
   background: none;
