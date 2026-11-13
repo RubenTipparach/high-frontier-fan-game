@@ -21,6 +21,8 @@ import * as refineries from './card-art/refineries.mjs';
 import * as generators from './card-art/generators.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const BACKDROP = /<rect width="300" height="288" fill="url\(#bg\)"\/>/;
+const STAR = /<circle [^>]*fill="#eef0ff"[^>]*\/>/g;
 
 // Per deck: its faces, its ship mounts, and which faces are APPROVED to render
 // in the game ('<cardId>:primary' / '<cardId>:secondary', or '*' for all).
@@ -40,7 +42,12 @@ for (const [deck, { ART, RIG = {}, approved }] of Object.entries(DECKS)) {
     const [card, face] = key.split(':');
     const side = face === 'primary' ? 'front' : 'back';
     const rel = `assets/cards/${deck}/${card}-${side}.svg`;
-    writeFileSync(join(ROOT, rel), compose(RIG, key, draw()));
+    let out = compose(RIG, key, draw());
+    // White (front) faces have no space backdrop: the card's own cream face
+    // shows through and only the machine is drawn (user 2026-11-13). Strip
+    // the backdrop rect and the starfield; everything after them stays.
+    if (face === 'primary') out = out.replace(BACKDROP, '').replace(STAR, '');
+    writeFileSync(join(ROOT, rel), out);
     (manifest[card] ||= {})[face] = { src: rel, approved: approved.has('*') || approved.has(key) };
     count++;
   }
