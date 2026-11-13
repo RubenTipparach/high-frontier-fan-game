@@ -59,8 +59,9 @@ function stars(n, seed) {
     const x = rnd() * W, y = rnd() * H, r = rnd() < 0.18 ? 1.6 : 0.8;
     out += `<circle cx="${f(x)}" cy="${f(y)}" r="${r}" fill="#eef0ff" opacity="${f(0.2 + rnd() * 0.5)}"/>`;
   }
-  return out;
+  return out + SUBJECT;   // everything after the starfield is the vessel
 }
+const SUBJECT = '<!--subject-->';
 
 function lin(id, stops, x1 = 0, y1 = 0, x2 = 0, y2 = 1) {
   return `<linearGradient id="${id}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}">${
@@ -236,10 +237,8 @@ ART['thr_hall_effect:primary'] = () => {
   <g transform="translate(98 150) rotate(16) scale(0.6)">
     <path d="M6,-66 L420,-200 L420,200 L6,66 Z" fill="url(#hplume)" filter="url(#glow)"/>
     <path d="M6,-40 Q160,-30 420,-90 L420,90 Q160,30 6,40 Z" fill="#c7d7ff" opacity="0.18"/>
-    <rect x="-150" y="-12" width="70" height="24" fill="#3a4250"/>
-    <path d="M-150,-40 L-120,-40 L-100,-90 M-150,40 L-120,40 L-100,90" stroke="#5b6475" stroke-width="5" fill="none"/>
-    <path d="M-92,-80 L0,-84 L0,84 L-92,80 Z" fill="url(#hbody)"/>
     <ellipse cx="-92" cy="0" rx="20" ry="80" fill="#2a303c"/>
+    <path d="M-92,-80 L0,-84 L0,84 L-92,80 Z" fill="url(#hbody)"/>
     ${bands}
     <ellipse cx="0" cy="0" rx="27" ry="84" fill="url(#hface)" stroke="#a9b2c2" stroke-width="2"/>
     ${bolts}
@@ -252,8 +251,6 @@ ART['thr_hall_effect:primary'] = () => {
     <rect x="-58" y="-114" width="72" height="12" rx="6" fill="#9aa3b5"/>
     <circle cx="16" cy="-108" r="6" fill="#dbe7ff" filter="url(#glow)"/>
     <path d="M18,-108 L70,-118 L70,-98 Z" fill="#a5b8ff" opacity="0.45"/>
-    <path d="M-92,30 Q-130,60 -150,110" stroke="#c2410c" stroke-width="3" fill="none"/>
-    <path d="M-92,40 Q-120,80 -132,130" stroke="#475569" stroke-width="3" fill="none"/>
   </g>`);
 };
 
@@ -499,7 +496,7 @@ ART['thr_ponderomotive_vasimr:secondary'] = () => {
     + lin('cone', [[0, '#64748b'], [0.5, '#cbd5e1'], [1, '#475569']]),
   `${bg.body}${stars(40, 20)}
   <path d="M10,60 L150,110 L150,178 L10,228 Z" fill="url(#cone)"/>
-  ${[...Array(8)].map((_, i) => { const x = 22 + i * 16, h = 82 - i * 9.5; return `<line x1="${x}" y1="${f(144 - h)}" x2="${x}" y2="${f(144 + h)}" stroke="#b45309" stroke-width="5"/>`; }).join('')}
+  ${[...Array(8)].map((_, i) => { const x = 22 + i * 16, h = 84 - (x - 10) / 140 * 50 + 2; return `<line x1="${x}" y1="${f(144 - h)}" x2="${x}" y2="${f(144 + h)}" stroke="#b45309" stroke-width="5" stroke-linecap="round"/>`; }).join('')}
   <ellipse cx="150" cy="144" rx="10" ry="34" fill="#0b1220"/>
   ${rings}`);
 };
@@ -583,6 +580,126 @@ ART['thr_re_solar_moth:secondary'] = () => {
   ${[-1, 1].map((s) => `<path d="M${150 + s * 40},176 Q${150 + s * 60},230 ${150 + s * 120},288" stroke="#c4b5fd" stroke-width="1.5" fill="none" stroke-dasharray="6 5"/>`).join('')}`);
 };
 
+// ---- the spacecraft kit ---------------------------------------------------
+// Every engine is bolted to a ship. A ship is drawn in its own frame: it
+// attaches at (0,0) and its body runs FORWARD along -y (away from the engine).
+// `kind` varies the silhouette so the deck is not 24 copies of one hull.
+
+const SHIP_DEFS = lin('shHull', [[0, '#e3e7ee'], [0.45, '#9aa3b2'], [1, '#3b424f']], 0, 0, 1, 0)
+  + rad('shTank', [[0, '#f4f6fa'], [0.55, '#a7b0be'], [1, '#4b5260']], '35%', '35%', '70%')
+  + lin('shRad', [[0, '#3a4252'], [1, '#262c38']])
+  + lin('shPv', [[0, '#1e3a8a'], [1, '#172554']]);
+
+function truss(x1, x2, y1, y2, step = 12) {
+  let d = `M${x1},${y1} L${x1},${y2} M${x2},${y1} L${x2},${y2}`;
+  let flip = false;
+  for (let y = y1; y > y2; y -= step) {
+    const ny = Math.max(y - step, y2);
+    d += flip ? ` M${x1},${y} L${x2},${ny}` : ` M${x2},${y} L${x1},${ny}`;
+    flip = !flip;
+  }
+  return `<path d="${d}" stroke="#8e97a6" stroke-width="2" fill="none"/>`;
+}
+function radiator(x, y, w, h) {
+  let fins = '';
+  for (let i = 1; i < 6; i++) fins += `<line x1="${f(x + (w * i) / 6)}" y1="${y}" x2="${f(x + (w * i) / 6)}" y2="${y + h}" stroke="#56627a" stroke-width="1"/>`;
+  return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="url(#shRad)" stroke="#6b7487" stroke-width="1"/>${fins}`;
+}
+function solarWing(x, y, w, h) {
+  let cells = '';
+  for (let i = 1; i < 5; i++) cells += `<line x1="${f(x + (w * i) / 5)}" y1="${y}" x2="${f(x + (w * i) / 5)}" y2="${y + h}" stroke="#60a5fa" stroke-width="0.8" opacity="0.6"/>`;
+  return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="url(#shPv)" stroke="#93c5fd" stroke-width="1"/>${cells}`;
+}
+function windows(x, y1, y2, step = 9) {
+  let w = '';
+  for (let y = y1; y > y2; y -= step) w += `<rect x="${x - 2}" y="${y - 3}" width="4" height="4" rx="1" fill="#fde68a"/>`;
+  return w;
+}
+function capsule(y) {
+  return `<path d="M-16,${y} L16,${y} L12,${y - 26} L-12,${y - 26} Z" fill="url(#shHull)"/>
+    <path d="M-12,${y - 26} L12,${y - 26} Q10,${y - 44} 0,${y - 50} Q-10,${y - 44} -12,${y - 26} Z" fill="url(#shHull)"/>
+    <rect x="-8" y="${y - 22}" width="16" height="5" rx="2" fill="#fde68a"/>
+    <line x1="-16" y1="${y - 3}" x2="16" y2="${y - 3}" stroke="#f97316" stroke-width="3"/>`;
+}
+function dish(x, y, r = 12) {
+  return `<line x1="${x}" y1="${y}" x2="${x + r + 6}" y2="${y - 6}" stroke="#8e97a6" stroke-width="2"/>
+    <path d="M${x + r + 6},${y - 6 - r} Q${x + r + 16},${y - 6} ${x + r + 6},${y - 6 + r} Z" fill="#cbd2dc" stroke="#7b8494" stroke-width="1"/>`;
+}
+
+function shipBody(kind) {
+  const mount = `<path d="M-22,0 L22,0 L14,-14 L-14,-14 Z" fill="#4b5260" stroke="#8e97a6" stroke-width="1"/>`;
+  if (kind === 'tug') {        // propellant tug: spherical tanks on a truss, capsule up front
+    return `${mount}${truss(-9, 9, -14, -150)}
+      ${radiator(-80, -128, 64, 16)}${radiator(16, -128, 64, 16)}
+      <circle cx="0" cy="-42" r="24" fill="url(#shTank)"/><line x1="-24" y1="-42" x2="24" y2="-42" stroke="#6b7487" stroke-width="1.5"/>
+      <circle cx="0" cy="-92" r="24" fill="url(#shTank)"/><line x1="-24" y1="-92" x2="24" y2="-92" stroke="#6b7487" stroke-width="1.5"/>
+      ${capsule(-150)}${dish(14, -160)}`;
+  }
+  if (kind === 'crewed') {     // long-haul crewed ship: hab hull with window rows + spin ring
+    return `${mount}${truss(-8, 8, -14, -46)}
+      ${radiator(-74, -40, 60, 14)}${radiator(14, -40, 60, 14)}
+      <rect x="-20" y="-150" width="40" height="104" rx="8" fill="url(#shHull)"/>
+      ${windows(-10, -60, -140)}${windows(10, -60, -140)}
+      <ellipse cx="0" cy="-104" rx="52" ry="12" fill="none" stroke="#c9d0db" stroke-width="5"/>
+      <path d="M-52,-104 A52,12 0 0 0 52,-104" fill="none" stroke="#7b8494" stroke-width="5"/>
+      <line x1="-20" y1="-104" x2="-52" y2="-104" stroke="#9aa3b2" stroke-width="2"/><line x1="20" y1="-104" x2="52" y2="-104" stroke="#9aa3b2" stroke-width="2"/>
+      ${capsule(-150)}`;
+  }
+  if (kind === 'freighter') {  // cargo hauler: a stack of containers on a spine
+    const boxes = [0, 1, 2, 3].map((i) => `<rect x="-24" y="${-44 - i * 26}" width="48" height="22" rx="2" fill="${['#b45309', '#64748b', '#0f766e', '#94a3b8'][i]}" stroke="#1f2430" stroke-width="1.5"/>`).join('');
+    return `${mount}${truss(-6, 6, -14, -150)}${boxes}${radiator(-70, -24, 52, 12)}${radiator(18, -24, 52, 12)}${capsule(-150)}`;
+  }
+  // probe: a compact bus with solar wings and a big dish
+  return `${mount}<rect x="-18" y="-50" width="36" height="36" rx="3" fill="#c8a86b" stroke="#8a6d38" stroke-width="1.5"/>
+    ${solarWing(-86, -40, 66, 16)}${solarWing(20, -40, 66, 16)}
+    <line x1="-20" y1="-32" x2="20" y2="-32" stroke="#8e97a6" stroke-width="2"/>
+    <path d="M-26,-50 Q0,-74 26,-50 Z" fill="#dfe4ea" stroke="#7b8494" stroke-width="1.5"/><line x1="0" y1="-56" x2="0" y2="-70" stroke="#7b8494" stroke-width="2"/>`;
+}
+
+// mount: where the ship bolts on, in the scene's own coords; back: the
+// direction the ship body runs from there (0 = up, 90 = right, -90 = left);
+// comp: the framing applied to ship + engine together.
+const DOWN = 'translate(18 4) rotate(-48 150 144) translate(150 144) scale(0.6) translate(-150 -144)';
+const RIGHT = 'translate(118 44) rotate(16) scale(0.62)';
+const RIG = {
+  'thr_ablative_plate:primary': { mount: [206, 96], back: -40, kind: 'crewed', s: 0.8, comp: 'translate(46 56) scale(0.8)' },
+  'thr_ablative_plate:secondary': { mount: [0, 144], back: -90, kind: 'tug', s: 1.2, comp: 'translate(120 70) rotate(18) scale(0.55)' },
+  'thr_de_laval_nozzle:primary': { mount: [150, 10], back: 0, kind: 'tug', s: 1.1, comp: DOWN },
+  'thr_de_laval_nozzle:secondary': { mount: [150, 34], back: 0, kind: 'crewed', s: 1.1, comp: DOWN },
+  'thr_dumbo:primary': { mount: [150, 18], back: 0, kind: 'tug', s: 1.1, comp: DOWN },
+  'thr_dumbo:secondary': { mount: [150, 26], back: 0, kind: 'freighter', s: 1.1, comp: DOWN },
+  'thr_hall_effect:primary': { mount: [42, 134], back: -74, kind: 'probe', s: 0.8, comp: 'translate(70 36) scale(0.8)' },
+  'thr_hall_effect:secondary': { mount: [8, 144], back: -90, kind: 'probe', s: 1.2, comp: RIGHT },
+  'thr_mass_driver:primary': { mount: [34, 246], back: -100, kind: 'freighter', s: 1.0, comp: 'translate(84 -34) scale(0.8)' },
+  'thr_mass_driver:secondary': { mount: [30, 144], back: -90, kind: 'crewed', s: 1.2, comp: RIGHT },
+  'thr_metastable_helium:primary': { mount: [150, 38], back: 0, kind: 'crewed', s: 1.1, comp: DOWN },
+  'thr_metastable_helium:secondary': { mount: [150, 20], back: 0, kind: 'crewed', s: 1.2, comp: DOWN },
+  'thr_monoatomic_plug_nozzle:primary': { mount: [150, 30], back: 0, kind: 'tug', s: 1.1, comp: DOWN },
+  'thr_monoatomic_plug_nozzle:secondary': { mount: [150, 20], back: 0, kind: 'freighter', s: 1.1, comp: DOWN },
+  'thr_photon_heliogyro:primary': { mount: [150, 150], back: -140, kind: 'probe', s: 0.6, front: true },
+  'thr_photon_heliogyro:secondary': { mount: [150, 156], back: -150, kind: 'probe', s: 0.6, front: true },
+  'thr_photon_kite_sail:primary': { mount: [150, 252], back: 180, kind: 'probe', s: 0.45, front: true },
+  'thr_photon_kite_sail:secondary': { mount: [242, 144], back: 90, kind: 'probe', s: 0.45, front: true },
+  'thr_ponderomotive_vasimr:primary': { mount: [16, 144], back: -90, kind: 'crewed', s: 1.2, comp: RIGHT },
+  'thr_ponderomotive_vasimr:secondary': { mount: [10, 144], back: -90, kind: 'tug', s: 1.2, comp: RIGHT },
+  'thr_pulsed_inductive:primary': { mount: [150, 242], back: 180, kind: 'tug', s: 1.0, comp: 'translate(150 144) rotate(128) scale(0.58) translate(-150 -144) translate(-10 30)' },
+  'thr_pulsed_inductive:secondary': { mount: [8, 144], back: -90, kind: 'probe', s: 1.2, comp: RIGHT },
+  'thr_re_solar_moth:primary': { mount: [150, 140], back: 0, kind: 'probe', s: 0.7, comp: 'translate(0 40) scale(0.9) translate(16 0)' },
+  'thr_re_solar_moth:secondary': { mount: [150, 58], back: 0, kind: 'crewed', s: 1.0, comp: DOWN },
+};
+
+function compose(key, svgText) {
+  const r = RIG[key];
+  const withDefs = svgText.replace('</defs>', `${SHIP_DEFS}\n</defs>`);
+  if (!r) return withDefs;
+  const i = withDefs.indexOf(SUBJECT);
+  const head = withDefs.slice(0, i);
+  const subject = withDefs.slice(i + SUBJECT.length).replace(/<\/svg>\s*$/, '');
+  const ship = `<g transform="translate(${r.mount[0]} ${r.mount[1]}) rotate(${r.back}) scale(${r.s})">${shipBody(r.kind)}</g>`;
+  const vessel = r.front ? `${subject}${ship}` : `${ship}${subject}`;
+  return `${head}<g transform="${r.comp || ''}">${vessel}</g>\n</svg>\n`;
+}
+
 // ---- emit ------------------------------------------------------------------
 
 const manifest = {};
@@ -590,7 +707,7 @@ for (const [key, draw] of Object.entries(ART)) {
   const [card, face] = key.split(':');
   const side = face === 'primary' ? 'front' : 'back';
   const rel = `assets/cards/${DECK}/${card}-${side}.svg`;
-  writeFileSync(join(ROOT, rel), draw());
+  writeFileSync(join(ROOT, rel), compose(key, draw()));
   (manifest[card] ||= {})[face] = { src: rel, approved: APPROVED.has('*') || APPROVED.has(key) };
 }
 
