@@ -415,18 +415,35 @@ ART['gen_rankine_mhd:secondary'] = () => {
     ${[...Array(7)].map((_, i) => `<rect x="${72 + i * 18}" y="${184 - i * 1.6}" width="6" height="3" fill="#facc15"/>`).join('')}`);
 };
 
-// 16. Rankine solar dynamic: a big faceted parabolic dish facing the sun, a
-// cavity receiver at the focus on struts, a turbine pod, radiator wings.
+// 16. Rankine solar dynamic (the Space Station solar-dynamic module): a big
+// offset dish tiled with HEXAGONAL mirror facets, a cavity receiver ringed
+// with thermal-storage canisters (it runs through eclipse), a fluid loop
+// piping hot toluene to a SEPARATE turbo-alternator, and big radiator panels.
+// The plumbing is what sets it apart from the Solar Stirling dish.
 ART['gen_rankine_solar_dynamic:primary'] = () => {
   const s = sky(231, ['#1a1610', '#050403'], ['90%', '30%']);
-  let facets = '';
-  for (let i = 0; i < 6; i++) facets += `<line x1="${f(60 + i * 4)}" y1="${f(134 + i * 22)}" x2="${f(96 + i * 1)}" y2="${f(140 + i * 20)}" stroke="#a8a29e" stroke-width="0.8"/>`;
-  return svg(s.defs + DISH, `${s.base}${sun(300, 150, 80)}
-    ${dish(70, 200, 70, 180)}${facets}
-    ${[150, 180, 210, 240].map((y) => `<line x1="300" y1="${y - 10}" x2="76" y2="${y}" stroke="#fde68a" stroke-width="1" opacity="0.25"/><line x1="76" y1="${y}" x2="160" y2="200" stroke="#fde68a" stroke-width="1" opacity="0.4"/>`).join('')}
-    <line x1="76" y1="140" x2="160" y2="196" stroke="#78716c" stroke-width="2"/><line x1="76" y1="260" x2="160" y2="204" stroke="#78716c" stroke-width="2"/>
-    <rect x="156" y="188" width="24" height="24" rx="4" fill="#7c2d12" stroke="#fb923c" stroke-width="1.5"/><circle cx="160" cy="200" r="5" fill="#fff7d6" filter="url(#glow)"/>
-    ${hcyl(180, 200, 30, 9, '#94a3b8')}${finPanel(214, 222, 70, 30, 7)}`);
+  let hex = '';
+  const R = 9, dx = R * 1.5, dy = R * Math.sqrt(3);
+  for (let c = -5; c <= 5; c++) for (let r = -6; r <= 6; r++) {
+    const x = c * dx, y = r * dy + (c % 2 ? dy / 2 : 0);
+    if ((x / 46) ** 2 + (y / 80) ** 2 > 1) continue;
+    const pts = [...Array(6)].map((_, i) => `${f(x + Math.cos(i * Math.PI / 3) * R * 0.92)},${f(y + Math.sin(i * Math.PI / 3) * R * 0.92)}`).join(' ');
+    hex += `<polygon points="${pts}" fill="url(#hxf)" stroke="#57534e" stroke-width="0.8"/>`;
+  }
+  return svg(s.defs + lin('hxf', [[0, '#fef3c7'], [0.5, '#d6d3d1'], [1, '#a8a29e']], 0, 0, 1, 1), `${s.base}${sun(300, 150, 80)}
+    ${[150, 180, 210, 240].map((y) => `<line x1="300" y1="${y - 10}" x2="82" y2="${y}" stroke="#fde68a" stroke-width="1" opacity="0.25"/><line x1="82" y1="${y}" x2="150" y2="200" stroke="#f59e0b" stroke-width="1" opacity="0.5"/>`).join('')}
+    <g transform="translate(70 200) rotate(-14) scale(0.62 1)">${hex}</g>
+    <line x1="74" y1="118" x2="146" y2="192" stroke="#57534e" stroke-width="2"/><line x1="66" y1="282" x2="146" y2="208" stroke="#57534e" stroke-width="2"/>
+    <rect x="146" y="184" width="30" height="32" rx="5" fill="#475569" stroke="#1f2937" stroke-width="1.5"/>
+    <circle cx="150" cy="200" r="6" fill="#fff7d6" filter="url(#glow)"/>
+    ${[0, 1, 2].map((i) => `<rect x="${178}" y="${186 + i * 10}" width="12" height="8" rx="2" fill="#b45309" stroke="#1f2937" stroke-width="0.8"/>`).join('')}
+    <path d="M190,192 L212,192 L212,156 L236,156" stroke="#dc2626" stroke-width="3" fill="none"/>
+    <path d="M190,210 L222,210 L222,176 L236,176" stroke="#2563eb" stroke-width="3" fill="none"/>
+    <rect x="236" y="148" width="22" height="36" rx="4" fill="#94a3b8" stroke="#1f2937" stroke-width="1.5"/>
+    <path d="M258,152 L276,146 L276,186 L258,180 Z" fill="#64748b" stroke="#1f2937"/>
+    ${[0, 1, 2, 3].map((i) => `<line x1="${262 + i * 4}" y1="${151 - i * 1.5}" x2="${262 + i * 4}" y2="${181 + i * 1.5}" stroke="#cbd5e1" stroke-width="1"/>`).join('')}
+    <line x1="230" y1="214" x2="230" y2="232" stroke="#1f2937" stroke-width="2"/>
+    ${finPanel(196, 232, 100, 38, 9)}`);
 };
 // Rankine multiphase: a reactor feeding a boiler drum where liquid metal boils
 // - bubbles in clear pipes - a turbine and a condenser radiator.
@@ -448,12 +465,21 @@ ART['gen_rankine_solar_dynamic:secondary'] = () => {
 // alternator on a tripod at its focus, the heater head glowing.
 ART['gen_solar_stirling:primary'] = () => {
   const s = sky(233, ['#1a1610', '#050403'], ['90%', '30%']);
-  return svg(s.defs + DISH, `${s.base}${sun(300, 150, 80)}
-    ${dish(64, 200, 74, 180)}
-    ${[140, 170, 200, 230, 260].map((y) => `<line x1="72" y1="${y}" x2="170" y2="200" stroke="#fde68a" stroke-width="1" opacity="0.4"/>`).join('')}
-    <line x1="72" y1="134" x2="170" y2="190" stroke="#78716c" stroke-width="2"/><line x1="72" y1="266" x2="170" y2="210" stroke="#78716c" stroke-width="2"/><line x1="76" y1="200" x2="166" y2="200" stroke="#78716c" stroke-width="2"/>
-    <rect x="168" y="184" width="54" height="32" rx="4" fill="#cbd5e1" stroke="#64748b" stroke-width="1.5"/>
-    <circle cx="170" cy="200" r="9" fill="#fb923c" filter="url(#glow)"/>${hcyl(222, 200, 24, 10, '#94a3b8')}${bolt(256, 176, 0.9)}`);
+  // Dish-Stirling: a smooth (inflatable) dish, and the free-piston Stirling
+  // engine + alternator hung RIGHT AT the focus on a tripod boom, its hot head
+  // facing into the dish and a finned cold end behind. No pipes, no turbine.
+  return svg(s.defs + DISH + lin('stc', [[0, '#e2e8f0'], [0.5, '#94a3b8'], [1, '#475569']]), `${s.base}${sun(300, 150, 80)}
+    ${[150, 180, 210, 240].map((y) => `<line x1="300" y1="${y - 10}" x2="70" y2="${y}" stroke="#fde68a" stroke-width="1" opacity="0.2"/>`).join('')}
+    ${dish(64, 200, 80, 180)}
+    <path d="M60,124 Q100,200 60,276" fill="none" stroke="#e0f2fe" stroke-width="3" opacity="0.6"/>
+    ${[140, 170, 200, 230, 260].map((y) => `<line x1="74" y1="${y}" x2="150" y2="200" stroke="#f59e0b" stroke-width="1" opacity="0.5"/>`).join('')}
+    <line x1="68" y1="126" x2="152" y2="190" stroke="#57534e" stroke-width="2"/><line x1="68" y1="274" x2="152" y2="210" stroke="#57534e" stroke-width="2"/><line x1="78" y1="200" x2="146" y2="200" stroke="#57534e" stroke-width="2"/>
+    <circle cx="150" cy="200" r="11" fill="#fb923c" filter="url(#glow)"/>
+    <rect x="150" y="188" width="18" height="24" rx="4" fill="#7c2d12" stroke="#1f2937" stroke-width="1.2"/>
+    <rect x="168" y="186" width="40" height="28" rx="6" fill="url(#stc)" stroke="#1f2937" stroke-width="1.4"/>
+    ${[...Array(7)].map((_, i) => `<rect x="${210 + i * 5}" y="180" width="3" height="40" rx="1" fill="#64748b" stroke="#1f2937" stroke-width="0.5"/>`).join('')}
+    <rect x="246" y="192" width="16" height="16" rx="3" fill="#94a3b8" stroke="#1f2937"/>
+    ${bolt(270, 178, 0.9)}`);
 };
 // Thermo-photovoltaic: a glowing ember of an emitter in a box lined with dark
 // PV cells, sun-heated through a small lens window.
