@@ -144,6 +144,11 @@ function sputter(x, y, color, seed) {
   }
   return out;
 }
+// A beam director: a 45-degree turning mirror in a housing at the end of a beam
+// line, so a horizontal laser can be sent down onto the rock.
+function director(x, y) {
+  return `<rect x="${x - 7}" y="${y - 9}" width="14" height="18" rx="2" fill="#334155" stroke="#94a3b8" stroke-width="1.2"/><line x1="${x - 5}" y1="${y - 6}" x2="${x + 5}" y2="${y + 6}" stroke="#e2e8f0" stroke-width="3"/>`;
+}
 // The target asteroid for a raygun scene, low on the right, and where a beam hits it.
 const RT = [266, 262], RR = 56;
 const RHIT = [f(RT[0] - RR * 0.62), f(RT[1] - RR * 0.5)];
@@ -175,31 +180,40 @@ ART['rob_blackbody_pumped_laser:primary'] = () => {
     ${hcyl(124, 198, 104, 9, '#4b3a3a', '#1c1917')}
     <rect x="126" y="193" width="100" height="10" fill="#fca5a5" opacity="0.35"/>
     <rect x="120" y="186" width="5" height="24" fill="#d6d3d1"/><rect x="229" y="188" width="4" height="20" fill="#93c5fd" opacity="0.8"/>
-    ${irBeam(233, 198, ...RHIT, '#fecaca')}${impact(...RHIT, '#fb923c', 31)}`);
+    ${director(240, 198)}${irBeam(240, 207, ...RHIT, '#fecaca')}${impact(...RHIT, '#fb923c', 31)}`);
 };
 
 // Fissile Aerosol Laser: a squat reactor drum circulates uranium aerosol whose
 // fission glow pumps long laser tubes; the crew rides a long boom away from it.
 ART['rob_blackbody_pumped_laser:secondary'] = () => {
   const b = space('#10200f', '#030603', '25%', '60%');
-  const tre = [0, 120, 240].map((a) => `<path d="M0,0 L${f(10 * Math.sin((a - 30) * Math.PI / 180))},${f(-10 * Math.cos((a - 30) * Math.PI / 180))} A10,10 0 0 1 ${f(10 * Math.sin((a + 30) * Math.PI / 180))},${f(-10 * Math.cos((a + 30) * Math.PI / 180))} Z" fill="#facc15"/>`).join('');
-  return svg(b.defs + lin('drum', [[0, '#3f4a3a'], [0.45, '#a3b39b'], [1, '#2b3328']], 0, 0, 1, 0),
+  const rnd = seeded(32);
+  let aerosol = '';
+  for (let i = 0; i < 26; i++) aerosol += `<circle cx="${f(70 + rnd() * 20)}" cy="${f(186 + rnd() * 34)}" r="${f(0.8 + rnd() * 1.4)}" fill="#ecfccb" opacity="${f(0.5 + rnd() * 0.5)}"/>`;
+  // control drums ringing the vessel: dark absorber stripe on a light reflector
+  const drum = (x, front) => `<rect x="${x - 6}" y="168" width="12" height="62" rx="6" fill="url(#cdrum)" stroke="#4b5563" stroke-width="1" opacity="${front ? 1 : 0.8}"/><rect x="${x - 2}" y="170" width="4" height="58" fill="#1f2937" opacity="0.7"/>`;
+  return svg(b.defs + lin('pv', [[0, '#5b6354'], [0.4, '#d4dccf'], [1, '#3a4136']], 0, 0, 1, 0)
+    + lin('cdrum', [[0, '#9ca3af'], [0.5, '#f3f4f6'], [1, '#6b7280']], 0, 0, 1, 0)
+    + rad('core', [[0, '#f7fee7'], [0.45, '#a3e635'], [1, '#365314']]),
   `${b.body}${stars(40, 32)}${rayTarget('rob_blackbody_pumped_laser', 'secondary', 32)}
-    <path d="M70,170 L10,120" stroke="#6b7487" stroke-width="3"/><path d="M62,176 L4,128" stroke="#6b7487" stroke-width="2"/>
-    ${[0, 1, 2, 3, 4].map((i) => `<line x1="${f(64 - i * 12)}" y1="${f(173 - i * 10)}" x2="${f(58 - i * 12)}" y2="${f(166 - i * 10)}" stroke="#6b7487" stroke-width="1.5"/>`).join('')}
-    <rect x="0" y="108" width="20" height="16" rx="3" fill="#cbd5e1"/><rect x="4" y="112" width="5" height="4" fill="#fde68a"/>
-    ${finPanel(4, 228, 52, 46)}
-    <rect x="50" y="170" width="60" height="72" fill="url(#drum)"/>
-    <ellipse cx="80" cy="242" rx="30" ry="8" fill="#2b3328"/>
-    <ellipse cx="80" cy="170" rx="30" ry="8" fill="#c7d2c0" stroke="#4b5563" stroke-width="1"/>
-    ${[186, 204, 222].map((y) => `<path d="M50,${y} A30,8 0 0 0 110,${y}" stroke="#4b5563" stroke-width="2" fill="none"/>`).join('')}
-    <g transform="translate(80 206)"><circle r="13" fill="#1f2937"/>${tre}<circle r="3" fill="#1f2937"/></g>
-    <path d="M100,172 Q132,148 150,176 Q166,204 138,214" stroke="#bef264" stroke-width="5" fill="none" opacity="0.35" filter="url(#glow)"/>
-    <path d="M100,172 Q132,148 150,176 Q166,204 138,214" stroke="#65a30d" stroke-width="2" fill="none"/>
+    <path d="M44,150 L8,112" stroke="#6b7487" stroke-width="3"/><path d="M38,156 L2,120" stroke="#6b7487" stroke-width="2"/>
+    ${[0, 1, 2, 3].map((i) => `<line x1="${f(40 - i * 10)}" y1="${f(152 - i * 10)}" x2="${f(34 - i * 10)}" y2="${f(146 - i * 10)}" stroke="#6b7487" stroke-width="1.5"/>`).join('')}
+    <rect x="-2" y="100" width="22" height="16" rx="3" fill="#cbd5e1"/><rect x="3" y="104" width="5" height="4" fill="#fde68a"/>
+    <path d="M38,144 L62,136 L66,152 L46,160 Z" fill="#475569" stroke="#94a3b8" stroke-width="1"/>
+    ${finPanel(2, 226, 44, 50)}
+    ${drum(52, false)}${drum(108, false)}
+    <rect x="54" y="150" width="52" height="98" rx="26" fill="url(#pv)" stroke="#2f362c" stroke-width="1.5"/>
+    <path d="M58,176 L102,176 M58,224 L102,224" stroke="#4b5a46" stroke-width="2"/>
+    <rect x="66" y="184" width="28" height="38" rx="10" fill="url(#core)" stroke="#d9f99d" stroke-width="1.5" filter="url(#glow)"/>
+    ${aerosol}
+    ${drum(64, true)}${drum(96, true)}
+    <path d="M80,150 Q80,128 104,128 Q132,128 132,150 L132,181" stroke="#bef264" stroke-width="5" fill="none" opacity="0.35" filter="url(#glow)"/>
+    <path d="M80,150 Q80,128 104,128 Q132,128 132,150 L132,181" stroke="#84cc16" stroke-width="2.5" fill="none"/>
+    <path d="M80,248 Q80,262 106,262 Q132,262 132,209" stroke="#65a30d" stroke-width="2.5" fill="none"/>
     ${hcyl(112, 188, 112, 5, '#3f4a3a')}${hcyl(112, 202, 112, 5, '#3f4a3a')}
     <rect x="114" y="185" width="108" height="6" fill="#d9f99d" opacity="0.5"/><rect x="114" y="199" width="108" height="6" fill="#d9f99d" opacity="0.5"/>
     <rect x="226" y="182" width="5" height="26" fill="#93c5fd" opacity="0.85"/>
-    ${beam(231, 195, ...RHIT, '#fbbf24', 2.5)}${impact(...RHIT, '#fbbf24', 32)}`);
+    ${director(238, 195)}${beam(238, 204, ...RHIT, '#fbbf24', 2.5)}${impact(...RHIT, '#fbbf24', 32)}`);
 };
 
 // Free Electron Laser: a very long straight machine - electron gun, ribbed
@@ -223,7 +237,7 @@ ART['rob_free_electron_laser:primary'] = () => {
     <rect x="228" y="${y - 6}" width="8" height="12" fill="#93c5fd" opacity="0.85"/>
     <line x1="104" y1="${y}" x2="212" y2="${y}" stroke="#5eead4" stroke-width="2" opacity="0.7" filter="url(#glow)"/>
     <g transform="translate(150 ${y - 20})" fill="#f1f5f9"><circle cx="0" cy="-9" r="2.6"/><rect x="-2.4" y="-6.5" width="4.8" height="7" rx="1.5"/><path d="M-2,0.5 L-3,6 M2,0.5 L3,6" stroke="#f1f5f9" stroke-width="1.6"/></g>
-    ${beam(236, y, ...RHIT, '#5eead4', 3)}${impact(...RHIT, '#5eead4', 33)}`);
+    ${director(243, y)}${beam(243, y + 9, ...RHIT, '#5eead4', 3)}${impact(...RHIT, '#5eead4', 33)}`);
 };
 
 // Neutral Beam: an ion source, a squat copper RFQ accelerator fed by RF power

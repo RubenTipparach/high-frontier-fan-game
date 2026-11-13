@@ -1227,9 +1227,9 @@
   background-size: cover;
   background-position: center;
 }
-/* Over the art the thrust triangle is slightly see-through, so the picture
-   reads behind it (user 2026-11-13). */
-.card-face.has-bg-art .thrust-visual { opacity: 0.85; }
+/* Over the art the thrust triangle is half see-through, so the picture reads
+   behind it (user 2026-11-13: 50%, on thrusters and robonauts alike). */
+.card-face.has-bg-art .thrust-visual { opacity: 0.5; }
 /* Text over the art follows the colonist-card treatment: the ability text and
    the Supports Required panel sit in a slightly-transparent black box with
    light ink. White face: no box outline (it reads as a stray line); dark
