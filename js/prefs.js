@@ -146,7 +146,7 @@ export function applyHolidayClass() {
       sky.className = 'xm-sky';
       sky.setAttribute('aria-hidden', 'true');
       let flakes = '';
-      for (let i = 0; i < 26; i++) flakes += '<span class="xm-flake"></span>';
+      for (let i = 0; i < 12; i++) flakes += '<span class="xm-flake"></span>';
       sky.innerHTML = flakes;
       document.body.appendChild(sky);
       // The sleigh flies behind the top bar's buttons, so it gets its own
