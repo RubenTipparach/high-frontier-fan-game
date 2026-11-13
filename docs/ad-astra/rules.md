@@ -1,6 +1,6 @@
 # High Frontier: Ad Astra - Rulebook
 
-**Draft v0.2 (2026-11-13).** A fan variant of High Frontier 4: All that
+**Draft v0.3 (2026-11-13).** A fan variant of High Frontier 4: All that
 takes the game past the edge of the Sol map. Not affiliated with Sierra Madre
 Games. Original rules; it borrows only the hooks HF4 already prints (TW
 thrusters, the three Ad Astra exits, the Ad Astra and Sunlens Futures).
@@ -28,8 +28,10 @@ TW drive and a drydock. The game runs in three acts:
 2. **Reaching the Stars (Act II).** Fly the star map, generation by
    generation, reach destinations and prospect them (flyby scans or a full
    stop).
-3. **Landfall (Act III).** Let the Seed replicate, flip your patents to their
-   Landfall side, and terraform a new world.
+3. **Colonies (Act III).** Let the Seed replicate, flip your patents to their
+   Landfall side, and found colonies, perhaps in more than one system. A
+   lucky Habitable world lets you grow an economy at once; a hostile one
+   must be terraformed, which is slow but yields spin-off technology.
 
 **A1a. Two theatres.** Life in Sol does not stop when the ship leaves. You
 play two theatres the whole game:
@@ -60,7 +62,7 @@ HF4:
 - **White side (Voyage face):** the technology as built in Sol and flown
   across the Crossing.
 - **Black side (Landfall face):** a different technology the same card
-  becomes once it is rebuilt at the destination (AA-H4). A spent drive
+  becomes once it is rebuilt at the destination (AA-H6). A spent drive
   becomes a terraforming tool; a cryo vault becomes a biosphere bank.
 
 Card types: **Drive** (the TW thruster), **Brake**, **Payload** (Crew
@@ -131,7 +133,9 @@ Generation marker off the track until launch.
 free actions and exactly ONE operation, in any order.
 - **Act I:** Home half only (one Home operation, AA-S2).
 - **From launch on:** a **Home half** (one Home operation, no movement) then a
-  **Frontier half** (coast, plus one Frontier operation). [OPEN Z7] whether
+  **Frontier half**: coast every starship, then take one Frontier operation
+  for EACH starship still flying or parked, and one for EACH system where
+  you have a Colony (H9). [TUNE] if this snowballs. [OPEN Z7] whether
   this is two operations a turn or one operation in a theatre of your choice.
 
 **D2. Launch Window (Act I clock).** Act I lasts at most **6 Drydock turns**
@@ -188,12 +192,13 @@ A Prospector and a Brake are optional but you will want both (G6, H2).
 Lens Survey Home operation (S2f).
 
 **E7. Launch.** Choose the Ad Astra exit you leave by. Your starship enters
-its first lane at V0 and immediately takes one Burn (AA-G3) for free. The
-exit choice grants a bonus [TUNE]:
+its first lane at V0 and immediately takes one Burn (AA-G3). That Burn is
+not an operation, but it pays propellant as usual. The exit choice grants a
+bonus [TUNE]:
 
 | Exit | Bonus |
 |---|---|
-| Jupiter-Sol-Jupiter (solar Oberth) | +1 V on launch, free. |
+| Jupiter-Sol-Jupiter (solar Oberth) | +1 V on launch, free (no propellant). Speed you gain here you must also lose before arrival, or fly by. |
 | Sol Exit Neptune | Your first lane counts as Thin ISM for dust (G7). |
 | Sol Exit Oort | Take 2 propellant of your family free (comet ice), Fusion and Pulse only. |
 
@@ -314,13 +319,26 @@ II: you are racing the Generations Clock to find a site worth seeding.
 
 ---
 
-## AA-H. Act III - Landfall
+## AA-H. Act III - Colonies
+
+Act III is about turning a claim into a civilization, in one star system or
+several. How it goes depends on the world you found.
 
 **H1. Entering a system.** Place your starship on the System board's arrival
-node. Movement on the System board uses your drive, at V-free in-system rules
-[OPEN Z2]: for v0.1, any site on the board is one Burn away.
+node. In-system movement: for now, any site on the board is one Burn away
+[OPEN Z2].
 
-**H2. Prospect.** See G11. Act III starts the moment you hold a claim.
+**H2. World classes.** Every world on a System tile shows a **Habitability**
+class, revealed with the tile:
+
+| Class | Meaning | Share of worlds [TUNE] |
+|---|---|---|
+| Garden | Breathable, living. Rare luck. | about 1 in 20 |
+| Habitable | Liveable with masks and greenhouses. | about 1 in 8 |
+| Marginal | Thin air or too cold or too hot. Needs terraforming to live in the open. | about 1 in 4 |
+| Hostile | Airless, frozen or poisonous. | the rest |
+
+Asteroids and small moons have no class: they are mines, never homes.
 
 **H3. Deploy the Seed (operation).** At a claimed site, decommission the Seed
 card to place **1 Replicator cube** there. That site is now your Replicator
@@ -328,36 +346,74 @@ Factory. Embryo Banks and Upload Cores become active here (F5).
 
 **H4. Replication (free, end of every Generation).** Each Replicator Factory
 doubles its cubes, up to the site's Size. Then the **Governor check**: if any
-Replicator Factory is at its cap and no Crew is colocated, roll 1d6; on a 1,
-**Grey Goo**: the site is consumed (remove its cubes and its claim, it can
-never be claimed again).
+Replicator Factory is at its cap and no Crew or Colony is in the same system,
+roll 1d6; on a 1, **Grey Goo**: the site is consumed (remove its cubes and
+its claim; it can never be claimed again).
 
 **H5. Drive recycling (free action).** The drive is 99% of your ship; reuse
 it. At your Replicator Factory, decommission your Drive (and any leftover
 propellant) to add cubes equal to the drive's Mass plus 1 per 6 propellant.
-You can no longer move after this.
+That starship can no longer move.
 
 **H6. Landfall Production (operation).** Spend Replicator cubes equal to a
-card's Landfall-side Mass to flip one Ad Astra card on your placard (or in
-the wreck of your ship) to its black Landfall side. The site's spectral type
-must match the card's, as HF4 ET Production. This is how patents flip.
-A design Transmitted from Sol (S2g) can be built this way too: it arrives as
-a blueprint, and the replicators make the card here, black side up.
+card's Landfall-side Mass to flip one Ad Astra card in the system to its
+black Landfall side. The site's spectral type must match the card's, as HF4
+ET Production. This is how patents flip. A design Transmitted from Sol (S2g)
+can be built this way too: it arrives as a blueprint, and the replicators
+make the card here, black side up.
 
-**H7. Terraform (operation).** Each terraformable world has a Terraform track:
+**H7. Found a Colony (operation).** Move Population from your starship (or an
+existing Colony in the same system) onto a world:
+- **Garden or Habitable world:** the Colony lives in the open and can Grow
+  (H9) right away. This is the lucky start.
+- **Marginal or Hostile world:** only under a **Dome** (a Landfall-side card
+  in the system). The Colony is capped at the Dome's capacity [TUNE: 2] until
+  the world is terraformed to Habitable.
 
-| Step | State | Needs (Landfall-side cards colocated, [TUNE]) | VP |
-|---|---|---|---|
-| 0 | Hostile | - | 0 |
-| 1 | Paraterraformed | a Dome | 2 |
-| 2 | Marginal | + a Mirror or Shade | 4 |
-| 3 | Habitable | + an Atmosphere card | 7 |
-| 4 | Garden | + a Biosphere card, 3 Population present | 12 |
+**H8. Two roads.** From here a system develops along one of two roads, and a
+player with several systems may walk both:
+- **The Economy road** (a Habitable or Garden world): Grow, Settle, Build and
+  launch Seedships. Fast and wide, but it earns no spin-off technology.
+- **The Terraforming road** (a Marginal or Hostile world): slow, but every
+  step is a research breakthrough that yields **spin-off tech** (H10).
 
-One Terraform operation advances a world one step if its needs are met.
+**H9. Colony operations.** A system with at least one Colony gives you one
+Frontier operation per Generation for that system (D1). Choose from:
 
-**H8. Homestead (operation).** Place 1 Population on a world at step 1 or
-more as a Colony (1 VP each, as M2 Homesteading).
+| ID | Operation | Effect |
+|---|---|---|
+| H9a | Grow | +1 Population on one Colony (open world, or a Dome below capacity). |
+| H9b | Industry | +2 Replicator cubes at a Replicator Factory in the system, past the site's cap [TUNE]. |
+| H9c | Settle | Found a Colony on another world, or claim another site, in the same system (needs a Landfall-side lander card, or 2 Replicator cubes to build one). |
+| H9d | Build | Landfall Production (H6). |
+| H9e | Research | Take the top card of the Frontier deck, paying 1 Replicator cube per card [TUNE]. |
+| H9f | Seedship | Spend [TUNE] 6 Replicator cubes to build a Seed and a small drive: a new starship launched from this system toward another star (AA-G). This is how an empire spreads between stars without Sol. |
+| H9g | Terraform | Advance a world one step on its Terraform track (H10). |
+
+**H10. Terraforming is research.** Each terraformable world has a Terraform
+track. Each step needs the Landfall-side cards listed, all in the system,
+and one Terraform operation:
+
+| Step | Reaching | Needs [TUNE] | Spin-off drawn | VP |
+|---|---|---|---|---|
+| 1 | Paraterraformed | a Dome | Habitat engineering | 2 |
+| 2 | Marginal | + a Mirror or Shade | Optics | 4 |
+| 3 | Habitable | + an Atmosphere card | Aerospace | 7 |
+| 4 | Garden | + a Biosphere card, 3 Population present | Biotech | 12 |
+
+A Marginal world starts at step 2. When you complete a step, draw the top
+card of that step's **Spin-off deck** into your Hand. Spin-offs are the
+tangential tech that only terraforming produces, for example:
+- **Habitat engineering:** Domes hold +1 Population.
+- **Optics:** Lens Survey from any colony system, no Sol Observatory needed.
+- **Aerospace:** Settle costs no lander.
+- **Biotech:** Grow adds 2 Population.
+
+A world that reaches Habitable switches to the Economy road too: its Colonies
+can now Grow in the open.
+
+**H11. Shared systems.** In multiplayer, two players may hold claims and
+Colonies in the same system. Solo play never shares. [OPEN Z5]
 
 ---
 
@@ -403,12 +459,13 @@ that operation bigger).
 
 ## AA-I. Scoring and solo victory
 
-**I1. Endgame.** At the end of Generation 12, or as soon as your only world
-reaches Garden.
+**I1. Endgame.** At the end of Generation 12.
 
 **I2. VP.**
-- Terraform track VP (H7), best world counts in full, others half.
-- 1 VP per Colony (H8).
+- Terraform track VP (H10) for every world.
+- 1 VP per Population in Colonies.
+- 2 VP per world with a Colony; 3 VP per star system with a Colony.
+- 1 VP per Spin-off card (H10).
 - 1 VP per Replicator Factory.
 - 1 VP per System tile you revealed (scouting glory).
 - Holding VP (S3).
@@ -437,8 +494,8 @@ reaches Garden.
   `reference/HF4-card-data.xlsx` (house rule: card data comes from the
   spreadsheet), or in a variant data file like Rat Frontier? Mockups use
   placeholder numbers until this is decided.
-- **Z5.** Multiplayer: race to the same stars, shared Beam Stations, claim
-  jumping across light-years.
+- **Z5.** Multiplayer: race to the same stars, shared systems (H11), shared
+  Beam Stations, claim jumping across light-years.
 - **Z7.** Home + Frontier each turn: two operations (v0.2 default), or one
   operation in a theatre of your choice? Two keeps both alive; one makes
   every turn a real trade-off.
@@ -446,6 +503,13 @@ reaches Garden.
   Replicator cube). Each gets a rendered preview for sign-off before use.
 
 ### Changelog
+- **v0.3 (2026-11-13):** Act III is now Colonies. World Habitability classes
+  (H2); Found a Colony, open or domed (H7); two roads, Economy vs
+  Terraforming (H8); Colony operations incl. Seedships between stars (H9);
+  terraforming as research drawing Spin-off tech (H10); shared systems in
+  multiplayer (H11). One Frontier operation per ship and per colony system.
+  E7: the launch Burn pays propellant; the Jupiter exit's free V must be lost
+  again before arrival.
 - **v0.2 (2026-11-13):** Act II is now Reaching the Stars (arrival +
   prospecting). New Home theatre (AA-S): Sol keeps going all game as an
   empire with no movement (Holdings, Expand, Produce, Lens Survey, Transmit,

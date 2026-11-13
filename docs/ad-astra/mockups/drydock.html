@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Ad Astra - Drydock (mockup)</title>
+<!-- MOCKUP ONLY (nodeploy branch). Serve the repo root and open
+     /docs/ad-astra/mockups/drydock.html. Cards are drawn by the game's own
+     renderCard; numbers follow docs/ad-astra/rules.md v0.2 (placeholders). -->
+<link rel="stylesheet" href="../../../css/style.css" />
+<link rel="stylesheet" href="../../../css/cards.css" />
+<style>
+  html, body { overflow: auto; height: auto; }
+  body { margin: 0; background: #0c0a16; color: #e5e7eb; font: 14px/1.4 system-ui, sans-serif; }
+  .aa-top { display: flex; align-items: center; gap: 18px; padding: 10px 18px;
+    background: #171425; border-bottom: 1px solid #2a2540; }
+  .aa-top h1 { margin: 0; font-size: 17px; letter-spacing: .04em; }
+  .aa-top h1 small { color: #e0218a; font-weight: 700; margin-left: 8px; letter-spacing: .1em; font-size: 11px; }
+  .aa-grow { flex: 1; }
+  .aa-chip { background: #221d36; border: 1px solid #3a3358; border-radius: 999px; padding: 4px 12px; font-weight: 600; }
+  .aa-chip b { color: #fbbf24; }
+  .aa-clock { display: flex; gap: 4px; align-items: center; }
+  .aa-clock span { width: 22px; height: 22px; border-radius: 4px; background: #2a2540; display: grid; place-items: center; font-size: 11px; color: #8b85a8; }
+  .aa-clock span.done { background: #4b3f78; color: #cfc8ff; }
+  .aa-clock span.now { background: #e0218a; color: #fff; font-weight: 800; }
+  .aa-main { display: grid; grid-template-columns: 300px 1fr 330px; gap: 14px; padding: 14px; }
+  .aa-panel { background: #15122a; border: 1px solid #2a2540; border-radius: 10px; padding: 12px; }
+  .aa-panel h2 { margin: 0 0 8px; font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: #e0218a; }
+  .aa-panel h2 .sub { color: #8b85a8; font-weight: 500; text-transform: none; letter-spacing: 0; margin-left: 6px; }
+  .aa-hold { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .aa-h { border: 1px dashed #3a3358; border-radius: 8px; padding: 6px 8px; font-size: 12px; color: #8b85a8; }
+  .aa-h.own { border-style: solid; border-color: #22c55e; background: #102a1c; color: #d1fae5; }
+  .aa-h b { display: block; font-size: 12.5px; color: inherit; }
+  .aa-h .c { float: right; color: #fbbf24; font-weight: 700; }
+  .aa-ops { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 10px; }
+  .aa-op { background: #2a2540; border: 0; border-radius: 7px; color: #e5e7eb; padding: 7px 8px; font-weight: 600; font-size: 12.5px; text-align: left; cursor: pointer; }
+  .aa-op small { display: block; color: #9a93ba; font-weight: 500; font-size: 11px; }
+  .aa-op.hot { background: #e0218a; color: #fff; }
+  .aa-op.hot small { color: #ffd6ec; }
+  .aa-op.launch { grid-column: span 2; background: #f59e0b; color: #1a1205; text-align: center; font-size: 14px; }
+  .aa-op.launch small { color: #3d2a06; }
+  .aa-note { font-size: 11.5px; color: #8b85a8; margin-top: 8px; }
+  .aa-placard { display: grid; grid-template-columns: repeat(3, auto); gap: 14px 16px; justify-content: center; }
+  .aa-slot { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .aa-slot > label { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: #fbbf24; font-weight: 700; }
+  .aa-slot.empty .aa-ghost { width: 180px; height: 252px; border: 2px dashed #3a3358; border-radius: 10px; display: grid; place-items: center; color: #6b648c; font-size: 12px; text-align: center; padding: 10px; box-sizing: border-box; }
+  .aa-prop { margin-top: 14px; }
+  .aa-pips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+  .aa-pip { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; background: #2a2540; color: #6b648c; }
+  .aa-pip.full { background: radial-gradient(circle at 35% 30%, #fde68a, #f59e0b 60%, #92400e); color: #3d1d00; font-weight: 800; }
+  .aa-pip.massline { outline: 2px solid #e0218a; outline-offset: 1px; }
+  .aa-ladder { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .aa-ladder td { padding: 6px 8px; border-bottom: 1px solid #2a2540; }
+  .aa-ladder tr.cur td { background: #3b1230; color: #fff; font-weight: 700; }
+  .aa-ladder tr.cur td:first-child { box-shadow: inset 3px 0 #e0218a; }
+  .aa-ladder .x { text-align: right; color: #fbbf24; font-weight: 800; }
+  .aa-bar { display: flex; height: 22px; border-radius: 6px; overflow: hidden; margin: 6px 0 2px; font-size: 10.5px; font-weight: 700; }
+  .aa-bar div { display: grid; place-items: center; color: #12091c; white-space: nowrap; overflow: hidden; }
+  .aa-legend { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11px; color: #9a93ba; }
+  .aa-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+  .aa-check { list-style: none; padding: 0; margin: 0; font-size: 12.5px; }
+  .aa-check li { padding: 4px 0; display: flex; gap: 8px; }
+  .aa-check .ok { color: #22c55e; font-weight: 900; }
+  .aa-check .no { color: #ef4444; font-weight: 900; }
+  .aa-plan { font-size: 12.5px; background: #1d1934; border-radius: 8px; padding: 8px 10px; margin-top: 8px; }
+  .aa-plan b { color: #fbbf24; }
+  .aa-exits { display: grid; gap: 6px; }
+  .aa-exit { border: 1px solid #3a3358; border-radius: 8px; padding: 7px 9px; font-size: 12px; display: flex; gap: 8px; align-items: flex-start; }
+  .aa-exit.sel { border-color: #fb923c; background: #2a1606; }
+  .aa-exit .ring { width: 14px; height: 14px; border-radius: 50%; border: 2.5px solid #fb923c; flex: none; margin-top: 2px; }
+  .aa-exit.sel .ring { background: #fb923c; }
+  .aa-exit b { display: block; }
+  .aa-tip { font-size: 11.5px; color: #c4b5fd; background: #1e1838; border-left: 3px solid #8b5cf6; padding: 6px 8px; border-radius: 4px; margin-top: 8px; }
+  .stack { display: flex; flex-direction: column; gap: 14px; }
+  .aa-theatre { font-size: 10px; letter-spacing: .14em; color: #8b85a8; text-transform: uppercase; margin: -4px 0 8px; }
+</style>
+</head>
+<body>
+  <div class="aa-top">
+    <h1>HIGH FRONTIER: AD ASTRA <small>ACT I - DRYDOCK</small></h1>
+    <div class="aa-grow"></div>
+    <div class="aa-clock" title="Launch Window (AA-D2): launch by the end of turn 6">
+      <span class="done">1</span><span class="done">2</span><span class="done">3</span><span class="now">4</span><span>5</span><span>6</span>
+    </div>
+    <div class="aa-chip">Launch Window</div>
+    <div class="aa-chip">Aqua <b>7</b></div>
+    <div class="aa-chip" style="opacity:.55">Generation - / 12</div>
+  </div>
+
+  <div class="aa-main">
+    <!-- HOME THEATRE -->
+    <div class="stack">
+      <div class="aa-panel">
+        <h2>Home: Sol empire <span class="sub">no movement (AA-S1)</span></h2>
+        <div class="aa-theatre">Holdings</div>
+        <div class="aa-hold" id="holdings"></div>
+        <div class="aa-ops">
+          <button class="aa-op">Income<small>+1 Aqua, +1 per Market</small></button>
+          <button class="aa-op">Research<small>Top card, 1 Aqua each</small></button>
+          <button class="aa-op">Boost<small>Hand to drydock</small></button>
+          <button class="aa-op">Expand<small>Buy a Holding</small></button>
+          <button class="aa-op hot">Produce<small>Earth fissile: 2 Aqua = 2 pulse</small></button>
+          <button class="aa-op" disabled style="opacity:.45">Lens Survey<small>Needs Lens Observatory</small></button>
+          <button class="aa-op launch">Launch<small>All 4 conversion checks pass</small></button>
+        </div>
+        <div class="aa-note">One Home operation per turn. Transmit unlocks after launch.</div>
+      </div>
+      <div class="aa-panel">
+        <h2>Hand</h2>
+        <div class="aa-note" style="margin:0">Embryo Bank, Magsail. Boost them to the drydock to swap into the placard.</div>
+      </div>
+    </div>
+
+    <!-- STARSHIP PLACARD -->
+    <div class="aa-panel">
+      <h2>Starship placard <span class="sub">converting your TW drive (AA-E5)</span></h2>
+      <div class="aa-placard" id="placard"></div>
+      <div class="aa-prop">
+        <h2 style="margin-bottom:0">Propellant: Pulse units <span class="sub">every 6 = 1 Mass (AA-E4) - pink ring marks each Mass step</span></h2>
+        <div class="aa-pips" id="pips"></div>
+      </div>
+    </div>
+
+    <!-- MASS + LAUNCH -->
+    <div class="stack">
+      <div class="aa-panel">
+        <h2>Mass ratio <span class="sub">AA-F4</span></h2>
+        <div class="aa-bar" id="bar"></div>
+        <div class="aa-legend" id="legend"></div>
+        <table class="aa-ladder" id="ladder" style="margin-top:10px"></table>
+        <div class="aa-plan" id="plan"></div>
+        <div class="aa-tip">Swap the Cryo Vault (2) for the Embryo Bank (1) and leave the Lidar home: total 8, Hauler x2. That makes 3 burns: V up 2, brake 1. Fewer sleepers, faster arrival.</div>
+      </div>
+      <div class="aa-panel">
+        <h2>Launch check</h2>
+        <ul class="aa-check" id="check"></ul>
+      </div>
+      <div class="aa-panel">
+        <h2>Exit <span class="sub">AA-E7</span></h2>
+        <div class="aa-exits">
+          <div class="aa-exit"><span class="ring"></span><div><b>Jupiter-Sol-Jupiter Exit</b>Solar Oberth: +1 V on launch, free. <span style="color:#fca5a5">This ship would reach V2 with 1 burn left: too fast to stop, a flyby.</span></div></div>
+          <div class="aa-exit sel"><span class="ring"></span><div><b>Sol Exit Neptune</b>First lane counts as thin ISM.</div></div>
+          <div class="aa-exit"><span class="ring"></span><div><b>Sol Exit Oort</b>+2 pulse units from comet ice.</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script type="module">
+  import { renderCard } from '../../../js/game/card-ui.js';
+  import { AA_DRIVES, AA_SHIP } from './ad-astra-cards.js';
+
+  const drive = AA_DRIVES[0];               // Solem Medusa Spinnaker
+  const slots = [
+    ['Drive', drive],
+    ['Support', AA_SHIP.generator],
+    ['Brake', null, 'No Brake card.<br>The Medusa canopy turns forward to brake (AA-F1).'],
+    ['Payload', AA_SHIP.payload],
+    ['Prospector', AA_SHIP.prospector],
+    ['Seed', AA_SHIP.seed],
+  ];
+  const placard = document.getElementById('placard');
+  for (const [label, card, ghost] of slots) {
+    const s = document.createElement('div');
+    s.className = 'aa-slot' + (card ? '' : ' empty');
+    s.innerHTML = `<label>${label}</label>`;
+    if (card) s.appendChild(renderCard(card));
+    else { const g = document.createElement('div'); g.className = 'aa-ghost'; g.innerHTML = ghost; s.appendChild(g); }
+    placard.appendChild(s);
+  }
+
+  // Rules v0.2 numbers (AA-E4, AA-F4, AA-G3).
+  const PULSE = 12, PULSE_CAP = 18;
+  const dryCards = [drive, AA_SHIP.generator, AA_SHIP.payload, AA_SHIP.prospector, AA_SHIP.seed];
+  const dry = dryCards.reduce((a, c) => a + c.mass, 0);
+  const propMass = (p) => Math.floor(p / 6);
+  const CLASSES = [
+    { name: 'Wisp', lo: 0, hi: 4, x: 1 }, { name: 'Hauler', lo: 5, hi: 8, x: 2 },
+    { name: 'Ark', lo: 9, hi: 13, x: 3 }, { name: 'Worldship', lo: 14, hi: 99, x: 4 },
+  ];
+  const cls = (m) => CLASSES.find((c) => m >= c.lo && m <= c.hi);
+  const total = dry + propMass(PULSE);
+
+  // burns available, recomputing the class each step (AA-G3)
+  let p = PULSE, burns = 0;
+  for (;;) { const cost = drive.fuel * cls(dry + propMass(p)).x; if (p < cost) break; p -= cost; burns++; }
+
+  const pips = document.getElementById('pips');
+  for (let i = 1; i <= PULSE_CAP; i++) {
+    const d = document.createElement('div');
+    d.className = 'aa-pip' + (i <= PULSE ? ' full' : '') + (i % 6 === 0 ? ' massline' : '');
+    d.textContent = i <= PULSE ? '☢' : '';
+    pips.appendChild(d);
+  }
+
+  const parts = [
+    ['Drive', drive.mass, '#fbbf24'], ['Support', AA_SHIP.generator.mass, '#fa8072'],
+    ['Propellant', propMass(PULSE), '#f59e0b'], ['Payload', AA_SHIP.payload.mass, '#60a5fa'],
+    ['Prospector', AA_SHIP.prospector.mass, '#a78bfa'], ['Seed', AA_SHIP.seed.mass, '#94a3b8'],
+  ];
+  document.getElementById('bar').innerHTML = parts.map(([n, m, c]) =>
+    `<div style="flex:${m};background:${c}" title="${n} ${m}">${m}</div>`).join('');
+  document.getElementById('legend').innerHTML = parts.map(([n, m, c]) =>
+    `<span><i style="background:${c}"></i>${n} ${m}</span>`).join('') + `<span style="color:#fff;font-weight:700">Total ${total}</span>`;
+
+  document.getElementById('ladder').innerHTML = CLASSES.map((c) =>
+    `<tr class="${c === cls(total) ? 'cur' : ''}"><td>${c.name}</td><td>${c.lo}${c.hi < 99 ? ' - ' + c.hi : '+'} Mass</td><td class="x">x${c.x}</td></tr>`).join('');
+
+  const perBurn = drive.fuel * cls(total).x;
+  document.getElementById('plan').innerHTML =
+    `Each burn: Fuel ${drive.fuel} x${cls(total).x} = <b>${perBurn} pulse</b>. ` +
+    `${PULSE} pulse = <b>${burns} burns</b>.<br>` +
+    `Plan: up to V1, coast to Alpha Centauri (4.4 ly), brake to V0. ` +
+    `Arrive around <b>Generation 6 of 12</b>.`;
+
+  const checks = [
+    [true, 'Drive operational (winch supplies electric)', 'E5a'],
+    [true, 'Payload with Population (Cryo Vault, 2)', 'E5b'],
+    [true, 'Seed aboard', 'E5c'],
+    [burns >= 1, 'Propellant to reach V1', 'E5d'],
+    [burns >= 2, 'Propellant to stop again (else flyby)', 'G4'],
+  ];
+  document.getElementById('check').innerHTML = checks.map(([ok, t, id]) =>
+    `<li><span class="${ok ? 'ok' : 'no'}">${ok ? '✓' : '✗'}</span><span>${t} <span style="color:#6b648c">${id}</span></span></li>`).join('');
+
+  const H = [
+    ['Earth fissile works', 'Pulse units', 3, true], ['Market', '+1 Aqua on Income', 4, true],
+    ['Jupiter He-3', 'Fusion pellets', 3, false], ['Saturn He-3', 'Fusion pellets', 3, false],
+    ['Mercury antimatter', 'Antimatter', 3, false], ['Beam Station', 'Pushes beam ships', 5, false],
+    ['Lens Observatory', 'Lens Survey', 4, false], ['Shipyard', 'Second drydock', 6, false],
+    ['Bernal Colony', 'Empire growth', 5, false],
+  ];
+  document.getElementById('holdings').innerHTML = H.map(([n, d, c, own]) =>
+    `<div class="aa-h ${own ? 'own' : ''}"><span class="c">${own ? '✓' : c}</span><b>${n}</b>${d}</div>`).join('');
+  document.body.dataset.ready = '1';
+</script>
+</body>
+</html>
