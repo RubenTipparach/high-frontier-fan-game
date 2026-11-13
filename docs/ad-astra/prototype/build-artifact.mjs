@@ -35,7 +35,7 @@ ${js}
 mkdirSync(dist, { recursive: true });
 writeFileSync(join(dist, 'ad-astra.html'), html);
 const assets = [];
-for (const dir of ['assets/factory', 'assets/map-icons', 'assets/background-rockets']) {
+for (const dir of ['assets/factory', 'assets/map-icons']) {
   mkdirSync(join(dist, dir), { recursive: true });
   for (const f of readdirSync(join(root, dir))) if (/\.(png|svg)$/.test(f) && !f.startsWith('_')) { copyFileSync(join(root, dir, f), join(dist, dir, f)); assets.push(`${dir}/${f}`); }
 }
