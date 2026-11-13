@@ -4,8 +4,15 @@ name: Deploy High Frontier to GitHub Pages and Fly.io
 # Each run overwrites the previously deployed Pages site, so the most-
 # recent commit on any branch is what ends up live. This matches the
 # project's requirement to "deploy on all commits regardless of branch."
+#
+# OPT-OUT: a branch whose name contains "nodeploy" (e.g. nodeploy/my-proto,
+# claude/nodeploy-proto) never starts this workflow on push, so it builds
+# nothing and deploys nothing. Use it for prototypes / experiments that must
+# not overwrite the live site or the API. Manual dispatch still works.
 on:
   push:
+    branches-ignore:
+      - '**nodeploy**'
   workflow_dispatch:
 
 permissions:

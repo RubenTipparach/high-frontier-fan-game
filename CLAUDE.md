@@ -627,6 +627,10 @@ Mirrors the murdoku-companion split:
   volume (`/data/hf.db`). Single-writer; do not horizontally scale.
 - **Deploy**: `.github/workflows/deploy.yml` runs on every push. Pages and
   Fly deploys are independent jobs; Fly job is gated on the canonical repo.
+  **Opt-out:** a branch whose name contains `nodeploy` (e.g.
+  `claude/nodeploy-<idea>`) is ignored by the push trigger, so pushing it runs
+  no build and deploys nothing. Use it for prototypes that must not touch prod.
+  A one-off push can also skip CI with `[skip ci]` in the head commit message.
 
 ### Board history storage - diffs, and never one big query
 
