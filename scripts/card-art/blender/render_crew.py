@@ -151,13 +151,13 @@ def liberty():
     joints) under a wider Vulcain-powered core stage and a crew capsule with its
     escape tower, lifting off in a column of solid-rocket smoke."""
     w = WHITE()
-    stage('srb', 0.36, 0.3, 5.2, w)
+    stage('srb', 0.3, 0.3, 5.2, w)   # 3.7 m solid, narrower than the 5.4 m stage above
     for k in range(4):
-        torus(f'joint{k}', 0.37, 0.035, DARK(), (RX, 0, 1.3 + k * 0.98))
-    lathe('interstage', [(0.36, 5.2), (0.5, 5.6), (0.0, 5.6)], m('inter', (0.75, 0.75, 0.75), 0.4)).location = (RX, 0, 0)
-    stage('core', 0.5, 5.6, 8.4, w)
-    torus('coreband', 0.51, 0.04, DARK(), (RX, 0, 8.3))
-    capsule_les('cap', 0.48, 8.4)
+        torus(f'joint{k}', 0.31, 0.035, DARK(), (RX, 0, 1.3 + k * 0.98))
+    lathe('interstage', [(0.3, 5.2), (0.52, 5.7), (0.0, 5.7)], m('inter', (0.75, 0.75, 0.75), 0.4)).location = (RX, 0, 0)
+    stage('core', 0.52, 5.7, 8.4, w)
+    torus('coreband', 0.53, 0.04, DARK(), (RX, 0, 8.3))
+    capsule_les('cap', 0.5, 8.4)
     bells('nozzle', RX, 0, 0.3, 0.3, 1, 0)
     tower(RX - 1.3, 8.6)
     pad()
@@ -167,78 +167,126 @@ def liberty():
     shoot()
 
 
-def new_glenn():
-    """B612 - New Glenn: the big reusable first stage settling onto its landing
-    ship at sea, legs out, fins up top; an infrared survey telescope above."""
-    w = WHITE()
-    z0 = 0.9
+def new_glenn_stage(z0=0.9, w=None, glow_mat=None):
+    """New Glenn's first stage: 7 m, four aft fins, two strakes, seven BE-4s."""
+    w = w or WHITE()
     stage('booster', 0.6, z0, z0 + 7.0, w)
     torus('band', 0.61, 0.05, DARK(), (RX, 0, z0 + 6.6))
     for k in range(4):
         a = k * TAU / 4 + 0.4
         box(f'fin{k}', (0.06, 0.6, 1.0), w, (RX + 0.62 * math.cos(a), 0.62 * math.sin(a), z0 + 6.1), (0, 0, a))
-        rod(f'leg{k}', (RX + 0.55 * math.cos(a), 0.55 * math.sin(a), z0 + 1.2), (RX + 1.3 * math.cos(a), 1.3 * math.sin(a), 0.62), 0.06, DARK())
     for k in range(2):
         a = k * math.pi + 0.3
         box(f'strake{k}', (0.05, 0.5, 1.6), w, (RX + 0.62 * math.cos(a), 0.62 * math.sin(a), z0 + 1.5), (0, 0, a))
     lathe('cap', [(0.6, z0 + 7.0), (0.55, z0 + 7.15), (0.0, z0 + 7.2)], w).location = (RX, 0, 0)
     bells('eng', RX, 0, z0, 0.18, 7, 0.36)
+
+
+def new_glenn_landing():
+    """New Glenn's first stage settling onto its landing ship at sea, legs out
+    (used by Cerulean's white face)."""
+    z0 = 0.9
+    new_glenn_stage(z0)
+    for k in range(4):
+        a = k * TAU / 4 + 0.4
+        rod(f'leg{k}', (RX + 0.55 * math.cos(a), 0.55 * math.sin(a), z0 + 1.2), (RX + 1.3 * math.cos(a), 1.3 * math.sin(a), 0.62), 0.06, DARK())
     flame = lathe('flame', [(0.0, z0), (0.4, z0), (0.2, 0.62), (0.0, 0.55)], mat_glow('flame', (1.0, 0.7, 0.35), 15, 0.7))
     flame.location = (RX, 0, 0)
     box('ship', (5.0, 2.6, 0.5), m('ship', (0.3, 0.32, 0.36), 0.6, 0.4), (RX, 0, 0.35))
-    box('sea', (24, 30, 0.2), m('sea', (0.03, 0.12, 0.35), 0.15), (0, 13, 0.0))
-    # the infrared survey telescope, upper left, with its sunshade
-    cyl('scope', 0.25, 0.9, m('foil', (0.85, 0.62, 0.2), 0.3, 1.0), (-2.6, 0, 9.4), (0, math.radians(60), 0.4))
-    box('shade', (1.2, 0.05, 0.9), m('shadeb', (0.75, 0.77, 0.8), 0.4, 0.4), (-2.8, 0.2, 9.0), (0.2, math.radians(60), 0.4))
+    box('sea', (60, 60, 0.2), m('sea', (0.0, 0.32, 0.55), 0.12), (0, 28, 0.0))
     shoot()
 
 
+def new_glenn():
+    """B612 - New Glenn on its pad at night, in an infrared false-colour glow
+    (B612's Sentinel was an infrared asteroid hunter), the telescope overhead
+    and two faint asteroid streaks (the blink-comparator pair)."""
+    ir = principled_ir()
+    new_glenn_stage(0.4, ir)
+    tower(RX - 1.5, 8.6, to=RX - 0.6)
+    pad()
+    ground((0.05, 0.05, 0.08))
+    for k in range(3):
+        area(f'flood{k}', (RX - 3 + k * 3, -4, 0.5), 300, 1, (1.0, 0.45, 0.2))
+    cyl('scope', 0.25, 0.9, m('foil', (0.85, 0.62, 0.2), 0.3, 1.0), (-2.4, 0, 9.0), (0, math.radians(60), 0.4))
+    box('shade', (1.2, 0.05, 0.9), m('shadeb', (0.75, 0.77, 0.8), 0.4, 0.4), (-2.6, 0.2, 8.6), (0.2, math.radians(60), 0.4))
+    streak = mat_glow('streak', (1.0, 0.6, 0.3), 6, 0.6)
+    rod('ast1', (-3.2, 2, 7.0), (-2.2, 2, 7.25), 0.04, streak)
+    rod('ast2', (-2.6, 2, 6.6), (-1.6, 2, 6.85), 0.04, streak)
+    K.camera((0, -20.2, 10.4), (0, 0, 8.9), 35, clip=4000)
+    c = bpy.context.scene.camera.data
+    c.sensor_fit, c.sensor_height = 'VERTICAL', 36
+    sun((0.6, -0.7, 0.5), 0.6, (0.6, 0.7, 1.0))
+
+
+def principled_ir():
+    """An infrared false-colour skin: warm magenta-orange glowing from within."""
+    mt = m('irskin', (0.55, 0.15, 0.3), 0.5)
+    b = mt.node_tree.nodes['Principled BSDF']
+    b.inputs['Emission Color'].default_value = (1.0, 0.35, 0.15, 1)
+    b.inputs['Emission Strength'].default_value = 0.9
+    return mt
+
+
 def angara():
-    """Roscosmos - Angara A5: a grey-white core flanked by four identical strap-
-    on boosters of the same diameter, a tall service tower, a snowy cosmodrome."""
-    w = m('greywhite', (0.82, 0.83, 0.82), 0.45)
-    r = 0.34
+    """Roscosmos - Angara A5: five IDENTICAL white URM-1 cylinders (a core and
+    four strap-ons of the same width), each strap-on capped by a plain conical
+    nose, under a wider fairing, in the service tower at snowbound Vostochny
+    with bare birches."""
+    w = WHITE()
+    r = 0.36
     stage('core', r, 0.4, 7.2, w)
-    stage('upper', r * 0.95, 7.2, 8.0, w)
-    lathe('fair', [(0.42, 8.0), (0.46, 8.3), (0.46, 9.1), (0.3, 9.6), (0.0, 9.75)], WHITE()).location = (RX, 0, 0)
+    stage('upper', r, 7.2, 8.0, w)
+    lathe('fair', [(r, 8.0), (0.5, 8.25), (0.5, 9.1), (0.3, 9.6), (0.0, 9.75)], w).location = (RX, 0, 0)
     for k in range(4):
         a = k * TAU / 4 + 0.785
-        booster(f'urm{k}', r, 0.4, 5.6, w, RX + 0.68 * math.cos(a), 0.68 * math.sin(a))
+        x, y = RX + 2 * r * math.cos(a), 2 * r * math.sin(a)
+        stage(f'urm{k}', r, 0.4, 5.6, w, x, y)
+        cone = lathe(f'urm{k}.nose', [(r, 5.6), (0.0, 6.5)], w, segs=32)
+        cone.location = (x, y, 0)
+        bells(f'urm{k}.bell', x, y, 0.4, 0.22, 1, 0)
     bells('coreeng', RX, 0, 0.4, 0.22, 1, 0)
     tower(RX - 1.4, 9.4)
     pad()
-    ground((0.92, 0.94, 0.97))
+    ground((0.93, 0.95, 0.98))
+    bark = m('birch', (0.92, 0.9, 0.86), 0.7)
+    twig = m('twig', (0.2, 0.18, 0.16), 0.8)
     rnd = random.Random(3)
-    for i in range(5):
-        x = -5 + i * 1.3
-        lathe(f'pine{i}', [(0.35, 0.3), (0.0, 1.6)], m('pine', (0.08, 0.25, 0.15), 0.8)).location = (x, rnd.uniform(1, 3), 0)
+    for i in range(6):
+        x, y = -5.2 + i * 1.0, rnd.uniform(0.8, 3.0)
+        h = rnd.uniform(2.2, 3.2)
+        rod(f'birch{i}', (x, y, 0), (x, y, h), 0.07, bark)
+        for k in range(5):
+            z = h * (0.45 + k * 0.11)
+            a = rnd.uniform(0, TAU)
+            rod(f'br{i}{k}', (x, y, z), (x + 0.6 * math.cos(a), y + 0.6 * math.sin(a), z + 0.45), 0.02, twig)
     shoot()
 
 
 def long_march_9():
-    """Taikonauts - Long March 9: a fat super-heavy core with four boosters,
-    white with grey bands, at a coastal pad lined with palms."""
+    """Taikonauts - Long March 9 (current design): no boosters - one fat
+    10.6 m white core over a broad cluster of methane engines, at Wenchang's
+    coastal pad among coconut palms; crew in red-trimmed white suits."""
     w = WHITE()
     grey = m('greyband', (0.45, 0.46, 0.48), 0.4)
-    r = 0.6
-    stage('core', r, 0.4, 7.6, w)
-    for z in (2.0, 4.5, 7.0):
-        torus(f'band{z}', r * 1.01, 0.08, grey, (RX, 0, z))
-    stage('upper', r * 0.9, 7.6, 8.6, w)
-    lathe('fair', [(0.6, 8.6), (0.62, 9.3), (0.4, 9.9), (0.0, 10.1)], w).location = (RX, 0, 0)
-    for k in range(4):
-        a = k * TAU / 4 + 0.785
-        booster(f'boost{k}', 0.38, 0.4, 5.4, w, RX + 1.0 * math.cos(a), 1.0 * math.sin(a))
-    bells('coreeng', RX, 0, 0.4, 0.2, 4, 0.3)
-    tower(RX - 1.7, 9.6, to=RX - 0.6)
+    r = 0.78
+    stage('core', r, 0.6, 7.4, w)
+    for z in (2.6, 5.4):
+        torus(f'band{z}', r * 1.01, 0.07, grey, (RX, 0, z))
+    stage('upper', r, 7.4, 8.4, w)
+    lathe('fair', [(r, 8.4), (0.8, 9.0), (0.5, 9.7), (0.0, 9.95)], w).location = (RX, 0, 0)
+    bells('core', RX, 0, 0.6, 0.15, 9, 0.5)
+    bells('centre', RX, 0, 0.6, 0.15, 1, 0)
+    tower(RX - 1.9, 9.6, to=RX - 0.8)
     pad()
     ground((0.86, 0.8, 0.62))
     box('sea', (60, 60, 0.2), m('sea', (0.05, 0.25, 0.45), 0.2), (0, 34, 0.0))
-    for i, x in enumerate((-4.4, -3.2)):
+    for i, x in enumerate((-4.4, -3.2, -1.9)):
         rod(f'palm{i}', (x, 0.5, 0), (x + 0.3, 0.5, 2.6), 0.07, m('trunk', (0.4, 0.28, 0.15), 0.8))
         for k in range(6):
             a = k * TAU / 6
             rod(f'frond{i}{k}', (x + 0.3, 0.5, 2.6), (x + 0.3 + 0.9 * math.cos(a), 0.5 + 0.9 * math.sin(a), 2.3), 0.06, m('leaf', (0.1, 0.45, 0.15), 0.7))
+    crew_figures(flag_free_colour((0.95, 0.95, 0.95)), x=-0.9)
     shoot()
 
 
