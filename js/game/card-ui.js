@@ -1372,10 +1372,10 @@ let _tvSeq = 0;   // unique gradient ids so a removed card SVG never breaks othe
 function tvWedge(g1, g2, stroke, id) {
   return `<defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1">`
     + `<stop offset="0" stop-color="${g1}"/><stop offset="1" stop-color="${g2}"/></linearGradient></defs>`
-    + `<path d="${TV_TRI}" fill="url(#${id})" stroke="${stroke}" stroke-width="2.5" stroke-linejoin="round"/>`;
+    + `<path class="tv-wedge" d="${TV_TRI}" fill="url(#${id})" stroke="${stroke}" stroke-width="2.5" stroke-linejoin="round"/>`;
 }
 function tvDarkWedge() {
-  return `<path d="${TV_TRI}" fill="${TVC.darkTri}" stroke="#3c465e" stroke-width="2.5" stroke-linejoin="round"/>`;
+  return `<path class="tv-wedge" d="${TV_TRI}" fill="${TVC.darkTri}" stroke="#3c465e" stroke-width="2.5" stroke-linejoin="round"/>`;
 }
 // Magenta thrust circle (or the dark-pink modifier circle), bottom-aligned to `by`.
 function tvCircle(cx, by, n, fill, rim) {

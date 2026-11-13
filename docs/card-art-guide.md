@@ -57,7 +57,7 @@ build change.
 
 ## Text and triangle over the art (user 2026-11-13)
 
-On a `.has-bg-art` face the thrust triangle is 50% opaque, and the ability
+On a `.has-bg-art` face only the thrust triangle's FILL is 50% transparent (`.tv-wedge`; its numbers and icons stay solid), and the ability
 text (`.card-blurb`) and the Supports Required panel follow the colonist-card
 treatment: a 60% black box with light ink, no outline on the white face, a
 faint light outline on the dark face, and an empty blurb collapses. Those are

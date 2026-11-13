@@ -1227,9 +1227,12 @@
   background-size: cover;
   background-position: center;
 }
-/* Over the art the thrust triangle is half see-through, so the picture reads
-   behind it (user 2026-11-13: 50%, on thrusters and robonauts alike). */
-.card-face.has-bg-art .thrust-visual { opacity: 0.5; }
+/* Over the art only the thrust triangle's own FILL is half see-through, so the
+   picture reads behind it; the thrust circle, fuel droplet, flame and icons on
+   it stay fully solid (user 2026-11-13: 50%, triangle background only, on
+   thrusters and robonauts alike). The wedge path carries .tv-wedge
+   (js/game/card-ui.js#tvWedge / tvDarkWedge). */
+.card-face.has-bg-art .tv-wedge { fill-opacity: 0.5; }
 /* Text over the art follows the colonist-card treatment: the ability text and
    the Supports Required panel sit in a slightly-transparent black box with
    light ink. White face: no box outline (it reads as a stray line); dark
