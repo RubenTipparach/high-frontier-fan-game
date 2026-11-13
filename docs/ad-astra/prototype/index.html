@@ -6,21 +6,14 @@
 <title>Ad Astra Prototype</title>
 <!-- Local dev (build-free): serve the repo root and open
      /docs/ad-astra/prototype/index.html. The single-file playable build is
-     made by build-artifact.mjs. -->
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Inter:wght@400;500;600;700;800&display=swap" />
+     made by build-artifact.mjs. Styled by the app's own stylesheets. -->
+<link rel="stylesheet" href="../../../css/style.css" />
+<link rel="stylesheet" href="../../../css/map.css" />
 <link rel="stylesheet" href="../../../css/cards.css" />
-<style id="aa-vars"></style>
 <link rel="stylesheet" href="./proto.css" />
 </head>
 <body>
 <div id="aa-app"></div>
-<script type="module">
-  // the card stylesheet reads its type colours from the app's :root tokens
-  fetch('../../../css/style.css').then((r) => r.text()).then((css) => {
-    const m = css.match(/:root\s*\{[\s\S]*?\n\}/); if (m) document.getElementById('aa-vars').textContent = m[0];
-  });
-  import('./game.js');
-</script>
+<script type="module" src="./game.js"></script>
 </body>
 </html>

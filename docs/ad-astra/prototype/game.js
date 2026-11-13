@@ -6,6 +6,7 @@
 // (js/game/card-ui.js#renderCard) so they look like the real cards.
 
 import { renderCard } from '../../../js/game/card-ui.js';
+import { MapRenderer } from '../../../js/game/render.js';
 import {
   TUNE, SOURCES, HOLDINGS, CLASSES, PROP_PER_MASS, FAMILY_GLYPH, CARD_BY_ID, DECKS, DECK_LABEL,
   SPINOFFS, TERRAFORM, EVENTS, STARS, STAR_BY_ID, ANCHORS, SEGMENTS, SPECIAL,
@@ -44,8 +45,8 @@ const poolFrom = (counts) => shuffle(Object.entries(counts).flatMap(([k, n]) => 
 let _uid = 1;
 
 // ================================================================ star map graph (AA-B6)
-const R = 18; // px per space
-function polar([deg, r]) { const a = deg * Math.PI / 180; return { x: Math.cos(a) * r * R, y: Math.sin(a) * r * R }; }
+const R = 17.5; // world px per space (25 spaces fit the 1400x900 board world), centred on Sol at (700, 450) like the HF planner map
+function polar([deg, r]) { const a = deg * Math.PI / 180; return { x: 700 + Math.cos(a) * r * R, y: 450 + Math.sin(a) * r * R }; }
 function buildMap() {
   const nodes = {}; const adj = {};
   const add = (id, o) => { nodes[id] = { id, ...o }; adj[id] = adj[id] || []; };
@@ -103,13 +104,14 @@ const nodeName = (id) => {
 
 // ================================================================ state
 let S = null;
+const CLS_LETTER = { Garden: 'G', Habitable: 'H', Marginal: 'M', Hostile: 'X' };
 function newGame() {
   const decks = {};
   for (const [role, ids] of Object.entries(DECKS)) decks[role] = shuffle(ids.slice());
   const stars = {};
   for (const st of STARS) stars[st.id] = { explored: false, hz: null, comps: [] };
   S = {
-    v: 5, phase: 'setup', turn: 1, gen: 0, aqua: TUNE.startAqua,
+    v: 6, phase: 'setup', turn: 1, gen: 0, aqua: TUNE.startAqua,
     holdings: [], decks, hand: [],
     ship: { cards: [], prop: 0, family: null, pos: 'sol', prev: null, next: null, V: 0, orbit: null, sysNode: null,
       launched: false, lost: false, recycled: false, exit: null, stagedUsed: false, cryoRolled: false, ignoreDust: false,
@@ -128,7 +130,7 @@ function log(msg, kind = '') { S.log.unshift({ msg, kind, when: whenLabel() }); 
 function whenLabel() { return S.phase === 'drydock' || S.phase === 'setup' ? `Drydock ${S.turn}` : `Gen ${S.gen}`; }
 function save() { try { localStorage.setItem('ad-astra-proto', JSON.stringify({ S, _uid })); } catch (e) { /* storage off */ } }
 function load() {
-  try { const raw = localStorage.getItem('ad-astra-proto'); if (!raw) return false; const o = JSON.parse(raw); if (!o.S || o.S.v !== 5) return false; S = o.S; _uid = o._uid || 1000; return true; } catch (e) { return false; }
+  try { const raw = localStorage.getItem('ad-astra-proto'); if (!raw) return false; const o = JSON.parse(raw); if (!o.S || o.S.v !== 6) return false; S = o.S; _uid = o._uid || 1000; return true; } catch (e) { return false; }
 }
 
 // ================================================================ ship derived values
@@ -231,61 +233,91 @@ function explore(starId, how) { // AA-G12
   log(`Explored ${star.name} by ${how}: ${found.length ? found.join(', ') : 'no worlds of note'}. +1 VP (AA-G12).`, 'good');
   return true;
 }
-function genSystem(starId) { // AA-B7a: a small map in the Sol map idiom
+function genSystem(starId) { // AA-B7a: a system map in the Sol map idiom
   const star = STAR_BY_ID[starId]; const st = S.stars[starId];
   const nodes = [], edges = [], sites = [];
-  const P = (deg, r) => ({ x: Math.cos(deg * Math.PI / 180) * r, y: Math.sin(deg * Math.PI / 180) * r });
-  const node = (id, kind, pos, label) => nodes.push({ id, kind, ...pos, label });
-  const site = (o) => sites.push({ claimed: false, cubes: 0, pop: 0, step: 0, startStep: 0, ...o });
-  node('high', 'orbit', P(270, 250), 'High Orbit');
-  // inner hot rock (always)
-  node('rockLO', 'burn', P(200, 70), 'Low orbit');
-  site({ id: 'rock', node: 'rockLO', kind: 'world', name: `${star.name} I`, cls: 'Hostile', size: rint(4, 6), hyd: rint(0, 1), spec: ['M', 'V'][rint(0, 1)], ring: 70, ang: 200, terra: true });
-  edges.push(['high', 'rockLO', 2]);
-  // habitable-zone world from its chit
-  if (st.hz && st.hz.startsWith && st.hz !== 'None') {
+  // compact layout opened at zoom 1.5, where HF shows its burn pads
+  const K = 0.8;
+  const P = (deg, r) => ({ x: 700 + Math.cos(deg * Math.PI / 180) * r * K, y: 430 + Math.sin(deg * Math.PI / 180) * r * K });
+  const lerp = (p, q, t) => ({ x: p.x + (q.x - p.x) * t, y: p.y + (q.y - p.y) * t });
+  const node = (id, kind, pos, label, extra = {}) => nodes.push({ id, kind, ...pos, label, ...extra });
+  const site = (o) => sites.push({ claimed: false, cubes: 0, pop: 0, step: 0, startStep: 0, ...o, node: o.id });
+  const HIGH = P(270, 285);
+  node('high', 'orbit', HIGH, 'High Orbit');
+  // a leg of `burns` magenta burn pads from High Orbit to a destination node (AA-B7b)
+  const leg = (prefix, destPos, burns, destId) => {
+    let prev = 'high';
+    for (let i = 1; i <= burns; i++) { const id = `${prefix}B${i}`; node(id, 'burn', lerp(HIGH, destPos, i / (burns + 1)), 'Burn pad'); edges.push([prev, id]); prev = id; }
+    edges.push([prev, destId]);
+  };
+  const short = star.name.split(' ')[0].replace(/'s$/, '');
+  // the inner rocky world, always
+  const rockPos = P(195, 85);
+  node('rock', 'site', rockPos, `${star.name} I`);
+  site({ id: 'rock', kind: 'world', name: `${star.name} I`, cls: 'Hostile', size: rint(4, 6), hyd: rint(0, 1), spec: ['M', 'V'][rint(0, 1)], terra: true });
+  leg('r', rockPos, 2, 'rock');
+  // the habitable-zone world from its chit
+  if (st.hz && st.hz !== 'None') {
     const [lo, hi] = CLASS_HYD[st.hz];
-    node('hzLO', 'burn', P(330, 145), 'Low orbit');
-    const nm = S.worldNames.pop() || 'World';
-    site({ id: 'hz', node: 'hzLO', kind: 'world', name: `${nm}`, cls: st.hz, size: rint(6, 9), hyd: rint(lo, hi), spec: SPEC[rint(0, 3)], ring: 145, ang: 330, terra: true,
-      step: st.hz === 'Marginal' ? 2 : st.hz === 'Habitable' ? 3 : st.hz === 'Garden' ? 4 : 0 });
-    sites[sites.length - 1].startStep = sites[sites.length - 1].step;
-    edges.push(['high', 'hzLO', 2]);
+    const pos = P(335, 165); const nm = S.worldNames.pop() || 'World';
+    node('hz', 'site', pos, nm);
+    const step = st.hz === 'Marginal' ? 2 : st.hz === 'Habitable' ? 3 : st.hz === 'Garden' ? 4 : 0;
+    site({ id: 'hz', kind: 'world', name: nm, cls: st.hz, size: rint(6, 9), hyd: rint(lo, hi), spec: SPEC[rint(0, 3)], terra: true, step, startStep: step });
+    leg('h', pos, 2, 'hz');
   }
-  // asteroid belt mines
-  node('belt', 'burn', P(80, 195), 'Belt');
-  edges.push(['high', 'belt', 1]);
+  // the asteroid belt: one burn out to it, then the mines
+  const hubPos = P(112, 205);
+  node('belt', 'hub', hubPos, 'Asteroid belt');
+  leg('b', hubPos, 1, 'belt');
   const nMines = rint(2, 3);
   for (let i = 0; i < nMines; i++) {
-    const ang = 40 + i * 45;
-    node(`m${i}L`, 'lagrange', P(ang, 210), 'Mine');
-    site({ id: `m${i}`, node: `m${i}L`, kind: 'mine', name: `${star.name.split(' ')[0]} belt ${String.fromCharCode(65 + i)}`, cls: null, size: rint(3, 6), hyd: rint(0, 4), spec: SPEC[rint(0, 3)], ring: 210, ang });
-    edges.push(['belt', `m${i}L`, 1]);
+    const pos = P(78 + i * 34, 255); const id = `m${i}`;
+    node(id, 'site', pos, `${short} belt ${String.fromCharCode(65 + i)}`);
+    site({ id, kind: 'mine', name: `${short} belt ${String.fromCharCode(65 + i)}`, cls: null, size: rint(3, 6), hyd: rint(0, 4), spec: SPEC[rint(0, 3)] });
+    edges.push(['belt', id]);
   }
-  // companions
+  // companions at their Lagrange points, with a buried ocean if the chit shows one
   st.comps.forEach((cmp, i) => {
-    const ang = i === 0 ? 20 : 150;
-    const nid = `c${i}L`;
-    node(nid, 'lagrange', P(ang, 265), cmp.kind === 'gas' ? 'Gas giant' : cmp.kind === 'brown' ? 'Brown dwarf' : 'White dwarf');
-    nodes[nodes.length - 1].body = cmp.kind;
-    edges.push(['high', nid, 2]);
+    const ang = i === 0 ? 22 : 218;
+    const lid = `c${i}L`; const lpos = P(ang, 270);
+    node(lid, 'lagrange', lpos, cmp.kind === 'gas' ? 'Gas giant' : cmp.kind === 'brown' ? 'Brown dwarf' : 'White dwarf', { body: cmp.kind });
+    leg(`c${i}`, lpos, 2, lid);
     if (cmp.chit === 'Ocean') {
-      const nm = cmp.kind === 'gas' ? `${star.name.split(' ')[0]} icy moon` : `${star.name.split(' ')[0]} dark world`;
-      site({ id: `c${i}`, node: nid, kind: 'ocean', name: nm, cls: 'Hostile', size: rint(5, 7), hyd: rint(7, 9), spec: 'C', ring: 265, ang, terra: false, body: cmp.kind });
+      const id = `c${i}`; const pos = P(ang + (i === 0 ? 9 : -9), 315);
+      const nm = cmp.kind === 'gas' ? `${short} icy moon` : `${short} dark world`;
+      node(id, 'site', pos, nm);
+      site({ id, kind: 'ocean', name: nm, cls: 'Hostile', size: rint(5, 7), hyd: rint(7, 9), spec: 'C', terra: false, body: cmp.kind });
+      edges.push([lid, id]);
     }
   });
   return { nodes, edges, sites, landfall: [], blueprints: [] };
 }
 const siteById = (starId, id) => sysOf(starId)?.sites.find((x) => x.id === id);
-function sysNeighbors(starId, nodeId) { return sysOf(starId).edges.filter((e) => e[0] === nodeId || e[1] === nodeId).map((e) => ({ to: e[0] === nodeId ? e[1] : e[0], burns: e[2] })); }
-function sysPath(starId, from, to) { // cheapest burns (Dijkstra, tiny graph)
+const sysAdj = (starId, id) => sysOf(starId).edges.filter((e) => e[0] === id || e[1] === id).map((e) => (e[0] === id ? e[1] : e[0]));
+function sysPathCost(starId, from, to) { // entering a burn pad costs 1 burn (the HF idiom)
+  const kind = Object.fromEntries(sysOf(starId).nodes.map((n) => [n.id, n.kind]));
   const dist = { [from]: 0 }, prev = {}, done = new Set();
-  while (true) {
+  for (;;) {
     let best = null; for (const [k, v] of Object.entries(dist)) if (!done.has(k) && (best == null || v < dist[best])) best = k;
     if (best == null) return null; if (best === to) break; done.add(best);
-    for (const nb of sysNeighbors(starId, best)) { const nd = dist[best] + nb.burns; if (dist[nb.to] == null || nd < dist[nb.to]) { dist[nb.to] = nd; prev[nb.to] = best; } }
+    for (const nb of sysAdj(starId, best)) { const nd = dist[best] + (kind[nb] === 'burn' ? 1 : 0); if (dist[nb] == null || nd < dist[nb]) { dist[nb] = nd; prev[nb] = best; } }
   }
-  return dist[to];
+  const path = [to]; while (path[0] !== from) path.unshift(prev[path[0]]);
+  return { cost: dist[to], path };
+}
+function canSysMove(starId, to) { // AA-B7b
+  const sh = S.ship; const f = family();
+  if (!shipActive() || sh.orbit !== starId) return { ok: false, why: 'not here' };
+  if (!['Pulse', 'Fusion', 'Antimatter'].includes(f)) return { ok: false, why: 'this drive cannot maneuver in a system' };
+  const prob = driveProblem(); if (prob) return { ok: false, why: prob };
+  const pc = sysPathCost(starId, sh.sysNode, to); if (!pc) return { ok: false, why: 'no route' };
+  const used = sh.sysBurnsGen === S.gen ? sh.sysBurns : 0;
+  const thrust = driveDef().thrust;
+  if (used + pc.cost > thrust) return { ok: false, why: `Thrust ${thrust} per Generation (${used} used)`, burns: pc.cost };
+  let p = sh.prop, cost = 0;
+  for (let i = 0; i < pc.cost; i++) { const c = driveDef().fuel * classFor(totalMass(p)).x; cost += c; p -= c; }
+  if (cost > sh.prop) return { ok: false, why: `needs ${cost} ${f}`, burns: pc.cost };
+  return { ok: true, burns: pc.cost, cost, path: pc.path };
 }
 const rolesIn = (starId) => {
   const sys = sysOf(starId); const roles = {}; if (!sys) return roles;
@@ -377,8 +409,15 @@ function renderInst(c, opts = {}) {
     },
   };
   let el;
-  try { el = renderCard(card, { face: c.face !== 'white' ? 'secondary' : 'primary' }); }
-  catch (e) { el = h('div', { class: 'aa-cardfallback' }, d.name); }
+  const isDrive = d.role === 'drive';
+  if (isDrive) { // HF4: a TW thruster is the purple face of the GW card. Voyage = that face.
+    card.faces = { primary: { ...card.faces.secondary, label: 'Landfall' }, secondary: { ...card.faces.primary, label: 'TW' } };
+  }
+  const want = isDrive ? (c.face === 'white' ? 'secondary' : 'primary') : (c.face !== 'white' ? 'secondary' : 'primary');
+  try {
+    el = renderCard(card, { face: want });
+    if (isDrive) el.querySelectorAll('.card-face[data-face="primary"] .card-typebar').forEach((tb) => { tb.textContent = 'LANDFALL'; });
+  } catch (e) { el = h('div', { class: 'aa-cardfallback' }, d.name); }
   const wrap = h('div', { class: 'aa-card' + (c.glitched ? ' glitched' : '') + (opts.small ? ' small' : '') }, el);
   if (c.glitched) wrap.append(h('div', { class: 'aa-glitch-badge', title: 'Glitched: inactive until repaired (AA-G7)' }, 'GLITCH'));
   if (opts.actions && opts.actions.length) wrap.append(h('div', { class: 'aa-card-acts' }, opts.actions));
@@ -747,20 +786,14 @@ function freeRecycle(site) { // AA-H5
   S.ops.frontier = Math.max(0, S.ops.frontier - 0);
   commit();
 }
-function freeSysMove(toNode) { // AA-H1: in-system moves pay propellant per burn
+function freeSysMove(toNode) { // AA-B7b: in-system moves pay propellant per burn
   const sh = S.ship; const starId = sh.orbit;
-  const f = family();
-  if (!['Pulse', 'Fusion', 'Antimatter'].includes(f) || driveProblem()) { toast('This drive cannot maneuver inside a system. Raygun from High Orbit, or use Landers.'); return; }
-  const nb = sysNeighbors(starId, sh.sysNode).find((x) => x.to === toNode);
-  if (!nb) { toast('Move one leg at a time along the lines.'); return; }
+  const c = canSysMove(starId, toNode);
+  if (!c.ok) { toast(`Can't move there: ${c.why}.`); return; }
   if (sh.sysBurnsGen !== S.gen) { sh.sysBurnsGen = S.gen; sh.sysBurns = 0; }
-  if (sh.sysBurns + nb.burns > driveDef().thrust) { toast(`Thrust ${driveDef().thrust}: no more burns this Generation.`); return; }
-  let p = sh.prop, cost = 0;
-  for (let i = 0; i < nb.burns; i++) { const c = driveDef().fuel * classFor(totalMass(p)).x; cost += c; p -= c; }
-  if (cost > sh.prop) { toast(`That leg costs ${cost} propellant; ${sh.prop} aboard.`); return; }
-  sh.prop -= cost; sh.sysBurns += nb.burns; sh.sysNode = toNode;
+  sh.prop -= c.cost; sh.sysBurns += c.burns; sh.sysNode = toNode;
   const nd = sysOf(starId).nodes.find((n) => n.id === toNode);
-  log(`Moved to ${nd.label} in ${nb.burns} burn${nb.burns > 1 ? 's' : ''} (${cost} ${f}).`); commit();
+  log(`Moved to ${nd.label} in ${c.burns} burn${c.burns === 1 ? '' : 's'}${c.cost ? ` (${c.cost} ${family()})` : ''} (AA-B7b).`); commit();
 }
 
 // ================================================================ END OF TURN
@@ -881,8 +914,9 @@ async function flybyScan(starId) { // AA-G6
 }
 async function enterOrbit(starId) { // AA-G4
   const sh = S.ship;
+  explore(starId, 'starship'); // stopping in its Oort cloud still shows you what orbits it (AA-G12)
   sh.orbit = starId; sh.sysNode = 'high'; sh.V = 0; sh.next = null; sh.pos = starId;
-  SEL.sysView = null; SEL.site = null;
+  SYSVIEW = starId; POPUP = null;
   log(`ORBIT at ${STAR_BY_ID[starId].name} (AA-G4).`, 'good');
   if (!S.firstArrival) { S.firstArrival = starId; log('First system entered: +3 VP (AA-I2).', 'good'); }
   for (const c of S.ship.cards.filter((x) => x.face === 'landfallAboard')) { S.ship.cards = S.ship.cards.filter((x) => x.uid !== c.uid); c.face = 'landfall'; sysOf(starId).landfall.push(c); }
@@ -945,73 +979,428 @@ function showScore() {
   modal({ title: S.over ? `Game over: ${S.over.reason === 'Time' ? `Generation ${TUNE.generations} has passed` : S.over.reason}` : 'Score so far', body });
 }
 
-// ================================================================ RENDER
-let TAB = 'ship';
-let SEL = { star: null, site: null };
-function setTab(t) { TAB = t; render(); }
+// ================================================================ RENDER (the HF shell)
+// The screen is the HF sandbox screen: the map toolbar on top, the ORIGINAL
+// MapRenderer (js/game/render.js) filling the stage, the icon sidepanel on the
+// right and the hand strip along the bottom, all styled by the app's own
+// css/style.css + css/map.css + css/cards.css. Only the data is Ad Astra's.
+let PANE = 'ship';                // open sidepanel pane ('' = closed)
+let MAPMODE = 'stars';            // 'stars' | 'system'
+let SYSVIEW = null;               // star whose system map is showing
+let POPUP = null;                 // { map: 'stars'|starId, id } of the open popup
+const MARKS = new Set();          // hand cards marked for BOOST (the HF hand idiom)
+const RENDERERS = {};             // key -> { renderer, host, data }
+let SHELL = false;
+
 function commit() { save(); render(); }
+function setMapMode(mode, starId) { MAPMODE = mode; if (starId) SYSVIEW = starId; render(); }
+function setTab(t) { if (t === 'map') setMapMode('stars'); else if (t === 'system') setMapMode('system', S.ship.orbit || SYSVIEW); else { PANE = 'ship'; render(); } }
+
+// ---------- map data in the original planner-map shape (as Rat Frontier does)
+function plannerShape(sites, edgePairs) {
+  const byId = Object.fromEntries(sites.map((x) => [x.id, x]));
+  const neighbors = new Map();
+  for (const [a, b] of edgePairs) {
+    if (!neighbors.has(a)) neighbors.set(a, new Set());
+    if (!neighbors.has(b)) neighbors.set(b, new Set());
+    neighbors.get(a).add(b); neighbors.get(b).add(a);
+  }
+  return { sites, edges: edgePairs, byId, chains: [], straightEdges: edgePairs, edgeLabels: {}, directedEdges: [], neighbors, mode: 'classic' };
+}
+// Hex sites and suns are REAL sites (they get the hex, size, droplets and name
+// label); everything else is a waypoint marker (burn pad, Lagrange ring, ...).
+const REAL_TYPES = new Set(['sun', 'planet', 'moon', 'asteroid', 'dwarf', 'site']);
+const baseSite = (o) => ({ id2: `aa-${o.id}`, isDecorative: false, solarZone: null, aeroLandable: false, hazard: false, isWaypoint: !REAL_TYPES.has(o.type), bodyKey: o.id, ...o });
+let _starData = null;
+function starMapData() { // AA-B6, drawn in HF node idioms
+  if (_starData) return _starData;
+  const sites = [];
+  for (const nd of Object.values(MAP.nodes)) {
+    let type = 'unknown', name = 'Deep space', hazard = false;
+    if (nd.kind === 'sol') { type = 'sun'; name = 'Sol'; }
+    else if (nd.kind === 'star') { const st = STAR_BY_ID[nd.star]; type = st.type === 'brown' ? 'dwarf' : 'sun'; name = st.name; }
+    else if (nd.kind === 'oort') { type = 'orbit'; name = `Oort cloud of ${nd.of === 'sol' ? 'Sol' : STAR_BY_ID[nd.of].name}`; }
+    else if (nd.kind === 'dust') { type = 'radhaz'; name = 'Dust'; hazard = true; }
+    else if (nd.kind === 'sunlens') { type = 'lagrange'; name = `Sunlens aimed at ${STAR_BY_ID[nd.target].name}`; }
+    else if (nd.kind === 'junction') { name = 'Junction'; }
+    sites.push(baseSite({ id: nd.id, name, type, x: nd.x, y: nd.y, hazard }));
+  }
+  const pairs = [];
+  for (const [a, nbs] of Object.entries(MAP.adj)) for (const b of nbs) if (a < b) pairs.push([a, b]);
+  _starData = plannerShape(sites, pairs);
+  return _starData;
+}
+const _sysData = {};
+function systemMapData(starId) { // AA-B7a
+  if (_sysData[starId]) return _sysData[starId];
+  const sys = sysOf(starId); const star = STAR_BY_ID[starId];
+  const siteBy = Object.fromEntries(sys.sites.map((x) => [x.id, x]));
+  const TYPE = { orbit: 'orbit', burn: 'burn', hub: 'unknown', lagrange: 'lagrange' };
+  const sites = [baseSite({ id: 'star', name: star.name, type: star.type === 'brown' ? 'dwarf' : 'sun', x: 700, y: 430 })];
+  for (const n of sys.nodes) {
+    const st = siteBy[n.id];
+    if (st) sites.push(baseSite({ id: n.id, name: st.name, type: st.kind === 'mine' ? 'asteroid' : st.kind === 'ocean' ? 'moon' : 'planet', x: n.x, y: n.y, siteSize: `${st.size}`, hydration: st.hyd }));
+    else sites.push(baseSite({ id: n.id, name: n.label, type: TYPE[n.kind] || 'unknown', x: n.x, y: n.y }));
+  }
+  _sysData[starId] = plannerShape(sites, sys.edges.map(([a, b]) => [a, b]));
+  return _sysData[starId];
+}
+
+function rendererFor(key) {
+  if (RENDERERS[key]) return RENDERERS[key];
+  const host = h('div', { class: 'aa-maphost', 'data-map': key });
+  $('#aa-maps').append(host);
+  const data = key === 'stars' ? starMapData() : systemMapData(key);
+  const renderer = new MapRenderer(host, { data, onSelect: (id) => openPopup(key, id) });
+  renderer.options.initialZoom = key === 'stars' ? 1 : 1.5;
+  // open on the whole map (the star neighbourhood, or the whole system), not
+  // zoomed onto the rocket the way the Sol board opens
+  renderer._initialViewDone = true;
+  // these maps are read zoomed out, so keep site names visible at fit zoom
+  renderer.options.labelFadeMin = 0.4; renderer.options.labelFadeMax = 0.7;
+  try { renderer.setAmbientRocketCount(0); } catch (e) { /* optional */ }
+  RENDERERS[key] = { renderer, host, data, fresh: true };
+  return RENDERERS[key];
+}
+
+function syncMaps() {
+  const key = MAPMODE === 'system' && SYSVIEW && sysOf(SYSVIEW) ? SYSVIEW : 'stars';
+  if (key === 'stars') MAPMODE = 'stars';
+  const cur = rendererFor(key);
+  for (const [k, r] of Object.entries(RENDERERS)) r.host.style.display = k === key ? '' : 'none';
+  const R = cur.renderer; const sh = S.ship;
+  // insets: the hand strip and the open sidepanel cover part of the stage
+  const hand = $('#aa-hand'); const side = $('#aa-side');
+  try { R.setInsets({ bottom: hand ? hand.offsetHeight : 0, right: side && PANE ? side.offsetWidth : 48 }); } catch (e) { /* older renderer */ }
+  if (cur.fresh) {
+    cur.fresh = false;
+    // open framed on the whole map, inside the area the hand and panel leave free
+    requestAnimationFrame(() => { try { R.reset(); R.flyToFit(cur.data.sites, { maxZoom: key === 'stars' ? 1.6 : 2.4, pad: 0.9 }); } catch (e) { /* sizing */ } });
+  }
+  if (key === 'stars') {
+    // explored stars carry their world badge as the hex label (G H M X, - none)
+    for (const st of STARS) {
+      const site = cur.data.byId[st.id];
+      if (S.stars[st.id].explored) {
+        const ws = sysOf(st.id).sites.filter((x) => x.id === 'hz' || x.kind === 'ocean');
+        site.siteSize = ws.length ? ws.map((x) => CLS_LETTER[x.cls]).join('') : '-';
+      }
+    }
+    const at = sh.launched && !sh.lost ? MAP.nodes[sh.orbit || sh.pos] : MAP.nodes.sol;
+    R.setSandboxRocket(sh.lost ? null : { x: at.x, y: at.y });
+    R.setRoute(predictedCourse());
+    R.setMoveTargets(null);
+    R.setFactories(null);
+    R.setColonies(null);
+    const discs = {};
+    for (const st of STARS) if (S.stars[st.id].explored) discs[st.id] = { outcome: sysOf(st.id).sites.some((x) => x.pop > 0) ? 'success' : 'success' };
+    R.setDiscs(null);
+  } else {
+    const sys = sysOf(key);
+    const here = sh.orbit === key && !sh.lost;
+    const n = here ? sys.nodes.find((q) => q.id === sh.sysNode) : null;
+    R.setSandboxRocket(n ? { x: n.x, y: n.y } : null);
+    R.setRoute(null);
+    const fac = {}, col = {}, discs = {};
+    for (const x of sys.sites) {
+      if (x.cubes > 0) fac[x.id] = { ownerId: 'me', spectralType: x.spec, color: '#b40054' };
+      if (x.pop > 0) col[x.id] = { ownerId: 'me' };
+      if (x.claimed && !x.cubes) discs[x.id] = { outcome: 'success' };
+      if (x.goo) discs[x.id] = { outcome: 'fail' };
+    }
+    R.setFactories(fac); R.setColonies(col); R.setDiscs(discs);
+    R.setMoveTargets(here && shipActive() ? moveTargets(key) : null);
+  }
+}
+function predictedCourse() {
+  const sh = S.ship; if (!sh.launched || sh.orbit || sh.lost || sh.V <= 0) return null;
+  const segs = []; let prev = sh.prev, cur = sh.pos, nxt = sh.next;
+  for (let i = 0; i < sh.V; i++) {
+    const opts = MAP.adj[cur].filter((n) => n !== prev);
+    const n = nxt && opts.includes(nxt) ? nxt : opts.length === 1 ? opts[0] : null;
+    if (!n) break;
+    segs.push({ from: cur, to: n, dv: 0, turn: 1 }); prev = cur; cur = n; nxt = null;
+  }
+  return segs.length ? segs : null;
+}
+function moveTargets(starId) {
+  const sh = S.ship; const out = {};
+  for (const n of sysOf(starId).nodes) {
+    if (n.id === sh.sysNode) continue;
+    const pc = sysPathCost(starId, sh.sysNode, n.id);
+    if (pc && pc.path.length === 2) out[n.id] = canSysMove(starId, n.id).ok ? 'ok' : 'blocked';
+  }
+  return out;
+}
+
+// ---------- popups (the HF site popup + its action buttons)
+function openPopup(key, id) {
+  const ent = RENDERERS[key]; if (!ent || !id) return;
+  const site = ent.data.byId[id]; if (!site) return;
+  POPUP = { key, id };
+  const actions = key === 'stars' ? starActions(id) : systemActions(key, id);
+  ent.renderer.setSitePopup(site, actions);
+}
+function refreshPopup() {
+  if (!POPUP) return;
+  const ent = RENDERERS[POPUP.key];
+  if (!ent || ent.host.style.display === 'none') return;
+  openPopup(POPUP.key, POPUP.id);
+}
+const act = (fn) => async (ev) => { if (ev) ev.stopPropagation(); await fn(); refreshPopup(); };
+const info = (label) => ({ label, disabled: true, variant: 'secondary' });
+function starActions(id) {
+  const nd = MAP.nodes[id]; const sh = S.ship; const out = [];
+  const fromShip = sh.launched && !sh.lost ? bfs(sh.orbit || sh.pos) : null;
+  if (nd.kind === 'star') {
+    const st = STAR_BY_ID[nd.star]; const ex = S.stars[nd.star].explored;
+    out.push(info(`${st.type === 'yellow' ? 'Yellow sun' : st.type === 'red' ? 'Red dwarf' : 'Brown dwarf'}${st.comp.length ? ` + ${st.comp.map((c) => ({ gas: 'gas giant', brown: 'brown dwarf', white: 'white dwarf' }[c])).join(', ')}` : ''}${st.hazard ? `, ${st.hazard === 'flare' ? 'flare star' : 'debris disk'}` : ''}`));
+    out.push(info(`${MAP.dist[nd.star]} spaces from Sol${fromShip ? `, ${fromShip[nd.star]} from your starship` : ''}`));
+    if (st.known) out.push(info(`Known planet: ${st.known}`));
+    if (ex) {
+      out.push(info(`Worlds: ${sysOf(nd.star).sites.filter((x) => x.kind !== 'mine').map((x) => `${x.name} (${x.cls})`).join(', ')}`));
+      out.push({ label: '🪐 Open system map', variant: 'rocket', onClick: act(() => setMapMode('system', nd.star)) });
+    } else {
+      out.push(info('Unexplored: fly through it, sit at its sunlens, or Lens Survey it'));
+      const range = S.spinoffs.includes('optics') ? 999 : TUNE.lensRangeSpaces;
+      if (owns('lens') && (MAP.dist[nd.star] ?? 99) <= range) out.push({ label: '🔭 Lens Survey (Home op)', variant: 'rocket', disabled: S.ops.home < 1 || !!S.over, onClick: act(() => lensSurveyStar(nd.star)) });
+    }
+    if (MAP.adj[nd.star].length === 1) out.push(info('Dead end: arrive at V0 or fly off into the dark'));
+  } else if (nd.kind === 'oort' && nd.of !== 'sol') out.push(info('Icebrake here: -1 V free, a roll for debris. V0 here is Orbit.'));
+  else if (nd.kind === 'dust') out.push(info('Dust strike: lose a card unless a Shield absorbs it'));
+  else if (nd.kind === 'sunlens') out.push(info(`Passing here explores ${STAR_BY_ID[nd.target].name}`));
+  if (fromShip && nd.kind !== 'star') out.push(info(`${fromShip[id]} spaces from your starship`));
+  return out;
+}
+function systemActions(starId, id) {
+  const sh = S.ship; const here = sh.orbit === starId && shipActive();
+  const site = siteById(starId, id); const out = [];
+  const fops = S.ops.frontier < 1 || !!S.over;
+  const colonyHere = sysOf(starId).sites.some((x) => x.pop > 0);
+  if (site) {
+    out.push(info(`${site.kind === 'mine' ? 'Mine' : site.kind === 'ocean' ? 'Buried ocean, Hostile surface' : site.cls} . Size ${site.size} . Hydration ${site.hyd} . Spectral ${site.spec}`));
+    const status = [site.goo ? 'Consumed by grey goo' : site.claimed ? 'Claimed' : 'Unclaimed', site.cubes ? `${site.cubes} cubes (cap ${site.size})` : '', site.pop ? `Colony ${site.pop}${isOpen(site) ? ' (open)' : ' (domed)'}` : '', site.kind === 'world' && site.terra ? `Terraform ${site.step}/4` : ''].filter(Boolean).join(' . ');
+    out.push(info(status));
+    if (!site.goo) {
+      const pc = prospectorCard();
+      const freeScan = pc && def(pc).raygun && S.ops.prospected;
+      if (here && !site.claimed) out.push({ label: freeScan ? '🔫 Prospect (free scan)' : '⛏ Prospect', variant: 'rocket', disabled: (fops && !freeScan) || !pc, onClick: act(() => opProspect(site)) });
+      if (here && site.claimed && !site.cubes && hasSeed()) out.push({ label: '🌱 Deploy Seed', variant: 'rocket', disabled: fops, onClick: act(() => opDeploySeed(site)) });
+      if (here && site.claimed && (site.kind === 'world' || site.kind === 'ocean')) out.push({ label: '🏠 Found Colony', variant: 'rocket', disabled: fops || shipPop() < 1, onClick: act(() => opFoundColony(site)) });
+      if ((here || colonyHere) && !site.claimed) out.push({ label: '🚩 Settle (claim)', disabled: fops, onClick: act(() => opSettle(starId, site)) });
+      if (site.pop > 0) out.push({ label: '👶 Grow', disabled: fops, onClick: act(() => opGrow(Object.assign(site, { _star: starId }))) });
+      if (site.cubes > 0 && (here || colonyHere)) out.push({ label: '🏭 Industry +2 cubes', disabled: fops, onClick: act(() => opIndustry(site)) });
+      if (site.cubes > 0 && (here || colonyHere)) out.push({ label: '🛠 Landfall Production', disabled: fops, onClick: act(() => opBuild(starId)) });
+      if (site.kind === 'world' && site.terra && (here || colonyHere) && site.step < 4) {
+        const nx = TERRAFORM[site.step + 1]; const roles = rolesIn(starId);
+        out.push({ label: `🌍 Terraform to ${nx.reach}`, disabled: fops, title: `Needs ${nx.needs.map((r) => `${r} ${roles[r] ? '✓' : '✗'}`).join(', ')}`, onClick: act(() => opTerraform(starId, site)) });
+      }
+      if (here && site.cubes > 0 && driveCard() && !sh.recycled) out.push({ label: '♻ Recycle drive here (free)', onClick: act(() => freeRecycle(site)) });
+    }
+  } else {
+    const n = sysOf(starId).nodes.find((q) => q.id === id);
+    if (n) out.push(info(n.kind === 'burn' ? 'Burn pad: entering it costs 1 burn' : n.kind === 'orbit' ? 'High Orbit: where ships arrive' : n.kind === 'lagrange' ? `${n.label}: Lagrange point` : n.label));
+    if (here && n && n.body === 'gas') out.push({ label: '⛽ Skim gas giant', disabled: fops || sh.sysNode !== id, onClick: act(opSkim) });
+  }
+  if (here && sh.sysNode !== id && (site || sysOf(starId).nodes.some((q) => q.id === id))) {
+    const c = canSysMove(starId, id);
+    out.push({ label: c.ok ? `🚀 Move here (${c.burns} burn${c.burns === 1 ? '' : 's'})` : `🚀 Move here: ${c.why}`, variant: 'rocket', disabled: !c.ok, onClick: act(() => freeSysMove(id)) });
+  }
+  if (here && site && sh.sysNode === id) out.push(info('Your starship is here'));
+  return out;
+}
+async function lensSurveyStar(starId) { if (!spendHome()) return; explore(starId, 'Lens Survey from Sol'); commit(); }
+
+// ---------- the shell
+function mountShell() {
+  if (SHELL) return; SHELL = true;
+  const app = $('#aa-app') || document.body.appendChild(h('div', { id: 'aa-app' }));
+  app.innerHTML = `
+  <div class="browse-shell aa-shell">
+    <div class="browse-stage"><div class="browse-map">
+      <div class="map-toolbar">
+        <div class="map-turn-controls">
+          <button id="aa-menu" title="Menu" aria-label="Menu">☰</button>
+          <button id="aa-clock" title="Turn clock" aria-label="Turn clock">🕐</button>
+          <button id="aa-news" title="This Generation's event" aria-label="Event">‼️</button>
+          <button id="turn-end" title="End your turn" aria-label="End turn">⏭ End turn</button>
+          <span id="aa-budget" class="map-turn-budget" aria-live="polite"></span>
+          <span class="map-aqua-chip" title="Aqua: your Sol treasury">💧 <strong id="aa-aqua">0</strong></span>
+        </div>
+        <div class="map-route">
+          <span id="route-status" class="muted"></span>
+          <button id="aa-mode-stars" title="The nearby stars">🌌 Star map</button>
+          <button id="aa-mode-sys" title="The system your starship is in">🪐 System</button>
+        </div>
+      </div>
+      <div class="browse-map-stage"><div class="browse-map-canvas" id="aa-maps"></div></div>
+    </div></div>
+    <aside id="aa-side" class="browse-sidepanel" data-active="">
+      <nav class="sidepanel-tabs">
+        <button data-pane="ship" title="Starship" aria-label="Starship">🚀</button>
+        <button data-pane="sol" title="Home: Sol empire" aria-label="Sol empire">☉</button>
+        <button data-pane="frontier" title="Frontier" aria-label="Frontier">🛰</button>
+        <button data-pane="milestones" title="Scoring" aria-label="Scoring">🏆</button>
+        <button data-pane="log" title="Mission log" aria-label="Mission log">📋</button>
+        <button data-pane="rules" title="How to play" aria-label="How to play">📖</button>
+      </nav>
+      <div class="sidepanel-content">
+        <button class="sidepanel-close" id="aa-side-close" aria-label="Close panel" title="Close">×</button>
+        ${['ship', 'sol', 'frontier', 'milestones', 'log', 'rules'].map((p) => `<div class="panel-pane" data-pane="${p}"></div>`).join('')}
+      </div>
+    </aside>
+    <div id="aa-hand" class="sandbox-hand" aria-label="Your hand">
+      <div class="hand-header">
+        <span class="hand-title">✋ Hand</span>
+        <span class="hand-count" id="aa-hand-count">0 cards</span>
+        <button id="hand-boost-commit" type="button" title="Boost every marked card onto the starship in the drydock">🚀 BOOST to drydock</button>
+        <button id="aa-research" class="hand-all-cards" type="button" title="Research: take top cards, 1 Aqua each">📚 Research</button>
+      </div>
+      <div id="aa-stacks" class="hand-stack-switcher" aria-label="Your stacks"></div>
+      <div id="aa-hand-cards" class="hand-cards" data-empty="Research to draw cards, then mark them and BOOST them onto your starship"></div>
+    </div>
+  </div>`;
+  $('#aa-menu').onclick = menuModal;
+  $('#aa-clock').onclick = clockModal;
+  $('#aa-news').onclick = () => S.event ? modal({ title: `Generation event: ${S.event.name}`, body: `<p>${S.event.text}</p><p class="muted">${S.event.note || ''}</p>` }) : toast('No event this turn.');
+  $('#turn-end').onclick = endTurn;
+  $('#aa-mode-stars').onclick = () => setMapMode('stars');
+  $('#aa-mode-sys').onclick = () => { const id = S.ship.orbit || SYSVIEW || Object.keys(S.systems)[0]; if (!id) { toast('No explored system yet.'); return; } setMapMode('system', id); };
+  $('#aa-side').querySelectorAll('.sidepanel-tabs button[data-pane]').forEach((b) => { b.onclick = () => { PANE = PANE === b.dataset.pane ? '' : b.dataset.pane; render(); }; });
+  $('#aa-side-close').onclick = () => { PANE = ''; render(); };
+  $('#hand-boost-commit').onclick = boostMarked;
+  $('#aa-research').onclick = () => opResearch('hand');
+  window.addEventListener('resize', () => syncMaps());
+}
 
 function render() {
-  const app = $('#aa-app'); if (!app) return;
-  app.replaceChildren(topBar(), h('div', { class: 'aa-main' }, homePanel(), centerPanel(), sidePanel()));
+  if (!S) return;
+  mountShell();
+  const sh = S.ship;
+  // toolbar
+  $('#aa-aqua').textContent = S.aqua;
+  const endB = $('#turn-end');
+  endB.textContent = BUSY ? '⏳ Moving' : S.phase === 'voyage' ? '⏭ End Generation' : '⏭ End turn';
+  endB.disabled = S.phase === 'setup' || !!S.over || BUSY;
+  $('#aa-clock').textContent = S.phase === 'voyage' ? `🕐 Gen ${S.gen}/${TUNE.generations}` : `🕐 Drydock ${S.turn}/${TUNE.launchWindow}`;
+  $('#aa-news').hidden = !S.event;
+  const tags = [`<span class="turn-tag${S.ops.home ? '' : ' is-spent'}" title="Home operation (AA-D1)">☉ Home op:${S.ops.home}</span>`];
+  if (S.phase === 'voyage') tags.push(`<span class="turn-tag${S.ops.frontier ? '' : ' is-spent'}" title="Frontier operations: one per starship and one per colony system (AA-D1)">🛰 Frontier:${S.ops.frontier}</span>`);
+  if (sh.launched && !sh.lost) tags.push(`<span class="turn-tag" title="Velocity: spaces moved each Generation (AA-B4)">🚀 V${sh.V}</span>`);
+  $('#aa-budget').innerHTML = tags.join('');
+  $('#route-status').textContent = statusLine();
+  $('#aa-mode-stars').classList.toggle('is-active', MAPMODE === 'stars');
+  $('#aa-mode-sys').classList.toggle('is-active', MAPMODE === 'system');
+  // sidepanel
+  const side = $('#aa-side');
+  side.dataset.active = PANE || '';
+  side.querySelectorAll('.sidepanel-tabs button[data-pane]').forEach((b) => b.classList.toggle('active', b.dataset.pane === PANE));
+  side.querySelectorAll('.panel-pane').forEach((p) => p.classList.toggle('active', p.dataset.pane === PANE));
+  const pane = PANE && side.querySelector(`.panel-pane[data-pane="${PANE}"]`);
+  if (pane) pane.replaceChildren(...paneContent(PANE));
+  renderHand();
+  syncMaps();
+  refreshPopup();
 }
-function topBar() {
-  const phase = S.phase === 'setup' ? 'Setup' : S.phase === 'drydock' ? `Act I - Drydock` : S.ship.orbit ? (colonySystems().length ? 'Act III - Colonies' : 'Act II - Reaching the Stars') : 'Act II - Reaching the Stars';
-  const clock = S.phase === 'voyage'
-    ? h('div', { class: 'aa-clock', title: `Generations Clock (AA-D3): the game ends after Generation ${TUNE.generations}` }, Array.from({ length: TUNE.generations }, (_, i) => h('span', { class: i + 1 < S.gen ? 'done' : i + 1 === S.gen ? 'now' : '' }, i + 1)))
-    : h('div', { class: 'aa-clock', title: `Launch Window (AA-D2): launch by the end of turn ${TUNE.launchWindow}` }, Array.from({ length: TUNE.launchWindow }, (_, i) => h('span', { class: i + 1 < S.turn ? 'done' : i + 1 === S.turn ? 'now' : '' }, i + 1)));
-  return h('header', { class: 'aa-top' },
-    h('div', { class: 'aa-brand' }, h('span', { class: 'aa-title' }, 'HIGH FRONTIER: AD ASTRA'), h('span', { class: 'aa-phase' }, phase)),
-    clock,
-    h('div', { class: 'aa-chips' },
-      h('span', { class: 'aa-chip', title: 'Aqua: your Sol treasury' }, 'Aqua ', h('b', {}, S.aqua)),
-      h('span', { class: 'aa-chip' + (S.ops.home ? ' live' : ''), title: 'Home operation (AA-D1)' }, 'Home op ', h('b', {}, S.ops.home)),
-      S.phase === 'voyage' ? h('span', { class: 'aa-chip' + (S.ops.frontier ? ' live' : ''), title: 'Frontier operations: one per starship and one per colony system (AA-D1)' }, 'Frontier ops ', h('b', {}, S.ops.frontier)) : null,
-      h('button', { class: 'aa-btn primary', onclick: endTurn, disabled: S.phase === 'setup' || !!S.over || BUSY }, BUSY ? 'Moving...' : S.phase === 'voyage' ? 'End Generation' : 'End turn'),
-      h('button', { class: 'aa-btn ghost', onclick: showScore }, 'Score'),
-      h('button', { class: 'aa-btn ghost', onclick: async () => { if (await modal({ title: 'New game?', body: 'Start over from the drydock. This game is lost.', buttons: [{ label: 'Keep playing', value: false }, { label: 'New game', value: true, danger: true }] })) { newGame(); commit(); setupPick(); } } }, 'New game')));
+function courseNote() {
+  const sh = S.ship;
+  const opts = MAP.adj[sh.pos].filter((n) => n !== sh.prev);
+  if (sh.next) { const lt = leadsTo(sh.pos, sh.next); return `V${sh.V}, heading for ${nodeName(lt.node)}, ${lt.steps} spaces.`; }
+  if (opts.length === 1) {
+    const lt = leadsTo(sh.pos, opts[0]); const nd = MAP.nodes[lt.node];
+    const leaf = nd.kind === 'star' && MAP.adj[lt.node].length === 1;
+    return `V${sh.V}. Next: ${nodeName(lt.node)} in ${lt.steps} spaces.${leaf ? ' A dead end: be at V0 there, or brake in its Oort cloud, or fly off into the dark.' : ''}`;
+  }
+  if (!opts.length) return `V${sh.V} at a dead end: brake to V0 now or be lost.`;
+  return `V${sh.V} at a junction: you choose the branch as you move.`;
+}
+function statusLine() {
+  const sh = S.ship;
+  if (S.over) return `Game over: ${S.over.total} VP, ${S.over.band}.`;
+  if (S.phase === 'setup') return 'Choose your starting TW drive.';
+  if (S.phase === 'drydock') return `Drydock: convert your TW drive into a starship and launch by turn ${TUNE.launchWindow}. ${launchChecks().filter((x) => x.ok).length}/4 launch checks pass.`;
+  if (sh.lost) return 'Your starship is lost. Sol plays on.';
+  if (sh.orbit) return `In orbit at ${STAR_BY_ID[sh.orbit].name}. Tap a site for its actions.`;
+  return courseNote();
 }
 
-function homePanel() {
+// ---------- hand strip (HF hand: click to mark, BOOST commits)
+function cardEl(c) { const el = renderInst(c); const card = el.querySelector('.card'); return card || el; }
+function renderHand() {
   const launched = S.ship.launched;
-  const hand = h('div', { class: 'aa-hand' });
-  for (const c of S.hand) hand.append(renderInst(c, { small: true, actions: !launched ? [h('button', { class: 'aa-mini', onclick: () => opBoost(c) }, `Boost (${def(c).mass} Aqua)`)] : [] }));
-  return h('section', { class: 'aa-panel aa-home', 'aria-label': 'Home theatre' },
-    h('h2', {}, 'Home: Sol ', h('small', {}, 'no movement (AA-S1)')),
-    h('div', { class: 'aa-holds' }, HOLDINGS.map((hd) => h('div', { class: 'aa-hold' + (owns(hd.id) ? ' own' : ''), title: hd.desc }, h('b', {}, hd.name), h('span', {}, owns(hd.id) ? 'Owned' : `${hd.cost} Aqua`)))),
+  const box = $('#aa-hand-cards');
+  for (const uid of [...MARKS]) if (!S.hand.some((c) => c.uid === uid)) MARKS.delete(uid);
+  box.replaceChildren(...S.hand.map((c) => {
+    const slot = h('div', { class: 'hand-slot' + (MARKS.has(c.uid) ? ' is-boost-marked' : ''), title: launched ? `${def(c).name}: Transmit it from the Sol panel` : `${def(c).name}: tap to mark for BOOST (${def(c).mass} Aqua)` });
+    slot.append(cardEl(c));
+    slot.onclick = (e) => { if (e.target.closest('.card-flip')) return; if (launched) return; MARKS.has(c.uid) ? MARKS.delete(c.uid) : MARKS.add(c.uid); renderHand(); };
+    return slot;
+  }));
+  $('#aa-hand-count').textContent = `${S.hand.length} card${S.hand.length === 1 ? '' : 's'}`;
+  const cost = S.hand.filter((c) => MARKS.has(c.uid)).reduce((a, c) => a + def(c).mass, 0);
+  const bb = $('#hand-boost-commit');
+  bb.disabled = launched || !MARKS.size || !!S.over;
+  bb.textContent = MARKS.size ? `🚀 BOOST ${MARKS.size} to drydock (${cost} Aqua)` : '🚀 BOOST to drydock';
+  bb.hidden = launched;
+  $('#aa-research').disabled = S.ops.home < 1 || !!S.over || S.phase === 'setup';
+  // stack chips: the starship (+ find pin), then each colony system
+  const chips = [];
+  const shipLabel = S.ship.lost ? 'Starship (lost)' : S.ship.recycled ? 'Starship (wreck)' : 'Starship';
+  chips.push(h('div', { class: 'hand-stack-group is-focused' },
+    h('button', { class: 'hand-stack-chip', title: 'Open the starship placard', onclick: () => { PANE = 'ship'; render(); } }, h('span', { class: 'chip-glyph' }, '🚀'), ` ${shipLabel} . ${dryMass() + propMass()} Mass`),
+    h('button', { class: 'hand-stack-pin', title: 'Find it on the map', 'aria-label': 'Find the starship', onclick: findShip }, '📍')));
+  for (const id of colonySystems()) chips.push(h('div', { class: 'hand-stack-group' }, h('button', { class: 'hand-stack-chip', onclick: () => setMapMode('system', id) }, h('span', { class: 'chip-glyph' }, '🏠'), ` ${STAR_BY_ID[id].name}`)));
+  $('#aa-stacks').replaceChildren(...chips);
+}
+function findShip() {
+  const sh = S.ship;
+  if (sh.orbit) setMapMode('system', sh.orbit); else setMapMode('stars');
+  const ent = RENDERERS[MAPMODE === 'system' ? sh.orbit : 'stars']; if (!ent) return;
+  const node = MAPMODE === 'system' ? sysOf(sh.orbit).nodes.find((n) => n.id === sh.sysNode) : MAP.nodes[sh.pos || 'sol'];
+  if (node) ent.renderer.flyTo({ x: node.x, y: node.y }, 3);
+}
+async function boostMarked() { // AA-S2c: first Boost of the turn is the operation, later ones free
+  const cards = S.hand.filter((c) => MARKS.has(c.uid));
+  for (const c of cards) { await opBoost(c); MARKS.delete(c.uid); }
+  render();
+}
+
+// ---------- sidepanel panes
+function paneContent(p) {
+  if (p === 'ship') return [h('h3', {}, '🚀 Starship'), shipPane()];
+  if (p === 'sol') return [h('h3', {}, '☉ Home: Sol empire'), solPane()];
+  if (p === 'frontier') return [h('h3', {}, '🛰 Frontier'), frontierPane()];
+  if (p === 'milestones') { const sc = score(); return [h('h3', {}, '🏆 Scoring'), h('table', { class: 'aa-score' }, sc.rows.map((r) => h('tr', {}, h('td', {}, r[0], ' ', h('small', {}, r[2])), h('td', {}, r[1]))), h('tr', { class: 'tot' }, h('td', {}, 'Total'), h('td', {}, sc.total))), h('p', { class: 'aa-band' }, S.over ? S.over.band : sc.band), h('p', { class: 'muted' }, 'Bands (AA-I3): 0-9 Lost in the dark, 10-19 Survivors, 20-34 Colony, 35+ New Earth.')]; }
+  if (p === 'log') return [h('h3', {}, '📋 Mission log'), h('ol', { class: 'aa-log' }, S.log.slice(0, 120).map((l) => h('li', { class: l.kind }, h('small', {}, l.when), ' ', l.msg)))];
+  if (p === 'rules') return [h('h3', {}, '📖 How to play'), h('div', { class: 'aa-rules', html: RULES_HTML })];
+  return [];
+}
+function opButton(label, sub, fn, disabled) { return h('button', { class: 'aa-op', onclick: fn, disabled: disabled || !!S.over }, label, h('small', {}, sub)); }
+function solPane() {
+  const launched = S.ship.launched; const homeLeft = S.ops.home > 0 && S.phase !== 'setup';
+  return h('div', {},
+    h('p', { class: 'muted' }, 'Sol is an economy you grow, not a map you fly (AA-S1). One Home operation each turn.'),
+    h('div', { class: 'aa-holds' }, HOLDINGS.map((hd) => h('div', { class: 'aa-hold' + (owns(hd.id) ? ' own' : ''), title: hd.desc }, h('b', {}, hd.name), h('span', {}, owns(hd.id) ? 'Owned' : `${hd.cost} Aqua . ${hd.vp} VP`)))),
     h('div', { class: 'aa-ops' },
-      opBtn('Income', `+${1 + (owns('market') ? 1 : 0)} Aqua`, opIncome),
-      opBtn('Research', '1 Aqua per card', () => opResearch('hand')),
-      opBtn('Expand', 'Buy a Holding', opExpand),
-      !launched ? opBtn('Produce', family() ? `${family()} propellant` : 'Needs a Drive', opProduce) : opBtn('Transmit', 'Send a design', opTransmit),
-      opBtn('Lens Survey', owns('lens') ? 'Explore a star' : 'Needs Observatory', opLensSurvey, !owns('lens')),
-      !launched ? h('button', { class: 'aa-op launch', onclick: opLaunch, disabled: S.phase !== 'drydock' }, 'Launch', h('small', {}, `${launchChecks().filter((x) => x.ok).length} of 4 checks pass`)) : null),
-    h('h3', {}, `Hand (${S.hand.length})`),
-    S.hand.length ? hand : h('p', { class: 'aa-dim' }, launched ? 'Research here, then Transmit designs to your colonies.' : 'Research to draw cards, then Boost them onto the starship.'));
+      opButton('Income', `+${1 + (owns('market') ? 1 : 0)} Aqua`, opIncome, !homeLeft),
+      opButton('Research', '1 Aqua per card', () => opResearch('hand'), !homeLeft),
+      opButton('Expand', 'Buy a Holding', opExpand, !homeLeft),
+      !launched ? opButton('Produce', family() ? `${family()} propellant` : 'Needs a Drive', opProduce, !homeLeft) : opButton('Transmit', 'Send a design', opTransmit, !homeLeft),
+      opButton('Lens Survey', owns('lens') ? 'Explore a star' : 'Needs Observatory', opLensSurvey, !homeLeft || !owns('lens')),
+      !launched ? h('button', { class: 'aa-op launch', onclick: opLaunch, disabled: S.phase !== 'drydock' || !!S.over }, '🚀 LAUNCH', h('small', {}, `${launchChecks().filter((x) => x.ok).length} of 4 checks pass`)) : null));
 }
-const opBtn = (label, sub, fn, disabled) => h('button', { class: 'aa-op', onclick: fn, disabled: disabled || S.phase === 'setup' || !!S.over || S.ops.home < 1 }, label, h('small', {}, sub));
-
-function centerPanel() {
-  const tabs = [['ship', 'Starship'], ['map', 'Star map'], ['system', S.ship.orbit ? STAR_BY_ID[S.ship.orbit].name : 'System']];
-  const body = TAB === 'ship' ? shipView() : TAB === 'map' ? mapView() : systemView();
-  return h('section', { class: 'aa-panel aa-center' },
-    h('div', { class: 'aa-tabs', role: 'tablist' }, tabs.map(([id, lb]) => h('button', { role: 'tab', 'aria-selected': TAB === id ? 'true' : 'false', class: 'aa-tab' + (TAB === id ? ' on' : ''), onclick: () => setTab(id) }, lb))),
-    body);
-}
-
-function shipView() {
-  const sh = S.ship; const dd = driveDef();
-  const tm = totalMass(); const cl = classFor(tm);
-  const wrap = h('div', { class: 'aa-shipview' });
-  const slots = [['drive', 'Drive'], ['support', 'Supports'], ['brake', 'Brake'], ['payload', 'Payload'], ['prospector', 'Prospector'], ['seed', 'Seed'], ['shield', 'Shield']];
+function shipPane() {
+  const sh = S.ship; const dd = driveDef(); const tm = totalMass(); const cl = classFor(tm);
+  const slots = [['drive', 'TW Drive'], ['support', 'Supports'], ['brake', 'Brake'], ['payload', 'Payload'], ['prospector', 'Prospector'], ['seed', 'Seed'], ['shield', 'Shield']];
   const placard = h('div', { class: 'aa-placard' });
   for (const [role, label] of slots) {
     const cards = S.ship.cards.filter((c) => def(c).role === role);
+    if (!cards.length && (role === 'brake' || role === 'shield') ) continue;
     const col = h('div', { class: 'aa-slot' }, h('label', {}, label));
-    if (!cards.length) col.append(h('div', { class: 'aa-ghost' }, role === 'brake' ? 'Optional. Some drives brake themselves.' : role === 'shield' ? 'Optional. Absorbs dust.' : role === 'support' ? 'What the drive requires.' : 'Empty'));
+    if (!cards.length) col.append(h('div', { class: 'aa-ghost' }, role === 'support' ? 'What the drive requires' : 'Empty'));
     for (const c of cards) {
       const acts = [];
-      if (c.glitched && sh.crew) acts.push(h('button', { class: 'aa-mini', onclick: () => freeRepair(c) }, 'Repair'));
+      if (c.glitched && sh.crew) acts.push(h('button', { class: 'aa-mini good', onclick: () => freeRepair(c) }, 'Repair'));
       if (S.event && S.event.flipFree && c.face === 'white') acts.push(h('button', { class: 'aa-mini good', onclick: () => freeFlipEvent(c) }, 'Flip free'));
       if (!S.over) acts.push(h('button', { class: 'aa-mini bad', onclick: () => freeJettison(c) }, 'Jettison'));
       col.append(renderInst(c, { small: true, actions: acts }));
@@ -1021,234 +1410,59 @@ function shipView() {
   const per = PROP_PER_MASS[family()] || Infinity;
   const pips = h('div', { class: 'aa-pips', 'aria-label': `${sh.prop} propellant` });
   if (per !== Infinity) for (let i = 1; i <= Math.max(sh.prop, 6); i++) pips.append(h('span', { class: 'aa-pip' + (i <= sh.prop ? ' full' : '') + (i % per === 0 ? ' mass' : '') }, i <= sh.prop ? FAMILY_GLYPH[family()] : ''));
-  const ladder = h('table', { class: 'aa-ladder' }, CLASSES.map((c) => h('tr', { class: c === cl ? 'cur' : '' }, h('td', {}, c.name), h('td', {}, `${c.lo}${c.hi < 999 ? `-${c.hi}` : '+'}`), h('td', { class: 'x' }, `x${c.x}`))));
   const tb = totalBurns();
-  const plan = h('div', { class: 'aa-plan' },
-    dd ? h('div', {}, `${dd.name}: Thrust ${dd.thrust}, Fuel ${dd.fuel}, ${FAMILY_GLYPH[dd.family]} ${dd.family}. ${dd.brake === true ? 'Can brake.' : dd.brake === 'staged' ? 'Staged sail: one -2 V brake at a star.' : 'Cannot brake.'}`) : h('div', {}, 'No drive.'),
-    h('div', {}, 'Mass: ', h('b', {}, `${dryMass()} dry + ${propMass()} propellant = ${tm}`), ` (${cl.name}, x${cl.x})`),
-    tb != null ? h('div', {}, 'Propellant: ', h('b', {}, `${sh.prop}`), ` = `, h('b', {}, `${tb} Burns`), ' at today\'s mass.') : h('div', {}, dd ? (dd.family === 'Beam' ? `Beam: 1 Aqua per Burn while within ${TUNE.beamRangeSpaces} spaces of Sol, with a Beam Station.` : 'Ramscoop: free above V2; the Beam Station lights it.') : ''));
-  const trip = h('table', { class: 'aa-trip' }, h('tr', {}, h('th', {}, 'Destination'), h('th', {}, 'Spaces'), h('th', {}, 'Gens at V1'), h('th', {}, 'V2'), h('th', {}, 'V3')),
-    STARS.slice().sort((a, b) => MAP.dist[a.id] - MAP.dist[b.id]).slice(0, 8).map((st) => h('tr', {}, h('td', {}, st.name), h('td', {}, MAP.dist[st.id]), ...[1, 2, 3].map((v) => h('td', {}, Math.ceil(MAP.dist[st.id] / v))))));
-  const checks = h('ul', { class: 'aa-check' }, launchChecks().map((c) => h('li', { class: c.ok ? 'ok' : 'no' }, c.ok ? '✓ ' : '✗ ', c.text, ' ', h('small', {}, c.id))));
-  wrap.append(placard, h('div', { class: 'aa-shipside' },
-    h('div', { class: 'aa-box' }, h('h3', {}, 'Mass ratio (AA-F4)'), plan, ladder, per !== Infinity ? h('div', {}, h('small', { class: 'aa-dim' }, `Every ${per} propellant weighs 1 Mass.`), pips) : null),
-    !sh.launched ? h('div', { class: 'aa-box' }, h('h3', {}, 'Launch check (AA-E5)'), checks) : null,
-    h('div', { class: 'aa-box' }, h('h3', {}, 'Trip planner'), h('p', { class: 'aa-dim' }, 'Spaces from Sol. Add Burns to speed up and to stop again.'), trip)));
-  return wrap;
+  return h('div', {},
+    placard,
+    h('div', { class: 'aa-box' }, h('h4', {}, 'Mass ratio (AA-F4)'),
+      dd ? h('div', {}, `${dd.name}: Thrust ${dd.thrust}, Fuel ${dd.fuel}, ${FAMILY_GLYPH[dd.family]} ${dd.family}. ${dd.brake === true ? 'Can brake.' : dd.brake === 'staged' ? 'Staged sail: one -2 V brake at a star.' : 'Cannot brake.'}`) : h('div', {}, 'No drive.'),
+      h('div', {}, 'Mass ', h('b', {}, `${dryMass()} dry + ${propMass()} propellant = ${tm}`), ` (${cl.name}, x${cl.x})`),
+      tb != null ? h('div', {}, 'Propellant ', h('b', {}, `${sh.prop}`), ' = ', h('b', {}, `${tb} Burns`), ' at this mass') : null,
+      h('table', { class: 'aa-ladder' }, CLASSES.map((c) => h('tr', { class: c === cl ? 'cur' : '' }, h('td', {}, c.name), h('td', {}, `${c.lo}${c.hi < 999 ? `-${c.hi}` : '+'}`), h('td', { class: 'x' }, `x${c.x}`)))),
+      per !== Infinity ? pips : null),
+    !sh.launched ? h('div', { class: 'aa-box' }, h('h4', {}, 'Launch check (AA-E5)'), h('ul', { class: 'aa-check' }, launchChecks().map((c) => h('li', { class: c.ok ? 'ok' : 'no' }, c.ok ? '✓ ' : '✗ ', c.text, ' ', h('small', {}, c.id))))) : null,
+    h('div', { class: 'aa-box' }, h('h4', {}, 'Trip planner'), h('table', { class: 'aa-trip' }, h('tr', {}, h('th', {}, 'Star'), h('th', {}, 'Spaces'), h('th', {}, 'V1'), h('th', {}, 'V2'), h('th', {}, 'V3')),
+      STARS.slice().sort((a, b) => MAP.dist[a.id] - MAP.dist[b.id]).slice(0, 8).map((st) => h('tr', {}, h('td', {}, st.name), h('td', {}, MAP.dist[st.id]), ...[1, 2, 3].map((v) => h('td', {}, `${Math.ceil(MAP.dist[st.id] / v)} gen`)))))));
 }
-
-// ----- star map view
-function mapView() {
+function frontierPane() {
   const sh = S.ship;
-  const svg = s('svg', { viewBox: '-500 -480 1000 960', class: 'aa-starmap', role: 'img', 'aria-label': 'Star map' });
-  const g = s('g');
-  svg.append(s('defs', {}, s('radialGradient', { id: 'gSol' }, s('stop', { offset: '0%', 'stop-color': '#fff7d6' }), s('stop', { offset: '100%', 'stop-color': '#fbbf24' }))));
-  // range rings
-  for (const r of [TUNE.beamRangeSpaces, TUNE.lensRangeSpaces]) g.append(s('circle', { cx: 0, cy: 0, r: r * R, class: 'aa-range' }));
-  g.append(s('text', { x: 4, y: -TUNE.beamRangeSpaces * R - 4, class: 'aa-rangelbl' }, 'beam range'));
-  g.append(s('text', { x: 4, y: -TUNE.lensRangeSpaces * R - 4, class: 'aa-rangelbl' }, 'lens range'));
-  // edges
-  for (const [a, nbs] of Object.entries(MAP.adj)) for (const b of nbs) if (a < b) g.append(s('line', { x1: MAP.nodes[a].x, y1: MAP.nodes[a].y, x2: MAP.nodes[b].x, y2: MAP.nodes[b].y, class: 'aa-path' }));
-  // predicted course
-  if (sh.launched && !sh.orbit && !sh.lost && sh.V > 0) {
-    let prev = sh.prev, cur = sh.pos, nxt = sh.next;
-    for (let i = 0; i < sh.V; i++) {
-      const opts = MAP.adj[cur].filter((n) => n !== prev);
-      const n = nxt && opts.includes(nxt) ? nxt : opts.length === 1 ? opts[0] : null;
-      if (!n) break;
-      g.append(s('line', { x1: MAP.nodes[cur].x, y1: MAP.nodes[cur].y, x2: MAP.nodes[n].x, y2: MAP.nodes[n].y, class: 'aa-course' }));
-      prev = cur; cur = n; nxt = null;
-    }
+  if (!sh.launched) return h('p', { class: 'muted' }, 'Nothing has left Sol yet. Launch from the Sol panel when the starship passes its checks.');
+  const box = h('div', {});
+  box.append(h('div', { class: 'aa-vrow' }, h('span', { class: 'aa-v' }, sh.lost ? 'LOST' : `V${sh.V}`), h('span', {}, sh.lost ? 'Your starship is lost.' : sh.orbit ? `In orbit at ${STAR_BY_ID[sh.orbit].name}` : `In ${nodeName(sh.pos)}`)));
+  if (!sh.orbit && !sh.lost && sh.V > 0) box.append(h('p', { class: 'muted' }, courseNote()));
+  box.append(h('p', { class: 'muted' }, `Propellant ${sh.prop}${family() ? ` ${family()}` : ''}. Population aboard ${shipPop()}. Frontier operations left: ${S.ops.frontier}.`));
+  if (S.event) box.append(h('div', { class: 'aa-box ev' }, h('h4', {}, `Event: ${S.event.name}`), h('p', {}, S.event.text), S.event.note ? h('p', { class: 'muted' }, S.event.note) : null));
+  const ops = h('div', { class: 'aa-ops' });
+  if (shipActive()) {
+    ops.append(opButton(sh.orbit ? 'Burn (leave orbit)' : 'Burn', 'Change V (Frontier op)', opBurn, S.ops.frontier < 1));
+    if (hasBrake('magsail') && !sh.orbit && sh.V > 0) ops.append(opButton('Magsail', '-1 V, free, once per Gen', freeMagsail, sh.magsailUsedGen === S.gen));
   }
-  // spaces
-  for (const nd of Object.values(MAP.nodes)) {
-    if (nd.kind === 'space') g.append(s('circle', { cx: nd.x, cy: nd.y, r: 2.6, class: 'aa-space' }));
-    if (nd.kind === 'junction') g.append(s('circle', { cx: nd.x, cy: nd.y, r: 4.5, class: 'aa-junction' }));
-    if (nd.kind === 'oort') g.append(s('circle', { cx: nd.x, cy: nd.y, r: 5, class: 'aa-oort' }, s('title', {}, `Oort cloud of ${nd.of === 'sol' ? 'Sol' : STAR_BY_ID[nd.of].name}: icebrake here`)));
-    if (nd.kind === 'dust') g.append(s('g', {}, s('circle', { cx: nd.x, cy: nd.y, r: 6, class: 'aa-dust' }), s('title', {}, 'Dust: a strike costs a card unless shielded')));
-    if (nd.kind === 'sunlens') {
-      const t = MAP.nodes[nd.target]; const a = Math.atan2(t.y - nd.y, t.x - nd.x);
-      g.append(s('g', {}, s('rect', { x: nd.x - 4, y: nd.y - 4, width: 8, height: 8, transform: `rotate(45 ${nd.x} ${nd.y})`, class: 'aa-lens' }),
-        s('line', { x1: nd.x, y1: nd.y, x2: nd.x + Math.cos(a) * 16, y2: nd.y + Math.sin(a) * 16, class: 'aa-lensarrow' }),
-        s('title', {}, `Sunlens aimed at ${STAR_BY_ID[nd.target].name}: passing here explores it`)));
-    }
+  const sysId = sh.orbit || colonySystems()[0];
+  if (sysId && factoriesIn(sysId).length) {
+    ops.append(opButton('Landfall Production', 'Flip a card (AA-H6)', () => opBuild(sysId), S.ops.frontier < 1));
+    ops.append(opButton('Research (cubes)', 'Blueprints here', () => opResearch(sysId), S.ops.frontier < 1));
   }
-  // stars
-  const COL = { yellow: '#fbbf24', red: '#f87171', brown: '#b45309' };
-  for (const st of STARS) {
-    const nd = MAP.nodes[st.id]; const info = S.stars[st.id];
-    const grp = s('g', { class: 'aa-star' + (SEL.star === st.id ? ' sel' : ''), tabindex: 0, role: 'button', 'aria-label': st.name, onclick: () => { SEL.star = st.id; render(); }, onkeydown: (e) => { if (e.key === 'Enter') { SEL.star = st.id; render(); } } });
-    if (st.hazard === 'flare') grp.append(s('circle', { cx: nd.x, cy: nd.y, r: 19, class: 'aa-flare' }));
-    if (st.hazard === 'debris') grp.append(s('circle', { cx: nd.x, cy: nd.y, r: 19, class: 'aa-debris' }));
-    grp.append(s('circle', { cx: nd.x, cy: nd.y, r: 13, class: 'aa-starspace' }));
-    grp.append(s('circle', { cx: nd.x, cy: nd.y, r: st.type === 'brown' ? 5 : 7, fill: COL[st.type] }));
-    st.comp.forEach((c, i) => grp.append(s('circle', { cx: nd.x + 10 + i * 7, cy: nd.y - 10, r: 3.2, fill: c === 'gas' ? '#fdba74' : c === 'brown' ? '#92400e' : '#e5e7eb', stroke: '#0b0918' })));
-    grp.append(s('text', { x: nd.x, y: nd.y + 27, class: 'aa-starlbl' }, st.name));
-    if (info.explored) {
-      const ws = sysOf(st.id).sites.filter((x) => x.kind === 'world' && x.id === 'hz' || x.kind === 'ocean');
-      const badge = ws.length ? ws.map((x) => CLS_LETTER[x.cls]).join('') : '-';
-      grp.append(s('g', {}, s('rect', { x: nd.x - 13, y: nd.y + 32, width: 26, height: 13, rx: 3, class: 'aa-chitbadge' }), s('text', { x: nd.x, y: nd.y + 42, class: 'aa-chittxt' }, badge)));
-      if (sysOf(st.id).sites.some((x) => x.pop > 0)) grp.append(s('circle', { cx: nd.x - 15, cy: nd.y - 12, r: 4, class: 'aa-colonydot' }));
-    } else grp.append(s('text', { x: nd.x, y: nd.y + 42, class: 'aa-unknown' }, '?'));
-    g.append(grp);
-  }
-  // Sol
-  g.append(s('circle', { cx: 0, cy: 0, r: 15, fill: 'url(#gSol)' }), s('text', { x: 0, y: 32, class: 'aa-starlbl' }, 'Sol'));
-  // ship
-  if (sh.launched && !sh.lost) {
-    const at = MAP.nodes[sh.orbit || sh.pos];
-    let ang = -90;
-    const toward = sh.next || (sh.prev ? null : null);
-    if (sh.prev) { const p = MAP.nodes[sh.prev]; ang = Math.atan2(at.y - p.y, at.x - p.x) * 180 / Math.PI; }
-    else if (toward) { const t = MAP.nodes[toward]; ang = Math.atan2(t.y - at.y, t.x - at.x) * 180 / Math.PI; }
-    g.append(s('g', { transform: `translate(${at.x} ${at.y + (sh.orbit ? -20 : 0)}) rotate(${ang})`, class: 'aa-shipmark' }, s('path', { d: 'M10 0 L-7 -6 L-4 0 L-7 6 Z' }), s('title', {}, `Your starship, V${sh.V}`)));
-  }
-  svg.append(g);
-  // info under map
-  const st = SEL.star && STAR_BY_ID[SEL.star];
-  const fromShip = sh.launched && !sh.lost ? bfs(sh.orbit || sh.pos) : null;
-  const panel = h('div', { class: 'aa-mapinfo' });
-  if (st) {
-    const info = S.stars[st.id];
-    panel.append(h('h3', {}, st.name),
-      h('p', {}, `${st.type === 'yellow' ? 'Yellow sun' : st.type === 'red' ? 'Red dwarf' : 'Brown dwarf'}${st.comp.length ? `, companions: ${st.comp.map((c) => ({ gas: 'gas giant', brown: 'brown dwarf', white: 'white dwarf' }[c])).join(', ')}` : ''}${st.hazard ? `, ${st.hazard === 'flare' ? 'flare star' : 'debris disk'}` : ''}${st.known ? `. Known planet: ${st.known}` : ''}.`),
-      h('p', {}, `${MAP.dist[st.id]} spaces from Sol${fromShip ? `, ${fromShip[st.id]} from your starship` : ''}.`),
-      info.explored ? h('p', {}, 'Explored: ', sysOf(st.id).sites.filter((x) => x.kind !== 'mine').map((x) => `${x.name} (${x.cls})`).join(', ')) : h('p', { class: 'aa-dim' }, 'Unexplored. Pass through it, sit at its sunlens, or Lens Survey it to learn what orbits there (AA-G12).'));
-  } else panel.append(h('p', { class: 'aa-dim' }, 'Select a star. Dots are spaces, half a light-year each. Blue rings are Oort clouds (icebrake), brown blots are Dust, gold diamonds are sunlens points. Badges under explored stars list the worlds found: G Garden, H Habitable, M Marginal, X Hostile, - none.'));
-  return h('div', { class: 'aa-mapwrap' }, h('div', { class: 'aa-svgbox' }, svg), panel);
+  box.append(ops);
+  const known = Object.keys(S.systems);
+  if (known.length) box.append(h('h4', {}, 'Explored systems'), h('div', { class: 'aa-ops' }, known.map((id) => opButton(STAR_BY_ID[id].name, sysOf(id).sites.some((x) => x.pop > 0) ? 'Colony' : sh.orbit === id ? 'In orbit' : 'View map', () => setMapMode('system', id)))));
+  return box;
 }
+const RULES_HTML = `
+<p><b>A turn</b> is one Home operation in Sol (no movement there) and, once launched, one Frontier operation per starship and per colony system. Free actions are unlimited.</p>
+<p><b>Act I, Drydock (6 turns).</b> Research cards (1 Aqua each), mark them in your hand and BOOST them onto the starship. A starship needs a working TW drive, Population, a Seed and propellant. Buy the Sol Source for your drive's propellant (Expand), then Produce. Every card you add raises the weight class and multiplies every Burn.</p>
+<p><b>Act II, Reaching the Stars.</b> Each dot is a space, half a light-year. At the end of each Generation the starship moves V spaces. Burn to change V. Brake with your drive, a Brake card, an icebrake in a star's Oort cloud (blue rings) or a fryby through a gas giant. Reach V0 at a star or in its Oort cloud to enter orbit. Passing through a star explores it. Many stars are dead ends.</p>
+<p><b>Act III, Colonies.</b> On a system map, entering a magenta burn pad costs a burn. Prospect, deploy the Seed (it doubles every Generation), rebuild cards into their Landfall side, found Colonies, grow, and terraform a hostile world step by step for spin-off tech.</p>
+<p class="muted">Full rules: docs/ad-astra/rules.md. Rule IDs like AA-G3 appear in the log.</p>`;
 
-// ----- system view (AA-B7a)
-const CLS_LETTER = { Garden: 'G', Habitable: 'H', Marginal: 'M', Hostile: 'X' };
-const SPEC_COL = { C: '#3f3f46', S: '#c2410c', M: '#9ca3af', V: '#7c3aed', D: '#7f1d1d', H: '#0ea5e9' };
-const CLS_COL = { Garden: '#22c55e', Habitable: '#84cc16', Marginal: '#eab308', Hostile: '#ef4444' };
-function hexPts(cx, cy, r) { return Array.from({ length: 6 }, (_, i) => { const a = Math.PI / 3 * i; return `${cx + r * Math.cos(a)},${cy + r * Math.sin(a)}`; }).join(' '); }
-function systemView() {
-  const sh = S.ship; const starId = SEL.sysView || sh.orbit || colonySystems()[0] || Object.keys(S.systems)[0];
-  if (!starId || !sysOf(starId)) return h('div', { class: 'aa-empty' }, h('p', {}, 'No system to show yet. Explore a star (fly through it, sunlens, or Lens Survey) to see its map; stop in orbit to work it.'));
-  const sys = sysOf(starId); const star = STAR_BY_ID[starId];
-  const here = sh.orbit === starId;
-  const svg = s('svg', { viewBox: '-320 -300 640 600', class: 'aa-sysmap', role: 'img', 'aria-label': `${star.name} system map` });
-  const COL = { yellow: '#fbbf24', red: '#f87171', brown: '#b45309' };
-  svg.append(s('circle', { cx: 0, cy: 0, r: 34, fill: COL[star.type], class: 'aa-sysstar' }));
-  for (const r of [70, 145, 210, 265]) svg.append(s('circle', { cx: 0, cy: 0, r, class: 'aa-orbit' }));
-  // edges with burn labels
-  const byId = Object.fromEntries(sys.nodes.map((n) => [n.id, n]));
-  for (const [a, b, burns] of sys.edges) {
-    const A = byId[a], B = byId[b];
-    svg.append(s('line', { x1: A.x, y1: A.y, x2: B.x, y2: B.y, class: 'aa-sysedge' }));
-    const mx = (A.x + B.x) / 2, my = (A.y + B.y) / 2;
-    svg.append(s('g', {}, s('circle', { cx: mx, cy: my, r: 8, class: 'aa-burnchip' }), s('text', { x: mx, y: my + 3.5, class: 'aa-burntxt' }, burns)));
-  }
-  // companion bodies (gas giant, brown or white dwarf) sit behind their Lagrange ring
-  for (const n of sys.nodes.filter((q) => q.body)) {
-    const off = { x: n.x * 0.12, y: n.y * 0.12 };
-    svg.append(s('circle', { cx: n.x + off.x, cy: n.y + off.y, r: n.body === 'gas' ? 24 : n.body === 'brown' ? 18 : 8, fill: n.body === 'gas' ? '#fdba74' : n.body === 'brown' ? '#92400e' : '#f1f5f9', class: 'aa-body' }));
-    svg.append(s('text', { x: n.x + off.x, y: n.y + off.y + 36, class: 'aa-sitelbl' }, n.label));
-  }
-  // sites
-  for (const x of sys.sites) {
-    const n = byId[x.node];
-    const bodyR = x.kind === 'mine' ? 0 : x.kind === 'ocean' ? 22 : x.id === 'hz' ? 26 : 16;
-    const cx = n.x + (x.kind === 'mine' ? 0 : Math.cos(x.ang * Math.PI / 180) * 34);
-    const cy = n.y + (x.kind === 'mine' ? 0 : Math.sin(x.ang * Math.PI / 180) * 34);
-    if (bodyR) svg.append(s('circle', { cx, cy, r: bodyR, class: 'aa-halo', fill: CLS_COL[x.cls] || '#64748b' }));
-    const g = s('g', { class: 'aa-site' + (SEL.site === x.id ? ' sel' : '') + (x.goo ? ' goo' : ''), tabindex: 0, role: 'button', 'aria-label': x.name, onclick: () => { SEL.site = x.id; SEL.sysView = starId; render(); } });
-    g.append(s('polygon', { points: hexPts(cx, cy, 13), fill: SPEC_COL[x.spec], class: 'aa-hex' }));
-    g.append(s('text', { x: cx, y: cy + 4, class: 'aa-hextxt' }, x.size));
-    g.append(s('text', { x: cx, y: cy + 27, class: 'aa-sitelbl' }, x.name));
-    if (x.claimed) g.append(s('rect', { x: cx + 7, y: cy - 16, width: 8, height: 8, class: 'aa-claim' }));
-    if (x.cubes) g.append(s('g', {}, s('rect', { x: cx - 18, y: cy - 18, width: 14, height: 11, rx: 2, class: 'aa-cubes' }), s('text', { x: cx - 11, y: cy - 9.5, class: 'aa-cubetxt' }, x.cubes)));
-    if (x.pop) g.append(s('g', {}, s('path', { d: `M${cx - 9} ${cy + 18} a9 9 0 0 1 18 0 z`, class: 'aa-dome' }), s('text', { x: cx, y: cy + 16.5, class: 'aa-cubetxt' }, x.pop)));
-    svg.append(g);
-  }
-  // nodes (burn pads magenta, lagrange orange rings, high orbit)
-  for (const n of sys.nodes) {
-    const adjacent = here && shipActive() && sysNeighbors(starId, sh.sysNode).some((x) => x.to === n.id);
-    const cls = n.kind === 'burn' ? 'aa-burnpad' : n.kind === 'lagrange' ? 'aa-lagrange' : 'aa-high';
-    const el = s('g', { class: 'aa-sysnode' + (adjacent ? ' can' : ''), onclick: () => adjacent && freeSysMove(n.id) },
-      n.kind === 'burn' ? s('rect', { x: n.x - 6, y: n.y - 6, width: 12, height: 12, rx: 2, class: cls }) : s('circle', { cx: n.x, cy: n.y, r: n.kind === 'orbit' ? 9 : 7, class: cls }),
-      s('title', {}, `${n.label}${adjacent ? ': click to move here' : ''}`));
-    svg.append(el);
-  }
-  svg.append(s('text', { x: byId.high.x, y: byId.high.y - 16, class: 'aa-sitelbl' }, 'High Orbit (arrival)'));
-  if (here) { const n = byId[sh.sysNode]; svg.append(s('g', { transform: `translate(${n.x} ${n.y - 14})`, class: 'aa-shipmark' }, s('path', { d: 'M0 8 L-6 -6 L0 -3 L6 -6 Z' }))); }
-  const others = Object.keys(S.systems).filter((id) => id !== starId);
-  return h('div', { class: 'aa-syswrap' },
-    h('div', { class: 'aa-syshead' }, h('h3', {}, star.name), here ? h('span', { class: 'aa-pill good' }, 'In orbit') : h('span', { class: 'aa-pill' }, 'Not here'),
-      others.length ? h('select', { 'aria-label': 'Show another system', id: 'aa-syspick', onchange: (e) => { SEL.sysView = e.target.value; SEL.site = null; render(); } }, h('option', { value: starId }, 'Other explored systems...'), others.map((id) => h('option', { value: id }, STAR_BY_ID[id].name))) : null),
-    h('div', { class: 'aa-svgbox' }, svg),
-    h('p', { class: 'aa-dim' }, 'Hexes are sites: the number is Size, the colour is spectral type, the halo is the world class. Magenta squares are burn pads, orange rings Lagrange points; numbers on the lines are burns. ',
-      here ? 'Click a highlighted node to move there (pays propellant, up to your Thrust per Generation).' : ''));
+async function menuModal() {
+  const v = await modal({ title: 'High Frontier: Ad Astra', body: '<p>A fan variant prototype. Your game saves in this browser.</p>', buttons: [{ label: 'Close', value: 0 }, { label: '🏆 Score', value: 1 }, { label: 'New game', value: 2, danger: true }] });
+  if (v === 1) showScore();
+  if (v === 2 && await modal({ title: 'New game?', body: 'Start over from the drydock. This game is lost.', buttons: [{ label: 'Keep playing', value: false }, { label: 'New game', value: true, danger: true }] })) { newGame(); MAPMODE = 'stars'; commit(); setupPick(); }
 }
-
-// ----- side panel: frontier status, site actions, log
-function sidePanel() {
-  const sh = S.ship;
-  const kids = [];
-  if (S.phase === 'voyage') {
-    const st = h('div', { class: 'aa-box' }, h('h3', {}, 'Frontier'),
-      sh.lost ? h('p', { class: 'aa-bad' }, 'Your starship is lost.') :
-      h('div', {},
-        h('div', { class: 'aa-vrow' }, h('span', { class: 'aa-v' }, `V${sh.V}`), h('span', {}, sh.orbit ? `In orbit at ${STAR_BY_ID[sh.orbit].name}` : `In ${nodeName(sh.pos)}`, sh.recycled ? ' (drive recycled)' : '')),
-        !sh.orbit && sh.V > 0 ? h('p', { class: 'aa-dim' }, courseNote()) : null,
-        h('p', { class: 'aa-dim' }, `Propellant ${sh.prop}${family() ? ` ${family()}` : ''}. Population aboard ${shipPop()}.`)));
-    kids.push(st);
-    if (S.event) kids.push(h('div', { class: 'aa-box ev' }, h('h3', {}, `Event: ${S.event.name}`), h('p', {}, S.event.text), S.event.note ? h('p', { class: 'aa-dim' }, S.event.note) : null));
-    const acts = h('div', { class: 'aa-acts' });
-    const fo = (label, fn, dis, tip) => acts.append(h('button', { class: 'aa-op', disabled: dis || !!S.over, onclick: fn, title: tip || '' }, label));
-    if (shipActive()) {
-      fo(sh.orbit ? 'Burn (leave orbit)' : 'Burn', opBurn, S.ops.frontier < 1);
-      if (hasBrake('magsail') && !sh.orbit && sh.V > 0) fo('Magsail -1 V (free)', freeMagsail, sh.magsailUsedGen === S.gen);
-      if (sh.orbit && STAR_BY_ID[sh.orbit].comp.includes('gas')) { const gasNode = sysOf(sh.orbit).nodes.find((n) => n.body === 'gas'); fo('Skim gas giant', opSkim, S.ops.frontier < 1 || sh.sysNode !== gasNode?.id, 'Move to the gas giant first'); }
-    }
-    const sysId = sh.orbit || colonySystems()[0];
-    if (sysId && factoriesIn(sysId).length) {
-      fo('Landfall Production', () => opBuild(sysId), S.ops.frontier < 1);
-      fo('Research (cubes)', () => opResearch(sysId), S.ops.frontier < 1);
-    }
-    kids.push(h('div', { class: 'aa-box' }, h('h3', {}, `Frontier ops: ${S.ops.frontier}`), acts));
-  }
-  const siteBox = siteActions();
-  if (siteBox) kids.push(siteBox);
-  kids.push(h('div', { class: 'aa-box aa-logbox' }, h('h3', {}, 'Mission log'), h('ol', { class: 'aa-log' }, S.log.slice(0, 60).map((l) => h('li', { class: l.kind }, h('small', {}, l.when), ' ', l.msg)))));
-  return h('section', { class: 'aa-panel aa-side' }, kids);
-}
-function courseNote() {
-  const sh = S.ship;
-  const opts = MAP.adj[sh.pos].filter((n) => n !== sh.prev);
-  if (sh.next) return `Heading toward ${nodeName(leadsTo(sh.pos, sh.next).node)}, ${leadsTo(sh.pos, sh.next).steps} spaces.`;
-  if (opts.length === 1) { const lt = leadsTo(sh.pos, opts[0]); const nd = MAP.nodes[lt.node]; const leaf = nd.kind === 'star' && MAP.adj[lt.node].length === 1; return `Next: ${nodeName(lt.node)} in ${lt.steps} spaces.${leaf ? ` It is a dead end: be at V0 there, or brake in its Oort cloud, or the ship flies off into the dark.` : ''}`; }
-  return 'At a junction: you will choose the branch as you move.';
-}
-function siteActions() {
-  const starId = SEL.sysView || S.ship.orbit; if (!starId || !SEL.site || TAB !== 'system') return null;
-  const site = siteById(starId, SEL.site); if (!site) return null;
-  const sh = S.ship; const here = sh.orbit === starId && shipActive();
-  const fops = S.ops.frontier < 1 || !!S.over;
-  const acts = h('div', { class: 'aa-acts' });
-  const b = (label, fn, dis, tip) => acts.append(h('button', { class: 'aa-op', disabled: dis, onclick: fn, title: tip || '' }, label));
-  const pc = prospectorCard();
-  if (!site.goo) {
-    if (here && !site.claimed) b(pc && def(pc).raygun && S.ops.prospected ? 'Prospect (free scan)' : 'Prospect', () => opProspect(site), (fops && !(pc && def(pc).raygun && S.ops.prospected)) || !pc);
-    if (here && site.claimed && !site.cubes && hasSeed()) b('Deploy Seed', () => opDeploySeed(site), fops);
-    if (here && site.claimed && (site.kind === 'world' || site.kind === 'ocean')) b('Found Colony', () => opFoundColony(site), fops || shipPop() < 1);
-    const colonyHere = sysOf(starId).sites.some((x) => x.pop > 0);
-    if ((here || colonyHere) && !site.claimed) b('Settle (claim)', () => opSettle(starId, site), fops);
-    if (site.pop > 0) b('Grow', () => opGrow(Object.assign(site, { _star: starId })), fops);
-    if (site.cubes > 0 && (here || colonyHere)) b('Industry +2 cubes', () => opIndustry(site), fops);
-    if (site.kind === 'world' && site.terra && (here || colonyHere) && site.step < 4) b(`Terraform to ${TERRAFORM[site.step + 1].reach}`, () => opTerraform(starId, site), fops);
-    if (here && site.cubes > 0 && driveCard() && !sh.recycled) b('Recycle drive here (free)', () => freeRecycle(site), !!S.over);
-  }
-  const roles = rolesIn(starId);
-  return h('div', { class: 'aa-box' }, h('h3', {}, site.name),
-    h('p', {}, `${site.kind === 'mine' ? 'Mine' : site.kind === 'ocean' ? 'Buried ocean (Hostile surface)' : site.cls} . Size ${site.size} . Hydration ${site.hyd} . Spectral ${site.spec}`),
-    site.goo ? h('p', { class: 'aa-bad' }, 'Consumed by grey goo.') : null,
-    h('p', { class: 'aa-dim' }, [site.claimed ? 'Claimed.' : 'Unclaimed.', site.cubes ? ` ${site.cubes} Replicator cubes (cap ${site.size}).` : '', site.pop ? ` Colony: ${site.pop} Population${isOpen(site) ? ' in the open' : ' under Domes'}.` : '', site.kind === 'world' && site.terra ? ` Terraform step ${site.step} of 4.` : ''].join('')),
-    site.kind === 'world' && site.terra && site.step < 4 ? h('p', { class: 'aa-dim' }, `Next step needs: ${TERRAFORM[site.step + 1].needs.map((r) => `${r} ${roles[r] ? '✓' : '✗'}`).join(', ')}${TERRAFORM[site.step + 1].pop ? `, ${TERRAFORM[site.step + 1].pop} Population here` : ''}.`) : null,
-    here || sysOf(starId).sites.some((x) => x.pop > 0) ? acts : h('p', { class: 'aa-dim' }, 'Bring your starship into orbit here to act.'),
-    sysOf(starId).landfall.length ? h('p', { class: 'aa-dim' }, 'Landfall cards here: ', sysOf(starId).landfall.map((c) => `${def(c).lf.name}${def(c).lf.role ? ` (${def(c).lf.role})` : ''}`).join(', ')) : null,
-    sysOf(starId).blueprints.length ? h('p', { class: 'aa-dim' }, 'Blueprints: ', sysOf(starId).blueprints.map((id) => CARD_BY_ID[id].name).join(', ')) : null);
+function clockModal() {
+  const voyage = S.phase === 'voyage';
+  const n = voyage ? TUNE.generations : TUNE.launchWindow; const cur = voyage ? S.gen : S.turn;
+  const cells = Array.from({ length: n }, (_, i) => `<span class="aa-clockcell${i + 1 < cur ? ' done' : i + 1 === cur ? ' now' : ''}">${i + 1}</span>`).join('');
+  modal({ title: voyage ? 'Generations Clock (AA-D3)' : 'Launch Window (AA-D2)', body: `<div class="aa-clockrow">${cells}</div><p class="muted">${voyage ? `The game ends after Generation ${n}. Each Generation is about 25 years.` : `Launch by the end of turn ${n}, or the starship is Grounded.`}</p>` });
 }
 
 // ================================================================ setup (AA-C2)
@@ -1277,11 +1491,12 @@ async function setupPick() {
 function start(data) {
   if (data && data.S) { S = data.S; _uid = data._uid || 1000; }
   else if (!load()) newGame();
-  let app = $('#aa-app'); if (!app) { app = h('div', { id: 'aa-app' }); document.body.append(app); }
+  if (S.ship.orbit) { MAPMODE = 'system'; SYSVIEW = S.ship.orbit; }
   render();
   if (S.phase === 'setup') setupPick();
   window.claude?.hot?.snapshot?.(() => ({ S, _uid }));
-  window.__aa = { get state() { return S; }, get busy() { return BUSY; }, explore, enterOrbit, endTurn, render, setTab, opIncome, opExpand, opResearch, opProduce, opLaunch, opBoost, newGame: () => { newGame(); commit(); setupPick(); } };
+  window.__aa = { get state() { return S; }, get busy() { return BUSY; }, explore, enterOrbit, openPopup, setMapMode, get renderers() { return RENDERERS; }, get mode() { return MAPMODE; },
+    setPane: (p) => { PANE = p; render(); }, endTurn, render, setTab, opIncome, opExpand, opResearch, opProduce, opLaunch, opBoost, newGame: () => { newGame(); commit(); setupPick(); } };
 }
 if (window.claude?.hot?.ready) window.claude.hot.ready(start);
 else start(window.claude?.hot?.data ?? null);

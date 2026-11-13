@@ -116,8 +116,7 @@ when the star is first explored (G12) and stay face up for the game.
 
 **B7a. System board.** Every explored star gets a detailed system map in the
 same idiom as the Sol map: flat-top hex sites with Size, Hydration and
-spectral type, magenta burn pads, orange Lagrange rings, and a burn count on
-every leg. Each system has:
+spectral type, magenta burn pads and orange Lagrange rings. Each system has:
 - **High Orbit**, where a ship arrives (G4);
 - an **inner rocky world** (Hostile, dry), always;
 - the **Habitable-zone world** from its chit, if any;
@@ -125,9 +124,10 @@ every leg. Each system has:
 - each **companion** at its Lagrange node, with its buried ocean if its chit
   shows one.
 
-**B7b. In-system moves (free action).** Move leg by leg, paying the leg's
-burns in propellant at the Burn rate (Fuel x weight class, G3), up to your
-Drive's Thrust in burns per Generation. Beam and Ramscoop drives cannot
+**B7b. In-system moves (free action).** As on the Sol map, entering a magenta
+burn pad costs 1 burn; other nodes are free. Pay each burn in propellant at
+the Burn rate (Fuel x weight class, G3), up to your Drive's Thrust in burns
+per Generation. A move may cross several nodes along the cheapest route. Beam and Ramscoop drives cannot
 maneuver inside a system: they work from High Orbit by raygun and Landers.
 
 **B8. Replicator cubes.** What the Seed becomes at Landfall: grey-goo
@@ -342,7 +342,8 @@ a time, paying Fuel x weight multiplier per step in your family's propellant
 (Beam: per F3). Raising and lowering V both count as Burns. Spending
 propellant may drop your weight class mid-burn; recompute per step.
 
-**G4. Orbit.** A ship at V0 on a Star space is in Orbit. Only in Orbit can you
+**G4. Orbit.** A ship at V0 on a Star space is in Orbit. Entering Orbit
+explores the star if it was not explored yet (G12). Only in Orbit can you
 Prospect (G11), deploy the Seed (H3), found Colonies (H7) or Skim (G13). A
 ship in Orbit may leave along any path out of the star, any facing.
 
@@ -633,6 +634,9 @@ itself is still to be drawn [OPEN Z8]. Data from public catalogues as of Nov
   Replicator cube). Each gets a rendered preview for sign-off before use.
 
 ### Changelog
+- **v0.5.1 (2026-11-13):** In-system moves use the Sol map's burn-pad idiom
+  (B7b). Entering Orbit explores the star (G4). The prototype now runs on the
+  app's own map renderer, toolbar, sidepanel and hand strip.
 - **v0.5 (2026-11-13):** Written alongside the first playable prototype
   (`docs/ad-astra/prototype/`). Detailed system maps for every star with
   in-system moves (B7a, B7b; settles Z2). Dead-end stars (G2a). Oort V0 is
