@@ -6,6 +6,7 @@ import { assetUrl } from '../base.js';
 import { isBatterySave, onBatterySaveChange } from '../prefs.js';
 import { isSirens, isHermes } from './online-mode.js';
 import { toLayoutPx, uiScale } from '../ui-scale.js';
+import { fleetLabel } from '../../data/fleet-tags.js';
 import { NODE_TAGS, spriteForTags } from '../../data/node-tags.js';
 import { serverTagLabels, tagInfo } from '../../data/node-labels.js';
 import { BUGGY_ROAD_GROUPS } from '../../data/buggy-roam.js';
@@ -1567,6 +1568,41 @@ export class MapRenderer {
   // hex's individual glyphs. Tween duration is ~420 ms with
   // ease-out cubic so the camera feels responsive without
   // jumping. Pass `{ ms: 0 }` to snap (legacy fast path).
+  // Pulse a ring on every node in `ids` (planner ids): a named group of sites
+  // the player asked to see at once - the Centaurs, the Greek / Trojan camps.
+  // null / [] clears it.
+  setGroupHighlight(ids) {
+    this._groupHighlightIds = (Array.isArray(ids) && ids.length) ? [...ids] : null;
+    this._scheduleDraw();
+  }
+  // Fly so every node in `nodes` ({x, y} world points) fits in the visible
+  // area, centred on their bounding box. A single node falls back to flyTo.
+  flyToFit(nodes, { maxZoom = 6, pad = 0.7 } = {}) {
+    const pts = (nodes || []).filter((n) => n && typeof n.x === 'number' && typeof n.y === 'number');
+    if (!pts.length) return;
+    if (pts.length === 1) { this.flyTo(pts[0], maxZoom); return; }
+    const xs = pts.map((n) => n.x); const ys = pts.map((n) => n.y);
+    const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+    const viewW = Math.max(1, this.hostW - this.insets.left - this.insets.right);
+    const viewH = Math.max(1, this.hostH - this.insets.top - this.insets.bottom);
+    const w = Math.max(1e-6, maxX - minX), h = Math.max(1e-6, maxY - minY);
+    const fit = Math.min(viewW / (w * this.fitScale), viewH / (h * this.fitScale)) * pad;
+    if (fit < MIN_ZOOM && pts.length > 2) {
+      // Too spread out to frame at all (both Trojan camps sit on opposite sides
+      // of Jupiter): frame the biggest cluster that does fit instead. Every
+      // member keeps its ring, wherever it is.
+      const winW = (viewW / (MIN_ZOOM * this.fitScale)) * pad;
+      const winH = (viewH / (MIN_ZOOM * this.fitScale)) * pad;
+      let best = null;
+      for (const a of pts) {
+        const near = pts.filter((q) => Math.abs(q.x - a.x) <= winW / 2 && Math.abs(q.y - a.y) <= winH / 2);
+        if (!best || near.length > best.length) best = near;
+      }
+      if (best && best.length < pts.length) { this.flyToFit(best, { maxZoom, pad }); return; }
+    }
+    const zoom = Math.max(MIN_ZOOM, Math.min(maxZoom, fit));
+    this.flyTo({ x: (minX + maxX) / 2, y: (minY + maxY) / 2 }, zoom);
+  }
   flyTo(target, zoom = 5, { ms = 420 } = {}) {
     if (!target || typeof target.x !== 'number' || typeof target.y !== 'number') return;
     this._cancelPanAnim();
@@ -3942,7 +3978,7 @@ export class MapRenderer {
       // Mobile-factory fleet tag (1B6): prefix the bracketed Greek name (e.g.
       // [Alpha]) when the fleet is active so a player can match a cube to the
       // planner dropdown.
-      const tagName = f.tag ? `[${f.tag.charAt(0).toUpperCase()}${f.tag.slice(1)}]` : '';
+      const tagName = f.tag ? fleetLabel(f.tag) : '';
       if (tagName && f.mobileEligible) text = `${tagName} ${text}`;
       if (text) this._drawFactoryLabel(ctx, cxs, cys + HEX_R + 14, text, f.color || '#9c9c9c', r, op);
     }
@@ -3960,7 +3996,10 @@ export class MapRenderer {
     ctx.save();
     for (const c of this._mobileCubes) {
       if (!Number.isFinite(c.x) || !Number.isFinite(c.y)) continue;
-      const cxs = this.pan.x + c.x * eff, cys = this.pan.y + c.y * eff;
+      // A cube parked beside a Factory (1B6b) sits off to the side of it, as
+      // the cube goes next to the Claim disk on the board.
+      const sideOff = c.beside ? HEX_R * 1.9 : 0;
+      const cxs = this.pan.x + c.x * eff + sideOff, cys = this.pan.y + c.y * eff - (c.beside ? HEX_R * 0.6 : 0);
       const dx = cxs - dw * FACTORY_ANCHOR_FX, dy = cys - dh * FACTORY_CENTER_FY;
       if (dx > this.hostW + 60 || dx + dw < -60 || dy > this.hostH + 60 || dy + dh < -60) continue;
       const base = this._factorySprites[(c.color || '').toLowerCase()] || this._factorySprites._default;
@@ -3977,7 +4016,7 @@ export class MapRenderer {
       ctx.globalAlpha = 0.95;
       ctx.stroke();
       ctx.restore();
-      const tagName = c.tag ? `[${c.tag.charAt(0).toUpperCase()}${c.tag.slice(1)}]` : '';
+      const tagName = c.tag ? fleetLabel(c.tag) : '';
       const label = `${tagName}${c.glitched ? ' ⚠' : ''}`.trim();
       if (label) this._drawFactoryLabel(ctx, cxs, cys + HEX_R + 14, label, c.color || '#9c9c9c', r, null);
     }
@@ -4353,6 +4392,7 @@ export class MapRenderer {
   // Hits any currently-selected route endpoint (the routed `from`
   // hex is the player's "I just tapped this" target in browse.js).
   _drawSelectionRingScreen(ctx) {
+    if (this.data && this._groupHighlightIds) this._drawGroupHighlightScreen(ctx);
     const ids = [];
     if (this._routeFromId) ids.push(this._routeFromId);
     if (this._routeToId)   ids.push(this._routeToId);
@@ -4385,6 +4425,33 @@ export class MapRenderer {
       ctx.strokeStyle = '#fde047';
       ctx.beginPath();
       ctx.arc(sx, sy, baseR + 16 + pulse * 6, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // Group highlight (setGroupHighlight): a pulsing gold ring on each member, a
+  // touch thinner than the selection ring so a selected route endpoint inside
+  // the group still stands out.
+  _drawGroupHighlightScreen(ctx) {
+    const eff = this.zoom * this.fitScale;
+    const { hostW, hostH } = this;
+    const t = (this._animTime || 0) / 1000;
+    const pulse = (Math.sin(t * Math.PI * 1.6) + 1) * 0.5;
+    const hexS = this._hexScale();
+    ctx.save();
+    ctx.lineWidth = 3.5;
+    ctx.strokeStyle = '#fbbf24';
+    for (const id of this._groupHighlightIds) {
+      const node = this.data.byId[id];
+      if (!node) continue;
+      const vis = TYPE_VIS[node.type] || TYPE_VIS.unknown;
+      const sx = this.pan.x + node.x * eff;
+      const sy = this.pan.y + node.y * eff;
+      if (sx < -60 || sx > hostW + 60 || sy < -60 || sy > hostH + 60) continue;
+      const baseR = (vis.kind === 'hex' ? vis.r * hexS : (vis.r || 8));
+      ctx.beginPath();
+      ctx.arc(sx, sy, baseR + 10 + pulse * 5, 0, Math.PI * 2);
       ctx.stroke();
     }
     ctx.restore();
@@ -6156,7 +6223,22 @@ export class MapRenderer {
             e.stopPropagation();
             const willOpen = menu.hidden;
             menu.hidden = !willOpen;
-            if (willOpen) setTimeout(() => document.addEventListener('click', closeMenu), 0);
+            if (willOpen) {
+              // Fit the list to the map space left below it (a long fleet list
+              // scrolls instead of being clipped by the map's edge).
+              // The turn banner and the hand panel sit OVER the lower map, so the
+              // visible floor is whichever of them (or the map) starts first.
+              const top = menu.getBoundingClientRect().top;
+              let floor = this.host ? this.host.getBoundingClientRect().bottom : window.innerHeight;
+              for (const sel of ['#mp-turn-banner', '#sandbox-hand']) {
+                const el = document.querySelector(sel);
+                const r = el && el.offsetParent ? el.getBoundingClientRect() : null;
+                if (r && r.height && r.top > top && r.top < floor) floor = r.top;
+              }
+              const room = toLayoutPx(floor - top) - 8;
+              menu.style.maxHeight = `${Math.max(96, Math.min(240, room))}px`;
+              setTimeout(() => document.addEventListener('click', closeMenu), 0);
+            }
             else document.removeEventListener('click', closeMenu);
           });
           slot.appendChild(b);

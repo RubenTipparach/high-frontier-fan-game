@@ -47,6 +47,11 @@ const GLYPH = {
       </g>
       <circle cx="11.8" cy="16.4" r="1.7" fill="__HOLE__" opacity="0.5"/>
     </g>`,
+  // "Any Reactor": the printed card writes the word "any" in the reactor square
+  // (Colliding FRC 3He-D Fusion prints "any any").
+  'reactor-any': () => `
+    <text x="16" y="20.6" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif"
+          font-weight="700" font-size="11.5" fill="currentColor" letter-spacing="-0.2">any</text>`,
   'gen-radioisotope': () => `
     <g fill="currentColor">
       <rect x="13.4" y="10.5" width="2.2" height="11" rx="0.4"/>
@@ -120,7 +125,7 @@ const GLYPH = {
 };
 
 export const SUPPORT_KIND_CAT = {
-  'reactor-fission': 'reactor', 'reactor-fusion': 'reactor', 'reactor-antimatter': 'reactor',
+  'reactor-fission': 'reactor', 'reactor-fusion': 'reactor', 'reactor-antimatter': 'reactor', 'reactor-any': 'reactor',
   'gen-radioisotope': 'generator', 'gen-electric': 'generator',
   'missile': 'robonaut', 'raygun': 'robonaut', 'buggy': 'robonaut',
 };

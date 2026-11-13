@@ -49,8 +49,17 @@
 //     valid, allSatisfied, coolingOk: boolean,
 //   }
 
-import { PATENTS_BY_ID } from '../../data/patents.js';
+import { PATENTS_BY_ID as _PATENTS_BY_ID } from '../../data/patents.js';
 import { CREW_BY_ID } from '../../data/crew.js';
+import { COLONISTS_BY_ID } from '../../data/colonists.js';
+// Colonists carry On-Board Nuclear Supports too (2C3: Rock Rats, Programmable
+// Matter, ...), so they join the card lookup the way rocket.js does.
+const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...COLONISTS_BY_ID };
+// A Human (Crew or Colonist) the build uses as its reactor / generator is
+// decommissioned with it and settles in a Colony there (2C3a).
+export function isHumanSupplier(slot) {
+  return !!(slot && (CREW_BY_ID[slot.id] || COLONISTS_BY_ID[slot.id]));
+}
 import { REQUIREMENT_VIS } from './card-ui.js';
 import { facePower } from '../../data/card-abilities.js';
 import { faceIsDirtFuelled } from '../../data/hermes.js';
@@ -279,6 +288,8 @@ export function resolveOption(stack, refIndex, robIndex, wiring, siteProvidesCoo
   const removeIndices = [];
   const kept = [];
   for (const idx of chain) {
+    // A Crew supplier (the on-board reactor grant) is decommissioned too (2C3a).
+    if (CREW_BY_ID[stack[idx].id]) { removeIndices.push(idx); continue; }
     const c = PATENTS_BY_ID[stack[idx].id];
     if (!c) continue;
     if (siteProvidesCooling && c.type === 'radiator') kept.push({ id: stack[idx].id, card: c, index: idx });
@@ -462,7 +473,9 @@ function buildChainTree(stack, opt, extraKeptIndices = []) {
     const icon = kept
       ? '<span class="decom-icon decom-kept">◐</span>'
       : '<span class="decom-icon">✕</span>';
-    const typeLabel = kept ? `${card?.type || 'radiator'}, KEPT` : (card?.type || (CREW_BY_ID[stack[idx].id] ? 'crew' : ''));
+    const typeLabel = kept ? `${card?.type || 'radiator'}, KEPT`
+      : isHumanSupplier(stack[idx]) ? `${card?.type || 'crew'}, settles in a Colony`
+        : (card?.type || '');
     const role = roleLabel
       ? ` <span class="chain-role">${escapeHtml(roleLabel)}</span>` : '';
     const name = card?.name
@@ -588,7 +601,9 @@ export function openIndustrializeModal({ siteName, spectralType, stack, options,
     // get to keep.
     const arcologyKept = arcologyKeepsRobonaut(stack, opt, siteZone) ? opt.robonaut : null;
     const chainTreeHtml = buildChainTree(stack, opt, arcologyKept ? [arcologyKept.index] : []);
-    const decomCount = opt.chainIndices.length - (arcologyKept ? 1 : 0);
+    // A Human support settles in a Colony instead of going to the hand (2C3a).
+    const humanCount = opt.chainIndices.filter((i) => isHumanSupplier(stack[i])).length;
+    const decomCount = opt.chainIndices.length - (arcologyKept ? 1 : 0) - humanCount;
     // V5 Hermes Fall adds a cost the support chain never explains: an
     // operational dirt rocket goes back to hand alongside it. Shown as its own
     // row, and called REQUIRED, so the player sees what the scenario is taking
@@ -637,7 +652,7 @@ export function openIndustrializeModal({ siteName, spectralType, stack, options,
         </div>
         ${pickerHtml}
         ${wiringHtml}
-        <div class="industrialize-section-label">Support chain - the ${decomCount} card${decomCount === 1 ? '' : 's'} below ${decomCount === 1 ? 'goes' : 'go'} back to your hand (${escapeHtml(coolingNote)}):</div>
+        <div class="industrialize-section-label">Support chain - the ${decomCount} card${decomCount === 1 ? '' : 's'} below ${decomCount === 1 ? 'goes' : 'go'} back to your hand${humanCount ? `, and ${humanCount === 1 ? 'the Human settles' : 'the Humans settle'} in a Colony` : ''} (${escapeHtml(coolingNote)}):</div>
         ${chainTreeHtml}
         ${dirtRocketHtml}
         ${arcologyHtml}

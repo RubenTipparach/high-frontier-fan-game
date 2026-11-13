@@ -98,7 +98,7 @@ const PROPERTY_COLUMNS_BOOL = {
   'Air Eater':      { key: 'airEater',       glyph: 'ᗧ', label: 'Air-eater',
     desc: 'Air-eater: scoops atmosphere at a gas giant or thick-atmosphere body for fuel or aerobraking.' },
   'Missile':        { key: 'missile',        glyph: '🚀', label: 'Missile',
-    desc: 'Missile robonaut: a one-shot impactor prospector, consumed when it fires.' },
+    desc: 'Missile robonaut: prospects the site your stack is parked on. It costs your operation, so it can prospect once per turn, and stays on your stack after it is used.' },
   'Raygun':         { key: 'raygun',         glyph: '🔫', label: 'Raygun',
     desc: 'Raygun robonaut: prospects every site within line of sight in a single op, not just the one you sit on.' },
   'Buggy':          { key: 'buggy',          glyph: '🛺', label: 'Buggy',
@@ -138,8 +138,11 @@ function requiresFromFace(face, type) {
   // supports to the stack instead of needing them (mapped in suppliesFromFace).
   // Neither sheet has a Therms column, so no cooling requirement either.
   if (type === 'freighter' || type === 'colonist') return reqs;
+  // TRUE means one supplier; a NUMBER in the cell is how many (the GW sheet's
+  // "Any Reactor" is 2 on Colliding FRC 3He-D Fusion, printed "any any").
   for (const [col, kind] of Object.entries(BOOLEAN_TO_REQ)) {
-    if (face[col]) reqs.push({ kind, count: 1 });
+    const v = face[col];
+    if (v) reqs.push({ kind, count: (typeof v === 'number' && v > 1) ? Math.floor(v) : 1 });
   }
   // Radiators SUPPLY therms (their Light/Heavy therm columns are cooling
   // capacity, read via thermsSupplied), so they never REQUIRE therms - skip the
@@ -174,7 +177,19 @@ const GENERATOR_TYPE_COLS = {
 // supply whichever Type-column boxes are ticked; other card
 // types supply nothing (they don't show up as chips on other
 // cards' supports rows).
+// "Any Reactor" (the GW sheet's column) means ANY reactor: a card that supplies
+// a fission, fusion or antimatter reactor also satisfies it. Tagged on the
+// supply list so every check that asks "does the stack supply this kind?"
+// answers it the same way. Display code skips the tag (it is not a chip of its
+// own).
+export const ANY_REACTOR = 'reactor-any';
+function withAnyReactor(kinds) {
+  return kinds.some((k) => String(k).startsWith('reactor-') && k !== ANY_REACTOR) ? [...kinds, ANY_REACTOR] : kinds;
+}
 function suppliesFromFace(face, type) {
+  return withAnyReactor(suppliesFromFaceRaw(face, type));
+}
+function suppliesFromFaceRaw(face, type) {
   if (!face) return [];
   // Freighters' and colonists' "Support Provided" matrix (same power-source
   // columns as the thruster "Support Requirements" matrix) are supplies: the

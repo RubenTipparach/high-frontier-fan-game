@@ -26,7 +26,7 @@ const CAT_NAME = {
   robonaut: 'Robonaut (black + pink square)',
 };
 const LBL = {
-  'reactor-fission': 'Fission (was X)', 'reactor-fusion': 'Fusion (∿)', 'reactor-antimatter': 'Antimatter (bomb)',
+  'reactor-fission': 'Fission (was X)', 'reactor-fusion': 'Fusion (∿)', 'reactor-antimatter': 'Antimatter (bomb)', 'reactor-any': 'Any reactor',
   'gen-radioisotope': 'Radioisotope (⟛)', 'gen-electric': 'Electric (e)',
   'missile': 'Missile', 'raygun': 'Raygun', 'buggy': 'Buggy',
   'thruster': 'Thruster (rocket bell)', 'refinery': 'Refinery (green flask)', 'robonaut': 'Robonaut (generic head)',
@@ -34,7 +34,7 @@ const LBL = {
 const stripSvg = (s) => s.replace(/^<svg[^>]*>/, '').replace(/<\/svg>$/, '');
 const ICON = 58, ROW_H = 88, PAD = 24, HEAD = 30, COL_W = 250;
 const rows = [
-  { name: CAT_NAME.reactor, items: ['reactor-fission', 'reactor-fusion', 'reactor-antimatter'].map((k) => ({ svg: supportIconSvg(k, opt), w: ICON, label: LBL[k] })) },
+  { name: CAT_NAME.reactor, items: ['reactor-fission', 'reactor-fusion', 'reactor-antimatter', 'reactor-any'].map((k) => ({ svg: supportIconSvg(k, opt), w: ICON, label: LBL[k] })) },
   { name: CAT_NAME.generator, items: ['gen-radioisotope', 'gen-electric'].map((k) => ({ svg: supportIconSvg(k, opt), w: ICON, label: LBL[k] })) },
   { name: 'Radiator (blue therms on white badge)', items: [1, 2, 3].map((n) => ({ svg: thermBadgeSvg(n, opt), w: (n * 13 + 8) * (ICON / 32), label: `${n} therm${n === 1 ? '' : 's'}` })) },
   { name: CAT_NAME.robonaut, items: ['missile', 'raygun', 'buggy'].map((k) => ({ svg: supportIconSvg(k, opt), w: ICON, label: LBL[k] })) },

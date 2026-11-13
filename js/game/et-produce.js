@@ -160,8 +160,12 @@ export function openEtProduceModal({
   // the factory Outpost, or the Bernal Stack when the factory has no outpost
   // slot to land in but a Bernal is reachable.
   const canFactoryOutpost = !!(existingOutpost || freeSlots.length);
-  let dest = rocket ? 'rocket'
+  const baseDest = rocket ? 'rocket'
     : (bernal && !canFactoryOutpost) ? 'bernalStack' : 'factory';
+  // A Freighter card can LAUNCH (its big cube appears at this factory, the
+  // default) or land as a card in one of the stacks below, to launch later.
+  const isFreighterOpt = (i) => !!(options[i] && options[i].card && options[i].card.type === 'freighter');
+  let dest = isFreighterOpt(0) ? 'launch' : baseDest;
   // Radiators land Black-Side-up but still choose a deployed side (Light =
   // lighter / less cooling, Heavy = more therms). Default Heavy (max cooling);
   // reset when the player picks a different card.
@@ -187,7 +191,9 @@ export function openEtProduceModal({
     const opt = options[selectedCard];
     if (!opt) return;
     const rs = (opt.card && opt.card.type === 'radiator') ? radSide : undefined;
-    if (dest === 'rocket') {
+    if (dest === 'launch') {
+      onCommit?.({ cardId: opt.id, launchFreighter: true });
+    } else if (dest === 'rocket') {
       onCommit?.({ cardId: opt.id, toRocket: true, radSide: rs });
     } else if (dest === 'bernalStack') {
       onCommit?.({ cardId: opt.id, toBernal: true, radSide: rs });
@@ -230,10 +236,12 @@ export function openEtProduceModal({
     // Destination selector (I8): only when a Dirtside Bernal is in reach. Lets
     // the product land at the Factory outpost, the Bernal's own stack, or an
     // Outpost at the Bernal's Space.
-    const destHtml = (bernal || rocket)
+    const frSel = isFreighterOpt(selectedCard);
+    const destHtml = (bernal || rocket || frSel)
       ? `<div class="et-slot-block">
-           <div class="et-section-label">Where should the Black-Side product land?</div>
+           <div class="et-section-label">${frSel ? 'Launch the Freighter, or land it as a card?' : 'Where should the Black-Side product land?'}</div>
            <div class="et-dest-buttons">
+             ${frSel ? `<button type="button" data-dest="launch" class="et-dest-btn ${dest === 'launch' ? 'is-selected' : ''}">🚛 Launch Freighter here</button>` : ''}
              ${rocket ? `<button type="button" data-dest="rocket" class="et-dest-btn ${dest === 'rocket' ? 'is-selected' : ''}">🚀 Rocket</button>` : ''}
              ${canFactoryOutpost ? `<button type="button" data-dest="factory" class="et-dest-btn ${dest === 'factory' ? 'is-selected' : ''}">🏭 Factory Outpost</button>` : ''}
              ${bernal ? `<button type="button" data-dest="bernalStack" class="et-dest-btn ${dest === 'bernalStack' ? 'is-selected' : ''}">🏛 ${escapeHtml(bernal.name)} Stack</button>` : ''}
@@ -242,14 +250,16 @@ export function openEtProduceModal({
          </div>`
       : '';
     const slotHtml =
-      dest === 'rocket'
+      dest === 'launch'
+        ? `<div class="et-slot-block"><div class="et-section-label">The Freighter's big cube launches at this factory, ready to fly.</div></div>`
+        : dest === 'rocket'
         ? `<div class="et-slot-block"><div class="et-section-label">Goes straight aboard your <strong>rocket</strong>, parked here. It can fly with the rocket this turn.</div></div>`
         : dest === 'bernalStack'
         ? `<div class="et-slot-block"><div class="et-section-label">Lands in <strong>${escapeHtml(bernal.name)}</strong>'s component stack.</div></div>`
         : dest === 'bernalOutpost'
           ? slotPickerFor('bernalOutpost')
           : slotPickerFor('factory');
-    const commitReady = (dest === 'bernalStack' || dest === 'rocket') ? true
+    const commitReady = (dest === 'bernalStack' || dest === 'rocket' || dest === 'launch') ? true
       : dest === 'bernalOutpost' ? !!bernalSlot
         : !!factorySlot;
     dialog.innerHTML = `
@@ -313,7 +323,12 @@ export function openEtProduceModal({
       src.textContent = etSourceLabel(opt.from);
       pick.appendChild(src);
       pick.addEventListener('click', () => {
-        if (selectedCard !== i) { selectedCard = i; radSide = 'heavy'; }
+        if (selectedCard !== i) {
+          selectedCard = i; radSide = 'heavy';
+          // A Freighter defaults to launching; any other card can't launch.
+          if (isFreighterOpt(i)) dest = 'launch';
+          else if (dest === 'launch') dest = baseDest;
+        }
         render();
       });
       // Magnifier: enlarged read-only look at the card, Black-Side-up
