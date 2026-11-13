@@ -141,21 +141,36 @@ export function applyHolidayClass() {
   try {
     const on = isHolidayTheme();
     document.documentElement.classList.toggle('theme-holiday', on);
-    if (on && !document.querySelector('.xm-sky')) {
-      const sky = document.createElement('div');
-      sky.className = 'xm-sky';
-      sky.setAttribute('aria-hidden', 'true');
-      let flakes = '';
-      for (let i = 0; i < 12; i++) flakes += '<span class="xm-flake"></span>';
-      sky.innerHTML = flakes;
-      document.body.appendChild(sky);
+    if (on && !document.querySelector('.xm-sleigh-layer')) {
       // The sleigh flies behind the top bar's buttons, so it gets its own
-      // low layer instead of riding the snow layer over everything.
+      // low layer.
       const sleighLayer = document.createElement('div');
       sleighLayer.className = 'xm-sky xm-sleigh-layer';
       sleighLayer.setAttribute('aria-hidden', 'true');
       sleighLayer.innerHTML = '<span class="xm-sleigh"></span>';
       document.body.appendChild(sleighLayer);
     }
+    // Snow falls only inside the hand panel (user 2026-11-13), as real
+    // flakes moved on the GPU so it stays smooth. The hand panel mounts later
+    // and can be rebuilt, so a light check keeps one snow layer in it.
+    if (on && !_handSnowTimer) {
+      ensureHandSnow();
+      _handSnowTimer = setInterval(ensureHandSnow, 1000);
+    }
   } catch { /* no document (non-browser) */ }
+}
+
+let _handSnowTimer = null;
+function ensureHandSnow() {
+  try {
+    const hand = document.querySelector('.sandbox-hand');
+    if (!hand || hand.querySelector(':scope > .xm-hand-snow')) return;
+    const snow = document.createElement('div');
+    snow.className = 'xm-hand-snow';
+    snow.setAttribute('aria-hidden', 'true');
+    let flakes = '';
+    for (let i = 0; i < 14; i++) flakes += '<span class="xm-flake"></span>';
+    snow.innerHTML = flakes;
+    hand.appendChild(snow);
+  } catch { /* ignore */ }
 }

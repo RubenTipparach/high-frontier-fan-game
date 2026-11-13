@@ -30,8 +30,8 @@ const STAR = /<circle [^>]*fill="#eef0ff"[^>]*\/>/g;
 const DECKS = {
   thrusters: { ...thrusters, approved: new Set(['*']) },
   robonauts: { ...robonauts, approved: new Set(['*']) },
-  refineries: { ...refineries, approved: new Set([]) },   // awaiting the user's sign-off
-  generators: { ...generators, approved: new Set([]) },   // awaiting the user's sign-off
+  refineries: { ...refineries, approved: new Set(['*']) },
+  generators: { ...generators, approved: new Set(['*']) },
 };
 
 const manifest = {};

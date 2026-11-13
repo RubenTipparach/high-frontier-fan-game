@@ -248,291 +248,291 @@ export const CARD_ART = {
   "ref_atomic_layer_deposition": {
     "primary": {
       "src": "assets/cards/refineries/ref_atomic_layer_deposition-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/refineries/ref_atomic_layer_deposition-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "ref_basalt_fiber_spinning": {
     "primary": {
       "src": "assets/cards/refineries/ref_basalt_fiber_spinning-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/refineries/ref_basalt_fiber_spinning-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "ref_cvd_molding": {
     "primary": {
       "src": "assets/cards/refineries/ref_cvd_molding-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/refineries/ref_cvd_molding-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "ref_carbo_chlorination": {
     "primary": {
       "src": "assets/cards/refineries/ref_carbo_chlorination-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/refineries/ref_carbo_chlorination-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "ref_electroforming": {
     "primary": {
       "src": "assets/cards/refineries/ref_electroforming-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/refineries/ref_electroforming-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "ref_fluidized_bed": {
     "primary": {
       "src": "assets/cards/refineries/ref_fluidized_bed-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/refineries/ref_fluidized_bed-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "ref_foamglass_sintering": {
     "primary": {
       "src": "assets/cards/refineries/ref_foamglass_sintering-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/refineries/ref_foamglass_sintering-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "ref_froth_flotation": {
     "primary": {
       "src": "assets/cards/refineries/ref_froth_flotation-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/refineries/ref_froth_flotation-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "ref_isru_sabatier": {
     "primary": {
       "src": "assets/cards/refineries/ref_isru_sabatier-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/refineries/ref_isru_sabatier-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "ref_in_situ_leaching": {
     "primary": {
       "src": "assets/cards/refineries/ref_in_situ_leaching-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/refineries/ref_in_situ_leaching-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "ref_magma_electrolysis": {
     "primary": {
       "src": "assets/cards/refineries/ref_magma_electrolysis-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/refineries/ref_magma_electrolysis-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "ref_supercritical_drying": {
     "primary": {
       "src": "assets/cards/refineries/ref_supercritical_drying-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/refineries/ref_supercritical_drying-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "gen_amtec_thermoelectric": {
     "primary": {
       "src": "assets/cards/generators/gen_amtec_thermoelectric-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/generators/gen_amtec_thermoelectric-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "gen_brayton_turbine": {
     "primary": {
       "src": "assets/cards/generators/gen_brayton_turbine-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/generators/gen_brayton_turbine-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "gen_cascade_photovoltaic": {
     "primary": {
       "src": "assets/cards/generators/gen_cascade_photovoltaic-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/generators/gen_cascade_photovoltaic-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "gen_cascade_thermoacoustic": {
     "primary": {
       "src": "assets/cards/generators/gen_cascade_thermoacoustic-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/generators/gen_cascade_thermoacoustic-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "gen_catalyzed_fission_scintillator": {
     "primary": {
       "src": "assets/cards/generators/gen_catalyzed_fission_scintillator-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/generators/gen_catalyzed_fission_scintillator-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "gen_ericsson_engine": {
     "primary": {
       "src": "assets/cards/generators/gen_ericsson_engine-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/generators/gen_ericsson_engine-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "gen_flywheel_compulsator": {
     "primary": {
       "src": "assets/cards/generators/gen_flywheel_compulsator-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/generators/gen_flywheel_compulsator-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "gen_h2_o2_fuel_cell": {
     "primary": {
       "src": "assets/cards/generators/gen_h2_o2_fuel_cell-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/generators/gen_h2_o2_fuel_cell-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "gen_in_core_thermionic": {
     "primary": {
       "src": "assets/cards/generators/gen_in_core_thermionic-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/generators/gen_in_core_thermionic-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "gen_magnetoshell_plasma_parachute": {
     "primary": {
       "src": "assets/cards/generators/gen_magnetoshell_plasma_parachute-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/generators/gen_magnetoshell_plasma_parachute-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "gen_marx_capacitor_bank": {
     "primary": {
       "src": "assets/cards/generators/gen_marx_capacitor_bank-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/generators/gen_marx_capacitor_bank-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "gen_optoelectric_nuclear_battery": {
     "primary": {
       "src": "assets/cards/generators/gen_optoelectric_nuclear_battery-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/generators/gen_optoelectric_nuclear_battery-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "gen_photon_tether_rectenna": {
     "primary": {
       "src": "assets/cards/generators/gen_photon_tether_rectenna-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/generators/gen_photon_tether_rectenna-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "gen_radioisotope_stirling": {
     "primary": {
       "src": "assets/cards/generators/gen_radioisotope_stirling-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/generators/gen_radioisotope_stirling-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "gen_rankine_mhd": {
     "primary": {
       "src": "assets/cards/generators/gen_rankine_mhd-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/generators/gen_rankine_mhd-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "gen_rankine_solar_dynamic": {
     "primary": {
       "src": "assets/cards/generators/gen_rankine_solar_dynamic-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/generators/gen_rankine_solar_dynamic-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "gen_solar_stirling": {
     "primary": {
       "src": "assets/cards/generators/gen_solar_stirling-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/generators/gen_solar_stirling-back.svg",
-      "approved": false
+      "approved": true
     }
   }
 };

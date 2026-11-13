@@ -10653,28 +10653,20 @@ html.theme-holiday .sandbox-hand::before {
   z-index: 2;
 }
 html.theme-holiday .main-menu-panel::before { border-radius: 12px 12px 0 0; }
-/* Snowflakes drifting slowly down the background of the hand panel, behind
-   its cards (the panel is its own stacking context, so z-index -1 sits above
-   its background and below its content). One sparse, faint layer. */
-html.theme-holiday .sandbox-hand::after {
-  content: '';
+/* The sleigh layer (fixed, never in the way: no pointer events). */
+.xm-sky, .xm-sleigh-layer, .xm-hand-snow { display: none; }
+/* Snow falls only inside the hand panel, behind its cards: the layer sits at
+   z-index -1 in the hand panel's own stacking context (above its background,
+   below its content) and clips the flakes to the panel. Each flake is moved
+   with a transform, so it animates on the GPU at full frame rate. */
+html.theme-holiday .xm-hand-snow {
+  display: block;
   position: absolute;
   inset: 0;
-  z-index: -1;
+  overflow: hidden;
   pointer-events: none;
-  opacity: 0.11;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Cpath d='M82.4,99.6 L89.2,103.2 M86.1,101.5 L88.5,101.0 M86.1,101.5 L87.0,103.8 M82.4,99.6 L82.7,107.3 M82.5,103.8 L84.2,105.6 M82.5,103.8 L81.0,105.7 M82.4,99.6 L75.9,103.6 M78.8,101.8 L78.0,104.2 M78.8,101.8 L76.4,101.5 M82.4,99.6 L75.6,96.0 M78.6,97.6 L76.2,98.1 M78.6,97.6 L77.7,95.3 M82.4,99.6 L82.1,91.9 M82.2,95.3 L80.6,93.5 M82.2,95.3 L83.7,93.4 M82.4,99.6 L88.9,95.5 M86.0,97.3 L86.7,95.0 M86.0,97.3 L88.4,97.7 ' stroke='%23e0f2fe' stroke-width='0.92' stroke-linecap='round' fill='none'/%3E%3Cpath d='M91.3,104.0 L95.3,106.4 M93.5,105.3 L95.0,105.1 M93.5,105.3 L94.0,106.7 M91.3,104.0 L91.2,108.7 M91.2,106.6 L92.2,107.8 M91.2,106.6 L90.2,107.7 M91.3,104.0 L87.1,106.3 M89.0,105.3 L88.4,106.7 M89.0,105.3 L87.5,105.0 M91.3,104.0 L87.2,101.6 M89.0,102.7 L87.5,102.9 M89.0,102.7 L88.5,101.2 M91.3,104.0 L91.3,99.2 M91.3,101.4 L90.3,100.2 M91.3,101.4 L92.3,100.2 M91.3,104.0 L95.4,101.7 M93.5,102.7 L94.1,101.3 M93.5,102.7 L95.0,103.0 ' stroke='%23e0f2fe' stroke-width='0.80' stroke-linecap='round' fill='none'/%3E%3Cpath d='M110.8,136.9 L114.9,138.2 M113.1,137.6 L114.4,137.1 M113.1,137.6 L113.8,138.8 M110.8,136.9 L111.7,141.2 M111.3,139.2 L112.4,140.1 M111.3,139.2 L110.6,140.5 M110.8,136.9 L107.5,139.8 M109.0,138.5 L108.8,139.9 M109.0,138.5 L107.6,138.5 M110.8,136.9 L106.6,135.5 M108.5,136.1 L107.2,136.6 M108.5,136.1 L107.8,134.9 M110.8,136.9 L109.9,132.6 M110.3,134.5 L109.2,133.7 M110.3,134.5 L111.0,133.3 M110.8,136.9 L114.0,134.0 M112.6,135.3 L112.8,133.9 M112.6,135.3 L114.0,135.2 ' stroke='%23e0f2fe' stroke-width='0.80' stroke-linecap='round' fill='none'/%3E%3Cpath d='M24.5,139.5 L31.3,139.8 M28.2,139.7 L29.9,138.4 M28.2,139.7 L29.8,141.2 M24.5,139.5 L27.6,145.6 M26.2,142.8 L28.2,143.7 M26.2,142.8 L25.8,145.0 M24.5,139.5 L20.9,145.3 M22.5,142.7 L22.8,144.8 M22.5,142.7 L20.4,143.3 M24.5,139.5 L17.7,139.2 M20.8,139.4 L19.1,140.7 M20.8,139.4 L19.2,137.9 M24.5,139.5 L21.4,133.5 M22.8,136.2 L20.8,135.4 M22.8,136.2 L23.3,134.1 M24.5,139.5 L28.1,133.8 M26.5,136.4 L26.2,134.3 M26.5,136.4 L28.6,135.8 ' stroke='%23e0f2fe' stroke-width='0.81' stroke-linecap='round' fill='none'/%3E%3Cpath d='M167.2,164.4 L172.4,168.3 M170.1,166.5 L172.2,166.4 M170.1,166.5 L170.5,168.6 M167.2,164.4 L166.4,170.9 M166.7,168.0 L167.9,169.7 M166.7,168.0 L165.2,169.4 M167.2,164.4 L161.1,167.0 M163.8,165.8 L162.8,167.7 M163.8,165.8 L161.8,165.2 M167.2,164.4 L161.9,160.4 M164.2,162.2 L162.1,162.3 M164.2,162.2 L163.8,160.1 M167.2,164.4 L167.9,157.8 M167.6,160.7 L166.4,159.0 M167.6,160.7 L169.1,159.3 M167.2,164.4 L173.2,161.8 M170.5,162.9 L171.5,161.0 M170.5,162.9 L172.5,163.6 ' stroke='%23e0f2fe' stroke-width='0.80' stroke-linecap='round' fill='none'/%3E%3C/svg%3E");
-  background-size: 240px 240px;
-  animation: xm-hand-snow 40s linear infinite;
+  z-index: -1;
 }
-@keyframes xm-hand-snow {
-  from { background-position: 0 0; }
-  to   { background-position: 0 240px; }
-}
-html.battery-save.theme-holiday .sandbox-hand::after { animation: none; }
-/* Snowfall + the sleigh: one fixed layer over everything but never in the way
-   (no pointer events). Flakes fall the full height of the screen. */
-.xm-sky, .xm-sleigh-layer { display: none; }
 html.theme-holiday .xm-sky,
 html.theme-holiday .xm-sleigh-layer {
   display: block;
@@ -10693,6 +10685,7 @@ html.theme-holiday .map-route { position: relative; z-index: 2; }
 html.theme-holiday .xm-flake {
   position: absolute;
   top: -16px;
+  will-change: transform;
   background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12.0,12.0 L22.5,12.0 M17.8,12.0 L20.3,9.8 M17.8,12.0 L20.3,14.2 M12.0,12.0 L17.2,21.1 M14.9,17.0 L18.0,18.2 M14.9,17.0 L14.3,20.3 M12.0,12.0 L6.8,21.1 M9.1,17.0 L9.7,20.3 M9.1,17.0 L6.0,18.2 M12.0,12.0 L1.5,12.0 M6.2,12.0 L3.7,14.2 M6.2,12.0 L3.7,9.8 M12.0,12.0 L6.7,2.9 M9.1,7.0 L6.0,5.8 M9.1,7.0 L9.7,3.7 M12.0,12.0 L17.2,2.9 M14.9,7.0 L14.3,3.7 M14.9,7.0 L18.0,5.8 ' stroke='%23ffffff' stroke-width='1.60' stroke-linecap='round' fill='none'/%3E%3C/svg%3E") no-repeat center / contain;
   filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.7));
   animation-name: xm-fall, xm-sway;
@@ -10700,35 +10693,35 @@ html.theme-holiday .xm-flake {
   animation-iteration-count: infinite, infinite;
   animation-direction: normal, alternate;
 }
-html.theme-holiday .xm-flake:nth-child(1) { left: 32.7%; width: 7.2px; height: 7.2px; opacity: 0.61; animation-duration: 23.1s, 6.7s; animation-delay: -2.0s, -2.0s; }
-html.theme-holiday .xm-flake:nth-child(2) { left: 6.7%; width: 9.9px; height: 9.9px; opacity: 0.49; animation-duration: 14.5s, 4.3s; animation-delay: -12.1s, -12.1s; }
-html.theme-holiday .xm-flake:nth-child(3) { left: 42.6%; width: 12.3px; height: 12.3px; opacity: 0.88; animation-duration: 15.7s, 7.1s; animation-delay: -6.3s, -6.3s; }
-html.theme-holiday .xm-flake:nth-child(4) { left: 57.6%; width: 9.0px; height: 9.0px; opacity: 0.58; animation-duration: 27.7s, 8.3s; animation-delay: -1.3s, -1.3s; }
-html.theme-holiday .xm-flake:nth-child(5) { left: 15.1%; width: 6.9px; height: 6.9px; opacity: 0.71; animation-duration: 18.3s, 4.9s; animation-delay: -22.9s, -22.9s; }
-html.theme-holiday .xm-flake:nth-child(6) { left: 63.6%; width: 9.0px; height: 9.0px; opacity: 0.54; animation-duration: 21.7s, 4.3s; animation-delay: -1.8s, -1.8s; }
-html.theme-holiday .xm-flake:nth-child(7) { left: 67.7%; width: 9.3px; height: 9.3px; opacity: 0.58; animation-duration: 18.4s, 6.3s; animation-delay: -16.4s, -16.4s; }
-html.theme-holiday .xm-flake:nth-child(8) { left: 78.8%; width: 11.4px; height: 11.4px; opacity: 0.84; animation-duration: 17.4s, 6.6s; animation-delay: -16.1s, -16.1s; }
-html.theme-holiday .xm-flake:nth-child(9) { left: 72.5%; width: 8.1px; height: 8.1px; opacity: 0.79; animation-duration: 27.7s, 6.1s; animation-delay: -3.3s, -3.3s; }
-html.theme-holiday .xm-flake:nth-child(10) { left: 15.9%; width: 9.9px; height: 9.9px; opacity: 0.71; animation-duration: 14.5s, 7.8s; animation-delay: -18.7s, -18.7s; }
-html.theme-holiday .xm-flake:nth-child(11) { left: 86.8%; width: 8.4px; height: 8.4px; opacity: 0.66; animation-duration: 23.7s, 6.9s; animation-delay: -16.6s, -16.6s; }
-html.theme-holiday .xm-flake:nth-child(12) { left: 83.3%; width: 13.5px; height: 13.5px; opacity: 0.77; animation-duration: 20.6s, 4.3s; animation-delay: -18.6s, -18.6s; }
-html.theme-holiday .xm-flake:nth-child(13) { left: 64.4%; width: 13.8px; height: 13.8px; opacity: 0.75; animation-duration: 25.5s, 5.9s; animation-delay: -8.0s, -8.0s; }
-html.theme-holiday .xm-flake:nth-child(14) { left: 3.2%; width: 9.6px; height: 9.6px; opacity: 0.8; animation-duration: 16.4s, 4.3s; animation-delay: -3.3s, -3.3s; }
-html.theme-holiday .xm-flake:nth-child(15) { left: 13.7%; width: 7.8px; height: 7.8px; opacity: 0.65; animation-duration: 19.5s, 4.4s; animation-delay: -24.4s, -24.4s; }
-html.theme-holiday .xm-flake:nth-child(16) { left: 54.8%; width: 12.9px; height: 12.9px; opacity: 0.64; animation-duration: 25.5s, 5.4s; animation-delay: -24.2s, -24.2s; }
-html.theme-holiday .xm-flake:nth-child(17) { left: 36.2%; width: 12.9px; height: 12.9px; opacity: 0.55; animation-duration: 27.4s, 4.9s; animation-delay: -4.2s, -4.2s; }
-html.theme-holiday .xm-flake:nth-child(18) { left: 23.9%; width: 9.9px; height: 9.9px; opacity: 0.64; animation-duration: 22.2s, 4.0s; animation-delay: -7.4s, -7.4s; }
-html.theme-holiday .xm-flake:nth-child(19) { left: 37.2%; width: 10.5px; height: 10.5px; opacity: 0.73; animation-duration: 27.3s, 6.6s; animation-delay: -19.3s, -19.3s; }
-html.theme-holiday .xm-flake:nth-child(20) { left: 67.3%; width: 6.3px; height: 6.3px; opacity: 0.81; animation-duration: 26.6s, 8.4s; animation-delay: -21.8s, -21.8s; }
-html.theme-holiday .xm-flake:nth-child(21) { left: 39.5%; width: 9.0px; height: 9.0px; opacity: 0.48; animation-duration: 15.4s, 4.3s; animation-delay: -17.8s, -17.8s; }
-html.theme-holiday .xm-flake:nth-child(22) { left: 21.5%; width: 7.2px; height: 7.2px; opacity: 0.52; animation-duration: 18.8s, 4.0s; animation-delay: -1.5s, -1.5s; }
-html.theme-holiday .xm-flake:nth-child(23) { left: 10.9%; width: 8.7px; height: 8.7px; opacity: 0.52; animation-duration: 14.4s, 7.1s; animation-delay: -24.5s, -24.5s; }
-html.theme-holiday .xm-flake:nth-child(24) { left: 25.7%; width: 8.7px; height: 8.7px; opacity: 0.9; animation-duration: 19.1s, 8.2s; animation-delay: -3.4s, -3.4s; }
-html.theme-holiday .xm-flake:nth-child(25) { left: 46.7%; width: 9.9px; height: 9.9px; opacity: 0.57; animation-duration: 15.2s, 5.7s; animation-delay: -2.9s, -2.9s; }
-html.theme-holiday .xm-flake:nth-child(26) { left: 82.2%; width: 7.2px; height: 7.2px; opacity: 0.52; animation-duration: 14.3s, 6.6s; animation-delay: -26.6s, -26.6s; }
+html.theme-holiday .xm-flake:nth-child(1) { left: 32.7%; width: 7.2px; height: 7.2px; opacity: 0.61; animation-duration: 9.7s, 6.7s; animation-delay: -2.0s, -2.0s; }
+html.theme-holiday .xm-flake:nth-child(2) { left: 6.7%; width: 9.9px; height: 9.9px; opacity: 0.49; animation-duration: 6.1s, 4.3s; animation-delay: -12.1s, -12.1s; }
+html.theme-holiday .xm-flake:nth-child(3) { left: 42.6%; width: 12.3px; height: 12.3px; opacity: 0.88; animation-duration: 6.6s, 7.1s; animation-delay: -6.3s, -6.3s; }
+html.theme-holiday .xm-flake:nth-child(4) { left: 57.6%; width: 9.0px; height: 9.0px; opacity: 0.58; animation-duration: 11.6s, 8.3s; animation-delay: -1.3s, -1.3s; }
+html.theme-holiday .xm-flake:nth-child(5) { left: 15.1%; width: 6.9px; height: 6.9px; opacity: 0.71; animation-duration: 7.7s, 4.9s; animation-delay: -22.9s, -22.9s; }
+html.theme-holiday .xm-flake:nth-child(6) { left: 63.6%; width: 9.0px; height: 9.0px; opacity: 0.54; animation-duration: 9.1s, 4.3s; animation-delay: -1.8s, -1.8s; }
+html.theme-holiday .xm-flake:nth-child(7) { left: 67.7%; width: 9.3px; height: 9.3px; opacity: 0.58; animation-duration: 7.7s, 6.3s; animation-delay: -16.4s, -16.4s; }
+html.theme-holiday .xm-flake:nth-child(8) { left: 78.8%; width: 11.4px; height: 11.4px; opacity: 0.84; animation-duration: 7.3s, 6.6s; animation-delay: -16.1s, -16.1s; }
+html.theme-holiday .xm-flake:nth-child(9) { left: 72.5%; width: 8.1px; height: 8.1px; opacity: 0.79; animation-duration: 11.6s, 6.1s; animation-delay: -3.3s, -3.3s; }
+html.theme-holiday .xm-flake:nth-child(10) { left: 15.9%; width: 9.9px; height: 9.9px; opacity: 0.71; animation-duration: 6.1s, 7.8s; animation-delay: -18.7s, -18.7s; }
+html.theme-holiday .xm-flake:nth-child(11) { left: 86.8%; width: 8.4px; height: 8.4px; opacity: 0.66; animation-duration: 10.0s, 6.9s; animation-delay: -16.6s, -16.6s; }
+html.theme-holiday .xm-flake:nth-child(12) { left: 83.3%; width: 13.5px; height: 13.5px; opacity: 0.77; animation-duration: 8.7s, 4.3s; animation-delay: -18.6s, -18.6s; }
+html.theme-holiday .xm-flake:nth-child(13) { left: 64.4%; width: 13.8px; height: 13.8px; opacity: 0.75; animation-duration: 10.7s, 5.9s; animation-delay: -8.0s, -8.0s; }
+html.theme-holiday .xm-flake:nth-child(14) { left: 3.2%; width: 9.6px; height: 9.6px; opacity: 0.8; animation-duration: 6.9s, 4.3s; animation-delay: -3.3s, -3.3s; }
+html.theme-holiday .xm-flake:nth-child(15) { left: 13.7%; width: 7.8px; height: 7.8px; opacity: 0.65; animation-duration: 8.2s, 4.4s; animation-delay: -24.4s, -24.4s; }
+html.theme-holiday .xm-flake:nth-child(16) { left: 54.8%; width: 12.9px; height: 12.9px; opacity: 0.64; animation-duration: 10.7s, 5.4s; animation-delay: -24.2s, -24.2s; }
+html.theme-holiday .xm-flake:nth-child(17) { left: 36.2%; width: 12.9px; height: 12.9px; opacity: 0.55; animation-duration: 11.5s, 4.9s; animation-delay: -4.2s, -4.2s; }
+html.theme-holiday .xm-flake:nth-child(18) { left: 23.9%; width: 9.9px; height: 9.9px; opacity: 0.64; animation-duration: 9.3s, 4.0s; animation-delay: -7.4s, -7.4s; }
+html.theme-holiday .xm-flake:nth-child(19) { left: 37.2%; width: 10.5px; height: 10.5px; opacity: 0.73; animation-duration: 11.5s, 6.6s; animation-delay: -19.3s, -19.3s; }
+html.theme-holiday .xm-flake:nth-child(20) { left: 67.3%; width: 6.3px; height: 6.3px; opacity: 0.81; animation-duration: 11.2s, 8.4s; animation-delay: -21.8s, -21.8s; }
+html.theme-holiday .xm-flake:nth-child(21) { left: 39.5%; width: 9.0px; height: 9.0px; opacity: 0.48; animation-duration: 6.5s, 4.3s; animation-delay: -17.8s, -17.8s; }
+html.theme-holiday .xm-flake:nth-child(22) { left: 21.5%; width: 7.2px; height: 7.2px; opacity: 0.52; animation-duration: 7.9s, 4.0s; animation-delay: -1.5s, -1.5s; }
+html.theme-holiday .xm-flake:nth-child(23) { left: 10.9%; width: 8.7px; height: 8.7px; opacity: 0.52; animation-duration: 6.0s, 7.1s; animation-delay: -24.5s, -24.5s; }
+html.theme-holiday .xm-flake:nth-child(24) { left: 25.7%; width: 8.7px; height: 8.7px; opacity: 0.9; animation-duration: 8.0s, 8.2s; animation-delay: -3.4s, -3.4s; }
+html.theme-holiday .xm-flake:nth-child(25) { left: 46.7%; width: 9.9px; height: 9.9px; opacity: 0.57; animation-duration: 6.4s, 5.7s; animation-delay: -2.9s, -2.9s; }
+html.theme-holiday .xm-flake:nth-child(26) { left: 82.2%; width: 7.2px; height: 7.2px; opacity: 0.52; animation-duration: 6.0s, 6.6s; animation-delay: -26.6s, -26.6s; }
 @keyframes xm-fall {
   from { transform: translateY(0); }
-  to   { transform: translateY(calc(var(--vhpx, 1vh) * 100 + 20px)); }
+  to   { transform: translateY(var(--xm-fall, 340px)); }
 }
 @keyframes xm-sway {
   from { margin-left: -14px; }
@@ -10753,7 +10746,8 @@ html.theme-holiday .xm-sleigh {
 }
 /* Battery saver means no motion: no snow, no sleigh, lights hold steady. */
 html.battery-save .xm-sky,
-html.battery-save .xm-sleigh-layer { display: none !important; }
+html.battery-save .xm-sleigh-layer,
+html.battery-save .xm-hand-snow { display: none !important; }
 html.battery-save.theme-holiday .browse-map::before,
 html.battery-save.theme-holiday .browse-map::after { animation: none; }
 @media (prefers-reduced-motion: reduce) {
