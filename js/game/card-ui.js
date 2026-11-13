@@ -321,7 +321,16 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   // label. The inactive half (driven by data-rotated on the
   // card root) is dimmed.
   if (card.type === 'radiator') {
-    return buildRadiatorFace(card, sideName);
+    const radFace = buildRadiatorFace(card, sideName);
+    // Radiator art sits in the open band between the two half-cards (css
+    // .is-radiator.has-bg-art). The whole card spins 180 degrees to its heavy
+    // side, so the art is drawn to read either way up.
+    const radArt = CARD_ART[card.id] && CARD_ART[card.id][sideName];
+    if (radArt && (radArt.approved || globalThis.HF_CARD_ART_PREVIEW)) {
+      radFace.style.backgroundImage = `url("${assetUrl(radArt.src)}")`;
+      radFace.classList.add('has-bg-art');
+    }
+    return radFace;
   }
 
   // Crew faces are functionally independent: each face is a

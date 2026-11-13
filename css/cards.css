@@ -1264,6 +1264,13 @@
   background: rgba(0, 0, 0, 0.6);
   border-color: rgba(125, 211, 252, 0.7);
 }
+/* Radiator art: a band between the light and heavy half-cards, not the whole
+   face (the halves keep their own parchment / dark ground). */
+.card-face.is-radiator.has-bg-art {
+  background-repeat: no-repeat;
+  background-size: 100% 43%;
+  background-position: center 50%;
+}
 /* No ability text: collapse the box rather than show a bare black bar. */
 .card-face.has-bg-art .card-blurb:empty {
   background: none;
