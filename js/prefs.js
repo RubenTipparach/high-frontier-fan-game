@@ -150,6 +150,9 @@ export function applyHolidayClass() {
       sleighLayer.innerHTML = '<span class="xm-sleigh"></span>';
       document.body.appendChild(sleighLayer);
     }
+    // The sleigh crosses now and then: each pass is scheduled at a random
+    // moment 1 to 5 minutes after the last (user 2026-11-13).
+    if (on && !_sleighTimer) scheduleSleigh();
     // Snow falls only inside the hand panel (user 2026-11-13), as real
     // flakes moved on the GPU so it stays smooth. The hand panel mounts later
     // and can be rebuilt, so a light check keeps one snow layer in it.
@@ -158,6 +161,25 @@ export function applyHolidayClass() {
       _handSnowTimer = setInterval(ensureHandSnow, 1000);
     }
   } catch { /* no document (non-browser) */ }
+}
+
+let _sleighTimer = null;
+const SLEIGH_MIN_MS = 60 * 1000;
+const SLEIGH_MAX_MS = 5 * 60 * 1000;
+function scheduleSleigh() {
+  const wait = SLEIGH_MIN_MS + Math.random() * (SLEIGH_MAX_MS - SLEIGH_MIN_MS);
+  _sleighTimer = setTimeout(() => {
+    try {
+      const s = document.querySelector('.xm-sleigh');
+      if (s && isHolidayTheme() && !document.hidden) {
+        // Two identical keyframe sets, alternated, so each pass restarts.
+        const next = s.classList.contains('xm-fly-a') ? 'xm-fly-b' : 'xm-fly-a';
+        s.classList.remove('xm-fly-a', 'xm-fly-b');
+        s.classList.add(next);
+      }
+    } catch { /* ignore */ }
+    scheduleSleigh();
+  }, wait);
 }
 
 let _handSnowTimer = null;
