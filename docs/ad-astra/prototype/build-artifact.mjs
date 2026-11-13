@@ -39,5 +39,9 @@ for (const dir of ['assets/factory', 'assets/map-icons']) {
   mkdirSync(join(dist, dir), { recursive: true });
   for (const f of readdirSync(join(root, dir))) if (/\.(png|svg)$/.test(f) && !f.startsWith('_')) { copyFileSync(join(root, dir, f), join(dist, dir, f)); assets.push(`${dir}/${f}`); }
 }
+// the real HF Sol board's data (js/game/planner-map.js fetches these)
+for (const f of ['vendor/hf-mission-planner/assets/data-hf4.json', 'data/site-flags.json']) {
+  mkdirSync(dirname(join(dist, f)), { recursive: true }); copyFileSync(join(root, f), join(dist, f)); assets.push(f);
+}
 writeFileSync(join(dist, 'assets.json'), JSON.stringify(assets, null, 1));
 console.log(`dist/ad-astra.html ${(html.length / 1024).toFixed(0)} KB + ${assets.length} assets`);

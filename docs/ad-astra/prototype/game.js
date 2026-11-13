@@ -6,7 +6,8 @@
 // (js/game/card-ui.js#renderCard) so they look like the real cards.
 
 import { renderCard } from '../../../js/game/card-ui.js';
-import { MapRenderer } from '../../../js/game/render.js';
+import { MapRenderer, LEO_ANCHOR } from '../../../js/game/render.js';
+import { loadPlannerMap } from '../../../js/game/planner-map.js';
 import {
   TUNE, SOURCES, HOLDINGS, CLASSES, PROP_PER_MASS, FAMILY_GLYPH, CARD_BY_ID, DECKS, DECK_LABEL,
   SPINOFFS, TERRAFORM, EVENTS, STARS, STAR_BY_ID, ANCHORS, SEGMENTS, SPECIAL,
@@ -1046,27 +1047,35 @@ function systemMapData(starId) { // AA-B7a
   return _sysData[starId];
 }
 
+let SOL_DATA = null, _solLoading = null;
 function rendererFor(key) {
   if (RENDERERS[key]) return RENDERERS[key];
+  if (key === 'sol' && !SOL_DATA) { // the real HF Sol board (js/game/planner-map.js)
+    if (!_solLoading) _solLoading = loadPlannerMap().then((d) => { SOL_DATA = d; render(); }).catch((e) => { toast(`The Sol map failed to load: ${e.message}`); MAPMODE = 'stars'; render(); });
+    return null;
+  }
   const host = h('div', { class: 'aa-maphost', 'data-map': key });
   $('#aa-maps').append(host);
-  const data = key === 'stars' ? starMapData() : systemMapData(key);
+  const data = key === 'stars' ? starMapData() : key === 'sol' ? SOL_DATA : systemMapData(key);
   const renderer = new MapRenderer(host, { data, onSelect: (id) => openPopup(key, id) });
-  renderer.options.initialZoom = key === 'stars' ? 1 : 1.5;
+  renderer.options.initialZoom = key === 'system' ? 1.5 : 1;
   // open on the whole map (the star neighbourhood, or the whole system), not
   // zoomed onto the rocket the way the Sol board opens
   renderer._initialViewDone = true;
   // these maps are read zoomed out, so keep site names visible at fit zoom
-  renderer.options.labelFadeMin = 0.4; renderer.options.labelFadeMax = 0.7;
+  // (the Sol board keeps the HF default fade: it has hundreds of sites)
+  if (key !== 'sol') { renderer.options.labelFadeMin = 0.4; renderer.options.labelFadeMax = 0.7; }
   try { renderer.setAmbientRocketCount(0); } catch (e) { /* optional */ }
   RENDERERS[key] = { renderer, host, data, fresh: true };
   return RENDERERS[key];
 }
 
 function syncMaps() {
-  const key = MAPMODE === 'system' && SYSVIEW && sysOf(SYSVIEW) ? SYSVIEW : 'stars';
-  if (key === 'stars') MAPMODE = 'stars';
+  const key = MAPMODE !== 'system' ? 'stars' : (SYSVIEW && sysOf(SYSVIEW)) ? SYSVIEW : 'sol';
   const cur = rendererFor(key);
+  const loading = $('#aa-maploading');
+  if (loading) loading.hidden = !!cur;
+  if (!cur) { for (const r of Object.values(RENDERERS)) r.host.style.display = 'none'; return; }
   for (const [k, r] of Object.entries(RENDERERS)) r.host.style.display = k === key ? '' : 'none';
   const R = cur.renderer; const sh = S.ship;
   // insets: the hand strip and the open sidepanel cover part of the stage
@@ -1075,7 +1084,12 @@ function syncMaps() {
   if (cur.fresh) {
     cur.fresh = false;
     // open framed on the whole map, inside the area the hand and panel leave free
-    requestAnimationFrame(() => { try { R.reset(); R.flyToFit(cur.data.sites, { maxZoom: key === 'stars' ? 1.6 : 2.4, pad: 0.9 }); } catch (e) { /* sizing */ } });
+    requestAnimationFrame(() => { try { R.reset(); if (key !== 'sol') R.flyToFit(cur.data.sites, { maxZoom: key === 'stars' ? 1.6 : 2.4, pad: 0.9 }); } catch (e) { /* sizing */ } });
+  }
+  if (key === 'sol') { // Sol: Home theatre, no movement (AA-S1); the drydock is at LEO
+    R.setSandboxRocket(sh.launched ? null : { x: LEO_ANCHOR.x, y: LEO_ANCHOR.y });
+    R.setRoute(null); R.setMoveTargets(null);
+    return;
   }
   if (key === 'stars') {
     // explored stars carry their world badge as the hex label (G H M X, - none)
@@ -1138,7 +1152,7 @@ function openPopup(key, id) {
   const ent = RENDERERS[key]; if (!ent || !id) return;
   const site = ent.data.byId[id]; if (!site) return;
   POPUP = { key, id };
-  const actions = key === 'stars' ? starActions(id) : systemActions(key, id);
+  const actions = key === 'stars' ? starActions(id) : key === 'sol' ? solActions(site) : systemActions(key, id);
   ent.renderer.setSitePopup(site, actions);
 }
 function refreshPopup() {
@@ -1209,6 +1223,12 @@ function systemActions(starId, id) {
   if (here && site && sh.sysNode === id) out.push(info('Your starship is here'));
   return out;
 }
+function solActions(site) {
+  const out = [info('Sol is your Home empire: nothing moves here (AA-S1).')];
+  if (site && site.name === 'LEO') out.push(info(S.ship.launched ? 'Your drydock, empty since launch.' : 'Your drydock: the starship is built here.'));
+  out.push({ label: '☉ Open the Sol empire panel', variant: 'rocket', onClick: act(() => { PANE = 'sol'; render(); }) });
+  return out;
+}
 async function lensSurveyStar(starId) { if (!spendHome()) return; explore(starId, 'Lens Survey from Sol'); commit(); }
 
 // ---------- the shell
@@ -1233,7 +1253,7 @@ function mountShell() {
           <button id="aa-mode-sys" title="The system your starship is in">🪐 System</button>
         </div>
       </div>
-      <div class="browse-map-stage"><div class="browse-map-canvas" id="aa-maps"></div></div>
+      <div class="browse-map-stage"><div class="browse-map-canvas" id="aa-maps"><p id="aa-maploading" class="aa-maploading" hidden>Loading the Sol board...</p></div></div>
     </div></div>
     <aside id="aa-side" class="browse-sidepanel" data-active="">
       <nav class="sidepanel-tabs">
@@ -1243,10 +1263,11 @@ function mountShell() {
         <button data-pane="milestones" title="Scoring" aria-label="Scoring">🏆</button>
         <button data-pane="log" title="Mission log" aria-label="Mission log">📋</button>
         <button data-pane="rules" title="How to play" aria-label="How to play">📖</button>
+        <button data-pane="debug" title="Debug tools (prototype)" aria-label="Debug tools">🔧</button>
       </nav>
       <div class="sidepanel-content">
         <button class="sidepanel-close" id="aa-side-close" aria-label="Close panel" title="Close">×</button>
-        ${['ship', 'sol', 'frontier', 'milestones', 'log', 'rules'].map((p) => `<div class="panel-pane" data-pane="${p}"></div>`).join('')}
+        ${['ship', 'sol', 'frontier', 'milestones', 'log', 'rules', 'debug'].map((p) => `<div class="panel-pane" data-pane="${p}"></div>`).join('')}
       </div>
     </aside>
     <div id="aa-hand" class="sandbox-hand" aria-label="Your hand">
@@ -1265,7 +1286,7 @@ function mountShell() {
   $('#aa-news').onclick = () => S.event ? modal({ title: `Generation event: ${S.event.name}`, body: `<p>${S.event.text}</p><p class="muted">${S.event.note || ''}</p>` }) : toast('No event this turn.');
   $('#turn-end').onclick = endTurn;
   $('#aa-mode-stars').onclick = () => setMapMode('stars');
-  $('#aa-mode-sys').onclick = () => { const id = S.ship.orbit || SYSVIEW || Object.keys(S.systems)[0]; if (!id) { toast('No explored system yet.'); return; } setMapMode('system', id); };
+  $('#aa-mode-sys').onclick = pickSystem;
   $('#aa-side').querySelectorAll('.sidepanel-tabs button[data-pane]').forEach((b) => { b.onclick = () => { PANE = PANE === b.dataset.pane ? '' : b.dataset.pane; render(); }; });
   $('#aa-side-close').onclick = () => { PANE = ''; render(); };
   $('#hand-boost-commit').onclick = boostMarked;
@@ -1372,6 +1393,7 @@ function paneContent(p) {
   if (p === 'frontier') return [h('h3', {}, '🛰 Frontier'), frontierPane()];
   if (p === 'milestones') { const sc = score(); return [h('h3', {}, '🏆 Scoring'), h('table', { class: 'aa-score' }, sc.rows.map((r) => h('tr', {}, h('td', {}, r[0], ' ', h('small', {}, r[2])), h('td', {}, r[1]))), h('tr', { class: 'tot' }, h('td', {}, 'Total'), h('td', {}, sc.total))), h('p', { class: 'aa-band' }, S.over ? S.over.band : sc.band), h('p', { class: 'muted' }, 'Bands (AA-I3): 0-9 Lost in the dark, 10-19 Survivors, 20-34 Colony, 35+ New Earth.')]; }
   if (p === 'log') return [h('h3', {}, '📋 Mission log'), h('ol', { class: 'aa-log' }, S.log.slice(0, 120).map((l) => h('li', { class: l.kind }, h('small', {}, l.when), ' ', l.msg)))];
+  if (p === 'debug') return [h('h3', {}, '🔧 Debug tools'), debugPane()];
   if (p === 'rules') return [h('h3', {}, '📖 How to play'), h('div', { class: 'aa-rules', html: RULES_HTML })];
   return [];
 }
@@ -1452,6 +1474,61 @@ const RULES_HTML = `
 <p><b>Act II, Reaching the Stars.</b> Each dot is a space, half a light-year. At the end of each Generation the starship moves V spaces. Burn to change V. Brake with your drive, a Brake card, an icebrake in a star's Oort cloud (blue rings) or a fryby through a gas giant. Reach V0 at a star or in its Oort cloud to enter orbit. Passing through a star explores it. Many stars are dead ends.</p>
 <p><b>Act III, Colonies.</b> On a system map, entering a magenta burn pad costs a burn. Prospect, deploy the Seed (it doubles every Generation), rebuild cards into their Landfall side, found Colonies, grow, and terraform a hostile world step by step for spin-off tech.</p>
 <p class="muted">Full rules: docs/ad-astra/rules.md. Rule IDs like AA-G3 appear in the log.</p>`;
+
+// ---------- System picker: Sol (the real HF board) and every explored system
+async function pickSystem() {
+  const ids = ['sol', ...Object.keys(S.systems)];
+  if (S.ship.orbit) ids.sort((a, b) => (b === S.ship.orbit) - (a === S.ship.orbit));
+  if (ids.length === 1) { setMapMode('system', 'sol'); return; }
+  const body = h('div', { class: 'aa-hold-pick' }); let choice = null;
+  for (const id of ids) {
+    const label = id === 'sol' ? 'Sol' : STAR_BY_ID[id].name;
+    const note = id === 'sol' ? 'Home: your empire and the drydock' : S.ship.orbit === id ? 'Your starship is in orbit here' : sysOf(id).sites.some((x) => x.pop > 0) ? 'Colony' : 'Explored';
+    body.append(h('button', { class: 'aa-pick', onclick: (e) => { choice = id; body.querySelectorAll('.aa-pick').forEach((b) => b.classList.remove('sel')); e.currentTarget.classList.add('sel'); } }, h('b', {}, label), h('span', {}, note)));
+  }
+  const ok = await modal({ title: 'Which system?', body, buttons: [{ label: 'Cancel', value: false }, { label: 'Show', value: true, primary: true }] });
+  if (ok && choice) setMapMode('system', choice);
+}
+
+// ---------- Debug tools (prototype only)
+function debugPane() {
+  const unexplored = STARS.filter((st) => !S.stars[st.id].explored);
+  const dlog = (m) => { log(`[debug] ${m}`); commit(); };
+  const starSel = (id) => h('select', { id, 'aria-label': 'Star' }, STARS.map((st) => h('option', { value: st.id }, `${st.name}${S.stars[st.id].explored ? ' (explored)' : ''}`)));
+  const btn = (label, fn) => h('button', { class: 'aa-op', onclick: fn, disabled: !!S.over && !/New/.test(label) }, label);
+  return h('div', { class: 'aa-debug' },
+    h('p', { class: 'muted' }, 'Prototype tools for testing. They bend the rules, and the log marks every use with [debug].'),
+    h('h4', {}, 'Reveal'),
+    h('div', { class: 'aa-ops' },
+      btn(`Reveal all stars (${unexplored.length} left)`, () => { for (const st of unexplored) explore(st.id, 'debug'); dlog(`revealed ${unexplored.length} stars`); }),
+      btn('Show every system map', () => { for (const st of STARS) if (!S.stars[st.id].explored) explore(st.id, 'debug'); dlog('revealed all'); pickSystem(); })),
+    h('div', { class: 'aa-dbgrow' }, starSel('aa-dbg-reveal'), btn('Reveal', () => { const id = $('#aa-dbg-reveal').value; explore(id, 'debug'); dlog(`revealed ${STAR_BY_ID[id].name}`); setMapMode('system', id); })),
+    h('h4', {}, 'Starship'),
+    h('div', { class: 'aa-dbgrow' }, starSel('aa-dbg-orbit'), btn('Put in orbit', async () => {
+      const id = $('#aa-dbg-orbit').value; const sh = S.ship;
+      if (!sh.launched) { sh.launched = true; sh.exit = 'neptune'; S.phase = 'voyage'; S.turn = 0; startGeneration(); }
+      sh.lost = false; sh.recycled = false; sh.prev = null; sh.next = null; sh.pos = id;
+      await enterOrbit(id); dlog(`starship placed in orbit at ${STAR_BY_ID[id].name}`);
+    })),
+    h('div', { class: 'aa-ops' },
+      btn('Starter ship (Medusa)', () => {
+        const mk = (id, x = {}) => inst(id, x);
+        S.ship.cards = [mk('medusa'), mk('winch'), mk('habring'), mk('lidar'), mk('seed'), mk('rover'), mk('magsail')]; S.ship.prop = 36; dlog('fitted a starter Medusa ship with 36 Pulse');
+      }),
+      btn('+12 propellant', () => { S.ship.prop += 12; dlog('+12 propellant'); }),
+      btn('Repair all cards', () => { S.ship.cards.forEach((c) => { c.glitched = false; }); dlog('repaired every card'); }),
+      btn('V +1', () => { S.ship.V = Math.min(TUNE.maxV, S.ship.V + 1); dlog(`V${S.ship.V}`); }),
+      btn('V 0', () => { S.ship.V = 0; dlog('V0'); }),
+      btn('+1 Seed', () => { S.ship.cards.push(inst('seed')); dlog('+1 Seed aboard'); })),
+    h('h4', {}, 'Economy and clock'),
+    h('div', { class: 'aa-ops' },
+      btn('+10 Aqua', () => { S.aqua += 10; dlog('+10 Aqua'); }),
+      btn('+1 Home op', () => { S.ops.home++; dlog('+1 Home op'); }),
+      btn('+1 Frontier op', () => { S.ops.frontier++; dlog('+1 Frontier op'); }),
+      btn('Gen -4 (more time)', () => { S.gen = Math.max(1, S.gen - 4); dlog(`Generation set to ${S.gen}`); }),
+      btn('+4 cubes everywhere', () => { for (const sys of Object.values(S.systems)) for (const x of sys.sites) if (x.cubes > 0) x.cubes += 4; dlog('+4 cubes at every factory'); }),
+      btn('All spin-offs', () => { for (const k of [1, 2, 3, 4]) if (!S.spinoffs.includes(SPINOFFS[k].effect)) S.spinoffs.push(SPINOFFS[k].effect); dlog('all spin-off tech'); })));
+}
 
 async function menuModal() {
   const v = await modal({ title: 'High Frontier: Ad Astra', body: '<p>A fan variant prototype. Your game saves in this browser.</p>', buttons: [{ label: 'Close', value: 0 }, { label: '🏆 Score', value: 1 }, { label: 'New game', value: 2, danger: true }] });

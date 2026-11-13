@@ -103,3 +103,8 @@ html, body { margin: 0; height: 100%; background: var(--bg, #07060f); color: var
 .aa-big b { color: #d60f7a; }
 #aa-toast { position: fixed; left: 50%; bottom: max(18px, env(safe-area-inset-bottom, 0px)); transform: translate(-50%, 40px); opacity: 0; background: var(--panel, #11101e); border: 1px solid var(--accent, #7dd3fc); color: #fff; padding: 9px 16px; border-radius: 8px; z-index: 500; transition: .25s; max-width: min(90vw, 520px); text-align: center; pointer-events: none; }
 #aa-toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+.aa-maploading { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; color: var(--ink-dim, #8b90b8); }
+.aa-dbgrow { display: flex; gap: 6px; align-items: stretch; margin: 6px 0; }
+.aa-dbgrow select { flex: 1; min-width: 0; background: var(--panel-2, #1a1830); color: var(--ink, #e6e9ff); border: 1px solid var(--border, #2a2740); border-radius: 6px; padding: 4px 6px; }
+.aa-dbgrow .aa-op { flex: 0 0 auto; }
