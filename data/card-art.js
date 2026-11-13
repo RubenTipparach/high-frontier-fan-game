@@ -128,121 +128,121 @@ export const CARD_ART = {
   "rob_blackbody_pumped_laser": {
     "primary": {
       "src": "assets/cards/robonauts/rob_blackbody_pumped_laser-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/robonauts/rob_blackbody_pumped_laser-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "rob_free_electron_laser": {
     "primary": {
       "src": "assets/cards/robonauts/rob_free_electron_laser-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/robonauts/rob_free_electron_laser-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "rob_neutral_beam": {
     "primary": {
       "src": "assets/cards/robonauts/rob_neutral_beam-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/robonauts/rob_neutral_beam-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "rob_phase_locked_diode_laser": {
     "primary": {
       "src": "assets/cards/robonauts/rob_phase_locked_diode_laser-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/robonauts/rob_phase_locked_diode_laser-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "rob_solar_pumped_mhd_exciplex_laser": {
     "primary": {
       "src": "assets/cards/robonauts/rob_solar_pumped_mhd_exciplex_laser-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/robonauts/rob_solar_pumped_mhd_exciplex_laser-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "rob_cat_fusion_z_pinch_torch": {
     "secondary": {
       "src": "assets/cards/robonauts/rob_cat_fusion_z_pinch_torch-back.svg",
-      "approved": false
+      "approved": true
     },
     "primary": {
       "src": "assets/cards/robonauts/rob_cat_fusion_z_pinch_torch-front.svg",
-      "approved": false
+      "approved": true
     }
   },
   "rob_kuck_mosquito": {
     "primary": {
       "src": "assets/cards/robonauts/rob_kuck_mosquito-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/robonauts/rob_kuck_mosquito-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "rob_met_steamer": {
     "primary": {
       "src": "assets/cards/robonauts/rob_met_steamer-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/robonauts/rob_met_steamer-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "rob_nuclear_drill": {
     "primary": {
       "src": "assets/cards/robonauts/rob_nuclear_drill-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/robonauts/rob_nuclear_drill-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "rob_rock_splitter": {
     "secondary": {
       "src": "assets/cards/robonauts/rob_rock_splitter-back.svg",
-      "approved": false
+      "approved": true
     },
     "primary": {
       "src": "assets/cards/robonauts/rob_rock_splitter-front.svg",
-      "approved": false
+      "approved": true
     }
   },
   "rob_tungsten_resistojet": {
     "primary": {
       "src": "assets/cards/robonauts/rob_tungsten_resistojet-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/robonauts/rob_tungsten_resistojet-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "rob_flywheel_tractor": {
     "primary": {
       "src": "assets/cards/robonauts/rob_flywheel_tractor-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/robonauts/rob_flywheel_tractor-back.svg",
-      "approved": false
+      "approved": true
     }
   }
 };

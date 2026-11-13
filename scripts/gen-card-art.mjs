@@ -25,7 +25,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 // Show the user a rendered preview before approving (CLAUDE.md).
 const DECKS = {
   thrusters: { ...thrusters, approved: new Set(['*']) },
-  robonauts: { ...robonauts, approved: new Set([]) },   // awaiting the user's sign-off
+  robonauts: { ...robonauts, approved: new Set(['*']) },
 };
 
 const manifest = {};

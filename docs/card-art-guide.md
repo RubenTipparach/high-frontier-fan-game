@@ -28,9 +28,11 @@ some kind of spaceship attached to your engines"): use the generator's ship
 kit (`shipBody` tug / crewed / freighter / probe + the `RIG` mounts) for new
 decks rather than drawing bare engines.
 
-- **Vector** - `scripts/gen-thruster-art.mjs` writes
-  `assets/cards/thrusters/<id>-<front|back>.svg` (all 24 thruster faces) and the
-  generated manifest `data/card-art.js`. Same idiom as the colonist art
+- **Vector** - `scripts/gen-card-art.mjs` (shared kit in
+  `scripts/card-art/kit.mjs`, one module per deck: `thrusters.mjs`,
+  `robonauts.mjs`) writes `assets/cards/<deck>/<id>-<front|back>.svg` and the
+  generated manifest `data/card-art.js`. LIVE: all 24 thruster faces and all
+  24 robonaut faces (user approved the robonauts 2026-11-13). Same idiom as the colonist art
   (`scripts/gen-colonist-art.mjs`): dark space gradient, seeded starfield,
   glowing subject. Deterministic, no `Math.random()`.
 - **Blender** (comparison only, NOT shipped) - `scripts/blender/render_thruster_art.py`,
@@ -60,3 +62,17 @@ text (`.card-blurb`) and the Supports Required panel follow the colonist-card
 treatment: a 60% black box with light ink, no outline on the white face, a
 faint light outline on the dark face, and an empty blurb collapses. Those are
 the only styling changes; nothing moves.
+
+## Research each card's real machine first (user 2026-11-13)
+
+Every face is a real or seriously proposed technology. Look up what it
+physically is before drawing it, and draw THAT anatomy: the first robonaut
+pass used three templates (a ship firing a beam, a rocket with a plume, a
+rover) and the user rejected it as generic. Each robonaut face now shows its
+own machine (e.g. the FEL's striped undulator, Kuck's comet rig under its
+water bag, the MagBeam plasma column into a magnetic bubble). The HF4 rules'
+designer notes fix the roles: rayguns fire at the surface from orbit and read
+the vapour's spectrum; buggies scoop and process regolith; missiles assay rock
+by melting it with their exhaust, so a missile's exhaust or beam is aimed AT
+its rock. Check every scene is aimed at its target. The published-card gallery
+(hf4map.com) has lapsed; its robonaut images were never archived.
