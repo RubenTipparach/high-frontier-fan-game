@@ -110,8 +110,12 @@ ART['rad_ether_charged_dust:secondary'] = () => {
 // 4. Li Heatsink Fountain: tanks of lithium that boil off once, venting
 // silvery fountains of vapour - a one-shot heat sink.
 ART['rad_li_heatsink_fountain:primary'] = () => scene('rad_li_heatsink_fountain', 'primary', 307, ['#141a24', '#030507'],
-  STEEL('tk') + lin('plume', [[0, '#f1f5f9', 0.9], [1, '#cbd5e1', 0]], 0, 0, 1, 0),
+  // Slate-blue vapour (not white): this is the cream white face, where a pale
+  // plume vanishes.
+  STEEL('tk') + lin('plume', [[0, '#334155', 0.95], [0.6, '#64748b', 0.6], [1, '#94a3b8', 0]], 0, 0, 1, 0),
   `${both(`<path d="M${CX + 40},${CY - 6} Q${CX + 90},${CY - 40} ${CX + 148},${CY - 30} L${CX + 148},${CY + 20} Q${CX + 90},${CY + 10} ${CX + 40},${CY + 6} Z" fill="url(#plume)"/>
+     <path d="M${CX + 44},${CY - 2} Q${CX + 92},${CY - 22} ${CX + 140},${CY - 14}" stroke="#1e293b" stroke-width="1.4" stroke-dasharray="4 4" fill="none" opacity="0.7"/>
+     ${[[70, -16], [92, -8], [112, -20], [128, 4], [100, 6], [140, -6]].map(([x, y]) => `<circle cx="${CX + x}" cy="${CY + y}" r="2.2" fill="#334155" opacity="0.75"/>`).join('')}
      <rect x="${CX + 4}" y="${CY - 30}" width="34" height="60" rx="12" fill="url(#tk)"/><rect x="${CX + 36}" y="${CY - 5}" width="8" height="10" fill="#94a3b8"/>`)}`);
 // Thermochemical Heatsink Fountain: a can packed with salt capsules that
 // absorb heat chemically, venting a white condensate plume.

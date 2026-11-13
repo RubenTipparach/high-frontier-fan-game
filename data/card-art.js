@@ -654,5 +654,365 @@ export const CARD_ART = {
       "src": "assets/cards/radiators/rad_ti_k_heat_pipe-back.svg",
       "approved": false
     }
+  },
+  "ber_geo_elevator_bernal": {
+    "primary": {
+      "src": "assets/cards/bernals/ber_geo_elevator_bernal-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/bernals/ber_geo_elevator_bernal-back.svg",
+      "approved": false
+    }
+  },
+  "ber_l1_climate_control_bernal": {
+    "primary": {
+      "src": "assets/cards/bernals/ber_l1_climate_control_bernal-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/bernals/ber_l1_climate_control_bernal-back.svg",
+      "approved": false
+    }
+  },
+  "ber_l2_collimator_bernal": {
+    "primary": {
+      "src": "assets/cards/bernals/ber_l2_collimator_bernal-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/bernals/ber_l2_collimator_bernal-back.svg",
+      "approved": false
+    }
+  },
+  "ber_l3_lofstrom_loop_microgravity": {
+    "primary": {
+      "src": "assets/cards/bernals/ber_l3_lofstrom_loop_microgravity-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/bernals/ber_l3_lofstrom_loop_microgravity-back.svg",
+      "approved": false
+    }
+  },
+  "ber_l4_antimatter_factory": {
+    "primary": {
+      "src": "assets/cards/bernals/ber_l4_antimatter_factory-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/bernals/ber_l4_antimatter_factory-back.svg",
+      "approved": false
+    }
+  },
+  "ber_l4s_pharmaceutics_bernal": {
+    "primary": {
+      "src": "assets/cards/bernals/ber_l4s_pharmaceutics_bernal-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/bernals/ber_l4s_pharmaceutics_bernal-back.svg",
+      "approved": false
+    }
+  },
+  "ber_l5_solar_cell_factory": {
+    "primary": {
+      "src": "assets/cards/bernals/ber_l5_solar_cell_factory-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/bernals/ber_l5_solar_cell_factory-back.svg",
+      "approved": false
+    }
+  },
+  "ber_l5s_cancer_hospital": {
+    "primary": {
+      "src": "assets/cards/bernals/ber_l5s_cancer_hospital-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/bernals/ber_l5s_cancer_hospital-back.svg",
+      "approved": false
+    }
+  },
+  "ber_sso_diplomatic": {
+    "primary": {
+      "src": "assets/cards/bernals/ber_sso_diplomatic-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/bernals/ber_sso_diplomatic-back.svg",
+      "approved": false
+    }
+  },
+  "ber_tourism_cycler": {
+    "primary": {
+      "src": "assets/cards/bernals/ber_tourism_cycler-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/bernals/ber_tourism_cycler-back.svg",
+      "approved": false
+    }
+  },
+  "rea_cermet_nerva_fission": {
+    "primary": {
+      "src": "assets/cards/reactors/rea_cermet_nerva_fission-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/reactors/rea_cermet_nerva_fission-back.svg",
+      "approved": false
+    }
+  },
+  "rea_d_d_fusion_magneto_inertial": {
+    "primary": {
+      "src": "assets/cards/reactors/rea_d_d_fusion_magneto_inertial-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/reactors/rea_d_d_fusion_magneto_inertial-back.svg",
+      "approved": false
+    }
+  },
+  "rea_d_t_fusion_tokamak": {
+    "primary": {
+      "src": "assets/cards/reactors/rea_d_t_fusion_tokamak-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/reactors/rea_d_t_fusion_tokamak-back.svg",
+      "approved": false
+    }
+  },
+  "rea_d_t_gun_fusion": {
+    "primary": {
+      "src": "assets/cards/reactors/rea_d_t_gun_fusion-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/reactors/rea_d_t_gun_fusion-back.svg",
+      "approved": false
+    }
+  },
+  "rea_lyman_alpha_trap": {
+    "primary": {
+      "src": "assets/cards/reactors/rea_lyman_alpha_trap-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/reactors/rea_lyman_alpha_trap-back.svg",
+      "approved": false
+    }
+  },
+  "rea_metallic_hydrogen": {
+    "primary": {
+      "src": "assets/cards/reactors/rea_metallic_hydrogen-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/reactors/rea_metallic_hydrogen-back.svg",
+      "approved": false
+    }
+  },
+  "rea_mini_mag_rf_paul_trap": {
+    "primary": {
+      "src": "assets/cards/reactors/rea_mini_mag_rf_paul_trap-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/reactors/rea_mini_mag_rf_paul_trap-back.svg",
+      "approved": false
+    }
+  },
+  "rea_pebble_bed_fission": {
+    "primary": {
+      "src": "assets/cards/reactors/rea_pebble_bed_fission-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/reactors/rea_pebble_bed_fission-back.svg",
+      "approved": false
+    }
+  },
+  "rea_penning_trap": {
+    "primary": {
+      "src": "assets/cards/reactors/rea_penning_trap-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/reactors/rea_penning_trap-back.svg",
+      "approved": false
+    }
+  },
+  "rea_project_orion": {
+    "primary": {
+      "src": "assets/cards/reactors/rea_project_orion-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/reactors/rea_project_orion-back.svg",
+      "approved": false
+    }
+  },
+  "rea_rubbia_thin_film_fission_hohlraum": {
+    "primary": {
+      "src": "assets/cards/reactors/rea_rubbia_thin_film_fission_hohlraum-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/reactors/rea_rubbia_thin_film_fission_hohlraum-back.svg",
+      "approved": false
+    }
+  },
+  "rea_supercritical_water_fission": {
+    "primary": {
+      "src": "assets/cards/reactors/rea_supercritical_water_fission-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/reactors/rea_supercritical_water_fission-back.svg",
+      "approved": false
+    }
+  },
+  "fre_fission_heated_steam": {
+    "primary": {
+      "src": "assets/cards/freighters/fre_fission_heated_steam-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/freighters/fre_fission_heated_steam-back.svg",
+      "approved": false
+    }
+  },
+  "fre_fusion_fragment_sail": {
+    "primary": {
+      "src": "assets/cards/freighters/fre_fusion_fragment_sail-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/freighters/fre_fusion_fragment_sail-back.svg",
+      "approved": false
+    }
+  },
+  "fre_hiiper_beam_rider": {
+    "primary": {
+      "src": "assets/cards/freighters/fre_hiiper_beam_rider-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/freighters/fre_hiiper_beam_rider-back.svg",
+      "approved": false
+    }
+  },
+  "fre_inflatable_solar_heated": {
+    "primary": {
+      "src": "assets/cards/freighters/fre_inflatable_solar_heated-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/freighters/fre_inflatable_solar_heated-back.svg",
+      "approved": false
+    }
+  },
+  "fre_poodle_steam": {
+    "primary": {
+      "src": "assets/cards/freighters/fre_poodle_steam-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/freighters/fre_poodle_steam-back.svg",
+      "approved": false
+    }
+  },
+  "fre_rotary_dirt_launcher": {
+    "primary": {
+      "src": "assets/cards/freighters/fre_rotary_dirt_launcher-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/freighters/fre_rotary_dirt_launcher-back.svg",
+      "approved": false
+    }
+  },
+  "fre_z_pinch_d_t_6li_fusion": {
+    "primary": {
+      "src": "assets/cards/freighters/fre_z_pinch_d_t_6li_fusion-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/freighters/fre_z_pinch_d_t_6li_fusion-back.svg",
+      "approved": false
+    }
+  },
+  "gw-_amat_catalyzed_fission_fusion": {
+    "primary": {
+      "src": "assets/cards/gwthrusters/gw-_amat_catalyzed_fission_fusion-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/gwthrusters/gw-_amat_catalyzed_fission_fusion-back.svg",
+      "approved": false
+    }
+  },
+  "gw-_dense_plasma_h_b_focus_fusion": {
+    "primary": {
+      "src": "assets/cards/gwthrusters/gw-_dense_plasma_h_b_focus_fusion-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/gwthrusters/gw-_dense_plasma_h_b_focus_fusion-back.svg",
+      "approved": false
+    }
+  },
+  "gw-_levitated_dipole_6li_h_fusion": {
+    "primary": {
+      "src": "assets/cards/gwthrusters/gw-_levitated_dipole_6li_h_fusion-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/gwthrusters/gw-_levitated_dipole_6li_h_fusion-back.svg",
+      "approved": false
+    }
+  },
+  "gw-_mini_mag_orion_z_pinch_fission": {
+    "primary": {
+      "src": "assets/cards/gwthrusters/gw-_mini_mag_orion_z_pinch_fission-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/gwthrusters/gw-_mini_mag_orion_z_pinch_fission-back.svg",
+      "approved": false
+    }
+  },
+  "gw-_salt_water_zubrin": {
+    "primary": {
+      "src": "assets/cards/gwthrusters/gw-_salt_water_zubrin-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/gwthrusters/gw-_salt_water_zubrin-back.svg",
+      "approved": false
+    }
+  },
+  "gw-_spheromak_3he_d_magnetic_fusion": {
+    "primary": {
+      "src": "assets/cards/gwthrusters/gw-_spheromak_3he_d_magnetic_fusion-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/gwthrusters/gw-_spheromak_3he_d_magnetic_fusion-back.svg",
+      "approved": false
+    }
+  },
+  "gw-_vista_d_t_inertial_fusion": {
+    "primary": {
+      "src": "assets/cards/gwthrusters/gw-_vista_d_t_inertial_fusion-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/gwthrusters/gw-_vista_d_t_inertial_fusion-back.svg",
+      "approved": false
+    }
   }
 };

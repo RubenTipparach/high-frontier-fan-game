@@ -20,6 +20,10 @@ import * as robonauts from './card-art/robonauts.mjs';
 import * as refineries from './card-art/refineries.mjs';
 import * as generators from './card-art/generators.mjs';
 import * as radiators from './card-art/radiators.mjs';
+import * as bernals from './card-art/bernals.mjs';
+import * as reactors from './card-art/reactors.mjs';
+import * as freighters from './card-art/freighters.mjs';
+import * as gwthrusters from './card-art/gwthrusters.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BACKDROP = /<rect width="300" height="\d+" fill="url\(#bg\)"\/>/;
@@ -34,6 +38,10 @@ const DECKS = {
   refineries: { ...refineries, approved: new Set(['*']) },
   generators: { ...generators, approved: new Set(['*']) },
   radiators: { ...radiators, approved: new Set([]) },   // mock-up: awaiting the user's sign-off
+  bernals: { ...bernals, approved: new Set([]) },   // mock-up: awaiting the user's sign-off
+  reactors: { ...reactors, approved: new Set([]) },   // mock-up: awaiting the user's sign-off
+  freighters: { ...freighters, approved: new Set([]) },   // mock-up: awaiting the user's sign-off
+  gwthrusters: { ...gwthrusters, approved: new Set([]) },   // mock-up: awaiting the user's sign-off
 };
 
 const manifest = {};
