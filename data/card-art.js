@@ -1074,5 +1074,185 @@ export const CARD_ART = {
       "src": "assets/cards/crew/crew_spacex_norse-back.svg",
       "approved": false
     }
+  },
+  "crew_brin": {
+    "primary": {
+      "src": "assets/cards/crew/crew_brin-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/crew/crew_brin-back.svg",
+      "approved": false
+    }
+  },
+  "crew_the_sea_peoples": {
+    "primary": {
+      "src": "assets/cards/crew/crew_the_sea_peoples-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/crew/crew_the_sea_peoples-back.svg",
+      "approved": false
+    }
+  },
+  "crew_the_martian_way": {
+    "primary": {
+      "src": "assets/cards/crew/crew_the_martian_way-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/crew/crew_the_martian_way-back.svg",
+      "approved": false
+    }
+  },
+  "crew_jaxa": {
+    "primary": {
+      "src": "assets/cards/crew/crew_jaxa-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/crew/crew_jaxa-back.svg",
+      "approved": false
+    }
+  },
+  "crew_space_force": {
+    "primary": {
+      "src": "assets/cards/crew/crew_space_force-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/crew/crew_space_force-back.svg",
+      "approved": false
+    }
+  },
+  "crew_aeb": {
+    "primary": {
+      "src": "assets/cards/crew/crew_aeb-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/crew/crew_aeb-back.svg",
+      "approved": false
+    }
+  },
+  "crew_explorers_without_borders": {
+    "primary": {
+      "src": "assets/cards/crew/crew_explorers_without_borders-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/crew/crew_explorers_without_borders-back.svg",
+      "approved": false
+    }
+  },
+  "crew_baltimore_gun_club": {
+    "primary": {
+      "src": "assets/cards/crew/crew_baltimore_gun_club-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/crew/crew_baltimore_gun_club-back.svg",
+      "approved": false
+    }
+  },
+  "crew_african_union_space_directorate": {
+    "primary": {
+      "src": "assets/cards/crew/crew_african_union_space_directorate-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/crew/crew_african_union_space_directorate-back.svg",
+      "approved": false
+    }
+  },
+  "crew_leo_workers_union": {
+    "primary": {
+      "src": "assets/cards/crew/crew_leo_workers_union-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/crew/crew_leo_workers_union-back.svg",
+      "approved": false
+    }
+  },
+  "crew_makers_guild": {
+    "primary": {
+      "src": "assets/cards/crew/crew_makers_guild-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/crew/crew_makers_guild-back.svg",
+      "approved": false
+    }
+  },
+  "crew_new_pilgrims": {
+    "primary": {
+      "src": "assets/cards/crew/crew_new_pilgrims-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/crew/crew_new_pilgrims-back.svg",
+      "approved": false
+    }
+  },
+  "crew_utopia_inc": {
+    "primary": {
+      "src": "assets/cards/crew/crew_utopia_inc-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/crew/crew_utopia_inc-back.svg",
+      "approved": false
+    }
+  },
+  "crew_galahad_group": {
+    "primary": {
+      "src": "assets/cards/crew/crew_galahad_group-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/crew/crew_galahad_group-back.svg",
+      "approved": false
+    }
+  },
+  "crew_brotherhood_of_cryptobankers": {
+    "primary": {
+      "src": "assets/cards/crew/crew_brotherhood_of_cryptobankers-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/crew/crew_brotherhood_of_cryptobankers-back.svg",
+      "approved": false
+    }
+  },
+  "crew_verisai": {
+    "primary": {
+      "src": "assets/cards/crew/crew_verisai-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/crew/crew_verisai-back.svg",
+      "approved": false
+    }
+  },
+  "crew_heliocentricity": {
+    "primary": {
+      "src": "assets/cards/crew/crew_heliocentricity-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/crew/crew_heliocentricity-back.svg",
+      "approved": false
+    }
+  },
+  "crew_cerulean": {
+    "primary": {
+      "src": "assets/cards/crew/crew_cerulean-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/crew/crew_cerulean-back.svg",
+      "approved": false
+    }
   }
 };
