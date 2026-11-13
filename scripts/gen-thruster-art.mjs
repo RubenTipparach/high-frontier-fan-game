@@ -215,22 +215,46 @@ ART['thr_dumbo:secondary'] = () => {
   <rect x="146" y="34" width="8" height="150" fill="#e0f2fe" opacity="0.7"/>`);
 };
 
-// Hall Effect: face-on annular thruster - the ring-shaped discharge channel
-// glowing blue, with the hollow cathode off to the side.
+// Hall Effect: a Hall thruster in three-quarter view - the squat cylindrical
+// body with its magnet pole pieces, the annular discharge channel glowing at
+// an angle, the hollow cathode clamped on top, and the wide blue-violet plume
+// fanning out of the ring.
 ART['thr_hall_effect:primary'] = () => {
-  const bg = space('#0d1b33', '#03050a');
-  return svg(bg.defs + rad('ring', [[0.55, '#0b1220', 0], [0.7, '#60a5fa'], [0.78, '#e0f2ff'], [0.86, '#3b82f6'], [1, '#1e3a8a', 0]])
-    + rad('halo', [[0, '#3b82f6', 0.5], [1, '#1e3a8a', 0]])
-    + lin('body', [[0, '#3f4756'], [1, '#1f2430']]),
-  `${bg.body}${stars(40, 7)}
-  <circle cx="150" cy="150" r="140" fill="url(#halo)"/>
-  <circle cx="150" cy="150" r="104" fill="url(#body)" stroke="#5b6577" stroke-width="3"/>
-  <circle cx="150" cy="150" r="96" fill="url(#ring)" filter="url(#glow)"/>
-  <circle cx="150" cy="150" r="52" fill="#2a3140" stroke="#4b5566" stroke-width="3"/>
-  <circle cx="150" cy="150" r="18" fill="#1b2029"/>
-  ${[0, 60, 120, 180, 240, 300].map((a) => `<circle cx="${f(150 + Math.cos(a * Math.PI / 180) * 36)}" cy="${f(150 + Math.sin(a * Math.PI / 180) * 36)}" r="3" fill="#5b6577"/>`).join('')}
-  <rect x="246" y="60" width="20" height="58" rx="6" fill="#59616f"/>
-  <circle cx="256" cy="122" r="7" fill="#bfdbfe" filter="url(#glow)"/>`);
+  const bg = space('#0d1b33', '#03050a', '25%', '55%');
+  // Local frame: thruster axis along +x, front face at x=0.
+  const bands = [-70, -48, -26].map((x) => `<path d="M${x},-80 A20,80 0 0 1 ${x},80" fill="none" stroke="#2b3240" stroke-width="3"/>`).join('');
+  const bolts = [...Array(10)].map((_, i) => {
+    const a = (i / 10) * Math.PI * 2;
+    return `<circle cx="${f(Math.cos(a) * 23)}" cy="${f(Math.sin(a) * 76)}" r="1.8" fill="#9aa4b6"/>`;
+  }).join('');
+  return svg(bg.defs
+    + lin('hbody', [[0, '#c3cad6'], [0.35, '#7a8394'], [1, '#2a303c']])
+    + lin('hface', [[0, '#4a5262'], [1, '#232833']])
+    + lin('hplume', [[0, '#e8f1ff', 0.95], [0.25, '#7aa2ff', 0.75], [0.7, '#6d4bd8', 0.3], [1, '#3b1d8f', 0]], 0, 0, 1, 0)
+    + rad('hchan', [[0, '#ffffff'], [0.5, '#9cc0ff'], [1, '#3b6dff', 0]]),
+  `${bg.body}${stars(45, 7)}
+  <g transform="translate(98 150) rotate(16) scale(0.6)">
+    <path d="M6,-66 L420,-200 L420,200 L6,66 Z" fill="url(#hplume)" filter="url(#glow)"/>
+    <path d="M6,-40 Q160,-30 420,-90 L420,90 Q160,30 6,40 Z" fill="#c7d7ff" opacity="0.18"/>
+    <rect x="-150" y="-12" width="70" height="24" fill="#3a4250"/>
+    <path d="M-150,-40 L-120,-40 L-100,-90 M-150,40 L-120,40 L-100,90" stroke="#5b6475" stroke-width="5" fill="none"/>
+    <path d="M-92,-80 L0,-84 L0,84 L-92,80 Z" fill="url(#hbody)"/>
+    <ellipse cx="-92" cy="0" rx="20" ry="80" fill="#2a303c"/>
+    ${bands}
+    <ellipse cx="0" cy="0" rx="27" ry="84" fill="url(#hface)" stroke="#a9b2c2" stroke-width="2"/>
+    ${bolts}
+    <ellipse cx="2" cy="0" rx="20" ry="64" fill="none" stroke="#3b6dff" stroke-width="16" opacity="0.5" filter="url(#soft)"/>
+    <ellipse cx="2" cy="0" rx="20" ry="64" fill="none" stroke="url(#hchan)" stroke-width="9" filter="url(#glow)"/>
+    <ellipse cx="2" cy="0" rx="20" ry="64" fill="none" stroke="#f4f8ff" stroke-width="2.5"/>
+    <ellipse cx="3" cy="0" rx="11" ry="38" fill="#3a4150" stroke="#8f99ab" stroke-width="1.5"/>
+    <ellipse cx="4" cy="0" rx="5" ry="16" fill="#1c2029"/>
+    <path d="M-70,-84 L-60,-104 L10,-104 L14,-96 L-58,-96 Z" fill="#6b7486"/>
+    <rect x="-58" y="-114" width="72" height="12" rx="6" fill="#9aa3b5"/>
+    <circle cx="16" cy="-108" r="6" fill="#dbe7ff" filter="url(#glow)"/>
+    <path d="M18,-108 L70,-118 L70,-98 Z" fill="#a5b8ff" opacity="0.45"/>
+    <path d="M-92,30 Q-130,60 -150,110" stroke="#c2410c" stroke-width="3" fill="none"/>
+    <path d="M-92,40 Q-120,80 -132,130" stroke="#475569" stroke-width="3" fill="none"/>
+  </g>`);
 };
 
 // Ion Drive: a gridded ion engine in profile - the perforated grid glows and

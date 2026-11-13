@@ -1227,6 +1227,34 @@
   background-size: cover;
   background-position: center;
 }
+/* Over the art the thrust triangle is slightly see-through, so the picture
+   reads behind it (user 2026-11-13). */
+.card-face.has-bg-art .thrust-visual { opacity: 0.85; }
+/* Text over the art follows the colonist-card treatment: the ability text and
+   the Supports Required panel sit in a slightly-transparent black box with
+   light ink. White face: no box outline (it reads as a stray line); dark
+   face: the faint light outline the colonist back uses. */
+.card-face.has-bg-art .card-blurb,
+.card-face.has-bg-art .card-supports {
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+}
+.card-face.has-bg-art .card-blurb {
+  padding: 4px 6px;
+  color: #eef2fb;
+}
+.card-face.has-bg-art .card-supports-label { color: #d6dbe8; }
+.card-face.has-bg-art[data-face="primary"] .card-blurb,
+.card-face.has-bg-art[data-face="primary"] .card-supports {
+  border: none;
+}
+/* No ability text: collapse the box rather than show a bare black bar. */
+.card-face.has-bg-art .card-blurb:empty {
+  background: none;
+  border: none;
+  padding: 0;
+}
 
 /* ── Bernal stack modal (M2, js/game/bernal-modal.js) ─────────────────────────
    A colony figure's stack view: the Kalpana/Stanford figure as the hero
