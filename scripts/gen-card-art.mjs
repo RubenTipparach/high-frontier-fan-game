@@ -18,6 +18,7 @@ import { compose } from './card-art/kit.mjs';
 import * as thrusters from './card-art/thrusters.mjs';
 import * as robonauts from './card-art/robonauts.mjs';
 import * as refineries from './card-art/refineries.mjs';
+import * as generators from './card-art/generators.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -28,6 +29,7 @@ const DECKS = {
   thrusters: { ...thrusters, approved: new Set(['*']) },
   robonauts: { ...robonauts, approved: new Set(['*']) },
   refineries: { ...refineries, approved: new Set([]) },   // awaiting the user's sign-off
+  generators: { ...generators, approved: new Set([]) },   // awaiting the user's sign-off
 };
 
 const manifest = {};

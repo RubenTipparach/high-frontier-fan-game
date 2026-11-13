@@ -364,5 +364,175 @@ export const CARD_ART = {
       "src": "assets/cards/refineries/ref_supercritical_drying-back.svg",
       "approved": false
     }
+  },
+  "gen_amtec_thermoelectric": {
+    "primary": {
+      "src": "assets/cards/generators/gen_amtec_thermoelectric-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/generators/gen_amtec_thermoelectric-back.svg",
+      "approved": false
+    }
+  },
+  "gen_brayton_turbine": {
+    "primary": {
+      "src": "assets/cards/generators/gen_brayton_turbine-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/generators/gen_brayton_turbine-back.svg",
+      "approved": false
+    }
+  },
+  "gen_cascade_photovoltaic": {
+    "primary": {
+      "src": "assets/cards/generators/gen_cascade_photovoltaic-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/generators/gen_cascade_photovoltaic-back.svg",
+      "approved": false
+    }
+  },
+  "gen_cascade_thermoacoustic": {
+    "primary": {
+      "src": "assets/cards/generators/gen_cascade_thermoacoustic-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/generators/gen_cascade_thermoacoustic-back.svg",
+      "approved": false
+    }
+  },
+  "gen_catalyzed_fission_scintillator": {
+    "primary": {
+      "src": "assets/cards/generators/gen_catalyzed_fission_scintillator-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/generators/gen_catalyzed_fission_scintillator-back.svg",
+      "approved": false
+    }
+  },
+  "gen_ericsson_engine": {
+    "primary": {
+      "src": "assets/cards/generators/gen_ericsson_engine-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/generators/gen_ericsson_engine-back.svg",
+      "approved": false
+    }
+  },
+  "gen_flywheel_compulsator": {
+    "primary": {
+      "src": "assets/cards/generators/gen_flywheel_compulsator-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/generators/gen_flywheel_compulsator-back.svg",
+      "approved": false
+    }
+  },
+  "gen_h2_o2_fuel_cell": {
+    "primary": {
+      "src": "assets/cards/generators/gen_h2_o2_fuel_cell-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/generators/gen_h2_o2_fuel_cell-back.svg",
+      "approved": false
+    }
+  },
+  "gen_in_core_thermionic": {
+    "primary": {
+      "src": "assets/cards/generators/gen_in_core_thermionic-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/generators/gen_in_core_thermionic-back.svg",
+      "approved": false
+    }
+  },
+  "gen_magnetoshell_plasma_parachute": {
+    "primary": {
+      "src": "assets/cards/generators/gen_magnetoshell_plasma_parachute-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/generators/gen_magnetoshell_plasma_parachute-back.svg",
+      "approved": false
+    }
+  },
+  "gen_marx_capacitor_bank": {
+    "primary": {
+      "src": "assets/cards/generators/gen_marx_capacitor_bank-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/generators/gen_marx_capacitor_bank-back.svg",
+      "approved": false
+    }
+  },
+  "gen_optoelectric_nuclear_battery": {
+    "primary": {
+      "src": "assets/cards/generators/gen_optoelectric_nuclear_battery-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/generators/gen_optoelectric_nuclear_battery-back.svg",
+      "approved": false
+    }
+  },
+  "gen_photon_tether_rectenna": {
+    "primary": {
+      "src": "assets/cards/generators/gen_photon_tether_rectenna-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/generators/gen_photon_tether_rectenna-back.svg",
+      "approved": false
+    }
+  },
+  "gen_radioisotope_stirling": {
+    "primary": {
+      "src": "assets/cards/generators/gen_radioisotope_stirling-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/generators/gen_radioisotope_stirling-back.svg",
+      "approved": false
+    }
+  },
+  "gen_rankine_mhd": {
+    "primary": {
+      "src": "assets/cards/generators/gen_rankine_mhd-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/generators/gen_rankine_mhd-back.svg",
+      "approved": false
+    }
+  },
+  "gen_rankine_solar_dynamic": {
+    "primary": {
+      "src": "assets/cards/generators/gen_rankine_solar_dynamic-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/generators/gen_rankine_solar_dynamic-back.svg",
+      "approved": false
+    }
+  },
+  "gen_solar_stirling": {
+    "primary": {
+      "src": "assets/cards/generators/gen_solar_stirling-front.svg",
+      "approved": false
+    },
+    "secondary": {
+      "src": "assets/cards/generators/gen_solar_stirling-back.svg",
+      "approved": false
+    }
   }
 };
