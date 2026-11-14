@@ -5979,6 +5979,7 @@ export class MapRenderer {
     const INK = {
       lagrange: '#f4a259', cluster: '#f0abfc', flyby: '#93c5fd',
       hazard: '#f1f5f9', aerobrake: '#f1f5f9', lander: '#f1f5f9', radbelt: '#fde68a',
+      note: '#fde047',
     };
     ctx.save();
     ctx.textAlign = 'center';
@@ -5994,7 +5995,8 @@ export class MapRenderer {
       const italic = l.kind === 'hazard' || l.kind === 'aerobrake' || l.kind === 'lander' || l.kind === 'radbelt';
       ctx.font = `${italic ? 'italic ' : ''}600 ${px.toFixed(1)}px ui-sans-serif, system-ui, sans-serif`;
       ctx.save();
-      ctx.globalAlpha = alpha * 0.9;
+      // Zone captions ("EARTH ZONE +0") sit behind the play at half strength.
+      ctx.globalAlpha = alpha * (l.kind === 'zone' ? 0.5 : 0.9);
       ctx.translate(sx, sy);
       // The board is read from both sides of the table, so some text is
       // printed upside down; on a screen, turn it to read upright.
@@ -6003,9 +6005,16 @@ export class MapRenderer {
       if (ang) ctx.rotate((ang * Math.PI) / 180);
       ctx.lineWidth = Math.max(2, px * 0.22);
       ctx.strokeStyle = 'rgba(5, 4, 16, 0.85)';
-      ctx.strokeText(l.text, 0, 0);
       ctx.fillStyle = INK[l.kind] || '#cbd5e1';
-      ctx.fillText(l.text, 0, 0);
+      // A printed rule block (the Sungrazer note) breaks over several lines,
+      // centred on its anchor like the board's own paragraph.
+      const lines = l.text.split('\n');
+      const lh = px * 1.25;
+      lines.forEach((line, i) => {
+        const y = (i - (lines.length - 1) / 2) * lh;
+        ctx.strokeText(line, 0, y);
+        ctx.fillText(line, 0, y);
+      });
       ctx.restore();
     }
     ctx.restore();

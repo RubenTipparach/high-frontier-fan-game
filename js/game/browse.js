@@ -16940,7 +16940,7 @@ function boardTextIndex() {
       && Math.abs(o.x - x) < 30 && Math.abs(o.y - y) < 30);
     if (dup) continue;
     const near = nearestNamedSite(x, y);
-    out.push({ __board: true, text: l.text, x, y, nodeId: null, kind: l.kind,
+    out.push({ __board: true, text: l.text.replace(/\n/g, ' '), x, y, nodeId: null, kind: l.kind,
       where: near ? near.name : '' });
   }
   _boardTextIndex = out;
