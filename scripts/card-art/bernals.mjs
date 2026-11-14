@@ -84,11 +84,40 @@ function scene(key, seed, defs, body) {
   // Drawn straight in card coordinates: the station lives in the open band
   // around the thrust triangle (y 0-150); the supports box and HOME / Lab
   // text cover the lower half, so only backdrop (planets) goes there.
-  return svg(b.defs + SHIELD + HULL + defs, `${b.body}${body}`);
+  return svg(b.defs + SHIELD + HULL + DRAWN_DEFS + defs, `${b.body}${body}`);
 }
 
 
 const INK = '#1f2937';
+// ---- hand-drawn hull vocabulary (no textures) -------------------------------
+// Every detail is placed on purpose: panel seams that follow the form, a lit
+// rim and a core shadow, end caps, docking ports, RCS quads, antennas.
+const DRAWN_DEFS = `
+  <linearGradient id="shl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e3ddd3"/><stop offset="0.45" stop-color="#b3aba0"/><stop offset="1" stop-color="#6e675f"/></linearGradient>
+  <radialGradient id="shs" cx="36%" cy="30%" r="75%"><stop offset="0" stop-color="#ece6dc"/><stop offset="0.55" stop-color="#aaa297"/><stop offset="1" stop-color="#5c554e"/></radialGradient>`;
+const SEAM = '#57534e', LIT = '#fafaf9';
+function seamV(x, y1, y2) { return `<line x1="${f(x)}" y1="${f(y1)}" x2="${f(x)}" y2="${f(y2)}" stroke="${SEAM}" stroke-width="0.7"/><line x1="${f(x + 0.9)}" y1="${f(y1)}" x2="${f(x + 0.9)}" y2="${f(y2)}" stroke="${LIT}" stroke-width="0.5" opacity="0.55"/>`; }
+function rcs(x, y) { return `<path d="M${x - 2.2},${y} h4.4 M${x},${y - 2.2} v4.4" stroke="${INK}" stroke-width="0.9"/><circle cx="${x}" cy="${y}" r="1" fill="#e7e5e4" stroke="${INK}" stroke-width="0.4"/>`; }
+function port(x, y, r = 2.6) { return `<circle cx="${x}" cy="${y}" r="${r}" fill="#cbd5e1" stroke="${INK}" stroke-width="0.7"/><circle cx="${x}" cy="${y}" r="${f(r * 0.45)}" fill="#334155"/>`; }
+// A shielded cylinder seen side-on: shell, panel bands, lit rim, core shadow,
+// metal end caps with RCS quads.
+function shellCyl(x, y, w, h, { rx = 3, bands = 9, caps = true } = {}) {
+  let seams = '';
+  for (let sx = x + bands; sx < x + w - 2; sx += bands) seams += seamV(sx, y + 1.5, y + h - 1.5);
+  return `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${rx}" fill="url(#shl)"/>${seams}
+    <rect x="${x + 1}" y="${f(y + h * 0.68)}" width="${w - 2}" height="${f(h * 0.3)}" rx="${rx}" fill="#1c1917" opacity="0.16"/>
+    <line x1="${x + rx}" y1="${f(y + h * 0.2)}" x2="${x + w - rx}" y2="${f(y + h * 0.2)}" stroke="${LIT}" stroke-width="1" opacity="0.75"/>
+    <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${rx}" fill="none" stroke="${INK}" stroke-width="1"/>
+    ${caps ? `<rect x="${x - 4}" y="${f(y + 2)}" width="5" height="${h - 4}" rx="1.5" fill="url(#hul)" stroke="${INK}" stroke-width="0.8"/><rect x="${x + w - 1}" y="${f(y + 2)}" width="5" height="${h - 4}" rx="1.5" fill="url(#hul)" stroke="${INK}" stroke-width="0.8"/>${rcs(x - 4, y + 3)}${rcs(x + w + 4, y + h - 3)}` : ''}`;
+}
+
+// A recessed window slot: a dark channel with a row of warm lights.
+function slot(x1, x2, y, h = 4) {
+  let o = `<rect x="${f(x1)}" y="${f(y - h / 2)}" width="${f(x2 - x1)}" height="${h}" rx="1" fill="#1c1917"/>`;
+  for (let x = x1 + 2; x < x2 - 2; x += 4.5) o += `<rect x="${f(x)}" y="${f(y - h / 2 + 0.9)}" width="2.2" height="${f(h - 1.8)}" fill="#fde68a"/>`;
+  return o;
+}
+
 // Deck signature on every white face: the little mass driver venting its own
 // rubble shield, always low on the left (rules fn 5: Bernals are dirt rockets).
 const SIG = (seed) => massDriver(70, 128, 40, 140, seed);
@@ -110,9 +139,14 @@ function geo(side) {
   return `${pp('e' + side[0], 150, 560, 440, { kind: 'earth', seed: 4, light: [0.5, -0.8] })}
    <line x1="205" y1="0" x2="205" y2="140" stroke="${lab ? '#e2e8f0' : '#475569'}" stroke-width="2"/>
    <rect x="196" y="2" width="18" height="10" fill="#57534e" stroke="${INK}" stroke-width="0.8"/>
-   ${[0, 1, 2].map((i) => `<ellipse cx="205" cy="${52 + i * 9}" rx="${46 - i * 6}" ry="9" fill="url(#hul)" stroke="${INK}" stroke-width="1"/>`).join('')}
-   <path d="M161,58 Q205,66 249,58" stroke="#fde68a" stroke-width="2" stroke-dasharray="3 3" fill="none"/>
-   ${lumps(205, 56, 46, 9, 401, 12, Math.PI * 0.9, Math.PI * 1.6)}
+   <ellipse cx="205" cy="70" rx="32" ry="7" fill="url(#hul)" stroke="${INK}" stroke-width="1"/>
+   <ellipse cx="205" cy="60" rx="46" ry="11" fill="url(#shl)"/>
+   ${[...Array(13)].map((_, i) => { const t = Math.PI * (0.12 + i * 0.0635); return `<line x1="${f(205 + Math.cos(t) * 46)}" y1="${f(60 + Math.sin(t) * 11)}" x2="${f(205 + Math.cos(t) * 46)}" y2="${f(60 + Math.sin(t) * 11 - 5)}" stroke="${SEAM}" stroke-width="0.7"/>`; }).join('')}
+   <path d="M162,57 A46,11 0 0 1 248,57" fill="none" stroke="${LIT}" stroke-width="1" opacity="0.8"/>
+   <ellipse cx="205" cy="60" rx="46" ry="11" fill="none" stroke="${INK}" stroke-width="1"/>
+   ${port(176, 52, 2.2)}${port(234, 52, 2.2)}
+   ${slot(170, 240, 62, 3.6)}
+   <ellipse cx="205" cy="49" rx="28" ry="6" fill="url(#hul)" stroke="${INK}" stroke-width="1"/><ellipse cx="205" cy="47.5" rx="18" ry="3" fill="#e2e8f0"/>
    ${lab ? `<rect x="198" y="100" width="14" height="16" rx="2" fill="#e2e8f0" stroke="${INK}"/><rect x="198" y="114" width="14" height="3" fill="#1e3a8a"/>
      <line x1="205" y1="150" x2="205" y2="118" stroke="#fde047" stroke-width="3" opacity="0.8" filter="url(#glow)"/>
      <line x1="205" y1="22" x2="240" y2="12" stroke="#cbd5e1" stroke-width="2.4"/><circle cx="246" cy="10" r="3" fill="#fde68a"/>
@@ -140,7 +174,7 @@ function l1(side) {
 // steering mirror (the Bonus Pivot).
 function l2(side) {
   const lab = side === 'secondary';
-  const pod = (x, y, a) => `<g transform="rotate(${a} ${x} ${y})"><rect x="${x - 16}" y="${y - 9}" width="32" height="18" rx="9" fill="url(#hul)" stroke="${INK}" stroke-width="1"/>${win(x - 10, y - 1.2, x + 10)}</g>${lumps(x, y, 16, 9, x, 7, Math.PI, Math.PI * 1.8)}`;
+  const pod = (x, y, a) => `<g transform="rotate(${a} ${x} ${y})">${shellCyl(x - 15, y - 9, 30, 18, { rx: 6, bands: 7.5 })}${slot(x - 10, x + 10, y, 3.4)}</g>`;
   let hex = '';
   if (lab) for (let r = -2; r <= 2; r++) for (let c = -2; c <= 2; c++) { if (Math.abs(r) + Math.abs(c) > 3) continue; const x = 150 + c * 9 + (r % 2 ? 4.5 : 0), y = 82 + r * 8; hex += `<polygon points="${[...Array(6)].map((_, k) => `${f(x + Math.cos(k * Math.PI / 3 + Math.PI / 6) * 5)},${f(y + Math.sin(k * Math.PI / 3 + Math.PI / 6) * 5)}`).join(' ')}" fill="#fef3c7" stroke="#a16207" stroke-width="0.5"/>`; }
   return `${pp('m' + side[0], 40, 150, 34, { kind: 'moon', seed: 6 })}
@@ -171,8 +205,9 @@ function l3(side) {
    <path d="${d}" stroke="${INK}" stroke-width="3.6" fill="none"/><path d="${d}" stroke="#cbd5e1" stroke-width="2" fill="none"/>
    <path d="${d}" stroke="#60a5fa" stroke-width="1" fill="none" stroke-dasharray="6 5" opacity="0.9"/>
    <line x1="236" y1="${f(arc(236))}" x2="236" y2="48" stroke="#475569" stroke-width="1.4"/>
-   <rect x="206" y="18" width="62" height="28" rx="3" fill="url(#shd)" stroke="${INK}" stroke-width="1.2"/>${lumps(237, 32, 31, 14, 407, 12)}
-   <rect x="213" y="29" width="48" height="5" fill="#fde68a" opacity="0.9"/>
+   ${shellCyl(208, 18, 58, 28, { bands: 9.6 })}
+   <line x1="266" y1="24" x2="278" y2="10" stroke="${INK}" stroke-width="1"/><path d="M272,6 Q284,6 284,16 Z" fill="#e2e8f0" stroke="${INK}" stroke-width="0.8"/>
+   ${slot(214, 260, 32, 4)}
    <rect x="172" y="27" width="34" height="9" fill="url(#hul)" stroke="${INK}"/>
    ${lab ? `${[0, 1, 2].map((i) => `<rect x="${175 + i * 10}" y="19" width="8" height="8" fill="#7c2d12" stroke="#fb923c" filter="url(#glow)"/>`).join('')}
      <circle cx="112" cy="${f(arc(112))}" r="4" fill="#e0f2fe" filter="url(#glow)"/><path d="M108,${f(arc(108))} L60,${f(arc(60))}" stroke="#bfdbfe" stroke-width="3" opacity="0.7" filter="url(#glow)"/>` : SIG(407)}`;
@@ -188,7 +223,7 @@ function l4(side) {
    <ellipse cx="150" cy="78" rx="136" ry="58" fill="none" stroke="#475569" stroke-width="3"/>
    ${[...Array(28)].map((_, i) => { const a = i * Math.PI / 14; return `<rect x="${f(150 + Math.cos(a) * 136 - 3)}" y="${f(78 + Math.sin(a) * 58 - 3)}" width="6" height="6" fill="#1d4ed8" stroke="${INK}" stroke-width="0.5"/>`; }).join('')}
    <ellipse cx="150" cy="78" rx="136" ry="58" fill="none" stroke="#e879f9" stroke-width="1" opacity="0.6"/>
-   <rect x="214" y="14" width="44" height="30" rx="6" fill="url(#hul)" stroke="${INK}" stroke-width="1.2"/>${win(220, 27, 254)}${lumps(236, 29, 22, 15, 409, 8, Math.PI, Math.PI * 2)}
+   ${shellCyl(214, 14, 44, 30, { rx: 6, bands: 11 })}${slot(219, 253, 29, 4)}
    ${[-1, 1].map((s2) => `<rect x="${s2 < 0 ? 188 : 258}" y="20" width="26" height="12" fill="#334155" stroke="#94a3b8" stroke-width="0.8"/>`).join('')}
    ${lab ? `<line x1="236" y1="44" x2="236" y2="70" stroke="#e879f9" stroke-width="2"/>${[0, 1, 2, 3].map((i) => `<rect x="${200 + i * 20}" y="70" width="14" height="22" rx="5" fill="#334155" stroke="${INK}"/><line x1="${200 + i * 20}" y1="76" x2="${214 + i * 20}" y2="76" stroke="#d97706" stroke-width="1.6"/><line x1="${200 + i * 20}" y1="86" x2="${214 + i * 20}" y2="86" stroke="#d97706" stroke-width="1.6"/><circle cx="${207 + i * 20}" cy="81" r="3" fill="#f0abfc" filter="url(#glow)"/>`).join('')}` : SIG(409)}`;
 }
@@ -201,7 +236,7 @@ function l4s(side) {
   const lab = side === 'secondary';
   const hx = 196, hy = 70;
   return `${pp('j' + side[0], 40, 140, 30, { kind: 'earth', seed: 21 })}
-   ${[90, 210, 330].map((d) => { const a = d * Math.PI / 180, x = hx + Math.cos(a) * 62, y = hy + Math.sin(a) * 50; return `<line x1="${hx}" y1="${hy}" x2="${f(x)}" y2="${f(y)}" stroke="#64748b" stroke-width="4"/><ellipse cx="${f(x)}" cy="${f(y)}" rx="15" ry="11" fill="url(#hul)" stroke="${INK}" stroke-width="1"/>${lumps(x, y, 14, 10, d, 7)}<rect x="${f(x - 8)}" y="${f(y - 1)}" width="16" height="2.4" fill="#fde68a"/>`; }).join('')}
+   ${[90, 210, 330].map((d) => { const a = d * Math.PI / 180, x = hx + Math.cos(a) * 62, y = hy + Math.sin(a) * 50; return `<line x1="${hx}" y1="${hy}" x2="${f(x)}" y2="${f(y)}" stroke="#64748b" stroke-width="4"/><ellipse cx="${f(x)}" cy="${f(y)}" rx="15" ry="11" fill="url(#shs)"/>${[-7, 0, 7].map((o) => `<ellipse cx="${f(x + o)}" cy="${f(y)}" rx="${f(Math.max(1.5, 7 - Math.abs(o) * 0.6))}" ry="10.6" fill="none" stroke="${SEAM}" stroke-width="0.6" opacity="0.8"/>`).join('')}<path d="M${f(x - 11)},${f(y - 6)} A15,11 0 0 1 ${f(x + 9)},${f(y - 9)}" fill="none" stroke="${LIT}" stroke-width="1" opacity="0.8"/><ellipse cx="${f(x)}" cy="${f(y)}" rx="15" ry="11" fill="none" stroke="${INK}" stroke-width="1"/>${slot(x - 9, x + 9, y, 3.2)}`; }).join('')}
    <path d="M${hx - 74},${hy - 20} A80,64 0 0 1 ${hx + 30},${hy - 66}" stroke="#94a3b8" stroke-dasharray="3 4" fill="none"/>
    <circle cx="${hx}" cy="${hy}" r="10" fill="#e2e8f0" stroke="${INK}" stroke-width="1.2"/>
    ${lab ? `<rect x="${hx - 4}" y="${hy - 64}" width="8" height="54" rx="3" fill="#ccfbf1" fill-opacity="0.5" stroke="#0d9488"/>${[0, 1, 2, 3, 4, 5].map((i) => `<circle cx="${hx}" cy="${hy - 58 + i * 8}" r="3" fill="#5eead4" stroke="#0f766e" stroke-width="0.5"/>`).join('')}<path d="M${hx + 14},${hy + 4} l6,-10 l2,0 l0,6 l5,10 l-14,0 Z" fill="#ccfbf1" stroke="#0d9488"/>` : SIG(411)}`;
@@ -215,8 +250,12 @@ function l5(side) {
   const lab = side === 'secondary';
   const cx = 168, cy = 86, R = 84, r = 30;
   return `${sun(292, 8, 50)}
-   <ellipse cx="${cx}" cy="${cy}" rx="${R}" ry="${r}" fill="none" stroke="url(#shd)" stroke-width="16"/>${lumps(cx, cy, R, r, 413, 20)}
-   <ellipse cx="${cx}" cy="${cy}" rx="${R}" ry="${r}" fill="none" stroke="#fde68a" stroke-width="1.4" stroke-dasharray="3 4"/>
+   <ellipse cx="${cx}" cy="${cy}" rx="${R}" ry="${r}" fill="none" stroke="url(#shl)" stroke-width="16"/>
+   ${[...Array(32)].map((_, i) => { const t = i * Math.PI / 16, px = cx + Math.cos(t) * R, py = cy + Math.sin(t) * r; const nx = Math.cos(t) / R, ny = Math.sin(t) / r, nl = Math.hypot(nx, ny); return `<line x1="${f(px - nx / nl * 7.5)}" y1="${f(py - ny / nl * 7.5)}" x2="${f(px + nx / nl * 7.5)}" y2="${f(py + ny / nl * 7.5)}" stroke="${SEAM}" stroke-width="0.7"/>`; }).join('')}
+   <path d="M${cx - R - 6},${cy - 2} A${R + 6},${r + 6} 0 0 1 ${cx + R + 6},${cy - 2}" fill="none" stroke="${LIT}" stroke-width="1.1" opacity="0.8"/>
+   <ellipse cx="${cx}" cy="${cy}" rx="${R + 8}" ry="${r + 8}" fill="none" stroke="${INK}" stroke-width="0.9"/><ellipse cx="${cx}" cy="${cy}" rx="${R - 8}" ry="${r - 8}" fill="none" stroke="${INK}" stroke-width="0.9"/>
+   <ellipse cx="${cx}" cy="${cy}" rx="${R}" ry="${r}" fill="none" stroke="#1c1917" stroke-width="3.4"/>
+   <ellipse cx="${cx}" cy="${cy}" rx="${R}" ry="${r}" fill="none" stroke="#fde68a" stroke-width="1.6" stroke-dasharray="2.4 2.2"/>
    ${[0, 30, 60, 90, 120, 150].map((a) => { const t = a * Math.PI / 180; return `<line x1="${f(cx - Math.cos(t) * R)}" y1="${f(cy - Math.sin(t) * r)}" x2="${f(cx + Math.cos(t) * R)}" y2="${f(cy + Math.sin(t) * r)}" stroke="#94a3b8" stroke-width="1.6"/>`; }).join('')}
    <circle cx="${cx}" cy="${cy}" r="9" fill="url(#hul)" stroke="${INK}"/>
    <line x1="${cx}" y1="${cy}" x2="${cx}" y2="${cy - 52}" stroke="#64748b" stroke-width="2"/>
@@ -234,9 +273,11 @@ function l5s(side) {
   const lab = side === 'secondary';
   const rnd = seeded(415);
   const pts = [...Array(14)].map((_, i) => { const a = i * Math.PI / 7, rr = 1 + (rnd() - 0.5) * 0.18; return `${f(178 + Math.cos(a) * 70 * rr)},${f(74 + Math.sin(a) * 48 * rr)}`; });
-  return `<polygon points="${pts.join(' ')}" fill="url(#shd)" stroke="${lab ? '#bbf7d0' : INK}" stroke-width="${lab ? 2.4 : 1.2}" stroke-linejoin="round"/>
-   ${[[150, 60, 9], [206, 92, 7], [196, 50, 5], [140, 96, 6]].map(([x, y, rr]) => `<ellipse cx="${x}" cy="${y}" rx="${rr}" ry="${f(rr * 0.6)}" fill="#44403c" opacity="0.6"/>`).join('')}
-   ${[0, 1, 2].map((i) => `<rect x="${166 + i * 14}" y="72" width="7" height="3" fill="#fde68a"/>`).join('')}
+  const P = pts.map((q) => q.split(',').map(Number));
+  const facets = P.map(([x1, y1], i) => { const [x2, y2] = P[(i + 1) % P.length]; const mx = (x1 + x2) / 2 - 178, my = (y1 + y2) / 2 - 74; const lit = (-mx * 0.6 - my * 0.8) / Math.hypot(mx, my); const g = Math.round(150 + lit * 45); return `<polygon points="178,74 ${x1},${y1} ${x2},${y2}" fill="rgb(${g},${g - 6},${g - 14})" stroke="rgb(${g - 18},${g - 24},${g - 30})" stroke-width="0.5"/>`; }).join('');
+  return `${facets}<path d="M150,40 l10,14 l-4,12 M206,60 l-12,10 l4,14 M120,80 l14,4" stroke="${SEAM}" stroke-width="0.8" fill="none" stroke-linecap="round"/><polygon points="${pts.join(' ')}" fill="none" stroke="${lab ? '#bbf7d0' : INK}" stroke-width="${lab ? 2.4 : 1.1}" stroke-linejoin="round"/>
+   ${[[150, 58, 9], [206, 92, 7], [198, 48, 5], [138, 94, 6]].map(([x, y, rr]) => `<ellipse cx="${x}" cy="${y}" rx="${rr}" ry="${f(rr * 0.55)}" fill="#57534e" opacity="0.55"/><path d="M${x - rr},${y} A${rr},${f(rr * 0.55)} 0 0 0 ${x + rr},${y}" fill="none" stroke="#e7e5e4" stroke-width="0.8" opacity="0.7"/>`).join('')}
+   ${[0, 1, 2].map((i) => slot(162 + i * 15, 172 + i * 15, 74, 3.2)).join('')}
    <rect x="242" y="66" width="18" height="14" rx="3" fill="url(#hul)" stroke="${INK}"/>
    ${lab ? `<circle cx="160" cy="34" r="13" fill="#94a3b8" stroke="${INK}"/><path d="M160,34 m0,-9 a9,9 0 1 1 -1,0 m1,4 a5,5 0 1 1 -1,0" stroke="#1d4ed8" fill="none" stroke-width="1"/>
      <line x1="172" y1="36" x2="212" y2="48" stroke="#7dd3fc" stroke-width="2.4" filter="url(#glow)"/><path d="M210,40 Q222,46 214,58 Z" fill="#e2e8f0" stroke="${INK}"/>
@@ -256,10 +297,15 @@ function sso(side) {
    ${[-1, 1].map((s2) => [0, 1, 2].map((i) => `<ellipse cx="${cx + s2 * (R + 6 + i * 8)}" cy="${cy}" rx="4" ry="${26 - i * 3}" fill="url(#hul)" stroke="${INK}" stroke-width="0.8"/>`).join('')).join('')}
    ${[0, 1].map((i) => `<ellipse cx="${cx + R + 44 + i * 10}" cy="${cy}" rx="3" ry="${34 + i * 6}" fill="none" stroke="#e5e7eb" stroke-width="2"/>`).join('')}
    <rect x="${cx - 6}" y="${cy - R - 18}" width="12" height="16" fill="#334155" stroke="#94a3b8" stroke-width="0.6"/>
-   <circle cx="${cx}" cy="${cy}" r="${R}" fill="url(#shd)" stroke="${INK}" stroke-width="1.2"/>${lumps(cx, cy, R * 0.92, R * 0.92, 417, 14)}
+   <circle cx="${cx}" cy="${cy}" r="${R}" fill="url(#shs)"/>
+   ${[-28, -14, 14, 28].map((dy) => { const rr = Math.sqrt(R * R - dy * dy); return `<path d="M${f(cx - rr)},${cy + dy} A${f(rr)},${f(rr * 0.22)} 0 0 0 ${f(cx + rr)},${cy + dy}" fill="none" stroke="${SEAM}" stroke-width="0.7" opacity="0.85"/>`; }).join('')}
+   ${[0.45, -0.45].map((k) => `<path d="M${cx},${cy - R} A${f(R * Math.abs(k))},${R} 0 0 ${k > 0 ? 1 : 0} ${cx},${cy + R}" fill="none" stroke="${SEAM}" stroke-width="0.7" opacity="0.7"/>`).join('')}
+   <ellipse cx="${cx}" cy="${cy - R + 5}" rx="11" ry="3" fill="url(#hul)" stroke="${INK}" stroke-width="0.7"/>
+   <path d="M${cx - R + 6},${cy - 14} A${R - 4},${R - 4} 0 0 1 ${cx - 6},${cy - R + 4}" fill="none" stroke="${LIT}" stroke-width="1.6" opacity="0.8"/>
+   <circle cx="${cx}" cy="${cy}" r="${R}" fill="none" stroke="${INK}" stroke-width="1.1"/>
    ${lab ? `<path d="M${cx - R + 6},${cy - 4} A${R - 6},${R - 6} 0 0 0 ${cx + R - 6},${cy - 4} Z" fill="#1e1b4b" stroke="#c4b5fd"/>${[0, 1, 2].map((t) => ideo.map((c, i) => { const a = Math.PI * (0.12 + i * 0.15), rr = R - 12 - t * 8; return `<rect x="${f(cx + Math.cos(a) * rr - 3)}" y="${f(cy - 4 + Math.sin(a) * rr * 0.75 - 2)}" width="6" height="4" fill="${c}"/>`; }).join('')).join('')}
      ${[-1, 1].map((s2) => `<path d="M${cx + s2 * (R + 30) - 8},${cy - 36} Q${cx + s2 * (R + 30)},${cy - 46} ${cx + s2 * (R + 30) + 8},${cy - 36}" fill="none" stroke="#e2e8f0" stroke-width="2"/>`).join('')}`
-    : `<path d="M${cx - R + 2},${cy} Q${cx},${cy + 14} ${cx + R - 2},${cy}" stroke="#fde68a" stroke-width="2.4" stroke-dasharray="3 3" fill="none"/>${SIG(417)}`}`;
+    : `<path d="M${cx - R + 1},${cy} Q${cx},${cy + 14} ${cx + R - 1},${cy}" stroke="#1c1917" stroke-width="4.4" fill="none"/><path d="M${cx - R + 3},${cy} Q${cx},${cy + 13} ${cx + R - 3},${cy}" stroke="#fde68a" stroke-width="2" stroke-dasharray="2.2 2.4" fill="none"/>${SIG(417)}`}`;
 }
 
 // 10. Tourism Cycler: Aldrin's "castle" - a keep of a tall central tower
@@ -275,7 +321,7 @@ function cycler(side) {
    <rect x="148" y="84" width="84" height="12" fill="url(#hul)" stroke="${INK}"/>
    ${[[160, 48, 18], [214, 54, 18], [182, 20, 26]].map(([x, y, w]) => `<rect x="${x}" y="${y}" width="${w}" height="${96 - y}" rx="3" fill="url(#hul)" stroke="${INK}" stroke-width="1"/>${lab ? [...Array(Math.floor((84 - y) / 9))].map((_, k) => win(x + 3, y + 8 + k * 9, x + w - 3)).join('') : ''}`).join('')}
    <path d="M182,20 Q195,2 208,20 Z" fill="${lab ? '#fde68a' : '#cbd5e1'}" stroke="${INK}" ${lab ? 'filter="url(#glow)"' : ''}/>
-   ${lab ? `<rect x="180" y="36" width="30" height="7" fill="#fde68a" filter="url(#glow)"/><path d="M262,92 l14,-4 l2,8 Z" fill="#e2e8f0" stroke="${INK}"/><line x1="232" y1="90" x2="262" y2="92" stroke="#94a3b8" stroke-dasharray="2 2"/>` : `${lumps(195, 60, 38, 40, 419, 10, Math.PI * 0.8, Math.PI * 1.3)}${SIG(419)}`}`;
+   ${lab ? `<rect x="180" y="36" width="30" height="7" fill="#fde68a" filter="url(#glow)"/><path d="M262,92 l14,-4 l2,8 Z" fill="#e2e8f0" stroke="${INK}"/><line x1="232" y1="90" x2="262" y2="92" stroke="#94a3b8" stroke-dasharray="2 2"/>` : SIG(419)}`;
 }
 
 const DRAW = { ber_geo_elevator_bernal: geo, ber_l1_climate_control_bernal: l1, ber_l2_collimator_bernal: l2, ber_l3_lofstrom_loop_microgravity: l3, ber_l4_antimatter_factory: l4, ber_l4s_pharmaceutics_bernal: l4s, ber_l5_solar_cell_factory: l5, ber_l5s_cancer_hospital: l5s, ber_sso_diplomatic: sso, ber_tourism_cycler: cycler };
