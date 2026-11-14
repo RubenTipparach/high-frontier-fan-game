@@ -64,6 +64,7 @@ export function rollSystem({ star, chits = {}, rint, worldName = () => 'World', 
       for (let j = 0; j < nMaj; j++) { const sz = rint(4, 9); moons.push({ name: `${name}-${ROMAN[j]}`, size: sz, sites: sz >= 7 ? 2 : 1, ocean: g.chit === 'Ocean' && j === Math.min(1, nMaj - 1) }); }
       for (let j = 0; j < nMin; j++) moons.push({ name: `${name} m${j + 1}`, size: rint(1, 2) });
       const zone = outerZones.length ? outerZones[Math.min(outerZones.length - 1, outerZones.length - 1 - (gi % outerZones.length))] : Z - 1;
+      (p.giantZones = p.giantZones || []).push(zone);
       add({ kind: 'giant', name, star: p.i, zone, giantKind: g.kind, size: g.kind === 'white' ? 10 : 11, moons, trojans: g.kind === 'gas' ? 2 : 0 }, { giant: g.kind });
       if (g.kind === 'gas') gasGiants++;
       left--;
@@ -86,7 +87,9 @@ export function rollSystem({ star, chits = {}, rint, worldName = () => 'World', 
   // room gets as many as it can hold.
   const Ls = starLayout(stars.map((x, i) => ({ ...x, role: i === 0 ? 'primary' : x.role })));
   const ringRocks = (si, z) => { const L = Ls[si]; const b = zoneBounds(stars[si].zones, L); const r = z === 0 ? b[1] * 0.62 : (b[z] + b[z + 1]) / 2;
-    const len = 2 * Math.PI * Math.sqrt(((r * L.kx) ** 2 + (r * L.ky) ** 2) / 2); return Math.max(0, Math.floor((len * 0.45) / 90)) * 3; };
+    const len = 2 * Math.PI * Math.sqrt(((r * L.kx) ** 2 + (r * L.ky) ** 2) / 2);
+    const giants = (plan[si].giantZones || []).filter((gz) => Math.abs(gz - z) <= 2).length; // a giant's moon system takes ~440 px of the rings near it
+    return Math.max(0, Math.floor((Math.max(0, len - 440 * giants) * 0.45) / 90)) * 3; };
   const room = {}; const roomOf = (si, z) => (room[`${si}:${z}`] ??= ringRocks(si, z));
   const wantTotal = asteroids ?? rint(TARGETS.asteroids[0], TARGETS.asteroids[1]);
   const belts = {}; // `${si}:${z}` -> { name, count }
