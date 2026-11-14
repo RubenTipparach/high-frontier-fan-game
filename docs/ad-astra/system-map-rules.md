@@ -199,7 +199,25 @@ for any other reason:
   transitions, so the trip costs 2 burns. A distant companion is reached the
   same way from the nearest outer ring: 2 burns, on a long route.
 
-## SM-10. Validation (the generator enforces these on every map)
+## SM-11. Hand edits (the map builder)
+
+The builder lets a designer adjust a generated board by hand. Every edit is
+stored in the spec, so a rebuild replays it, and none of them adds or removes a
+node, burn or edge: the routes stay exactly what the rules made, so every
+SM-10 check still runs on the edited board.
+- **SM-11a. Moving a body** (drag any part of it) moves it with all its
+  children: a giant's moons, Trojans, ladder and slingshot; a belt's rocks; a
+  planet's sites and landing burns. The drop sets its star, zone and angle;
+  the body is then laid out by the rules there.
+- **SM-11b. Moving a star** (a binary partner or distant companion) moves its
+  whole system: zones, rings and bodies. The primary stays put.
+- **SM-11c. Bending a route** (Edit splines on a node): each route through
+  the node has a handle; dragging it bends that curve. A bend is stored
+  against the route's role (a body's well, a spoke, a moon's branch), so it
+  follows the body when the body moves. Ring arcs follow their zone and
+  cannot be bent (SM-2b).
+
+ (the generator enforces these on every map)
 
 1. No dead ends (SM-8b); decorative nodes have exactly 2 edges (SM-8a).
 2. Every zone-crossing transfer carries exactly one burn (SM-3a).

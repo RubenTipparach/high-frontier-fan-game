@@ -42,8 +42,9 @@ export function starLayout(stars) {
   const at = (cx, cy, inner, outer) => ({ cx, cy, inner, outer, kx: WORLD.kx, ky: WORLD.ky });
   return stars.map((s, i) => {
     const role = i === 0 ? 'primary' : s.role;
-    if (role === 'binary') return at(1080, 470, 40, 180);
-    if (role === 'distant') return at(1240, 128, 24, 104);
+    // SM-11b: a binary partner or distant companion may be moved by hand (cx, cy)
+    if (role === 'binary') return at(s.cx ?? 1080, s.cy ?? 470, 40, 180);
+    if (role === 'distant') return at(s.cx ?? 1240, s.cy ?? 128, 24, 104);
     if (hasB) return at(400, 470, 48, 250);
     if (hasD) return at(590, 470, 60, 355);
     return at(WORLD.cx, WORLD.cy, WORLD.inner, WORLD.outer);
@@ -101,12 +102,19 @@ export function buildMap(spec) {
 
   // a route between two real nodes: `stops` are real nodes along the way at
   // fraction t, decoratives fill the gaps so it draws as a curve (SM-8a)
-  const route = (from, to, stops = [], bow = 0.12, step = 30) => {
+  // `key` names the route by its role (a body's well, a spoke, a moon's branch),
+  // so a hand bend in spec.curves[key] (SM-11c) survives rebuilds and moves
+  const curves = spec.curves || {}; const routes = [];
+  const route = (from, to, stops = [], bow = 0.12, step = 30, key = null) => {
     const A = byId[from], B = byId[to];
     const dx = B.x - A.x, dy = B.y - A.y;
-    const cx = (A.x + B.x) / 2 - dy * bow, cy = (A.y + B.y) / 2 + dx * bow;
+    const bend = key && curves[key];
+    const u = bend ? bend.u : 0, v = bend ? bend.v : bow; // control point = mid + u*(B-A) + v*perp(B-A)
+    const cx = (A.x + B.x) / 2 + u * dx - dy * v, cy = (A.y + B.y) / 2 + u * dy + dx * v;
+    // the handle sits ON the curve, at its midpoint: (A + 2*cp + B) / 4
+    if (key) routes.push({ key, from, to, cp: { x: round1(cx), y: round1(cy) }, mid: { x: round1(((A.x + B.x) / 2 + cx) / 2), y: round1(((A.y + B.y) / 2 + cy) / 2) }, bent: !!bend, ids: null });
     const at = (t) => ({ x: round1((1 - t) * (1 - t) * A.x + 2 * (1 - t) * t * cx + t * t * B.x), y: round1((1 - t) * (1 - t) * A.y + 2 * (1 - t) * t * cy + t * t * B.y) });
-    const len = Math.hypot(dx, dy) * (1 + Math.abs(bow));
+    const len = Math.hypot(dx, dy) * (1 + Math.abs(v) + Math.abs(u));
     const marks = [0, ...stops.map((s) => s.t), 1];
     const ids = [from];
     for (let i = 0; i < marks.length - 1; i++) {
@@ -117,6 +125,7 @@ export function buildMap(spec) {
     }
     ids.push(to);
     for (let i = 0; i < ids.length - 1; i++) link(ids[i], ids[i + 1]);
+    if (key) routes[routes.length - 1].ids = ids;
     return ids;
   };
   // an arc along a zone ring between two angles, free Hohmann travel (SM-2b)
@@ -238,7 +247,7 @@ export function buildMap(spec) {
         if (it.kind === 'giant') { it.delta = giantDelta(st, k); angles.add(Math.round((it.angle - it.delta + 360) % 360)); angles.add(Math.round((it.angle + it.delta) % 360)); }
       }
       if (k === st.N - 1) for (const a of facing[st.i]) angles.add(a);
-      const list = [...angles].sort((p, q) => p - q).filter((a, i, arr) => i === 0 || a - arr[i - 1] >= 5);
+      const list = []; for (const a of [...angles].sort((p, q) => p - q)) if (!list.length || a - list[list.length - 1] >= 5) list.push(a); // merge pivots closer than 5 degrees
       ringPivots[st.i][k] = list.map((a) => ({ a, id: add('hohmann', P(st.L, a, st.mid(k))) }));
     }
     for (let k = 0; k < st.N; k++) {
@@ -254,18 +263,18 @@ export function buildMap(spec) {
       for (let k = 0; k < st.N - 1; k++) {
         const from = pivotAt(st, k, a), to = pivotAt(st, k + 1, a);
         const t = (st.b[k + 1] - st.mid(k)) / (st.mid(k + 1) - st.mid(k));
-        route(from.id, to.id, [{ kind: 'burn', t: clamp(t, 0.2, 0.8), extra: { purpose: 'transition' } }], 0.04);
+        route(from.id, to.id, [{ kind: 'burn', t: clamp(t, 0.2, 0.8), extra: { purpose: 'transition' } }], 0.04, 30, `spoke:${st.i}:${a}:${k}`);
       }
     }
   }
   // SM-9a: arrival outside the primary's outer zone; one burn crossing into it
   const S0 = S[0];
   const high = add('orbit', P(S0.L, 270, S0.L.outer + 26), { id: 'high', label: 'System edge (arrival)' });
-  route(high, pivotAt(S0, S0.N - 1, 270).id, [{ kind: 'burn', t: 0.45, extra: { purpose: 'transition' } }], 0);
+  route(high, pivotAt(S0, S0.N - 1, 270).id, [{ kind: 'burn', t: 0.45, extra: { purpose: 'transition' } }], 0, 30, 'arrival');
   // SM-9b: between stars, a burn leaving one outer zone and a burn entering the other's
   for (const x of interStar) {
     const p = pivotAt(x.from, x.from.N - 1, x.aOut), q = pivotAt(x.to, x.to.N - 1, x.aIn);
-    route(p.id, q.id, [{ kind: 'burn', t: 0.22, extra: { purpose: 'transition' } }, { kind: 'burn', t: 0.78, extra: { purpose: 'transition' } }], x.to.role === 'distant' ? 0.1 : 0.05, 34);
+    route(p.id, q.id, [{ kind: 'burn', t: 0.22, extra: { purpose: 'transition' } }, { kind: 'burn', t: 0.78, extra: { purpose: 'transition' } }], x.to.role === 'distant' ? 0.1 : 0.05, 34, `between:${x.from.i}:${x.to.i}`);
   }
 
   // ---- SM-4 / SM-5 / SM-7: each body's well
@@ -286,9 +295,9 @@ export function buildMap(spec) {
     link(lagId, lb); link(lb, siteId);
   };
   // an asteroid group: from a node, one escape burn -> Lagrange -> 1-3 rocks fanned outward
-  const rockGroup = (fromId, lagPos, around, rocks, bodyKind, extra, dist = 22, spread = 100) => {
+  const rockGroup = (fromId, lagPos, around, rocks, bodyKind, extra, dist = 22, spread = 100, key = null) => {
     const lag = add('lagrange', lagPos, { purpose: 'orbit', body: extra.belt || extra.moonOf, ...(extra.moonOf ? { moonOf: extra.moonOf } : {}) });
-    route(fromId, lag, [{ kind: 'burn', t: 0.5, extra: { purpose: 'escape', body: extra.belt || rocks[0].name, ...(extra.moonOf ? { moonOf: extra.moonOf } : {}) } }], 0.08, 16);
+    route(fromId, lag, [{ kind: 'burn', t: 0.5, extra: { purpose: 'escape', body: extra.belt || rocks[0].name, ...(extra.moonOf ? { moonOf: extra.moonOf } : {}) } }], 0.08, 16, key);
     rocks.forEach((r, j) => link(lag, addSite(fanPos(byId[lag], j, rocks.length, around, dist, spread), { ...extra, body: r.name, bodyKind, size: r.size, region: 0 })));
     return lag;
   };
@@ -300,7 +309,7 @@ export function buildMap(spec) {
     const outAng = outAngOf(L, a);
     if (it.kind === 'cluster') { // SM-5f: pivot -> one escape burn -> Lagrange -> 1-3 asteroids
       const side = it.side;
-      const lag = rockGroup(dep.id, P(L, a, st.mid(k) + side * 0.3 * w), side > 0 ? outAng : outAng + 180, it.rocks, 'asteroid', { belt: it.belt, home: st.i });
+      const lag = rockGroup(dep.id, P(L, a, st.mid(k) + side * 0.3 * w), side > 0 ? outAng : outAng + 180, it.rocks, 'asteroid', { belt: it.belt, home: st.i }, 22, 100, `group:${it.name}`);
       if (k === 0) byId[lag].tags.hazard = true; // SM-6b
       continue;
     }
@@ -309,9 +318,9 @@ export function buildMap(spec) {
       const tag = { comet: true, season, siteSynodic: season };
       const esc = k === st.N - 1 ? 3 : k >= st.N / 2 ? 2 : 1;
       const lag1 = add('lagrange', lift(P(L, a, st.mid(k) + 0.2 * w), COMET_LIFT[0]), { purpose: 'orbit', body: it.name, ...tag });
-      route(dep.id, lag1, Array.from({ length: esc }, (_, i) => ({ kind: 'burn', t: (i + 1) / (esc + 1), extra: { purpose: 'escape', body: it.name, ...tag } })), 0.18, 16);
+      route(dep.id, lag1, Array.from({ length: esc }, (_, i) => ({ kind: 'burn', t: (i + 1) / (esc + 1), extra: { purpose: 'escape', body: it.name, ...tag } })), 0.18, 16, `well:${it.name}`);
       const lag2 = add('lagrange', lift(P(L, a + 5, st.mid(k) + 0.34 * w), COMET_LIFT[1]), { purpose: 'orbit', body: it.name, ...tag });
-      route(lag1, lag2, [], 0.25, 14);
+      route(lag1, lag2, [], 0.25, 14, `far:${it.name}`);
       link(lag2, addSite(lift(P(L, a + 9, st.mid(k) + 0.44 * w), COMET_LIFT[2]), { body: it.name, bodyKind: 'comet', size: clamp(it.size | 0 || 2, 1, 3), region: 0, home: st.i, ...tag }));
       continue;
     }
@@ -319,13 +328,18 @@ export function buildMap(spec) {
     if (it.kind === 'giant') {
       const C = P(L, a, st.mid(k) + 0.42 * w);
       const pol = (ang, r) => ({ x: round1(C.x + Math.cos(deg(ang)) * r), y: round1(C.y + Math.sin(deg(ang)) * r) });
-      const D0 = pivotAt(st, k, a - it.delta), D2 = pivotAt(st, k, a + it.delta);
+      // three distinct ring pivots: ladder start, slingshot in, slingshot out (a
+      // merged pivot falls back to the ring neighbour on that side)
+      const ring = ringPivots[st.i][k]; const di = ring.indexOf(dep);
+      let D0 = pivotAt(st, k, a - it.delta), D2 = pivotAt(st, k, a + it.delta);
+      if (D0 === dep && ring.length > 2) D0 = ring[(di - 1 + ring.length) % ring.length];
+      if (D2 === dep && ring.length > 1) D2 = ring[(di + 1) % ring.length];
       // SM-7a: the slingshot point, on the transfer layer: in from the ring and
       // back out to it a little further on, free through radiation belts. No
       // moon route touches it.
       const F = add('lagrange', C, { purpose: 'flyby', body: it.name, fly: flybyOf(size) || null, giant: true });
-      route(dep.id, F, [{ kind: 'radhaz', t: 0.5 }], 0.05, 16);
-      if (D2.id !== dep.id) route(F, D2.id, [{ kind: 'radhaz', t: 0.45 }], 0.12, 16);
+      route(dep.id, F, [{ kind: 'radhaz', t: 0.5 }], 0.05, 16, `sling-in:${it.name}`);
+      if (D2.id !== dep.id) route(F, D2.id, [{ kind: 'radhaz', t: 0.45 }], 0.12, 16, `sling-out:${it.name}`);
       bodies.push({ id: `${F}-body`, name: it.name, kind: it.giantKind || 'gas', x: C.x, y: C.y, size, star: st.i });
       // SM-7b: the escape ladder curls round the outward side; moons branch off burns 2 and 3
       const R = 36; // just outside the giant's sphere (GIANT_HALO)
@@ -333,7 +347,7 @@ export function buildMap(spec) {
       const b1 = add('burn', pol(A1, R + 4), { purpose: 'escape', body: it.name, rung: 1 });
       const b2 = add('burn', pol(A2, R), { purpose: 'escape', body: it.name, rung: 2 });
       const b3 = add('burn', pol(A3, R), { purpose: 'escape', body: it.name, rung: 3 });
-      route((D0.id !== dep.id ? D0 : dep).id, b1, [], 0.1, 16);
+      route((D0.id !== dep.id ? D0 : dep).id, b1, [], 0.1, 16, `ladder:${it.name}`);
       arcAround(b1, b2, C, R + 2, A1, A2); arcAround(b2, b3, C, R, A2, A3);
       const rungFor = (ang) => (((ang - outAng + 540) % 360) - 180 < 0 ? b2 : b3);
       const majors = (it.moons || []).filter((m) => (m.size | 0 || 6) > 2);
@@ -351,7 +365,7 @@ export function buildMap(spec) {
         const me = moonEscape(msize);
         const stops = [...(inner ? [{ kind: 'radhaz', t: 0.3 }] : []),
           ...Array.from({ length: me }, (_, j) => ({ kind: 'burn', t: 0.42 + (0.5 * (j + 1)) / (me + 1), extra: { purpose: 'escape', body: m.name, ...tag } }))];
-        route(rungFor(ma), mlag, stops, 0.05, 14);
+        route(rungFor(ma), mlag, stops, 0.05, 14, `moon:${m.name}`);
         const ss = placeSites(m.name, 'moon', mc, clamp(m.sites | 0 || 1, 1, 2), ma, 22, msize, { ...tag, ocean: !!m.ocean, home: st.i }, 80);
         ss.forEach((s, j) => landTo(mlag, s.sid, landingOf(msize), j === 0 && msize >= 8, false));
       });
@@ -359,7 +373,7 @@ export function buildMap(spec) {
       const groups = []; for (let i = 0; i < minors.length; i += 3) groups.push(minors.slice(i, i + 3));
       groups.forEach((g, i) => {
         const ga = lo + ((hi - lo) * (i + 0.5)) / groups.length;
-        rockGroup(rungFor(ga), pol(ga, SHELL.minor - 16), ga, g.map((m) => ({ name: m.name, size: clamp(m.size | 0 || 2, 1, 2) })), 'moon', { moonOf: it.name, minor: true, home: st.i }, 24, 70);
+        rockGroup(rungFor(ga), pol(ga, SHELL.minor - 16), ga, g.map((m) => ({ name: m.name, size: clamp(m.size | 0 || 2, 1, 2) })), 'moon', { moonOf: it.name, minor: true, home: st.i }, 24, 70, `minors:${it.name}:${i}`);
       });
       continue;
     }
@@ -368,14 +382,14 @@ export function buildMap(spec) {
     const lag = add('lagrange', P(L, a, st.mid(k) + 0.24 * w), { purpose: 'orbit', body: it.name, fly: flybyOf(size) || null });
     if (k === 0) byId[lag].tags.hazard = true; // SM-6b
     const esc = wellBurns(size); // SM-4a
-    route(dep.id, lag, Array.from({ length: esc }, (_, i) => ({ kind: 'burn', t: (i + 1) / (esc + 1), extra: { purpose: 'escape', body: it.name } })), 0.18, 16);
+    route(dep.id, lag, Array.from({ length: esc }, (_, i) => ({ kind: 'burn', t: (i + 1) / (esc + 1), extra: { purpose: 'escape', body: it.name } })), 0.18, 16, `well:${it.name}`);
     const count = it.kind === 'planet' ? clamp(it.sites | 0 || 1, 1, 3) : 1; // SM-5a
     const landing = landingOf(size);
     const ss = placeSites(it.name, it.kind, centre, count, outAng, it.kind === 'planet' ? 26 : 12, size, { cls: it.cls || null, home: st.i }, 64);
     ss.forEach((s, j) => landTo(lag, s.sid, landing, false, !!it.atmosphere && j === 0)); // SM-6c aerobrake on one landing
   }
   const zones = zoneLayer(stars);
-  const map = { spec, stars: S.map((st) => ({ id: starNodes[st.i], name: st.name, type: st.type || 'yellow', role: st.role, zones: st.N, x: st.L.cx, y: st.L.cy })), nodes, edges, sites, bodies, zones };
+  const map = { spec, stars: S.map((st) => ({ id: starNodes[st.i], name: st.name, type: st.type || 'yellow', role: st.role, zones: st.N, x: st.L.cx, y: st.L.cy })), nodes, edges, sites, bodies, zones, routes };
   map.report = validateMap(map);
   return map;
 }

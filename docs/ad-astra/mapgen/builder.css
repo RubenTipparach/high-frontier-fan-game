@@ -38,3 +38,23 @@ html, body { margin: 0; height: 100%; background: var(--bg, #07060f); color: var
 .mg-report li.no { color: var(--bad, #f87171); }
 .mg-report b { font-weight: 600; margin-right: 6px; }
 .mg-report small { display: block; color: var(--ink-dim, #8b90b8); margin-left: 16px; }
+
+/* drag and drop */
+.mg-adds button[draggable="true"] { cursor: grab; }
+.mg-hint { font-size: 12px; }
+.mg-ghost { position: absolute; z-index: 20; pointer-events: none; transform: translate(14px, -50%);
+  display: flex; flex-direction: column; gap: 1px; padding: 5px 9px; border-radius: 7px;
+  background: rgba(12, 10, 28, .92); border: 1px dashed var(--accent, #7dd3fc); color: var(--ink, #e6e9ff); font-size: 12px; white-space: nowrap; }
+.mg-ghost b { color: var(--accent, #7dd3fc); font-weight: 600; }
+.mg-ghost::before { content: ''; position: absolute; left: -14px; top: 50%; width: 10px; height: 10px; margin-top: -5px; border-radius: 50%; border: 2px solid var(--accent, #7dd3fc); }
+
+/* spline editing (SM-11c) */
+#mg-handles { position: absolute; inset: 0; pointer-events: none; z-index: 15; }
+.mg-handle { position: absolute; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; pointer-events: auto; cursor: grab;
+  background: #0c0a1c; border: 2px solid var(--accent, #7dd3fc); box-shadow: 0 0 0 3px rgba(125, 211, 252, .25); touch-action: none; }
+.mg-handle.bent { background: var(--accent, #7dd3fc); }
+.mg-handle.dragging { cursor: grabbing; transform: scale(1.25); }
+.mg-handle span { position: absolute; left: 16px; top: -4px; font-size: 11px; white-space: nowrap; color: var(--ink, #e6e9ff);
+  background: rgba(12, 10, 28, .85); padding: 1px 5px; border-radius: 4px; pointer-events: none; }
+.mg-splinebar { display: grid; gap: 4px; margin: 8px 0; padding: 8px 10px; border: 1px solid var(--accent, #7dd3fc); border-radius: 8px; background: rgba(125, 211, 252, .08); }
+.mg-splinebar b { color: var(--accent, #7dd3fc); }

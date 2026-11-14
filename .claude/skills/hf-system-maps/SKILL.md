@@ -142,6 +142,32 @@ the builder's presets and "Roll a system" all use it. Boards come out at 50 to
 160 sites (Sol: 188).
 
 
+## Hand edits in the builder (SM-11)
+
+Edits live in the spec, so a rebuild replays them; none adds or removes a node,
+burn or edge, so every SM-10 check still runs on an edited board.
+- **Drag a body** (any of its nodes: a giant's moon, Trojan, ladder, slingshot
+  or sphere; a belt's rock; a planet's site) and it moves with all its
+  children: `bodyIndexForNode` maps a node to its spec body, `placementAt`
+  turns the drop point into star / zone / angle, and the drag previews live
+  (`previewSoon`, one rebuild per animation frame, without saving).
+- **Drag a companion star** (within 22 px of its centre): sets
+  `spec.stars[i].cx / cy`, which `starLayout` honours; its whole system moves.
+- **Drag a + button onto the map** (HTML5 drag and drop) to drop a new body
+  there; a click still adds it with automatic placement.
+- **Edit splines**: the popup's button lists the routes through a node
+  (`map.routes`, recorded by `route(..., key)`). Each route has a role key
+  (`well:<body>`, `spoke:<star>:<angle>:<zone>`, `moon:<name>`,
+  `sling-in:<giant>`, `group:<cluster>` ...), and a bend is stored as
+  `spec.curves[key] = { u, v }` (control point = mid + u*(B-A) + v*perp), so it
+  follows the body when the body moves. The handle sits ON the curve, at its
+  midpoint (A + 2cp + B) / 4. Double-click straightens. Ring arcs are not
+  routes and cannot be bent (SM-2b).
+- A giant always gets three distinct ring pivots; when one merges with a
+  neighbour it falls back to the next pivot along the ring. Without that, a
+  hand-dropped giant could leave its slingshot a dead end (it did, at 147
+  degrees).
+
 ## The spec
 
 ```js
