@@ -328,3 +328,29 @@ follow the same discipline as everything else in this repo: land the flag
 first, gate every code path on it, and exercise the change against a real
 server before it's called done (see CLAUDE.md's "EXERCISE every change BEFORE
 pushing").
+
+## Module tags are per face (2026-11-14)
+
+The user's rule: "do not couple front and back". Each face is judged on its OWN text, so the
+module tags in `data/crew.js` now live on the face, not the card. Both the Library tile and the
+admin crew picker read them from `CREW_FACES`. A `requiresModule` face shows "Coming soon · M4/M5"
+and is locked; a `notRecommendedWithModule` face shows the amber caution.
+
+| Card | Face | Tag | Why (that face's text) |
+|---|---|---|---|
+| The Sea Peoples | Courier | requires M4 | "Connections (4B2f)" is an M4 contract ability |
+| The Sea Peoples | Power Brokers | none | FINAO + Seniority Disks: M0 machinery only |
+| JAXA | Futurists | requires M4 | contract auction (M4) |
+| JAXA | Starchild | requires M4 | augmentations (M4) |
+| Utopia, Inc. | Executive Discount | requires M5 | company service prices (stock market) |
+| Utopia, Inc. | Piggyback | none | free boost when an opponent boosts: core boosting |
+| Brotherhood of Cryptobankers | both | requires M5 | angel / chair / dividends (stock market) |
+| VerisAI | Incubator | requires M5 | splinter a company (stock market) |
+| VerisAI | Cavitation Engineers | none | ignore one Aerobrake per turn: core aerobrake rule |
+| Explorers Without Borders | both | caution M5 | both move or discount Aqua |
+| Makers Guild | Offworld Trade Nexus | caution M5 | Bernal Profits pay Aqua |
+| Makers Guild | Trade Port | none | discard 2 for a patent: no Aqua |
+| Cerulean | Blue Planet | caution M5 | FINAO Aqua cost |
+| Cerulean | Dowsers | none | ISRU refuel rule: no Aqua |
+
+Faces with no tag were already untagged before this change.
