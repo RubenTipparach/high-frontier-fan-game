@@ -658,101 +658,101 @@ export const CARD_ART = {
   "ber_geo_elevator_bernal": {
     "primary": {
       "src": "assets/cards/bernals/ber_geo_elevator_bernal-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/bernals/ber_geo_elevator_bernal-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "ber_l1_climate_control_bernal": {
     "primary": {
       "src": "assets/cards/bernals/ber_l1_climate_control_bernal-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/bernals/ber_l1_climate_control_bernal-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "ber_l2_collimator_bernal": {
     "primary": {
       "src": "assets/cards/bernals/ber_l2_collimator_bernal-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/bernals/ber_l2_collimator_bernal-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "ber_l3_lofstrom_loop_microgravity": {
     "primary": {
       "src": "assets/cards/bernals/ber_l3_lofstrom_loop_microgravity-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/bernals/ber_l3_lofstrom_loop_microgravity-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "ber_l4_antimatter_factory": {
     "primary": {
       "src": "assets/cards/bernals/ber_l4_antimatter_factory-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/bernals/ber_l4_antimatter_factory-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "ber_l4s_pharmaceutics_bernal": {
     "primary": {
       "src": "assets/cards/bernals/ber_l4s_pharmaceutics_bernal-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/bernals/ber_l4s_pharmaceutics_bernal-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "ber_l5_solar_cell_factory": {
     "primary": {
       "src": "assets/cards/bernals/ber_l5_solar_cell_factory-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/bernals/ber_l5_solar_cell_factory-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "ber_l5s_cancer_hospital": {
     "primary": {
       "src": "assets/cards/bernals/ber_l5s_cancer_hospital-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/bernals/ber_l5s_cancer_hospital-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "ber_sso_diplomatic": {
     "primary": {
       "src": "assets/cards/bernals/ber_sso_diplomatic-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/bernals/ber_sso_diplomatic-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "ber_tourism_cycler": {
     "primary": {
       "src": "assets/cards/bernals/ber_tourism_cycler-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/bernals/ber_tourism_cycler-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "rea_cermet_nerva_fission": {
@@ -878,381 +878,381 @@ export const CARD_ART = {
   "fre_fission_heated_steam": {
     "primary": {
       "src": "assets/cards/freighters/fre_fission_heated_steam-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/freighters/fre_fission_heated_steam-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "fre_fusion_fragment_sail": {
     "primary": {
       "src": "assets/cards/freighters/fre_fusion_fragment_sail-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/freighters/fre_fusion_fragment_sail-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "fre_hiiper_beam_rider": {
     "primary": {
       "src": "assets/cards/freighters/fre_hiiper_beam_rider-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/freighters/fre_hiiper_beam_rider-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "fre_inflatable_solar_heated": {
     "primary": {
       "src": "assets/cards/freighters/fre_inflatable_solar_heated-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/freighters/fre_inflatable_solar_heated-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "fre_poodle_steam": {
     "primary": {
       "src": "assets/cards/freighters/fre_poodle_steam-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/freighters/fre_poodle_steam-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "fre_rotary_dirt_launcher": {
     "primary": {
       "src": "assets/cards/freighters/fre_rotary_dirt_launcher-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/freighters/fre_rotary_dirt_launcher-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "fre_z_pinch_d_t_6li_fusion": {
     "primary": {
       "src": "assets/cards/freighters/fre_z_pinch_d_t_6li_fusion-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/freighters/fre_z_pinch_d_t_6li_fusion-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "gw-_amat_catalyzed_fission_fusion": {
     "primary": {
-      "src": "assets/cards/gwthrusters/gw-_amat_catalyzed_fission_fusion-front.svg",
-      "approved": false
+      "src": "assets/cards/gwthrusters/gw-_amat_catalyzed_fission_fusion-front-3d.webp",
+      "approved": true
     },
     "secondary": {
-      "src": "assets/cards/gwthrusters/gw-_amat_catalyzed_fission_fusion-back.svg",
-      "approved": false
+      "src": "assets/cards/gwthrusters/gw-_amat_catalyzed_fission_fusion-back-3d.webp",
+      "approved": true
     }
   },
   "gw-_dense_plasma_h_b_focus_fusion": {
     "primary": {
-      "src": "assets/cards/gwthrusters/gw-_dense_plasma_h_b_focus_fusion-front.svg",
-      "approved": false
+      "src": "assets/cards/gwthrusters/gw-_dense_plasma_h_b_focus_fusion-front-3d.webp",
+      "approved": true
     },
     "secondary": {
-      "src": "assets/cards/gwthrusters/gw-_dense_plasma_h_b_focus_fusion-back.svg",
-      "approved": false
+      "src": "assets/cards/gwthrusters/gw-_dense_plasma_h_b_focus_fusion-back-3d.webp",
+      "approved": true
     }
   },
   "gw-_levitated_dipole_6li_h_fusion": {
     "primary": {
-      "src": "assets/cards/gwthrusters/gw-_levitated_dipole_6li_h_fusion-front.svg",
-      "approved": false
+      "src": "assets/cards/gwthrusters/gw-_levitated_dipole_6li_h_fusion-front-3d.webp",
+      "approved": true
     },
     "secondary": {
-      "src": "assets/cards/gwthrusters/gw-_levitated_dipole_6li_h_fusion-back.svg",
-      "approved": false
+      "src": "assets/cards/gwthrusters/gw-_levitated_dipole_6li_h_fusion-back-3d.webp",
+      "approved": true
     }
   },
   "gw-_mini_mag_orion_z_pinch_fission": {
     "primary": {
-      "src": "assets/cards/gwthrusters/gw-_mini_mag_orion_z_pinch_fission-front.svg",
-      "approved": false
+      "src": "assets/cards/gwthrusters/gw-_mini_mag_orion_z_pinch_fission-front-3d.webp",
+      "approved": true
     },
     "secondary": {
-      "src": "assets/cards/gwthrusters/gw-_mini_mag_orion_z_pinch_fission-back.svg",
-      "approved": false
+      "src": "assets/cards/gwthrusters/gw-_mini_mag_orion_z_pinch_fission-back-3d.webp",
+      "approved": true
     }
   },
   "gw-_salt_water_zubrin": {
     "primary": {
-      "src": "assets/cards/gwthrusters/gw-_salt_water_zubrin-front.svg",
-      "approved": false
+      "src": "assets/cards/gwthrusters/gw-_salt_water_zubrin-front-3d.webp",
+      "approved": true
     },
     "secondary": {
-      "src": "assets/cards/gwthrusters/gw-_salt_water_zubrin-back.svg",
-      "approved": false
+      "src": "assets/cards/gwthrusters/gw-_salt_water_zubrin-back-3d.webp",
+      "approved": true
     }
   },
   "gw-_spheromak_3he_d_magnetic_fusion": {
     "primary": {
-      "src": "assets/cards/gwthrusters/gw-_spheromak_3he_d_magnetic_fusion-front.svg",
-      "approved": false
+      "src": "assets/cards/gwthrusters/gw-_spheromak_3he_d_magnetic_fusion-front-3d.webp",
+      "approved": true
     },
     "secondary": {
-      "src": "assets/cards/gwthrusters/gw-_spheromak_3he_d_magnetic_fusion-back.svg",
-      "approved": false
+      "src": "assets/cards/gwthrusters/gw-_spheromak_3he_d_magnetic_fusion-back-3d.webp",
+      "approved": true
     }
   },
   "gw-_vista_d_t_inertial_fusion": {
     "primary": {
-      "src": "assets/cards/gwthrusters/gw-_vista_d_t_inertial_fusion-front.svg",
-      "approved": false
+      "src": "assets/cards/gwthrusters/gw-_vista_d_t_inertial_fusion-front-3d.webp",
+      "approved": true
     },
     "secondary": {
-      "src": "assets/cards/gwthrusters/gw-_vista_d_t_inertial_fusion-back.svg",
-      "approved": false
+      "src": "assets/cards/gwthrusters/gw-_vista_d_t_inertial_fusion-back-3d.webp",
+      "approved": true
     }
   },
   "crew_un_b612": {
     "primary": {
       "src": "assets/cards/crew/crew_un_b612-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/crew/crew_un_b612-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "crew_roscosmos_taikonauts": {
     "primary": {
       "src": "assets/cards/crew/crew_roscosmos_taikonauts-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/crew/crew_roscosmos_taikonauts-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "crew_nasa_isro": {
     "primary": {
       "src": "assets/cards/crew/crew_nasa_isro-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/crew/crew_nasa_isro-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "crew_anonp2p_esa": {
     "primary": {
       "src": "assets/cards/crew/crew_anonp2p_esa-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/crew/crew_anonp2p_esa-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "crew_shimizu_nasrda": {
     "primary": {
       "src": "assets/cards/crew/crew_shimizu_nasrda-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/crew/crew_shimizu_nasrda-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "crew_spacex_norse": {
     "primary": {
       "src": "assets/cards/crew/crew_spacex_norse-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/crew/crew_spacex_norse-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "crew_brin": {
     "primary": {
       "src": "assets/cards/crew/crew_brin-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/crew/crew_brin-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "crew_the_sea_peoples": {
     "primary": {
       "src": "assets/cards/crew/crew_the_sea_peoples-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/crew/crew_the_sea_peoples-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "crew_the_martian_way": {
     "primary": {
       "src": "assets/cards/crew/crew_the_martian_way-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/crew/crew_the_martian_way-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "crew_jaxa": {
     "primary": {
       "src": "assets/cards/crew/crew_jaxa-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/crew/crew_jaxa-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "crew_space_force": {
     "primary": {
       "src": "assets/cards/crew/crew_space_force-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/crew/crew_space_force-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "crew_aeb": {
     "primary": {
       "src": "assets/cards/crew/crew_aeb-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/crew/crew_aeb-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "crew_explorers_without_borders": {
     "primary": {
       "src": "assets/cards/crew/crew_explorers_without_borders-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/crew/crew_explorers_without_borders-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "crew_baltimore_gun_club": {
     "primary": {
       "src": "assets/cards/crew/crew_baltimore_gun_club-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/crew/crew_baltimore_gun_club-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "crew_african_union_space_directorate": {
     "primary": {
       "src": "assets/cards/crew/crew_african_union_space_directorate-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/crew/crew_african_union_space_directorate-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "crew_leo_workers_union": {
     "primary": {
       "src": "assets/cards/crew/crew_leo_workers_union-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/crew/crew_leo_workers_union-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "crew_makers_guild": {
     "primary": {
       "src": "assets/cards/crew/crew_makers_guild-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/crew/crew_makers_guild-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "crew_new_pilgrims": {
     "primary": {
       "src": "assets/cards/crew/crew_new_pilgrims-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/crew/crew_new_pilgrims-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "crew_utopia_inc": {
     "primary": {
       "src": "assets/cards/crew/crew_utopia_inc-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/crew/crew_utopia_inc-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "crew_galahad_group": {
     "primary": {
       "src": "assets/cards/crew/crew_galahad_group-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/crew/crew_galahad_group-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "crew_brotherhood_of_cryptobankers": {
     "primary": {
       "src": "assets/cards/crew/crew_brotherhood_of_cryptobankers-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/crew/crew_brotherhood_of_cryptobankers-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "crew_verisai": {
     "primary": {
       "src": "assets/cards/crew/crew_verisai-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/crew/crew_verisai-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "crew_heliocentricity": {
     "primary": {
       "src": "assets/cards/crew/crew_heliocentricity-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/crew/crew_heliocentricity-back.svg",
-      "approved": false
+      "approved": true
     }
   },
   "crew_cerulean": {
     "primary": {
       "src": "assets/cards/crew/crew_cerulean-front.svg",
-      "approved": false
+      "approved": true
     },
     "secondary": {
       "src": "assets/cards/crew/crew_cerulean-back.svg",
-      "approved": false
+      "approved": true
     }
   }
 };

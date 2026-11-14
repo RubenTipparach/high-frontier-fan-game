@@ -11,7 +11,7 @@
 // untouched. See docs/card-art-guide.md.
 //
 // Deterministic: no Math.random() - the starfield is a seeded PRNG.
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compose } from './card-art/kit.mjs';
@@ -39,16 +39,17 @@ const DECKS = {
   refineries: { ...refineries, approved: new Set(['*']) },
   generators: { ...generators, approved: new Set(['*']) },
   radiators: { ...radiators, approved: new Set(['*']) },
-  bernals: { ...bernals, approved: new Set([]) },   // mock-up: awaiting the user's sign-off
+  bernals: { ...bernals, approved: new Set(['*']) },
   reactors: { ...reactors, approved: new Set(['*']) },
-  freighters: { ...freighters, approved: new Set([]), frontBackdrop: true },   // mock-up: awaiting the user's sign-off
-  gwthrusters: { ...gwthrusters, approved: new Set([]), frontBackdrop: true },   // mock-up: awaiting the user's sign-off
-  crew: { ...crew, approved: new Set([]) },   // mock-up: awaiting the user's sign-off
+  freighters: { ...freighters, approved: new Set(['*']), frontBackdrop: true },
+  // GW / TW ship their Blender renders (user 2026-11-14: "gw/tw thrusters go 3d").
+  gwthrusters: { ...gwthrusters, approved: new Set(['*']), frontBackdrop: true, use3d: true },
+  crew: { ...crew, approved: new Set(['*']) },
 };
 
 const manifest = {};
 let count = 0;
-for (const [deck, { ART, RIG = {}, approved, frontBackdrop = false }] of Object.entries(DECKS)) {
+for (const [deck, { ART, RIG = {}, approved, frontBackdrop = false, use3d = false }] of Object.entries(DECKS)) {
   mkdirSync(join(ROOT, 'assets', 'cards', deck), { recursive: true });
   for (const [key, draw] of Object.entries(ART)) {
     const [card, face] = key.split(':');
@@ -62,7 +63,11 @@ for (const [deck, { ART, RIG = {}, approved, frontBackdrop = false }] of Object.
     // keep the space backdrop there (frontBackdrop).
     if (face === 'primary' && !frontBackdrop) out = out.replace(BACKDROP, '').replace(STAR, '');
     writeFileSync(join(ROOT, rel), out);
-    (manifest[card] ||= {})[face] = { src: rel, approved: approved.has('*') || approved.has(key) };
+    // A deck that ships its 3D render points the game at the -3d.webp beside
+    // the SVG (the SVG is still written, as the vector reference).
+    const rel3d = `assets/cards/${deck}/${card}-${side}-3d.webp`;
+    const src = use3d && existsSync(join(ROOT, rel3d)) ? rel3d : rel;
+    (manifest[card] ||= {})[face] = { src, approved: approved.has('*') || approved.has(key) };
     count++;
   }
 }
