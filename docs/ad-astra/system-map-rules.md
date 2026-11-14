@@ -114,6 +114,14 @@ for any other reason:
   a moon or belt rock drops the star's name: `b-I Near`, `Belt C`), and sit at
   least 26 world px apart, sites on the same body included: the Sol board's
   own closest pair (SM-0). Labels fade in as you zoom, as on Sol.
+- **SM-5i. Room to read (design rule, measured off Sol).** Route nodes
+  (everything but curve bends) sit at least **10 px** apart (Sol: 99% do), and
+  at every node the two closest connections are at least **30 degrees** apart
+  (Sol: 95% are). The generator builds to this: wells lean off the radial line
+  and get 13 px a stop; every body keeps its own ring pivot, clear of the
+  spokes and its neighbours; a giant's moons branch through orbit hubs. A
+  generated board must pass; a hand-edited board (SM-11) that breaks it shows
+  a **warning**, with the places it happens, instead of a failure.
 - **SM-5h. Placement.** Bodies are placed largest first. Each has a footprint
   (a giant's moon system, a planet and its sites, an asteroid group, a comet)
   and takes the first angle on its zone's ring where that footprint clears
@@ -144,16 +152,16 @@ for any other reason:
     escape burns, both Lagrange points and the site) carries the season and is
     drawn in the season's colour, as Sol draws its seasonal comets.
   - **Out of the plane.** A comet's orbit is inclined, so its route leaves the
-    orbital plane: from its ring pivot it climbs toward the top of the board,
-    the far orbit and the comet sitting higher (20, 36 and 52 px) than the
-    plane would put them.
+    orbital plane: from its ring pivot it climbs steeply toward the top of the
+    board (60 degrees up, to one side), its stops 13+ px apart, the far orbit
+    and the comet at the top of the climb. It never folds back on itself.
 
 ## SM-6. Hazards
 
 - **SM-6a. Radiation.** Radiation nodes go in each star's innermost zone
-  (on its ring and transfers) and in each giant's belts: on the slingshot
-  routes to its flyby point and on the routes down to its inner moons.
-  Nowhere else.
+  (on its ring, where an arc is long enough) and in each giant's belt: on the
+  slingshot routes to its flyby point and on its escape ladder between the 1st
+  and 2nd burns, so every moon lies inside the belt. Nowhere else.
 - **SM-6b. Hazardous points.** Lagrange points in the star's zone are hazards.
 - **SM-6c. Aerobrakes.** A body with an atmosphere (habitable-zone worlds that
   are not Hostile, giants) has an aerobrake on its landing path; every
@@ -168,16 +176,18 @@ for any other reason:
   planets. It leads to no moon: **you cannot slingshot into a moon's orbit.**
 - **SM-7b. The escape ladder.** From the ladder pivot on the ring, the
   giant's well is a ladder of 3 escape burns curling round the outward side of
-  the giant. Moons branch off the ladder's 2nd and 3rd burns with ordinary
-  burns (each takes the rung on its side): branch burn -> the moon's own
-  escape burns -> moon Lagrange -> landing -> sites.
+  the giant, with the radiation belt between the 1st and 2nd. Moons branch off
+  the 2nd and 3rd burns (each takes the rung on its side) through **orbit
+  hubs**: free Lagrange points that split the branches two ways, so no fork
+  is tighter than SM-5i's 30 degrees (Sol's Jupiter and Saturn branch the same
+  way). A moon's own route is its escape burns -> its Lagrange point -> landing
+  -> sites.
 - **SM-7c. Major and minor moons (design target).** A gas giant has 4 to 10
   **major moons** (size 4+, 1 to 2 sites each) and 10 to 15 **minor moons**
-  (size 1-2, one site each; Sol's Himalia group). Brown and white dwarfs have
-  fewer. Majors sit on two shells round the giant (inner shell through a
-  radiation belt, SM-6a); minors sit in groups of up to 3 on an outer shell,
-  each group off a rung by one burn and a Lagrange point, like an asteroid
-  group. The moon system spans about 160 px, as Jupiter's does on Sol.
+  (size 1-2, one site each; Sol's Himalia group), the minors in groups of up
+  to 3 off one Lagrange point. Majors and minor groups alternate between two
+  shells round the giant, so neighbours' sites stay apart. Brown and white
+  dwarfs have fewer. The moon system spans about 200 px.
 - **SM-7d.** The giant itself is a body you cannot land on.
 
 ## SM-8. Curves and routes
@@ -238,3 +248,7 @@ SM-10 check still runs on the edited board.
     two Lagrange points, and its whole route carries one season; with 3 or
     more comets, all three seasons are used (SM-5g).
 11. Each gas giant has 4 to 10 major and 10 to 15 minor moons (SM-7c).
+12. Route nodes at least 10 px apart (SM-5i).
+13. At every node, its two closest connections at least 30 degrees apart (SM-5i).
+Checks 12 and 13 are warnings on a hand-edited board. Every check lists the
+places it fails, so the builder can take you to each one.

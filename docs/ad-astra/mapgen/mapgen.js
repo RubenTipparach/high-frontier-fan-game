@@ -24,10 +24,12 @@ export const flybyOf = (size) => (size >= 11 ? 4 : size >= 10 ? 2 : size >= 8 ? 
 export const moonEscape = (size) => Math.max(1, wellBurns(size) - 1); // SM-4b: the giant's ladder comes first
 
 export const SITE_GAP = 26; // SM-5e: the Sol board's own closest pair of sites
+export const NODE_GAP = 10; // SM-5i: the Sol board keeps 99% of its route nodes 10+ px apart
+export const MIN_ANGLE = 30; // SM-5i: and 95% of its nodes' connections 30+ degrees apart
+const STEP = 13; // px per stop along a well, so stops sit NODE_GAP apart with room to spare
 export const GIANT_HALO = 24; // a giant's sphere radius on these boards (world px)
 // SM-1f / 5f / 5g / 7c design targets
 export const SEASONS = ['red', 'yellow', 'blue']; // SM-5g / AA-D3a: the Comet Cycle
-export const COMET_LIFT = [20, 36, 52]; // SM-5g: px above the plane for the near orbit, far orbit, comet
 const lift = (p, dy) => ({ x: p.x, y: round1(p.y - dy) });
 export const TARGETS = { planets: [4, 15], asteroids: [30, 50], comets: 10, majors: [4, 10], minors: [10, 15] };
 const deg = (a) => (a * Math.PI) / 180;
@@ -62,6 +64,14 @@ const P = (L, a, r) => ({ x: round1(L.cx + Math.cos(deg(a)) * r * L.kx), y: roun
 export function radiusOf(x, y, L = WORLD) { return Math.hypot((x - L.cx) / L.kx, (y - L.cy) / L.ky); }
 const angleTo = (L, x, y) => ((Math.atan2((y - L.cy) / L.ky, (x - L.cx) / L.kx) * 180) / Math.PI + 360) % 360;
 const outAngOf = (L, a) => (Math.atan2(Math.sin(deg(a)) * L.ky, Math.cos(deg(a)) * L.kx) * 180) / Math.PI;
+// SM-5i: a body's well leaves its ring pivot leaning 45 degrees off the radial
+// line (alternately ahead / behind), long enough that every stop on it sits
+// STEP px from the next. Returns the pivot point, the well's direction and a
+// point `len` px along it.
+const wellDir = (L, a, sign, lean = 45) => { const o = deg(outAngOf(L, a) + sign * lean); return { x: Math.cos(o), y: Math.sin(o) }; };
+// lean further off the radial line when the well is long, so it stays inside its own zone
+const leanFor = (len, w) => Math.max(45, Math.min(72, (Math.acos(Math.min(1, (0.38 * w) / len)) * 180) / Math.PI));
+const along = (p, d, len, up = 0) => ({ x: round1(p.x + d.x * len), y: round1(p.y + d.y * len - up) });
 const hash = (str) => { let h = 2166136261; for (const c of String(str)) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } return Math.abs(h); };
 
 // SM-1c: the zone bands as the renderer draws them (setCanonicalZones), with
@@ -185,44 +195,73 @@ export function buildMap(spec) {
   // depends on its angle; bodies are placed largest first at the first angle
   // whose footprint clears every footprint already placed.
   const wOf = (st, k) => st.b[k + 1] - st.b[k];
+  const sideOf = (it) => (hash(it.name || '') % 2 ? 1 : -1);
+  // SM-5i geometry shared by placement and construction
+  const bodyGeom = (it, L, a, D) => { const esc = wellBurns(clamp(it.size | 0 || 4, 1, 11)); const len = (esc + 1) * STEP; const reach = len + (it.kind === 'planet' ? 16 + 26 : 22);
+    const d = wellDir(L, a, sideOf(it), leanFor(reach, wOf(it.st, it.zone))); const lag = along(D, d, len); return { d, esc, lag, centre: along(lag, d, it.kind === 'planet' ? 16 : 10) }; };
+  const cometEsc = (k, N) => (k === N - 1 ? 3 : k >= N / 2 ? 2 : 1);
+  // SM-5g: a comet's route climbs off the plane: up the board and to one side,
+  // never folding back on itself (an outward direction plus a lift cancelled on
+  // the lower half of the board and stacked the stops)
+  const cometGeom = (it, L, a, D, k, N) => { const esc = cometEsc(k, N); const n1 = (esc + 1) * STEP; const d = { x: sideOf(it) * 0.5, y: -0.866 };
+    return { d, esc, lag1: along(D, d, n1), lag2: along(D, d, n1 + 18), site: along(D, d, n1 + 38) }; };
+  const clusterLag = (L, a, side, D) => along(D, wellDir(L, a, 0), side * 2 * STEP);
   const footprint = (it, a) => {
     const st = it.st, k = it.zone, w = wOf(st, k), L = st.L;
     if (it.kind === 'giant') { const C = P(L, a, st.mid(k) + 0.42 * w); return { x: C.x, y: C.y, r: giantReach(it) }; } // the moons fan almost all the way round
     // footprint = the farthest site from the centre, plus half a gap (SM-5e)
-    if (it.kind === 'cluster') { const c = P(L, a, st.mid(k) + it.side * 0.3 * w); return { x: c.x, y: c.y, r: 22 + HALF_GAP }; }
-    if (it.kind === 'comet') { const c = lift(P(L, a + 9, st.mid(k) + 0.44 * w), COMET_LIFT[2]); return { x: c.x, y: c.y, r: HALF_GAP + 1 }; }
-    const c = P(L, a, st.mid(k) + 0.36 * w);
-    return { x: c.x, y: c.y, r: (it.kind === 'planet' ? 26 : 12) + HALF_GAP };
+    const D = P(L, a, st.mid(k));
+    const seg = (p, q, pad) => ({ x: (p.x + q.x) / 2, y: (p.y + q.y) / 2, r: Math.hypot(q.x - p.x, q.y - p.y) / 2 + pad });
+    if (it.kind === 'cluster') { const c = clusterLag(L, a, it.side, D); return [{ x: c.x, y: c.y, r: 22 + HALF_GAP }, seg(D, c, 6)]; }
+    if (it.kind === 'comet') { const g = cometGeom(it, L, a, D, k, st.N); return [seg(g.lag1, g.site, HALF_GAP), seg(D, g.lag1, 6)]; }
+    const g = bodyGeom(it, L, a, D);
+    return [{ x: g.centre.x, y: g.centre.y, r: (it.kind === 'planet' ? 26 : 12) + HALF_GAP }, seg(D, g.lag, 6)];
   };
+  // a giant's three ring pivots sit ~70 px apart along its ring (SM-7)
+  const giantDelta = (st, k) => Math.max(7, (70 / (st.mid(k) * st.L.kx)) * (180 / Math.PI));
+  // SM-5h / 5i: a footprint is a set of circles (the body and its route), and
+  // each body keeps its own ring pivot, clear of the spokes and the others
   const placed = [];
-  const clash = (f) => placed.reduce((worst, g) => Math.max(worst, f.r + g.r - Math.hypot(f.x - g.x, f.y - g.y)), -Infinity);
-  const offBoard = (f) => Math.max(0, f.r * 0.6 - f.x, f.x + f.r * 0.6 - WORLD.w, f.r * 0.6 - f.y, f.y + f.r * 0.6 - WORLD.h);
+  const circles = (f) => (Array.isArray(f) ? f : [f]);
+  const clash = (fs) => { let worst = -Infinity; for (const f of circles(fs)) for (const g of placed) worst = Math.max(worst, f.r + g.r - Math.hypot(f.x - g.x, f.y - g.y)); return worst; };
+  const offBoard = (fs) => Math.max(0, ...circles(fs).map((f) => Math.max(f.r * 0.6 - f.x, f.x + f.r * 0.6 - WORLD.w, f.r * 0.6 - f.y, f.y + f.r * 0.6 - WORLD.h)));
+  const SPOKE_ANGLES = [270, 30, 150];
+  const ringMinDeg = (st, k) => Math.max(5, ((NODE_GAP + 4) / (st.mid(k) * st.L.kx)) * (180 / Math.PI));
+  const used = {}; const useAngle = (st, k, a) => { (used[`${st.i}:${k}`] = used[`${st.i}:${k}`] || []).push(a); };
+  const pin = (st, k, a) => placed.push({ x: P(st.L, a, st.mid(k)).x, y: P(st.L, a, st.mid(k)).y, r: 9 }); // a ring pivot: keep routes off it
+  for (const st of S) for (let k = 0; k < st.N; k++) SPOKE_ANGLES.forEach((a) => { useAngle(st, k, a); pin(st, k, a); });
+  for (const l of spec.links || []) useAngle(S[0], S[0].N - 1, ((l.angle % 360) + 360) % 360);
+  for (const st of S.slice(1)) { const from = st.role === 'binary' ? S[0] : (S.find((x) => x.role === 'binary') || S[0]); useAngle(from, from.N - 1, angleTo(from.L, st.L.cx, st.L.cy)); useAngle(st, st.N - 1, angleTo(st.L, from.L.cx, from.L.cy)); }
+  const angDist0 = (p, q) => Math.abs(((p - q + 540) % 360) - 180);
+  const pivotAnglesOf = (it, a) => (it.kind === 'giant' ? [a - giantDelta(it.st, it.zone), a, a + giantDelta(it.st, it.zone)] : [a]);
+  const crowding = (it, a) => { const md = ringMinDeg(it.st, it.zone) * 2; let worst = 0; for (const p of pivotAnglesOf(it, a)) for (const u of used[`${it.st.i}:${it.zone}`] || []) worst = Math.max(worst, md - angDist0(p, u)); return worst; };
   const size0 = (it) => (it.kind === 'giant' ? 1000 + giantReach(it) : it.kind === 'planet' ? 500 + (it.sites | 0) : it.kind === 'comet' ? 200 : it.kind === 'cluster' ? (it.trojanOf ? 50 : 100) : 300);
   const order = items.filter((it) => !it.trojanOf).sort((p, q) => (q.fixed - p.fixed) || (size0(q) - size0(p)));
   // variants a body may fall back on when its ring is full: an asteroid group
   // may sit on either side of its ring, a comet one zone further out
   const variants = (it) => (it.kind === 'cluster' && !it.trojanOf && it.zone > 0 ? [{ side: it.side }, { side: -it.side }]
     : it.kind === 'comet' ? Array.from({ length: it.st.N - it.zone }, (_, d) => ({ zone: it.zone + d })) : [{}]);
+  const commit = (it, a, fs) => { placed.push(...circles(fs)); pivotAnglesOf(it, a).forEach((p) => { useAngle(it.st, it.zone, ((p % 360) + 360) % 360); }); };
   const placeOne = (it) => {
-    if (it.fixed) { placed.push(footprint(it, it.angle)); return; }
+    if (it.fixed) { commit(it, it.angle, footprint(it, it.angle)); return; }
     const start = hash(`${it.name || it.kind}${spec.jitter || ''}`) % 360; // a retry re-places with another start
     let best = null;
     for (const v of variants(it)) {
       const cand = { ...it, ...v };
-      for (let s = 0; s < 360; s += 3) {
+      for (let s = 0; s < 360; s += 2) {
         const a = (start + s) % 360;
         const f = footprint(cand, a);
-        const bad = Math.max(clash(f), 0) + offBoard(f) * 2;
+        const bad = Math.max(clash(f), 0) + offBoard(f) * 2 + crowding(cand, a) * 4;
         if (!best || bad < best.bad) best = { a, f, bad, v };
         if (bad <= 0) break;
       }
       if (best.bad <= 0) break;
     }
-    Object.assign(it, best.v); it.angle = best.a; placed.push(best.f);
+    Object.assign(it, best.v); it.angle = best.a; commit(it, best.a, best.f);
   };
   for (const it of order) {
     placeOne(it);
-    if (it.kind === 'giant') for (const tr of items.filter((x) => x.trojanOf && x.trojanOf.name === it.name)) { tr.angle = (it.angle + tr.offset + 360) % 360; placed.push(footprint(tr, tr.angle)); }
+    if (it.kind === 'giant') for (const tr of items.filter((x) => x.trojanOf && x.trojanOf.name === it.name)) { tr.angle = (it.angle + tr.offset + 360) % 360; commit(tr, tr.angle, footprint(tr, tr.angle)); }
   }
 
   // ---- SM-9b: the routes between stars need a pivot facing the other star
@@ -234,8 +273,6 @@ export function buildMap(spec) {
     interStar.push({ from, to: st, aOut: Math.round(aOut), aIn: Math.round(aIn) });
   }
 
-  // a giant's three ring pivots sit ~70 px apart along its ring (SM-7)
-  const giantDelta = (st, k) => Math.max(7, (70 / (st.mid(k) * st.L.kx)) * (180 / Math.PI));
   // ---- SM-2: a ring of pivots per zone; SM-3a spokes carry the radial transfers
   const SPOKES = [270, 30, 150]; // 270 = toward the arrival edge (top)
   const ringPivots = S.map(() => []);
@@ -248,7 +285,8 @@ export function buildMap(spec) {
       }
       if (k === st.N - 1) for (const a of facing[st.i]) angles.add(a);
       if (k === st.N - 1 && st.i === 0) for (const l of spec.links || []) angles.add(Math.round(((l.angle % 360) + 360) % 360)); // SM-9a
-      const list = []; for (const a of [...angles].sort((p, q) => p - q)) if (!list.length || a - list[list.length - 1] >= 5) list.push(a); // merge pivots closer than 5 degrees
+      const minDeg = Math.max(5, ((NODE_GAP + 4) / (st.mid(k) * st.L.kx)) * (180 / Math.PI)); // SM-5i: pivots 14+ px apart along the ring
+      const list = []; for (const a of [...angles].sort((p, q) => p - q)) if (!list.length || a - list[list.length - 1] >= minDeg) list.push(a);
       ringPivots[st.i][k] = list.map((a) => ({ a, id: add('hohmann', P(st.L, a, st.mid(k))) }));
     }
     for (let k = 0; k < st.N; k++) {
@@ -317,19 +355,19 @@ export function buildMap(spec) {
     const outAng = outAngOf(L, a);
     if (it.kind === 'cluster') { // SM-5f: pivot -> one escape burn -> Lagrange -> 1-3 asteroids
       const side = it.side;
-      const lag = rockGroup(dep.id, P(L, a, st.mid(k) + side * 0.3 * w), side > 0 ? outAng : outAng + 180, it.rocks, 'asteroid', { belt: it.belt, home: st.i }, 22, 100, `group:${it.name}`);
+      const lag = rockGroup(dep.id, clusterLag(L, a, side, byId[dep.id]), side > 0 ? outAng : outAng + 180, it.rocks, 'asteroid', { belt: it.belt, home: st.i }, 22, 100, `group:${it.name}`);
       if (k === 0) byId[lag].tags.hazard = true; // SM-6b
       continue;
     }
     if (it.kind === 'comet') { // SM-5g: pivot -> escape burns -> orbit -> far orbit -> the comet, climbing off the plane
       const season = SEASONS.includes(it.season) ? it.season : SEASONS[cometNo++ % SEASONS.length];
       const tag = { comet: true, season, siteSynodic: season };
-      const esc = k === st.N - 1 ? 3 : k >= st.N / 2 ? 2 : 1;
-      const lag1 = add('lagrange', lift(P(L, a, st.mid(k) + 0.2 * w), COMET_LIFT[0]), { purpose: 'orbit', body: it.name, ...tag });
-      route(dep.id, lag1, Array.from({ length: esc }, (_, i) => ({ kind: 'burn', t: (i + 1) / (esc + 1), extra: { purpose: 'escape', body: it.name, ...tag } })), 0.18, 16, `well:${it.name}`);
-      const lag2 = add('lagrange', lift(P(L, a + 5, st.mid(k) + 0.34 * w), COMET_LIFT[1]), { purpose: 'orbit', body: it.name, ...tag });
-      route(lag1, lag2, [], 0.25, 14, `far:${it.name}`);
-      link(lag2, addSite(lift(P(L, a + 9, st.mid(k) + 0.44 * w), COMET_LIFT[2]), { body: it.name, bodyKind: 'comet', size: clamp(it.size | 0 || 2, 1, 3), region: 0, home: st.i, ...tag }));
+      const g = cometGeom(it, L, a, byId[dep.id], k, st.N); // one straight climb off the plane (SM-5i)
+      const lag1 = add('lagrange', g.lag1, { purpose: 'orbit', body: it.name, ...tag });
+      route(dep.id, lag1, Array.from({ length: g.esc }, (_, i) => ({ kind: 'burn', t: (i + 1) / (g.esc + 1), extra: { purpose: 'escape', body: it.name, ...tag } })), 0.04, 16, `well:${it.name}`);
+      const lag2 = add('lagrange', g.lag2, { purpose: 'orbit', body: it.name, ...tag });
+      route(lag1, lag2, [], 0.04, 14, `far:${it.name}`);
+      link(lag2, addSite(g.site, { body: it.name, bodyKind: 'comet', size: clamp(it.size | 0 || 2, 1, 3), region: 0, home: st.i, ...tag }));
       continue;
     }
     const size = clamp(it.size | 0 || 4, 1, 11);
@@ -386,14 +424,15 @@ export function buildMap(spec) {
       continue;
     }
     // planets, dwarfs, lone asteroids: pivot -> escape burns -> orbit -> landing -> sites
-    const centre = P(L, a, st.mid(k) + 0.36 * w);
-    const lag = add('lagrange', P(L, a, st.mid(k) + 0.24 * w), { purpose: 'orbit', body: it.name, fly: flybyOf(size) || null });
+    const g = bodyGeom(it, L, a, byId[dep.id]); const centre = g.centre; // SM-5i: a leaning well, STEP px a stop
+    const lag = add('lagrange', g.lag, { purpose: 'orbit', body: it.name, fly: flybyOf(size) || null });
     if (k === 0) byId[lag].tags.hazard = true; // SM-6b
-    const esc = wellBurns(size); // SM-4a
-    route(dep.id, lag, Array.from({ length: esc }, (_, i) => ({ kind: 'burn', t: (i + 1) / (esc + 1), extra: { purpose: 'escape', body: it.name } })), 0.18, 16, `well:${it.name}`);
+    const esc = g.esc; // SM-4a
+    route(dep.id, lag, Array.from({ length: esc }, (_, i) => ({ kind: 'burn', t: (i + 1) / (esc + 1), extra: { purpose: 'escape', body: it.name } })), 0.04, 16, `well:${it.name}`);
     const count = it.kind === 'planet' ? clamp(it.sites | 0 || 1, 1, 3) : 1; // SM-5a
     const landing = landingOf(size);
-    const ss = placeSites(it.name, it.kind, centre, count, outAng, it.kind === 'planet' ? 26 : 12, size, { cls: it.cls || null, home: st.i }, 64);
+    const around = (Math.atan2(g.d.y, g.d.x) * 180) / Math.PI; // the sites fan on past the orbit point
+    const ss = placeSites(it.name, it.kind, centre, count, around, it.kind === 'planet' ? 26 : 12, size, { cls: it.cls || null, home: st.i }, 64);
     ss.forEach((s, j) => landTo(lag, s.sid, landing, false, !!it.atmosphere && j === 0)); // SM-6c aerobrake on one landing
   }
   const zones = zoneLayer(stars);
