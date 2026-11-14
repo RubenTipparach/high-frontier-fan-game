@@ -2734,7 +2734,7 @@ export class MapRenderer {
       this._drawFactoriesScreen(ctx);
       this._drawMobileCubesScreen(ctx);
       this._drawFocusedStackRingScreen(ctx);
-      this._drawLeoAnchorScreen(ctx);
+      if (this.options.solDecor !== false) this._drawLeoAnchorScreen(ctx); // LEO is a Sol-board label
       this._drawPlayerShipScreen(ctx);
       // Reset the per-frame ship hit-boxes; each ship draw routine repopulates
       // them so a tap can map a screen point back to the ship under it.
