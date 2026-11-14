@@ -123,6 +123,7 @@ import { renderAssemblyPanel, renderAssemblyLaws } from './assembly.js';
 import { uiIcon, cardPileBadge } from './ui-icons.js';
 import { SITE_TAGS, normaliseTag, tagDisplay } from '../../data/site-tags.js';
 import { NODE_TAGS } from '../../data/node-tags.js';
+import { hazardFlavorOf } from '../../data/hazard-flavors.js';
 import { routeFlewAerobrake } from '../../data/lander-burn.js';
 import { nodeSeason, seasonEntryBlocked } from '../../data/season-gate.js';
 import { serverTagLabels, tagInfo } from '../../data/node-labels.js';
@@ -9424,6 +9425,18 @@ function humanizeOnlineOpError(code, detail) {
     card_not_in_hand: 'That card is not in your hand.',
     not_a_tied_card: 'Pick one of the tied cards.',
     no_moves_left: 'No moves left this turn. End your turn.',
+    no_life_raft: 'Only Space Force (Life Raft / Lifeboat) can move a rocket as a Freighter.',
+    life_raft_needs_crew: 'The Space Force crew must be aboard the rocket to move it as a Freighter.',
+    life_raft_too_heavy: 'The stack is too heavy to move as a Freighter (Life Raft: wet mass under 5, Lifeboat: under 7).',
+    life_raft_glory_chit: 'A Life Raft cannot move as a Freighter while it carries a glory chit.',
+    no_weak_stability_boundary: 'Only Heliocentricity (Weak Stability Boundary) can coast as a second movement.',
+    wsb_needs_crew: 'The Heliocentricity crew must be aboard to coast along the Weak Stability Boundary.',
+    wsb_already_used: 'You already coasted along the Weak Stability Boundary this turn.',
+    wsb_move_first: 'Move the stack first; the Weak Stability Boundary coast is a second movement.',
+    wsb_must_coast: 'The Weak Stability Boundary movement is a coast: plot a route with no burns.',
+    no_blue_planet: 'Only Cerulean (Blue Planet) can pay the 1 aqua aerobrake FINAO.',
+    not_on_aerobrake: 'Your rocket is not parked on an aerobrake.',
+    no_hazard_to_pay: 'There is no aerobrake descent to pay for.',
     insufficient_water: 'Not enough water for that burn.',
     no_route: 'No route to that site.',
     unknown_site: 'Unknown site.',
@@ -15774,8 +15787,10 @@ function ensureMapShell(host) {
     // parachute space (🪂) takes a descent hazard roll when the next turn opens -
     // roll a 1 and the whole stack burns up - unless a parachute generator is
     // aboard. Make sure the player knows what staying costs before committing.
+    let bluePlanet = false;
     try {
-      if (isAerobrakeSite(getRocketSite()) && !stackSafeAerobrake()) {
+      if (isAerobrakeSite(getRocketSite()) && !stackSafeAerobrake()) bluePlanet = await bluePlanetChoice();
+      if (isAerobrakeSite(getRocketSite()) && !stackSafeAerobrake() && !bluePlanet) {
         const stay = await confirmModal({
           title: '🪂 Parked on a parachute space',
           body: 'Your stack is still falling through the atmosphere. When your next turn opens it rolls a descent hazard - roll a 1 and the whole stack burns up. End your turn here anyway?',
@@ -15800,7 +15815,7 @@ function ensureMapShell(host) {
       }
       if (hasRocket && (getMovesRemaining() > 0 || getOpsRemaining() > 0)
         && !(await confirmEndTurn())) return;
-      await submitOnlineOp({ kind: 'END_TURN' });
+      await submitOnlineOp({ kind: 'END_TURN', ...(bluePlanet ? { bluePlanet: true } : {}) });
       // Turn just passed - refresh the "Next table" list now so the button can
       // offer a jump to another game that needs me without waiting for a poll.
       refreshNextTables(true);
@@ -18847,8 +18862,12 @@ function routeHazards(segments) {
 // share an arrival and split the route at the boundaries between them.
 // `liftoffAssist` / `landingAssist` are null or {site, glyph, label},
 // already gated by the caller (needsRoll, not colony-waived).
-function buildOrderedHazardItems({ turn1Segs, hz, curSite, safeAeroOnline, liftoffAssist, landingAssist, liftoffAssistActive }) {
+function buildOrderedHazardItems({ turn1Segs, hz, curSite, safeAeroOnline, liftoffAssist, landingAssist, liftoffAssistActive, chaosImmune = false, cavitationFree = false }) {
   const items = [];
+  // Promo crew waivers, mirrored so the pay / roll checklist lines up with the
+  // hazards that actually roll: POWER SERIES CHAOS MODEL passes every geyser /
+  // ring / spin / wind hazard, CAVITATION ENGINEERS the turn's first aerobrake.
+  let cavitationLeft = !!cavitationFree;
   if (liftoffAssist) items.push({ ...liftoffAssist, segIndex: 0 });
   // H6c Crash Hazard: a factory-assist liftoff ignores the hazard on the FIRST
   // space it moves into (turn1Segs[0].to). Mirror of the server; the assist's own
@@ -18860,6 +18879,8 @@ function buildOrderedHazardItems({ turn1Segs, hz, curSite, safeAeroOnline, lifto
   for (const h of hz) {
     if (h.site.type === 'radhaz') continue;
     if (safeAeroOnline && h.aero) continue;
+    if (chaosImmune && hazardFlavorOf(plannerIdToSlug(h.site.id))) continue;
+    if (cavitationLeft && h.aero && turn1Segs.some((sg) => sg.to === h.site.id)) { cavitationLeft = false; continue; }
     if (crashSpaceId && h.site.id === crashSpaceId && !isLanderBurnNodeClient(plannerIdToSlug(h.site.id))) continue;
     if (liftoffColonyWaives(curSite, h.site)) continue;
     const segIndex = turn1Segs.findIndex((s) => s.to === h.site.id);
@@ -20898,6 +20919,25 @@ function doIncomeOp() {
 // (see engine.js#applyEndTurn). Solo: credit it locally, then end the turn
 // through the existing toolbar handler (the op is spent by then, so the
 // button ends the turn instead of reopening the ops menu).
+// BLUE PLANET (Cerulean promo crew): "If ending turn on an aerobrake Hazard,
+// cost of FINAO = 1 Aqua, which gains 1 FT." Asked when the rocket is about to
+// end its turn parked on an aerobrake with no parachute generator aboard.
+// Resolves true when the player pays the 1 aqua FINAO (sent as END_TURN
+// bluePlanet: true), false to leave the descent to the die.
+async function bluePlanetChoice() {
+  if (!_online) return false;
+  const me = mySnapshotPlayer();
+  if (!me || !playerHasPrivilege(me, 'BLUE_PLANET')) return false;
+  if (!isAerobrakeSite(getRocketSite()) || stackSafeAerobrake()) return false;
+  if (me.rocket && me.rocket.bluePlanetFinao) return false;
+  if ((me.aqua | 0) < 1) return false;
+  return confirmModal({
+    title: '🌊 Blue Planet',
+    body: 'Your stack is parked on an aerobrake, so its next turn opens with a descent hazard. Pay FINAO now for just 1 aqua: no roll, and the scooped atmosphere adds 1 FT to your tank.',
+    yes: '🌊 Pay 1 aqua FINAO', no: 'Leave it to the die',
+  });
+}
+
 async function passTurn() {
   if (_online) {
     if (myBerthOpen()) {
@@ -20906,7 +20946,9 @@ async function passTurn() {
       if (me) openExomigrateModal(me);
       return;
     }
-    await submitOnlineOp({ kind: 'END_TURN' });
+    let bluePlanet = false;
+    try { bluePlanet = await bluePlanetChoice(); } catch { bluePlanet = false; }
+    await submitOnlineOp({ kind: 'END_TURN', ...(bluePlanet ? { bluePlanet: true } : {}) });
     return;
   }
   if (getOpsRemaining() > 0) {
@@ -26392,6 +26434,40 @@ function openFleetModal() {
   document.body.appendChild(back);
 }
 
+// LIFE RAFT / LIFEBOAT (Space Force promo crew): "May move as a Freighter
+// (1B4) if the stack Wet Mass is less than 5 & doesn't contain a glory chit"
+// (Lifeboat: less than 7). Mirror of the engine's lifeRaftFail: returns the
+// face name when this turn's rocket move may be flown as a Freighter, else null.
+function lifeRaftOffer() {
+  const me = mySnapshotPlayer();
+  if (!me) return null;
+  const boat = playerHasPrivilege(me, 'LIFEBOAT');
+  if (!boat && !playerHasPrivilege(me, 'LIFE_RAFT')) return null;
+  const stack = (me.rocket && me.rocket.stack) || [];
+  if (!stack.some((s) => s && s.id === 'crew_space_force')) return null;
+  const totals = getStackTotals();
+  const wet = rocketDryMass(totals.dryMass || 0) + getTankWater();
+  if (!(wet < (boat ? 7 : 5))) return null;
+  if (!boat) {
+    const ids = new Set(stack.map((s) => s && s.id));
+    const chits = (me.glory && me.glory.chits) || [];
+    if (chits.some((c) => c && (!c.crewId || ids.has(c.crewId)))) return null;
+  }
+  return boat ? 'Lifeboat' : 'Life Raft';
+}
+// WEAK STABILITY BOUNDARY (Heliocentricity promo crew): "After its Stack
+// moves, you may activate this thruster to coast as a second movement." Ready
+// when the rocket's move is spent, the crew is aboard, this turn's use is
+// unspent, and the plotted leg is a coast (no burns).
+function wsbCoastReady(turnBurns) {
+  const me = mySnapshotPlayer();
+  if (!me || !playerHasPrivilege(me, 'WEAK_STABILITY_BOUNDARY')) return false;
+  if (me.wsbCoastUsed) return false;
+  if ((me.movesRemaining | 0) > 0) return false;
+  if (!(((me.rocket && me.rocket.stack) || []).some((s) => s && s.id === 'crew_heliocentricity'))) return false;
+  return turnBurns === 0;
+}
+
 // Step the rocket through its planned route's "turn 1" segments
 // (one move per turn, capped at BURNS_PER_TURN burns of cumulative
 // dv). The remaining segments shift down a turn so the next move
@@ -26423,7 +26499,35 @@ async function moveRocket() {
   // The freighter + Bernals are self-contained movers (no rocket support chain),
   // so this rocket-only gate is skipped when the route owner isn't the rocket.
   const ownerIsBernal = typeof _plannedRouteUnit === 'string' && _plannedRouteUnit.startsWith('bernal');
-  if (_plannedRouteUnit !== 'freighter' && !ownerIsBernal) {
+  // Promo crew movement choices for the rocket's own route (online only - the
+  // abilities are faction privileges the game enforces). Asked before the
+  // support-chain gate, because a Freighter move needs no engine at all.
+  let asFreighter = false;
+  let wsbCoast = false;
+  if (_online && _plannedRouteUnit !== 'freighter' && !ownerIsBernal && _plannedRouteUnit !== 'factory') {
+    const t1Burns = (_plannedRoute || [])
+      .filter((s) => (Number(s.turn) || 1) === 1)
+      .reduce((n, s) => n + (Number(s.burns) || 0), 0);
+    if (wsbCoastReady(t1Burns)) {
+      const go = await confirmModal({
+        title: '🌀 Weak Stability Boundary',
+        body: 'Your stack has moved this turn. Activate the Sundiver and coast along this route as a second movement (no burns, once per turn)?',
+        yes: '🌀 Coast again', no: 'Cancel',
+      });
+      if (!go) { setStatus('Move cancelled.'); return false; }
+      wsbCoast = true;
+    } else {
+      const raft = lifeRaftOffer();
+      if (raft && getMovesRemaining() > 0) {
+        asFreighter = await confirmModal({
+          title: `🛟 ${raft}`,
+          body: `Move this stack as a Freighter: Net Thrust 1 (2 with Powersat), no fuel burned, and the Freighter's landing rules. Otherwise it flies on its own thruster as usual.`,
+          yes: '🛟 Move as a Freighter', no: 'Fly normally',
+        });
+      }
+    }
+  }
+  if (_plannedRouteUnit !== 'freighter' && !ownerIsBernal && !asFreighter) {
     const act = isRocketActive();
     // A dead engine (no active thruster, or a broken support chain) can still
     // COAST: a turn of the route that spends no burns flies, the same as on the
@@ -26566,9 +26670,12 @@ async function moveRocket() {
     // Ordered hazard checklist for the WHOLE planned turn-1 route: liftoff
     // assist, then route hazards in travel order, then landing assist -
     // matches the server's own rollItems order exactly.
+    const meHz = mySnapshotPlayer();
     const genericItems = buildOrderedHazardItems({
       turn1Segs, hz, curSite, safeAeroOnline, liftoffAssist: liftoffAssistItem, landingAssist: landingAssistItem,
       liftoffAssistActive: !!liftG.assist,
+      chaosImmune: playerHasPrivilege(meHz, 'POWER_SERIES_CHAOS_MODEL'),
+      cavitationFree: playerHasPrivilege(meHz, 'CAVITATION_ENGINEERS') && !(meHz && meHz.cavitationUsed),
     });
     let hazardPay = false;
     let hazardChoices = null;
@@ -26672,6 +26779,8 @@ async function moveRocket() {
       kind: 'MOVE', toSiteId: finalToSiteId, hazardPay, segments: finalSegments, pickupChit,
       ...(hazardChoices ? { hazardChoices } : {}),
       ...(acetyleneLiftoff ? { acetyleneLiftoff: true } : {}),
+      ...(asFreighter ? { asFreighter: true } : {}),
+      ...(wsbCoast ? { wsbCoast: true } : {}),
     });
     if (ok) {
       const glideOwnsLine = (_moveRouteConsume === null);   // the glide picked up the consume
