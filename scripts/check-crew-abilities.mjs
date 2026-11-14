@@ -1239,6 +1239,28 @@ check('AMBASSADOR: suspended by Anarchy; locked under m0+m1+m2 until a Home Bern
   assert(ok.r.ok && ok.centrist === 1, `promo game, Home Bernal: ${ok.r.error}`);
 });
 
+// ARBITER's "your vote tallies" also covers a tally the holder's own action
+// triggers mid-op (here an Ambassador lobby; Arbiter held through a card grant
+// so one seat carries both faces).
+check('ARBITER: a tally the holder\'s own Lobby triggers counts their delegates twice', () => {
+  const run = (arbiter) => {
+    const st = playing(2, { m0: true });
+    const me = only(st, 0, 'crew_aeb', 'primary');
+    if (arbiter) me.grantedPrivileges = ['ARBITER'];
+    st.activeLawStar = 'centrist';
+    me.aqua = 5; me.lobbiedThisTurn = false;
+    const pid = me.profileId, rid = st.players[1].profileId;
+    for (const k of Object.keys(st.assembly.delegates)) st.assembly.delegates[k] = {};
+    st.assembly.delegates.freedom = { [pid]: 3 };
+    st.assembly.delegates.equality = { [rid]: 3 };
+    const r = op(st, 0, { kind: 'LOBBY', ideology: 'freedom', ambassador: true });
+    assert(r.ok, r.error);
+    return r.state.activeLawStar;
+  };
+  eq(run(true), 'freedom', 'Arbiter-weighted tally (freedom 4 vs equality 3)');
+  eq(run(false), 'equality', 'plain tally (freedom 2 vs equality 3)');
+});
+
 // ---- EMISSARIES (African Union, white) ----
 // "On your turn, you may treat any or all Ideologies tied for the most
 // delegates as the Active Law."

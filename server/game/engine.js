@@ -8228,7 +8228,8 @@ function placeExomigrant(state, player, cardId, card, dest, baseLog, opts) {
       // pre-resolved the way a Fundraise is, so an interactive exomigration
       // (allowTiePick) records a pendingLawStar the player resolves with
       // SET_LAW_STAR; automatic exomigrations leave the star put (quiet tally).
-      const winners = voteWinners(asm);
+      // An Arbiter's own exomigration counts their delegates twice.
+      const winners = tallyWinnersFor(state, player);
       if (winners.length === 1 && winners[0] !== state.activeLawStar) {
         state.activeLawStar = winners[0];
         const starName = (IDEOLOGY_BY_KEY[winners[0]] || {}).name || winners[0];
@@ -10514,9 +10515,19 @@ function grantDelegate(state, player, ideo) {
 // choice on a tie - mid-op rule triggers can't pause for a pick). This is the
 // "quiet" half of the vote tally (O3a); the full Fundraise-style tally that
 // resolves ties via the fundraiser's own choice lives in applyFundraise.
-function quietVoteTally(state) {
+// ARBITER (African Union, black): "Your vote tallies may treat your delegates
+// as 2 delegates each." A tally the Arbiter's OWN action triggers (Exomigration,
+// a Colony delegate, a Lobby) counts their delegates twice. These tallies run
+// mid-op and cannot pause for a choice, so the "may" is resolved as always
+// doubling (recorded as a ruling in docs/crew-ability-audit.md); the explicit
+// start-of-turn tally and Fundraise keep the opt-out.
+function tallyWinnersFor(state, tallier) {
   const asm = assemblyOf(state);
-  const winners = voteWinners(asm);
+  if (tallier && hasPrivilege(state, tallier, 'ARBITER')) return arbiterWinners(asm, tallier.profileId, true);
+  return voteWinners(asm);
+}
+function quietVoteTally(state, tallier = null) {
+  const winners = tallyWinnersFor(state, tallier);
   if (winners.length === 1 && winners[0] !== state.activeLawStar) {
     state.activeLawStar = winners[0];
     return (IDEOLOGY_BY_KEY[winners[0]] || {}).name || winners[0];
@@ -10775,7 +10786,7 @@ function applyLobby(state, op, player) {
     setPlaceCount(asm, 'centrist', player.profileId, placeCount(asm, 'centrist', player.profileId) + 1);
     ambassadorTail = ' Ambassador: the delegate crossed the floor to the Centrists instead of leaving the Assembly.';
     // A delegate moved, so the vote tally runs (O3a). A tie leaves the star put.
-    const moved = quietVoteTally(state);
+    const moved = quietVoteTally(state, player);
     if (moved) ambassadorTail += ` The vote tally moves the active-law star to ${moved}.`;
   }
   player.lobbiedLaws = Array.isArray(player.lobbiedLaws) ? player.lobbiedLaws : [];
@@ -11480,7 +11491,7 @@ function applyBuildColony(state, op, player) {
       // that actually moved. grantDelegate returns false when the player has no
       // cube left to seat (the I7f reserve limit), and a colony that seated
       // nobody has not changed the assembly.
-      const starMoved = gotColonyDelegate ? quietVoteTally(state) : null;
+      const starMoved = gotColonyDelegate ? quietVoteTally(state, player) : null;
       const bits = [];
       if (gotColonyDelegate) bits.push(`a delegate joins ${(IDEOLOGY_BY_KEY[home] || {}).name || home} for the Colony`);
       if (starMoved) bits.push(`the active-law star moves to ${starMoved}`);
