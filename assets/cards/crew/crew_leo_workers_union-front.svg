@@ -13,7 +13,31 @@
 <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0f172a" stop-opacity="0"/><stop offset="1" stop-color="#0f172a" stop-opacity="0.8"/></linearGradient>
 <linearGradient id="shHull" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#e3e7ee" stop-opacity="1"/><stop offset="0.45" stop-color="#9aa3b2" stop-opacity="1"/><stop offset="1" stop-color="#3b424f" stop-opacity="1"/></linearGradient><radialGradient id="shTank" cx="35%" cy="35%" r="70%"><stop offset="0" stop-color="#f4f6fa" stop-opacity="1"/><stop offset="0.55" stop-color="#a7b0be" stop-opacity="1"/><stop offset="1" stop-color="#4b5260" stop-opacity="1"/></radialGradient><linearGradient id="shRad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a4252" stop-opacity="1"/><stop offset="1" stop-color="#262c38" stop-opacity="1"/></linearGradient><linearGradient id="shPv" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1e3a8a" stop-opacity="1"/><stop offset="1" stop-color="#172554" stop-opacity="1"/></linearGradient>
 </defs>
-<rect x="0" y="150" width="300" height="262" fill="url(#sky)"/><circle cx="150" cy="620" r="250" fill="url(#earth2)" stroke="#1f2937"/>
+<rect x="0" y="150" width="300" height="262" fill="url(#sky)"/><defs>
+    <clipPath id="lwpc"><circle cx="150" cy="620" r="250"/></clipPath>
+    <radialGradient id="lwps" cx="34%" cy="24.4%" r="75%"><stop offset="0" stop-color="#1e5aa8"/><stop offset="1" stop-color="#0b2a5c"/></radialGradient>
+    <filter id="lwpl" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.006" numOctaves="7" seed="18"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  14 0 0 0 -7.3"/>
+      <feComposite in="SourceGraphic" operator="in"/>
+    </filter>
+    <filter id="lwpk" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.0088 0.0144" numOctaves="6" seed="25"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  5 0 0 0 -2.5"/>
+      <feGaussianBlur stdDeviation="1.2"/>
+    </filter>
+    <linearGradient id="lwplg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2f6b3a"/><stop offset="1" stop-color="#8a7a4a"/></linearGradient>
+    <radialGradient id="lwpn" cx="34%" cy="24.4%" r="95%"><stop offset="0.35" stop-color="#000" stop-opacity="0"/><stop offset="0.72" stop-color="#020617" stop-opacity="0.55"/><stop offset="1" stop-color="#000" stop-opacity="0.92"/></radialGradient>
+    <radialGradient id="lwph" cx="34%" cy="24.4%" r="45%"><stop offset="0" stop-color="#fff" stop-opacity="0.35"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>
+    <radialGradient id="lwpa" cx="50%" cy="50%" r="50%"><stop offset="0.9" stop-color="#7dd3fc" stop-opacity="0.9"/><stop offset="1" stop-color="#7dd3fc" stop-opacity="0"/></radialGradient></defs><circle cx="150" cy="620" r="267.5" fill="url(#lwpa)"/>
+    <g clip-path="url(#lwpc)">
+      <circle cx="150" cy="620" r="250" fill="url(#lwps)"/>
+      <rect x="-100" y="370" width="500" height="500" fill="url(#lwplg)" filter="url(#lwpl)"/>
+      <rect x="-100" y="370" width="500" height="500" fill="#fff" filter="url(#lwpk)" opacity="0.85"/>
+      <circle cx="150" cy="620" r="250" fill="url(#lwph)"/>
+      <circle cx="150" cy="620" r="250" fill="url(#lwpn)"/>
+    </g>
+    <circle cx="150" cy="620" r="251" fill="none" stroke="#7dd3fc" stroke-width="3" stroke-opacity="0.55"/>
   <path d="M0,300 L300,250 L300,272 L0,322 Z" fill="none" stroke="#475569" stroke-width="2"/><path d="M0,300 L30,272" stroke="#64748b" stroke-width="1.4"/><path d="M30,295 L60,267" stroke="#64748b" stroke-width="1.4"/><path d="M60,290 L90,262" stroke="#64748b" stroke-width="1.4"/><path d="M90,285 L120,257" stroke="#64748b" stroke-width="1.4"/><path d="M120,280 L150,252" stroke="#64748b" stroke-width="1.4"/><path d="M150,275 L180,247" stroke="#64748b" stroke-width="1.4"/><path d="M180,270 L210,242" stroke="#64748b" stroke-width="1.4"/><path d="M210,265 L240,237" stroke="#64748b" stroke-width="1.4"/><path d="M240,260 L270,232" stroke="#64748b" stroke-width="1.4"/><path d="M270,255 L300,227" stroke="#64748b" stroke-width="1.4"/>
   <circle cx="90" cy="250" r="8" fill="#f8fafc" stroke="#1f2937"/><rect x="85" y="247" width="10" height="5" rx="2" fill="#0f172a"/><rect x="81" y="258" width="18" height="22" rx="4" fill="#f8fafc" stroke="#1f2937"/><rect x="81" y="264" width="18" height="4" fill="#facc15"/><circle cx="190" cy="232" r="8" fill="#f8fafc" stroke="#1f2937"/><rect x="185" y="229" width="10" height="5" rx="2" fill="#0f172a"/><rect x="181" y="240" width="18" height="22" rx="4" fill="#f8fafc" stroke="#1f2937"/><rect x="181" y="246" width="18" height="4" fill="#facc15"/>
   <circle cx="214" cy="258" r="5" fill="#fef9c3" filter="url(#glow)"/><path d="M90,258 q-30,30 -60,20" stroke="#facc15" fill="none" stroke-dasharray="3 2"/>

@@ -7,7 +7,8 @@
 // the privilege text (top) and thrust triangle (bottom centre) stay clear.
 // See docs/card-art-guide.md.
 import { CREW, PROMO_CREW } from '../../data/crew.js';
-import { f, lin, rad, seeded } from './kit.mjs';
+import { f, lin, rad, seeded, planetPaint } from './kit.mjs';
+function pp(id, cx, cy, r, o) { const p = planetPaint(id, cx, cy, r, o); return `<defs>${p.defs}</defs>${p.body}`; }
 
 export const ART = {};
 export const RIG = {};
@@ -252,7 +253,7 @@ promo('crew_the_sea_peoples', (side) => {
 // Phobos behind. Back face (Tailings Remining): their ships embedded in the
 // end of a colossal block of Saturn-ring ice, burning it as reaction mass.
 promo('crew_the_martian_way', (side) => svg(rad('mars', [[0, '#fdba74'], [0.6, '#c2410c'], [1, '#431407']], '35%', '30%') + lin('ice', [[0, '#e0f2fe'], [0.5, '#93c5fd'], [1, '#3b82f6']], 0, 0, 1, 0), side === 'primary'
-  ? `<circle cx="70" cy="330" r="76" fill="url(#mars)" stroke="${INK}"/><circle cx="160" cy="250" r="8" fill="#78716c" stroke="${INK}"/>
+  ? `${pp('mw', 70, 330, 76, { kind: 'mars', seed: 5, light: [0.7, -0.6] })}<circle cx="160" cy="250" r="8" fill="#78716c" stroke="${INK}"/>
      <g transform="rotate(30 200 300)">${stage(200, 250, 340, 18)}${band(200, 270, 18, 3, INK)}</g>
      <rect x="216" y="356" width="56" height="22" rx="5" fill="#78716c" stroke="${INK}"/><rect x="226" y="360" width="10" height="6" fill="#fde68a"/>
      <line x1="226" y1="356" x2="214" y2="330" stroke="${INK}" stroke-width="2"/><line x1="246" y1="356" x2="226" y2="324" stroke="${INK}" stroke-width="2"/>
@@ -293,7 +294,7 @@ promo('crew_aeb', (side) => { const big = side === 'secondary'; return svg('', `
 // Centaur V upper stage nosing supply pods toward a small shuttle; crew in
 // field-medic white with a red stripe. The back face (Iso-Shuttles) shows
 // two shuttles running the route.
-promo('crew_explorers_without_borders', (side) => svg(rad('earth', [[0, '#93c5fd'], [0.6, '#1d4ed8'], [1, '#0b1640']], '40%', '30%'), `<circle cx="150" cy="560" r="220" fill="url(#earth)" stroke="${INK}"/>
+promo('crew_explorers_without_borders', (side) => svg(rad('earth', [[0, '#93c5fd'], [0.6, '#1d4ed8'], [1, '#0b1640']], '40%', '30%'), `${pp('ew' + side[0], 150, 560, 220, { kind: 'earth', seed: 14, light: [0.4, -0.9] })}
   <g transform="rotate(-70 220 270)">${stage(220, 220, 320, 22)}${band(220, 240, 22, 4, '#ea580c')}${bells(220, 320, 2, 10)}</g>
   ${[0, 1, 2].map((i) => `<rect x="${130 - i * 26}" y="${244 + i * 10}" width="20" height="16" rx="3" fill="#f8fafc" stroke="${INK}"/><rect x="${130 - i * 26}" y="${250 + i * 10}" width="20" height="3" fill="#dc2626"/>`).join('')}
   ${(side === 'primary' ? [[40, 300]] : [[40, 300], [70, 210]]).map(([x, y]) => `<path d="M${x},${y} L${x + 40},${y - 6} L${x + 48},${y} L${x + 40},${y + 6} Z" fill="#f8fafc" stroke="${INK}"/><path d="M${x + 14},${y + 2} L${x + 24},${y + 14} L${x + 30},${y + 2} Z" fill="#cbd5e1" stroke="${INK}"/>`).join('')}`));
@@ -322,7 +323,7 @@ promo('crew_african_union_space_directorate', (side) => svg('', `${SEA('#0369a1'
 // EVA suits on an orbital truss, tool tethers out, an Angara small in the
 // distance below. White face: on the job (Collective Bargaining). Back face
 // (Sitdown): seated across the hatch, arms folded, tools down.
-promo('crew_leo_workers_union', (side) => svg(rad('earth2', [[0, '#93c5fd'], [0.6, '#1d4ed8'], [1, '#0b1640']], '40%', '30%'), `<circle cx="150" cy="620" r="250" fill="url(#earth2)" stroke="${INK}"/>
+promo('crew_leo_workers_union', (side) => svg(rad('earth2', [[0, '#93c5fd'], [0.6, '#1d4ed8'], [1, '#0b1640']], '40%', '30%'), `${pp('lw' + side[0], 150, 620, 250, { kind: 'earth', seed: 18, light: [-0.5, -0.8] })}
   <path d="M0,300 L300,250 L300,272 L0,322 Z" fill="none" stroke="#475569" stroke-width="2"/>${[...Array(10)].map((_, i) => `<path d="M${i * 30},${300 - i * 5} L${i * 30 + 30},${272 - i * 5}" stroke="#64748b" stroke-width="1.4"/>`).join('')}
   ${(side === 'primary' ? [[90, 270], [190, 252]] : [[110, 280], [150, 274], [190, 266]]).map(([x, y]) => `<circle cx="${x}" cy="${y - 20}" r="8" fill="#f8fafc" stroke="${INK}"/><rect x="${x - 5}" y="${y - 23}" width="10" height="5" rx="2" fill="#0f172a"/><rect x="${x - 9}" y="${y - 12}" width="18" height="${side === 'primary' ? 22 : 14}" rx="4" fill="#f8fafc" stroke="${INK}"/><rect x="${x - 9}" y="${y - 6}" width="18" height="4" fill="#facc15"/>`).join('')}
   ${side === 'primary' ? `<circle cx="214" cy="258" r="5" fill="#fef9c3" filter="url(#glow)"/><path d="M90,258 q-30,30 -60,20" stroke="#facc15" fill="none" stroke-dasharray="3 2"/>` : ''}
@@ -331,7 +332,7 @@ promo('crew_leo_workers_union', (side) => svg(rad('earth2', [[0, '#93c5fd'], [0.
 // Makers Guild: a boxy kit-bashed tug of mismatched printed modules (the
 // "NCC 1702-A") docked at a busy trade-port station, cargo racks and a big
 // 3D printer arm; guild craftspeople in aprons. Back face: the trade port.
-promo('crew_makers_guild', (side) => svg('', `<rect x="0" y="300" width="${W}" height="16" fill="#475569" stroke="${INK}"/>${[...Array(6)].map((_, i) => `<rect x="${10 + i * 48}" y="316" width="40" height="${side === 'primary' ? 40 : 70}" fill="${['#b45309', '#64748b', '#0f766e', '#94a3b8', '#a16207', '#475569'][i]}" stroke="${INK}"/>`).join('')}
+promo('crew_makers_guild', (side) => svg('', `${pp('mg' + side[0], 40, 560, 300, { kind: 'earth', seed: 27, light: [0.7, -0.7] })}<rect x="0" y="300" width="${W}" height="16" fill="#475569" stroke="${INK}"/>${[...Array(6)].map((_, i) => `<rect x="${10 + i * 48}" y="316" width="40" height="${side === 'primary' ? 40 : 70}" fill="${['#b45309', '#64748b', '#0f766e', '#94a3b8', '#a16207', '#475569'][i]}" stroke="${INK}"/>`).join('')}
   <g transform="translate(180 200)"><rect x="0" y="0" width="36" height="28" fill="#94a3b8" stroke="${INK}"/><rect x="36" y="6" width="22" height="16" fill="#b45309" stroke="${INK}"/><rect x="-22" y="4" width="22" height="20" fill="#cbd5e1" stroke="${INK}"/><path d="M58,8 L72,4 L72,26 L58,22 Z" fill="#475569" stroke="${INK}"/><rect x="6" y="-14" width="10" height="14" fill="#0f766e" stroke="${INK}"/></g>
   <path d="M40,300 L40,240 L90,220 L100,236" stroke="#d97706" stroke-width="5" fill="none"/><rect x="94" y="232" width="12" height="10" fill="#475569" stroke="${INK}"/>`));
 
@@ -362,7 +363,7 @@ promo('crew_galahad_group', (side) => side === 'primary'
   ? svg(lin('ray', [[0, '#fef9c3', 0.9], [1, '#fef9c3', 0]]), `<path d="M190,0 L254,0 L270,${G} L174,${G} Z" fill="url(#ray)"/>${pad(222, C.crew_galahad_group, { tower: false })}
      ${[-18, 18].map((d) => booster(222 + d, 270, 392, 13, 'url(#ste)')).join('')}${stage(222, 180, 392, 22)}${fairing(222, 180, 24, 48, 22)}${bells(222, 392, 3, 8)}${liftoff(222, 400, 22, 41)}
      <circle cx="60" cy="${G - 46}" r="7" fill="#f8fafc" stroke="${INK}"/><path d="M50,${G} L52,${G - 38} L68,${G - 38} L70,${G} Z" fill="#e5e7eb" stroke="${INK}"/><path d="M54,${G - 36} L66,${G - 36} L66,${G - 8} L60,${G - 2} L54,${G - 8} Z" fill="#1e40af" stroke="${INK}"/><path d="M58,${G - 30} h4 v6 h4 v3 h-4 v10 h-4 v-10 h-4 v-3 h4 Z" fill="#fbbf24"/>`)
-  : svg('', `<path d="M0,${G - 20} Q150,${G - 50} 300,${G - 20} L300,${H} L0,${H} Z" fill="#cbd5e1" stroke="${INK}"/>
+  : svg('', `${pp('gq', 150, 790, 420, { kind: 'moon', seed: 8, light: [-0.4, -0.9] })}
      <path d="M190,${G - 104} Q220,${G - 70} 250,${G - 104} Z" fill="#e5e7eb" stroke="${INK}"/><rect x="216" y="${G - 86}" width="8" height="40" fill="#94a3b8" stroke="${INK}"/><path d="M204,${G - 46} L236,${G - 46} L228,${G - 34} L212,${G - 34} Z" fill="#94a3b8" stroke="${INK}"/>
      <circle cx="120" cy="${G - 60}" r="7" fill="#f8fafc" stroke="${INK}"/><path d="M110,${G - 14} L112,${G - 52} L128,${G - 52} L130,${G - 14} Z" fill="#1e40af" stroke="${INK}"/>`));
 
@@ -406,7 +407,7 @@ promo('crew_cerulean', (side) => side === 'primary'
      ${stage(222, 220, 382, 26)}${band(222, 222, 26, 6, INK)}
      ${[-1, 1].map((s2) => `<path d="M${222 + s2 * 13},230 l${s2 * 10},-8 l0,18 Z" fill="#cbd5e1" stroke="${INK}"/><line x1="${222 + s2 * 12}" y1="370" x2="${222 + s2 * 30}" y2="${G - 12}" stroke="${INK}" stroke-width="2.4"/>`).join('')}
      ${bells(222, 382, 3, 8)}<path d="M206,390 Q222,420 238,390 Z" fill="url(#flm)" filter="url(#glow)"/>`)
-  : svg('', `<path d="M0,${G - 30} Q150,${G - 60} 300,${G - 30} L300,${H} L0,${H} Z" fill="#e0f2fe" stroke="${INK}"/>${[[40, G - 20], [200, G - 26], [260, G - 10]].map(([x, y]) => `<path d="M${x},${y} l30,6" stroke="#7dd3fc" stroke-width="1.4"/>`).join('')}
+  : svg('', `${pp('cd', 150, 800, 440, { kind: 'ice', seed: 13, light: [0.5, -0.9] })}${[[40, G - 20], [200, G - 26], [260, G - 10]].map(([x, y]) => `<path d="M${x},${y} l30,6" stroke="#7dd3fc" stroke-width="1.4"/>`).join('')}
      <circle cx="160" cy="${G - 92}" r="8" fill="#f8fafc" stroke="${INK}"/><rect x="155" y="${G - 96}" width="10" height="5" rx="2" fill="#0f172a"/><path d="M150,${G - 30} L152,${G - 82} L168,${G - 82} L170,${G - 30} Z" fill="#e3e0d4" stroke="${INK}"/>
      <path d="M170,${G - 70} L196,${G - 56} M170,${G - 70} L194,${G - 74} M195,${G - 65} L214,${G - 52}" stroke="#78350f" stroke-width="2.4" fill="none"/>`));
 

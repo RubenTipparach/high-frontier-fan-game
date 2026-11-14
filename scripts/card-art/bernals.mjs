@@ -151,21 +151,31 @@ function l2(side) {
    ${lab ? `${hex}${beam(160, 82, 236, 60, '#fde047', 2.4)}<rect x="234" y="52" width="6" height="16" fill="#e2e8f0" stroke="${INK}" transform="rotate(30 237 60)"/>${beam(238, 58, 300, 12, '#fde047', 2.2)}` : SIG(405)}`;
 }
 
-// 4. L3 Lofstrom Loop: a Lewis One habitat - a flat-capped shielded cylinder
-// with a non-rotating micro-g module out of one end - riding the end of a
-// launch loop (a maglev racetrack over an ocean world). The Lab adds a sled
-// streaking along the loop and furnace racks glowing on the micro-g spine.
+// 4. L3 Lofstrom Loop: a Lofstrom launch loop - a maglev sheath riding high
+// above an ocean world, curving with the planet, held up by criss-crossed
+// stay cables and ramping down to a station at each end (fn 8) - with a
+// Lewis One habitat (flat-capped shielded cylinder, a non-rotating micro-g
+// module out of one end) riding above it. The Lab adds a sled streaking
+// along the loop and furnace racks glowing on the micro-g spine.
 function l3(side) {
   const lab = side === 'secondary';
-  return `${pp('o' + side[0], 150, 610, 480, { kind: 'ocean', seed: 9, light: [0.6, -0.8] })}
-   <rect x="10" y="88" width="282" height="16" rx="8" fill="none" stroke="#475569" stroke-width="2.6"/>
-   <rect x="10" y="88" width="282" height="16" rx="8" fill="none" stroke="#60a5fa" stroke-width="1" stroke-dasharray="6 4"/>
-   <circle cx="18" cy="96" r="6" fill="#64748b" stroke="${INK}"/>
-   <rect x="208" y="54" width="70" height="32" rx="3" fill="url(#shd)" stroke="${INK}" stroke-width="1.2"/>${lumps(243, 70, 35, 16, 407, 14)}
-   <rect x="216" y="66" width="54" height="5" fill="#fde68a" opacity="0.85"/>
-   <rect x="170" y="65" width="38" height="10" fill="url(#hul)" stroke="${INK}"/><line x1="243" y1="86" x2="282" y2="96" stroke="#475569" stroke-width="2"/>
-   ${lab ? `${[0, 1, 2].map((i) => `<rect x="${174 + i * 11}" y="56" width="8" height="9" fill="#7c2d12" stroke="#fb923c" filter="url(#glow)"/>`).join('')}
-     <rect x="70" y="91" width="24" height="10" rx="3" fill="#f8fafc" stroke="${INK}"/><path d="M70,96 L20,96" stroke="#bfdbfe" stroke-width="5" opacity="0.6" filter="url(#glow)"/>` : SIG(407)}`;
+  const PCX = 150, PCY = 582, PR = 480, LR = 508;
+  const surf = (x) => PCY - Math.sqrt(PR * PR - (x - PCX) ** 2);
+  const arc = (x) => PCY - Math.sqrt(LR * LR - (x - PCX) ** 2);
+  let d = '', cables = '';
+  for (let x = 24; x <= 276; x += 6) d += `${x === 24 ? 'M' : 'L'}${x},${f(arc(x))} `;
+  for (let x = 30; x <= 270; x += 16) cables += `<line x1="${x}" y1="${f(arc(x))}" x2="${x + 18}" y2="${f(surf(x + 18))}" stroke="#334155" stroke-width="0.6" opacity="0.7"/><line x1="${x}" y1="${f(arc(x))}" x2="${x - 18}" y2="${f(surf(x - 18))}" stroke="#334155" stroke-width="0.6" opacity="0.7"/>`;
+  const ramp = (x0, x1) => `<path d="M${x0},${f(arc(x0))} Q${f((x0 + x1) / 2)},${f(arc(x0))} ${x1},${f(surf(x1) - 2)}" stroke="#475569" stroke-width="2.2" fill="none"/><rect x="${x1 - 6}" y="${f(surf(x1) - 7)}" width="12" height="7" fill="#64748b" stroke="${INK}" stroke-width="0.6"/>`;
+  return `${pp('o' + side[0], PCX, PCY, PR, { kind: 'ocean', seed: 9, light: [0.6, -0.8] })}
+   ${cables}${ramp(24, 6)}${ramp(276, 294)}
+   <path d="${d}" stroke="${INK}" stroke-width="3.6" fill="none"/><path d="${d}" stroke="#cbd5e1" stroke-width="2" fill="none"/>
+   <path d="${d}" stroke="#60a5fa" stroke-width="1" fill="none" stroke-dasharray="6 5" opacity="0.9"/>
+   <line x1="236" y1="${f(arc(236))}" x2="236" y2="48" stroke="#475569" stroke-width="1.4"/>
+   <rect x="206" y="18" width="62" height="28" rx="3" fill="url(#shd)" stroke="${INK}" stroke-width="1.2"/>${lumps(237, 32, 31, 14, 407, 12)}
+   <rect x="213" y="29" width="48" height="5" fill="#fde68a" opacity="0.9"/>
+   <rect x="172" y="27" width="34" height="9" fill="url(#hul)" stroke="${INK}"/>
+   ${lab ? `${[0, 1, 2].map((i) => `<rect x="${175 + i * 10}" y="19" width="8" height="8" fill="#7c2d12" stroke="#fb923c" filter="url(#glow)"/>`).join('')}
+     <circle cx="112" cy="${f(arc(112))}" r="4" fill="#e0f2fe" filter="url(#glow)"/><path d="M108,${f(arc(108))} L60,${f(arc(60))}" stroke="#bfdbfe" stroke-width="3" opacity="0.7" filter="url(#glow)"/>` : SIG(407)}`;
 }
 
 // 5. L4 Antimatter Factory: a thin hubless accelerator ring of magnet
