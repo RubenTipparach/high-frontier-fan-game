@@ -173,64 +173,44 @@ export const EVENTS = {
   6: { name: 'Baby boom', text: 'Habitat Ring: +1 Population (max 4).' },
 };
 
-// ---------------------------------------------------------------- stars (AA-Y)
-// type: yellow | red | brown. comp: giants inside the system (gas giant, brown
-// or white dwarf). stars: stellar companions with their own systems on the same
-// board (SM-1e): role 'binary' sits beside the primary, 'distant' far out at the
-// board's edge. known: a known HZ planet (on the companion that names it).
-export const STARS = [
-  { id: 'alphacen', name: 'Alpha Centauri', type: 'yellow', comp: [], hazard: 'flare', stars: [{ name: 'Alpha Centauri B', type: 'yellow', role: 'binary' }, { name: 'Proxima Centauri', type: 'red', role: 'distant', known: 'Proxima b' }] },
-  { id: 'barnard', name: "Barnard's Star", type: 'red', comp: [], hazard: null },
-  { id: 'luhman16', name: 'Luhman 16', type: 'brown', comp: [], hazard: null, stars: [{ name: 'Luhman 16 B', type: 'brown', role: 'binary' }] },
-  { id: 'wise0855', name: 'WISE 0855-0714', type: 'brown', comp: [], hazard: null },
-  { id: 'wolf359', name: 'Wolf 359', type: 'red', comp: [], hazard: 'flare' },
-  { id: 'lalande', name: 'Lalande 21185', type: 'red', comp: [], hazard: null },
-  { id: 'sirius', name: 'Sirius', type: 'yellow', comp: [], hazard: null, stars: [{ name: 'Sirius B', type: 'white', role: 'binary' }] },
-  { id: 'uvceti', name: 'Luyten 726-8', type: 'red', comp: [], hazard: 'flare', stars: [{ name: 'Luyten 726-8 B', type: 'red', role: 'binary' }] },
-  { id: 'ross154', name: 'Ross 154', type: 'red', comp: [], hazard: 'flare' },
-  { id: 'epseri', name: 'Epsilon Eridani', type: 'yellow', comp: ['gas'], hazard: 'debris' },
-  { id: 'ross128', name: 'Ross 128', type: 'red', comp: [], hazard: null, known: 'Ross 128 b' },
-  { id: 'cyg61', name: '61 Cygni', type: 'yellow', comp: [], hazard: null, stars: [{ name: '61 Cygni B', type: 'yellow', role: 'binary' }] },
-  { id: 'procyon', name: 'Procyon', type: 'yellow', comp: [], hazard: null, stars: [{ name: 'Procyon B', type: 'white', role: 'binary' }] },
-  { id: 'epsind', name: 'Epsilon Indi', type: 'yellow', comp: ['gas'], hazard: null, stars: [{ name: 'Epsilon Indi B', type: 'brown', role: 'distant' }] },
-  { id: 'tauceti', name: 'Tau Ceti', type: 'yellow', comp: [], hazard: 'debris', known: 'Tau Ceti e' },
-  { id: 'luyten', name: "Luyten's Star", type: 'red', comp: [], hazard: null, known: 'GJ 273 b' },
-  { id: 'teegarden', name: "Teegarden's Star", type: 'red', comp: [], hazard: null, known: 'Teegarden b' },
-];
-export const STAR_BY_ID = Object.fromEntries(STARS.map((s) => [s.id, s]));
-
-// Map anchors in polar form: angle (deg, screen, 0 = right, clockwise) and
-// radius in spaces from Sol (drawn at R px per space).
-export const ANCHORS = {
-  sol: [0, 0],
-  J1: [200, 4], J2: [70, 6], J3: [320, 8], J4: [255, 10], J5: [160, 9],
-  alphacen: [215, 9], barnard: [188, 12], ross154: [176, 19],
-  luhman16: [96, 13], wolf359: [52, 16], ross128: [36, 22], cyg61: [78, 23],
-  wise0855: [136, 15], lalande: [18, 17],
-  sirius: [304, 17], epseri: [334, 21], procyon: [292, 23],
-  uvceti: [244, 17], tauceti: [262, 24], teegarden: [232, 25],
-  epsind: [160, 24], luyten: [146, 25],
+// ---------------------------------------------------------------- stars (AA-B6, AA-Y)
+// The 94 star systems within 20 light-years (starcat.js, from the public "List
+// of nearest stars"). type: yellow (A-K) | red (M) | white (white dwarf) |
+// brown (L/T/Y). comp: giants inside the system. stars: stellar companions with
+// their own systems on the same board (SM-1e), role 'binary' or 'distant'.
+// known: a known HZ planet. HAND gives the stars the game already knew their
+// ids and hand-made details, so saves and rules text keep working.
+import { STARCAT } from './starcat.js';
+const TYPE_OF = (c) => ('AFGK'.includes(c) ? 'yellow' : c === 'M' ? 'red' : c === 'D' ? 'white' : 'brown');
+const RANK = (c) => 'OBAFGKMDLTY'.indexOf(c);
+const HAND = {
+  'Alpha Centauri': { id: 'alphacen', hazard: 'flare', stars: [{ name: 'Alpha Centauri B', type: 'yellow', role: 'binary' }, { name: 'Proxima Centauri', type: 'red', role: 'distant', known: 'Proxima b' }] },
+  "Barnard's Star": { id: 'barnard' },
+  'Luhman 16': { id: 'luhman16', stars: [{ name: 'Luhman 16 B', type: 'brown', role: 'binary' }] },
+  'WISE 0855−0714': { id: 'wise0855', name: 'WISE 0855-0714' },
+  'Wolf 359': { id: 'wolf359', hazard: 'flare' },
+  'Lalande 21185': { id: 'lalande' },
+  Sirius: { id: 'sirius', stars: [{ name: 'Sirius B', type: 'white', role: 'binary' }] },
+  'Gliese 65': { id: 'uvceti', name: 'Luyten 726-8', hazard: 'flare', stars: [{ name: 'Luyten 726-8 B', type: 'red', role: 'binary' }] },
+  'Ross 154': { id: 'ross154', hazard: 'flare' },
+  'Epsilon Eridani': { id: 'epseri', comp: ['gas'], hazard: 'debris' },
+  'Ross 128': { id: 'ross128', known: 'Ross 128 b' },
+  '61 Cygni': { id: 'cyg61', stars: [{ name: '61 Cygni B', type: 'yellow', role: 'binary' }] },
+  Procyon: { id: 'procyon', stars: [{ name: 'Procyon B', type: 'white', role: 'binary' }] },
+  'Epsilon Indi': { id: 'epsind', comp: ['gas'], stars: [{ name: 'Epsilon Indi B', type: 'brown', role: 'distant' }] },
+  'Tau Ceti': { id: 'tauceti', hazard: 'debris', known: 'Tau Ceti e' },
+  "Luyten's Star": { id: 'luyten', known: 'GJ 273 b' },
+  "Teegarden's Star": { id: 'teegarden', known: 'Teegarden b' },
 };
-// Paths: [a, b, steps]. steps = number of moves from a to b (AA-B6). Path
-// lengths from Sol match the catalogue's space counts.
-export const SEGMENTS = [
-  ['sol', 'J1', 4], ['J1', 'alphacen', 5], ['J1', 'barnard', 8], ['barnard', 'ross154', 7],
-  ['sol', 'J2', 6], ['J2', 'luhman16', 7], ['J2', 'wolf359', 10], ['wolf359', 'ross128', 6], ['J2', 'cyg61', 17],
-  ['sol', 'wise0855', 15], ['sol', 'lalande', 17],
-  ['sol', 'J3', 8], ['J3', 'sirius', 9], ['J3', 'epseri', 13], ['sirius', 'procyon', 6],
-  ['sol', 'J4', 10], ['J4', 'uvceti', 7], ['J4', 'tauceti', 14], ['J4', 'teegarden', 15],
-  ['sol', 'J5', 9], ['J5', 'epsind', 15], ['J5', 'luyten', 16],
-];
-// Special spaces: [segmentIndex, stepIndexFromA (1-based), kind, extra]
-export const SPECIAL = [
-  [0, 3, 'dust'],          // the Local Interstellar Cloud lies toward Centauri
-  [11, 4, 'dust'],
-  [6, 5, 'dust'],
-  [4, 2, 'sunlens', 'tauceti'],   // Sol's lens points are opposite their targets
-  [0, 2, 'sunlens', 'lalande'],
-  [15, 2, 'sunlens', 'cyg61'],
-  [19, 2, 'sunlens', 'epseri'],
-];
+const slug = (n) => n.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '').slice(0, 18);
+export const STARS = STARCAT.map((c) => {
+  const comps = [...c.stars].sort((p, q) => RANK(p.cls) - RANK(q.cls)); // the primary is the hottest
+  const hand = HAND[c.name] || {};
+  const name = hand.name || c.name;
+  const auto = comps.slice(1, 3).map((x, i) => ({ name: `${name} ${'BC'[i]}`, type: TYPE_OF(x.cls), role: i === 0 ? 'binary' : 'distant' }));
+  return { id: hand.id || slug(c.name), name, ly: c.ly, x: c.x, y: c.y, z: c.z, type: TYPE_OF(comps[0].cls), comp: hand.comp || [], hazard: hand.hazard || null, known: hand.known, stars: hand.stars || auto };
+});
+export const STAR_BY_ID = Object.fromEntries(STARS.map((s) => [s.id, s]));
 
 // ---------------------------------------------------------------- chits (AA-B7, AA-H2)
 export const HZ_POOLS = {

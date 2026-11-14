@@ -18,7 +18,7 @@ export function seededRint(seed) {
 }
 
 // star: { name, type }; chits: { hz, comps: [{ kind, chit }], stars: [{ name, type, role, chit, known }] }
-export function rollSystem({ star, chits = {}, rint, worldName = () => 'World', planets = null }) {
+export function rollSystem({ star, chits = {}, rint, worldName = () => 'World', planets = null, links = null }) {
   const short = star.name.split(' ')[0].replace(/'s$/, '');
   const comps = chits.stars || [];
   const hasB = comps.some((c) => c.role === 'binary');
@@ -105,5 +105,5 @@ export function rollSystem({ star, chits = {}, rint, worldName = () => 'World', 
   }
   const NAMES = ['Ardo', 'Vey', 'Ilse', 'Marrow', 'Tess', 'Quill', 'Orrin', 'Sable', 'Hale', 'Corin', 'Nyx', 'Pell'];
   cometHomes.forEach(([si, z], c) => add({ kind: 'comet', name: `Comet ${short} ${NAMES[c % NAMES.length]}`, star: si, zone: Math.max(1, z), size: rint(1, 3) }, { comet: true }));
-  return { spec: { name: star.name, stars, bodies }, meta, pick };
+  return { spec: { name: star.name, stars, bodies, ...(links ? { links } : {}) }, meta, pick };
 }

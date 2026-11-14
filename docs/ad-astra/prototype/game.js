@@ -9,11 +9,12 @@ import { renderCard } from '../../../js/game/card-ui.js';
 import { MapRenderer, LEO_ANCHOR } from '../../../js/game/render.js';
 import { loadPlannerMap, buildChains } from '../../../js/game/planner-map.js';
 import { buildSystem, SYSTEM_LAYOUT, zoneLayer } from './systems.js';
+import { buildStarMap } from './starmap.js';
 import { GIANT_HALO } from '../mapgen/mapgen.js';
 import { NODE_TAGS } from '../../../data/node-tags.js';
 import {
   TUNE, SOURCES, HOLDINGS, CLASSES, PROP_PER_MASS, FAMILY_GLYPH, CARD_BY_ID, DECKS, DECK_LABEL,
-  SPINOFFS, TERRAFORM, EVENTS, STARS, STAR_BY_ID, ANCHORS, SEGMENTS, SPECIAL,
+  SPINOFFS, TERRAFORM, EVENTS, STARS, STAR_BY_ID,
   HZ_POOLS, COMP_POOL, CLASS_HYD, WORLD_NAMES,
 } from './data.js';
 
@@ -49,40 +50,9 @@ const poolFrom = (counts) => shuffle(Object.entries(counts).flatMap(([k, n]) => 
 let _uid = 1;
 
 // ================================================================ star map graph (AA-B6)
-// World px per space, centred on Sol. The renderer never zooms out past 1 and
-// the hand strip covers the bottom of the stage, so the neighbourhood is drawn
-// as a tilted plane: wide, not tall. Distances are counted in spaces (dots).
-const RX = 24, RY = 10.5;
-function polar([deg, r]) { const a = deg * Math.PI / 180; return { x: 700 + Math.cos(a) * r * RX, y: 400 + Math.sin(a) * r * RY }; }
-function buildMap() {
-  const nodes = {}; const adj = {};
-  const add = (id, o) => { nodes[id] = { id, ...o }; adj[id] = adj[id] || []; };
-  const link = (a, b) => { adj[a].push(b); adj[b].push(a); };
-  for (const [id, pos] of Object.entries(ANCHORS)) {
-    const p = polar(pos);
-    if (id === 'sol') add(id, { kind: 'sol', ...p, label: 'Sol' });
-    else if (STAR_BY_ID[id]) add(id, { kind: 'star', star: id, ...p, label: STAR_BY_ID[id].name });
-    else add(id, { kind: 'junction', ...p });
-  }
-  SEGMENTS.forEach(([a, b, steps], si) => {
-    let prev = a;
-    for (let i = 1; i < steps; i++) {
-      const t = i / steps;
-      const id = `s${si}_${i}`;
-      add(id, { kind: 'space', x: nodes[a].x + (nodes[b].x - nodes[a].x) * t, y: nodes[a].y + (nodes[b].y - nodes[a].y) * t });
-      // Oort spaces: the space next to a star or Sol (AA-B6).
-      if (i === 1 && (a === 'sol' || STAR_BY_ID[a])) Object.assign(nodes[id], { kind: 'oort', of: a });
-      if (i === steps - 1 && STAR_BY_ID[b]) Object.assign(nodes[id], { kind: 'oort', of: b });
-      link(prev, id); prev = id;
-    }
-    link(prev, b);
-  });
-  for (const [si, i, kind, target] of SPECIAL) Object.assign(nodes[`s${si}_${i}`], { kind, target });
-  // distance from Sol in spaces (beam range, lens range)
-  const dist = { sol: 0 }; const q = ['sol'];
-  while (q.length) { const n = q.shift(); for (const m of adj[n]) if (dist[m] == null) { dist[m] = dist[n] + 1; q.push(m); } }
-  return { nodes, adj, dist };
-}
+// The 94 star systems within 20 light-years, joined by a Delaunay triangulation
+// (starmap.js). Every star is a junction; distances are counted in spaces.
+function buildMap() { return buildStarMap([{ id: 'sol', name: 'Sol', x: 0, y: 0, z: 0 }, ...STARS]); }
 const MAP = buildMap();
 function bfs(from) {
   const dist = { [from]: 0 }; const q = [from];
@@ -118,7 +88,7 @@ function newGame() {
   const stars = {};
   for (const st of STARS) stars[st.id] = { explored: false, hz: null, comps: [] };
   S = {
-    v: 6, phase: 'setup', turn: 1, gen: 0, aqua: TUNE.startAqua,
+    v: 7, phase: 'setup', turn: 1, gen: 0, aqua: TUNE.startAqua,
     holdings: [], decks, hand: [],
     ship: { cards: [], prop: 0, family: null, pos: 'sol', prev: null, next: null, V: 0, orbit: null, sysNode: null,
       launched: false, lost: false, recycled: false, exit: null, stagedUsed: false, cryoRolled: false, ignoreDust: false,
@@ -137,7 +107,7 @@ function log(msg, kind = '') { S.log.unshift({ msg, kind, when: whenLabel() }); 
 function whenLabel() { return S.phase === 'drydock' || S.phase === 'setup' ? `Drydock ${S.turn}` : `Gen ${S.gen}`; }
 function save() { try { localStorage.setItem('ad-astra-proto', JSON.stringify({ S, _uid })); } catch (e) { /* storage off */ } }
 function load() {
-  try { const raw = localStorage.getItem('ad-astra-proto'); if (!raw) return false; const o = JSON.parse(raw); if (!o.S || o.S.v !== 6) return false; S = o.S; _uid = o._uid || 1000; return true; } catch (e) { return false; }
+  try { const raw = localStorage.getItem('ad-astra-proto'); if (!raw) return false; const o = JSON.parse(raw); if (!o.S || o.S.v !== 7) return false; /* v7: the 94-star map: older ships sit on spaces that no longer exist */ S = o.S; _uid = o._uid || 1000; return true; } catch (e) { return false; }
 }
 
 // ================================================================ ship derived values
@@ -229,7 +199,7 @@ function explore(starId, how) { // AA-G12
   const st = S.stars[starId]; if (st.explored) return false;
   const star = STAR_BY_ID[starId];
   st.explored = true; st.how = how; S.explorations++;
-  if (star.type !== 'brown') {
+  if (star.type === 'yellow' || star.type === 'red') { // white and brown dwarfs have no habitable-zone chit
     let c = drawChit(star.type);
     if (c === 'None' && star.known) { c = drawChit(star.type); }
     st.hz = c;
@@ -247,12 +217,27 @@ function explore(starId, how) { // AA-G12
   log(`Explored ${star.name} by ${how}: ${found.length ? found.join(', ') : 'no worlds of note'}. +1 VP (AA-G12).`, 'good');
   return true;
 }
+// AA-G4a / SM-9a: a system's star-map links, as Ad Astra node bearings on its board
+function linksOf(starId) {
+  const me = MAP.nodes[starId];
+  return MAP.links.filter((l) => l.from === starId || l.to === starId).map((l) => {
+    const other = l.from === starId ? l.to : l.from; const o = MAP.nodes[other];
+    return { id: other, name: other === 'sol' ? 'Sol' : STAR_BY_ID[other].name, angle: Math.round((Math.atan2((o.y - me.y) / 0.95, (o.x - me.x) / 1.45) * 180) / Math.PI) };
+  });
+}
+const firstEdge = (sys) => (sys.nodes.find((n) => n.kind === 'orbit') || {}).id;
+function arrivalNode(starId) { // the Ad Astra node of the link the ship came in on (AA-G4a)
+  const sh = S.ship; const sys = sysOf(starId);
+  const via = sh.pos && sh.pos !== starId ? sh.pos : sh.prev;
+  const far = via && MAP.nodes[via] ? leadsTo(starId, via).node : null;
+  return far && sys.nodes.some((n) => n.id === `edge:${far}`) ? `edge:${far}` : firstEdge(sys);
+}
 function genSystem(starId, keep = null) { // AA-B7a: built by the system map rules (systems.js -> mapgen)
   const st = S.stars[starId];
   const oldHz = keep && keep.find((x) => (x.role === 'hz') || x.id === 'hz');
   const keptName = oldHz ? String(oldHz.body || oldHz.name).split(':')[0] : null;
   if (!st.stars) st.stars = (STAR_BY_ID[starId].stars || []).map((c) => ({ ...c, chit: c.known ? 'Hostile' : 'None' })); // older saves
-  return buildSystem({ star: STAR_BY_ID[starId], chits: { hz: st.hz, comps: st.comps, stars: st.stars }, rint, worldName: () => keptName || S.worldNames.pop() || 'World', keep });
+  return buildSystem({ star: STAR_BY_ID[starId], chits: { hz: st.hz, comps: st.comps, stars: st.stars }, links: linksOf(starId), rint, worldName: () => keptName || S.worldNames.pop() || 'World', keep });
 }
 // Saved games keep each system's map; rebuild older ones in the current layout,
 // carrying their claims, cubes, colonies and terraform progress across.
@@ -261,7 +246,7 @@ function migrateSystems() {
     if (sys.layout === SYSTEM_LAYOUT) continue;
     const fresh = genSystem(starId, sys.sites);
     Object.assign(sys, { nodes: fresh.nodes, edges: fresh.edges, sites: fresh.sites, display: fresh.display, stars: fresh.stars, zones: fresh.zones, layout: SYSTEM_LAYOUT });
-    if (S.ship.orbit === starId && !sys.nodes.some((n) => n.id === S.ship.sysNode)) S.ship.sysNode = 'high';
+    if (S.ship.orbit === starId && !sys.nodes.some((n) => n.id === S.ship.sysNode)) S.ship.sysNode = firstEdge(sys);
     delete _sysData[starId]; delete _adjCache[starId];
   }
 }
@@ -615,12 +600,15 @@ async function opBurn() { // AA-G3
   document.body.append(back); upd();
   const go = await p; back.remove();
   if (!go || !steps) return;
+  const leaving = sh.orbit && sh.V + steps > 0;
+  const edgeAt = leaving && String(sh.sysNode || '').startsWith('edge:') ? sh.sysNode.slice(5) : null;
+  if (leaving && !edgeAt) { toast('To leave the system, first move to the Ad Astra node of the link you want (AA-G4a).'); return; }
   if (!spendFrontier()) return;
   for (let i = 0; i < Math.abs(steps); i++) { const c = burnStepCost(Math.sign(steps), sh.V, sh.prop); sh.prop -= c.prop; S.aqua -= c.aqua; sh.V += Math.sign(steps); }
   if (sh.orbit && sh.V > 0) {
     // leaving orbit: pick a path out (AA-G4)
-    const opts = MAP.adj[sh.orbit];
-    sh.next = opts.length === 1 ? opts[0] : await chooseBranch(sh.orbit, opts, 'Leave orbit along which path?');
+    const opts = MAP.adj[sh.orbit]; // AA-G4a: along the link of this Ad Astra node
+    sh.next = opts.find((o) => leadsTo(sh.orbit, o).node === edgeAt) || (opts.length === 1 ? opts[0] : await chooseBranch(sh.orbit, opts, 'Leave orbit along which path?'));
     sh.pos = sh.orbit; sh.prev = null; sh.orbit = null; sh.sysNode = null;
     log(`Burn: V${sh.V}. Leaving orbit toward ${nodeName(leadsTo(sh.pos, sh.next).node)}.`);
   } else {
@@ -935,7 +923,8 @@ async function flybyScan(starId) { // AA-G6
 async function enterOrbit(starId) { // AA-G4
   const sh = S.ship;
   explore(starId, 'starship'); // stopping in its Oort cloud still shows you what orbits it (AA-G12)
-  sh.orbit = starId; sh.sysNode = 'high'; sh.V = 0; sh.next = null; sh.pos = starId;
+  const entry = arrivalNode(starId);
+  sh.orbit = starId; sh.sysNode = entry; sh.V = 0; sh.next = null; sh.pos = starId;
   SYSVIEW = starId; POPUP = null;
   log(`ORBIT at ${STAR_BY_ID[starId].name} (AA-G4).`, 'good');
   if (!S.firstArrival) { S.firstArrival = starId; log('First system entered: +3 VP (AA-I2).', 'good'); }
@@ -1047,25 +1036,30 @@ const BODY_ART = {
   ceres: { base: '#9c9387', light: '#d4cbbd', dark: '#2f2b25' },
 };
 let _starData = null;
+// stars that keep their names zoomed out: the ones the game always featured and
+// those with proper names; catalogue designations (Gliese 445, 2MASS ...) fade in
+const FEATURED = new Set(['alphacen', 'barnard', 'luhman16', 'wise0855', 'wolf359', 'lalande', 'sirius', 'uvceti', 'ross154', 'epseri', 'ross128', 'cyg61', 'procyon', 'epsind', 'tauceti', 'luyten', 'teegarden']);
+const notable = (st) => FEATURED.has(st.id) || /'s Star$|^(Altair|Alsafi|Eta |Delta |Omicron|70 |36 |82 )/.test(st.name);
 function starMapData() { // AA-B6, drawn in HF node idioms
   if (_starData) return _starData;
   const sites = [];
   for (const nd of Object.values(MAP.nodes)) {
     let type = 'unknown', name = 'Deep space', hazard = false;
-    if (nd.kind === 'sol') { type = 'orbit'; name = 'Sol'; sites.push(baseSite({ id: 'sun-sol', name: 'Sol', type: 'sun', x: nd.x, y: nd.y, sunR: 15 })); }
+    const always = nd.kind === 'sol' || (nd.kind === 'star' && (notable(STAR_BY_ID[nd.star]) || S.stars[nd.star]?.explored));
+    if (nd.kind === 'sol') { type = 'orbit'; name = 'Sol'; sites.push(baseSite({ id: 'sun-sol', name: 'Sol', type: 'sun', x: nd.x, y: nd.y, sunR: 15, labelAlways: true })); }
     else if (nd.kind === 'star') {
       // The renderer never picks a sun on click, so the star SPACE is a cyan
       // orbit ring (clickable, the HF "park here" marker) with the sun drawn
       // behind it as decoration. Brown dwarfs are hexes, clickable already.
       const st = STAR_BY_ID[nd.star]; name = st.name;
       if (st.type === 'brown') type = 'dwarf';
-      else { type = 'orbit'; sites.push(baseSite({ id: `sun-${nd.star}`, name: st.name, type: 'sun', x: nd.x, y: nd.y, sunR: 15 })); }
+      else { type = 'orbit'; sites.push(baseSite({ id: `sun-${nd.star}`, name: st.name, type: 'sun', x: nd.x, y: nd.y, sunR: st.type === 'red' ? 11 : st.type === 'white' ? 8 : 15, labelAlways: always })); }
     }
     else if (nd.kind === 'oort') { type = 'orbit'; name = `Oort cloud of ${nd.of === 'sol' ? 'Sol' : STAR_BY_ID[nd.of].name}`; }
     else if (nd.kind === 'dust') { type = 'radhaz'; name = 'Dust'; hazard = true; }
     else if (nd.kind === 'sunlens') { type = 'lagrange'; name = `Sunlens aimed at ${STAR_BY_ID[nd.target].name}`; }
     else if (nd.kind === 'junction') { name = 'Junction'; }
-    sites.push(baseSite({ id: nd.id, name, type, x: nd.x, y: nd.y, hazard }));
+    sites.push(baseSite({ id: nd.id, name, type, x: nd.x, y: nd.y, hazard, labelAlways: always && type !== 'orbit' }));
   }
   const pairs = [];
   for (const [a, nbs] of Object.entries(MAP.adj)) for (const b of nbs) if (a < b) pairs.push([a, b]);
@@ -1132,7 +1126,7 @@ function rendererFor(key) {
   // (the Sol board keeps the HF default fade: it has hundreds of sites)
   // (system maps are as dense as Sol now, so they keep Sol's fade: names
   // appear as you zoom in; only the star map shows its names zoomed out)
-  if (key === 'stars') { renderer.options.labelFadeMin = 0.4; renderer.options.labelFadeMax = 0.7; }
+  if (key === 'stars') { renderer.options.labelFadeMin = 1.5; renderer.options.labelFadeMax = 2; } // AA-B6: the rest of the 94 names come in as you zoom
   if (key !== 'stars' && key !== 'sol' && sysOf(key)) { // a system board: tint its helio zones as Sol's are (SM-1c)
     Object.assign(renderer.options, { visualizeZones: true, zoneFill: true, zoneOpacity: 0.14 });
     const sy = sysOf(key);
@@ -1662,14 +1656,14 @@ async function setupPick() {
 
 // ================================================================ boot
 function start(data) {
-  if (data && data.S) { S = data.S; _uid = data._uid || 1000; }
+  if (data && data.S && data.S.v === 7) { S = data.S; _uid = data._uid || 1000; }
   else if (!load()) newGame();
   migrateSystems();
   if (S.ship.orbit) { MAPMODE = 'system'; SYSVIEW = S.ship.orbit; }
   render();
   if (S.phase === 'setup') setupPick();
   window.claude?.hot?.snapshot?.(() => ({ S, _uid }));
-  window.__aa = { get state() { return S; }, get busy() { return BUSY; }, explore, enterOrbit, openPopup, setMapMode, get renderers() { return RENDERERS; }, get mode() { return MAPMODE; },
+  window.__aa = { get state() { return S; }, map: MAP, opBurn, leadsTo, get busy() { return BUSY; }, explore, enterOrbit, openPopup, setMapMode, get renderers() { return RENDERERS; }, get mode() { return MAPMODE; },
     setPane: (p) => { PANE = p; render(); }, endTurn, render, setTab, opIncome, opExpand, opResearch, opProduce, opLaunch, opBoost, newGame: () => { newGame(); commit(); setupPick(); } };
 }
 if (window.claude?.hot?.ready) window.claude.hot.ready(start);

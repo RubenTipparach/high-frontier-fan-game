@@ -186,14 +186,17 @@ for any other reason:
   edges bend them (ring arcs follow the zone ellipse; radial transfers bow
   gently).
 - **SM-8b.** No dead ends: every non-site node has at least two edges, except
-  the single arrival node at the system's edge.
+  the Ad Astra nodes at the system's edge.
 - **SM-8c.** Every site is reachable from the arrival node.
 
 ## SM-9. Arrival
 
-- **SM-9a.** Ships arrive at one node outside the primary star's outermost
-  zone (the system edge). Entering the outermost zone's ring from it is a zone
-  transition: one burn (SM-3a).
+- **SM-9a. Ad Astra nodes.** Ships arrive and leave at **Ad Astra nodes**
+  outside the primary star's outermost zone: one per star-map link of the
+  star (AA-G4a), placed at the bearing of that neighbour on the star map.
+  Entering the outermost zone's ring from one is a zone transition: one burn
+  (SM-3a). A board with no links (the builder) has a single arrival node at
+  the top.
 - **SM-9b. Between stars.** A binary pair is joined outer ring to outer ring:
   leaving one star's outer zone and entering the other's are both zone
   transitions, so the trip costs 2 burns. A distant companion is reached the
@@ -224,7 +227,7 @@ SM-10 check still runs on the edited board.
 3. Every burn is a zone transition, an escape burn or a landing burn (SM-3).
 4. Worlds (planets, dwarfs, asteroids) get deeper wells with size (SM-4a); moon
    sites sit at least 4 burns deep, under their giant's well (SM-4b).
-5. Every site has one edge and is reachable from arrival (SM-5b, 8c).
+5. Every site has one edge and is reachable from every Ad Astra node (SM-5b, 8c).
 6. Radiation only in a star's innermost zone and giant belts (SM-6a).
 7. Sites at least 26 world px apart (SM-5e).
 8. No moon route touches a flyby point; every moon branches off its giant's

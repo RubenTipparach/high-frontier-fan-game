@@ -9,16 +9,16 @@
 import { buildMap, zoneLayer } from '../mapgen/mapgen.js';
 import { rollSystem, REGIONS } from '../mapgen/roll.js';
 
-export const SYSTEM_LAYOUT = 9; // 9 = Sol-scale boards, comets with seasons off the plane
+export const SYSTEM_LAYOUT = 10; // 10 = an Ad Astra node per star-map link (SM-9a)
 export { zoneLayer };
 const SPEC = ['C', 'S', 'M', 'V'];
 const CLASS_HYD = { Garden: [6, 9], Habitable: [4, 7], Marginal: [2, 5], Hostile: [0, 3] };
 const STEP_OF = { Marginal: 2, Habitable: 3, Garden: 4, Hostile: 0 };
 const SHORT = { north: 'N', equator: 'Eq', south: 'S', 'day side': 'Day', 'night side': 'Night', 'near side': 'Near', 'far side': 'Far', 'ice shell': 'Ice', 'dark side': 'Dark' };
 
-export function buildSystem({ star, chits, rint, worldName, keep }) {
+export function buildSystem({ star, chits, rint, worldName, keep, links = null }) {
   const short = star.name.split(' ')[0].replace(/'s$/, '');
-  const { spec, meta } = rollSystem({ star, chits, rint, worldName });
+  const { spec, meta } = rollSystem({ star, chits, rint, worldName, links });
   // SM-10: re-place with fresh start angles until every check passes
   let map = buildMap(spec);
   for (let tries = 1; tries < 12 && !map.report.every((r) => r.ok); tries++) map = buildMap({ ...spec, jitter: tries });

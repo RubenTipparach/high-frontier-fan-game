@@ -247,6 +247,7 @@ export function buildMap(spec) {
         if (it.kind === 'giant') { it.delta = giantDelta(st, k); angles.add(Math.round((it.angle - it.delta + 360) % 360)); angles.add(Math.round((it.angle + it.delta) % 360)); }
       }
       if (k === st.N - 1) for (const a of facing[st.i]) angles.add(a);
+      if (k === st.N - 1 && st.i === 0) for (const l of spec.links || []) angles.add(Math.round(((l.angle % 360) + 360) % 360)); // SM-9a
       const list = []; for (const a of [...angles].sort((p, q) => p - q)) if (!list.length || a - list[list.length - 1] >= 5) list.push(a); // merge pivots closer than 5 degrees
       ringPivots[st.i][k] = list.map((a) => ({ a, id: add('hohmann', P(st.L, a, st.mid(k))) }));
     }
@@ -267,10 +268,17 @@ export function buildMap(spec) {
       }
     }
   }
-  // SM-9a: arrival outside the primary's outer zone; one burn crossing into it
+  // SM-9a: Ad Astra nodes outside the primary's outer zone, one per star-map
+  // link at that neighbour's bearing (or a single arrival node at the top);
+  // entering the outer ring from one is a zone transition: one burn
   const S0 = S[0];
-  const high = add('orbit', P(S0.L, 270, S0.L.outer + 26), { id: 'high', label: 'System edge (arrival)' });
-  route(high, pivotAt(S0, S0.N - 1, 270).id, [{ kind: 'burn', t: 0.45, extra: { purpose: 'transition' } }], 0, 30, 'arrival');
+  const edgesSpec = (spec.links && spec.links.length) ? spec.links : [{ id: null, name: null, angle: 270 }];
+  for (const l of edgesSpec) {
+    const a = ((l.angle % 360) + 360) % 360;
+    const id = l.id ? `edge:${l.id}` : 'high';
+    const en = add('orbit', P(S0.L, a, S0.L.outer + 26), { id, label: l.name ? `Ad Astra: toward ${l.name}` : 'System edge (arrival)', adAstra: l.id || true, toward: l.id || null });
+    route(en, pivotAt(S0, S0.N - 1, a).id, [{ kind: 'burn', t: 0.45, extra: { purpose: 'transition' } }], 0, 30, l.id ? `adastra:${l.id}` : 'arrival');
+  }
   // SM-9b: between stars, a burn leaving one outer zone and a burn entering the other's
   for (const x of interStar) {
     const p = pivotAt(x.from, x.from.N - 1, x.aOut), q = pivotAt(x.to, x.to.N - 1, x.aIn);
@@ -455,7 +463,8 @@ export function validateMap(map) {
   // 5. sites: one edge, reachable from arrival
   const multi = nodes.filter((n) => n.kind === 'site' && adj[n.id].length !== 1);
   check('SM-5b each site has one edge', multi.length === 0, multi.length ? `${multi.length} sites with ${multi.map((n) => adj[n.id].length).join('/')}` : `${nodes.filter((n) => n.kind === 'site').length} sites`);
-  const seen = new Set(['high']); const q = ['high'];
+  const entry = (nodes.find((n) => n.kind === 'orbit') || {}).id;
+  const seen = new Set([entry]); const q = [entry];
   while (q.length) { const n = q.shift(); for (const m of adj[n] || []) if (!seen.has(m)) { seen.add(m); q.push(m); } }
   const unreach = nodes.filter((n) => n.kind === 'site' && !seen.has(n.id));
   check('SM-8c every site reachable', unreach.length === 0, unreach.length ? `${unreach.length} unreachable` : 'all reachable from the edge');

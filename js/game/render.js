@@ -5266,8 +5266,11 @@ export class MapRenderer {
       // player-coloured pill already carries the site name ("Eureka 1S"), so
       // drawing the bare name too would be redundant (two names on one site).
       const hasFactory = !!(this._factories && this._factories[site.id]);
-      if (labelAlpha > 0 && !hasFactory) {
-        ctx.globalAlpha = labelAlpha;
+      // A site may keep its name at every zoom (labelAlways): the Ad Astra star
+      // map keeps its well-known stars named while the rest fade in. Sol sets none.
+      const siteAlpha = site.labelAlways ? 1 : labelAlpha;
+      if (siteAlpha > 0 && !hasFactory) {
+        ctx.globalAlpha = siteAlpha;
         const labelOffset = (vis.kind === 'sun' && site.sunR ? site.sunR : vis.r) + 12;
         ctx.font = '500 11px ui-sans-serif, system-ui, sans-serif';
         ctx.strokeStyle = 'rgba(5, 4, 16, 0.85)';
