@@ -68,7 +68,19 @@ The C5 faction bank (`:16170` area) is verified as in the first pass:
 
 ## Promo crew
 
-Promo picks need `ctx.allowPromoCrew` (admin) and m0+m1+m2.
+**Promo crew is released to every player (2026-11-14).** There is no admin
+check and no blanket m0+m1+m2 gate any more. Each face needs only the modules
+its own text uses (`needsModules` in `data/crew.js`):
+- **M0:** Power Brokers, Ambassador, Rabble-Rouser, Emissaries, Arbiter.
+- **M1:** Life Raft, Lifeboat, Iso-Shuttles.
+- **M2:** Shuttles, Offworld Trade Nexus, Immigrant, Quest.
+- **None:** the other in-scope faces.
+
+A face whose module the room lacks is refused (`crew_face_needs_modules`) and
+greyed in the picker with a "Needs M1" badge. An M4 / M5 face is refused
+outright (`crew_face_needs_module`), which answers open question 4. Outside M2
+the Home Bernal lock below does not apply. The rest of this section describes
+an m0+m1+m2 game:
 - **The M2 lock applies.** Because m2 is forced, every promo privilege read
   through `hasPrivilege` stays off until a Home Bernal is anchored. Every new
   face follows that convention, and each face's tests prove it.
@@ -166,7 +178,8 @@ Carried over from the first pass:
 2. Secretary General under M2 with Anarchy at the first anchor: paid later
    (current), paid regardless, or forfeited?
 3. Dharma Refuel: must the chit-carrying Human be colocated with the refuel?
-4. Should PICK_CREW refuse an out-of-scope (M4 / M5) face?
+4. ~~Should PICK_CREW refuse an out-of-scope (M4 / M5) face?~~ Done
+   2026-11-14: refused per face (`crew_face_needs_module`).
 
 Rulings made while building the 21 faces (most faithful reading taken; each
 can be flipped):

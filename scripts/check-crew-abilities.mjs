@@ -757,24 +757,48 @@ check('SCRUM TROUBLESHOOTERS: the Sunspot Glitch event skips Norse, hits SpaceX'
 // (PROMO = m0+m1+m2) as well as in a bare core game.
 const PROMO = { m0: true, m1: true, m2: true };
 
-check('promo crew: refused without the admin flag, refused without m0+m1+m2', () => {
-  const pickIn = (opts, ctx) => {
+// Promo crew is RELEASED to every player (user 2026-11-14): no admin flag,
+// and each face needs only the modules its own text uses (data/crew.js
+// needsModules); a face that needs M4 / M5 is refused outright.
+check('promo crew: any player may pick a face whose modules the room runs', () => {
+  const pick = (cardId, face, opts, ctx = {}) => {
     const st = freshGame(2, opts);
-    st.players[0].color = colorOf('crew_brin');
-    return op(st, 0, { kind: 'PICK_CREW', cardId: 'crew_brin', face: 'primary' }, ctx);
+    st.players[0].color = colorOf(cardId);
+    return op(st, 0, { kind: 'PICK_CREW', cardId, face }, ctx);
   };
-  eq(pickIn(PROMO, {}).error, 'promo_crew_admin_only', 'non-admin promo pick');
-  eq(pickIn({ m0: true, m1: true }, { allowPromoCrew: true }).error, 'promo_crew_needs_modules', 'admin pick without m2');
-  assert(pickIn(PROMO, { allowPromoCrew: true }).ok, 'admin pick with m0+m1+m2 refused');
+  // No module needed: a core game is enough, no admin.
+  assert(pick('crew_brin', 'primary', {}).ok, 'BRIN (no module) refused in a core game');
+  assert(pick('crew_utopia_inc', 'secondary', {}).ok, 'Piggyback (no module) refused in a core game');
+  // M1 face (Life Raft moves as a Freighter).
+  const lr = pick('crew_space_force', 'primary', { m0: true });
+  eq(lr.error, 'crew_face_needs_modules', 'Life Raft without M1');
+  eq(JSON.stringify(lr.missing || (lr.detail && lr.detail.missing)), JSON.stringify(['M1']), 'missing list');
+  assert(pick('crew_space_force', 'primary', { m1: true }).ok, 'Life Raft with M1');
+  // M0 face (Arbiter tallies the Assembly), refused for an admin too.
+  eq(pick('crew_african_union_space_directorate', 'secondary', {}, { allowPromoCrew: true }).error, 'crew_face_needs_modules', 'Arbiter without M0, admin');
+  assert(pick('crew_african_union_space_directorate', 'secondary', { m0: true }).ok, 'Arbiter with M0');
+  // M2 face (Quest exomigrates) vs its no-module card-mate (Heroic needs none).
+  eq(pick('crew_galahad_group', 'secondary', { m0: true, m1: true }).error, 'crew_face_needs_modules', 'Quest without M2');
+  assert(pick('crew_galahad_group', 'primary', {}).ok, 'Heroic in a core game');
 });
-check('promo crew: M4 / M5 "requiresModule" cards are still pickable by an admin (no per-card gate)', () => {
-  // Recorded behaviour: the server gate is the blanket m0+m1+m2 check only, so
-  // a "Coming soon" card (e.g. JAXA, M4) is accepted and does nothing.
-  const st = freshGame(2, PROMO);
-  st.players[0].color = colorOf('crew_jaxa');
-  const r = op(st, 0, { kind: 'PICK_CREW', cardId: 'crew_jaxa', face: 'primary' }, { allowPromoCrew: true });
-  assert(r.ok, `admin JAXA pick refused: ${r.error}`);
-  return 'accepted';
+check('promo crew: an M4 / M5 face ("Coming soon") is refused; its in-scope card-mate is not', () => {
+  const pick = (cardId, face, ctx = {}) => {
+    const st = freshGame(2, PROMO);
+    st.players[0].color = colorOf(cardId);
+    return op(st, 0, { kind: 'PICK_CREW', cardId, face }, ctx);
+  };
+  eq(pick('crew_jaxa', 'primary').error, 'crew_face_needs_module', 'JAXA Futurists (M4)');
+  eq(pick('crew_jaxa', 'secondary', { allowPromoCrew: true }).error, 'crew_face_needs_module', 'JAXA Starchild (M4), admin too');
+  eq(pick('crew_utopia_inc', 'primary').error, 'crew_face_needs_module', 'Utopia Executive Discount (M5)');
+  assert(pick('crew_utopia_inc', 'secondary').ok, 'Utopia Piggyback refused');
+  assert(pick('crew_verisai', 'secondary').ok, 'VerisAI Cavitation Engineers refused');
+  eq(pick('crew_verisai', 'primary').error, 'crew_face_needs_module', 'VerisAI Incubator (M5)');
+});
+check('promo crew: swapping a promo card in after the draft closed stays an admin test drive', () => {
+  const st = promoDraft('crew_brin', 'primary');
+  const plain = op(st, 0, { kind: 'PICK_CREW', cardId: 'crew_brin', face: 'secondary' });
+  eq(plain.error, 'crew_draft_closed', 'non-admin re-pick after the draft');
+  assert(op(st, 0, { kind: 'PICK_CREW', cardId: 'crew_brin', face: 'secondary' }, { allowPromoCrew: true }).ok, 'admin test-drive swap refused');
 });
 
 // A promo seat closes the draft for real (admin pick), the other seat picks

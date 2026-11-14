@@ -16042,19 +16042,22 @@ function applyPickCrew(state, op, ctx) {
   const face = op.face === 'secondary' ? 'secondary' : 'primary';
   const card = CREW_BY_ID[cardId];
   if (!card) return fail('unknown_crew');
-  // Promo crew (data/crew.js#PROMO_CREW) is a Library-only reference set, not
-  // a real starting faction - the client wizard already excludes it from a
-  // normal pick, but never trust the client: reject here too unless the
-  // caller is an admin's explicit test pick (ctx.allowPromoCrew, set by the
-  // route layer from profileIsAdmin - see server/index.js) AND the game runs
-  // the full m0+m1+m2 module stack the promo abilities depend on. Below that
-  // bar the privilege can't fire, so the pick is refused.
-  if (PROMO_CREW_IDS.has(cardId)) {
-    if (!ctx.allowPromoCrew) return fail('promo_crew_admin_only');
-    if (!(state.m0 && state.m1 && state.m2)) return fail('promo_crew_needs_modules');
-  }
+  // Promo crew (data/crew.js#PROMO_CREW) - RELEASED to every player
+  // (user 2026-11-14; it used to need ctx.allowPromoCrew, an admin).
+  // ctx.allowPromoCrew (admin) now only keeps its test-drive power: swapping a
+  // promo card in AFTER the draft closed (the phase check above).
   const faceData = card.faces && card.faces[face];
   if (!faceData) return fail('unknown_crew_face');
+  // Each face needs only the modules its OWN text uses (data/crew.js
+  // needsModules: e.g. Life Raft moves as a Freighter, so M1; Arbiter tallies
+  // the Assembly, so M0). Judged per face, so a card's other side may still
+  // be picked. The old blanket m0+m1+m2 gate is gone (user 2026-11-14).
+  const missing = (faceData.needsModules || []).filter((m) => !state[String(m).toLowerCase()]);
+  if (missing.length) return fail('crew_face_needs_modules', { missing });
+  // A face that needs a module this game does not implement (M4 / M5, the
+  // Library's "Coming soon") has no rule behind it, so it cannot be a
+  // faction. Judged per face: the card's other face may still be picked.
+  if (faceData.requiresModule) return fail('crew_face_needs_module', { module: faceData.requiresModule });
   // Any crew card is a legal pick as long as no OTHER player has already
   // claimed it: each physical crew card is one player's faction, so a card
   // taken by someone else is off the board. Both faces of an unclaimed card

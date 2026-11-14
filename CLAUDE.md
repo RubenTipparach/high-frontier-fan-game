@@ -227,6 +227,21 @@ per room and carried into the game state as a boolean (`state.m0`,
   but adds NO decks (unlike M1's two Terawatt decks). Both flags are still fixed
   at room creation, default OFF, with no retroactive apply. **Rat Frontier is
   the one feature still behind `profileIsAdmin`.**
+- **Promo crew (data/crew.js#PROMO_CREW) - RELEASED to every player
+  (user 2026-11-14).** No admin check (the old `promo_crew_admin_only` is
+  gone) and no blanket m0+m1+m2 gate: each face needs only the modules its OWN
+  text uses, tagged per face as `needsModules` in `data/crew.js` (e.g. Life Raft
+  `['M1']`, Arbiter `['M0']`, Quest `['M2']`; most faces need none). A pick of a
+  face the room lacks a module for is refused (`crew_face_needs_modules`, with
+  the missing list) and the crew picker shows it greyed under "Not available to
+  pick" with a "Needs M1" badge. A face tagged `requiresModule` M4 / M5 ("Coming
+  soon") is refused outright (`crew_face_needs_module`). `ctx.allowPromoCrew`
+  (admin) now only keeps the solo "Test drive promo crew" swap AFTER the draft
+  closed. Every in-scope promo face has an engine rule, a client control where it
+  needs a choice, and checks in `scripts/check-crew-abilities.mjs` (see
+  `docs/crew-ability-audit.md`). Under M2, like every faction privilege, a promo
+  privilege stays locked until its holder anchors a Home Bernal; outside M2 it
+  works from the start.
 - **Futures gate on `state.m2`.** The Futures deck physically ships in M1, but a
   Future is not playable until M2 (it needs Bernals / anchoring / the Epic-Hazard
   economy), so in this implementation futures are an M2 mechanic: every futures

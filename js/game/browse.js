@@ -78,6 +78,16 @@ function crewModuleBadge(face) {
     badge.className = 'card-module-badge is-required';
     badge.textContent = `Coming soon · ${face.requiresModule}`;
     badge.setAttribute('data-tip', `Coming soon: this side needs Module ${n}, which isn't available yet, so it can't be picked.`);
+  } else if (face.needsModules && face.needsModules.length) {
+    const missing = crewFaceMissingModules(face);
+    const mods = face.needsModules.join(' + ');
+    badge.className = 'card-module-badge ' + (missing.length ? 'is-required' : 'is-needs');
+    badge.textContent = `Needs ${mods}${face.notRecommendedWithModule ? ` · ⚠ ${face.notRecommendedWithModule}` : ''}`;
+    const names = { M0: 'Module 0 (Politics)', M1: 'Module 1 (Terawatt)', M2: 'Module 2 (Futures)' };
+    badge.setAttribute('data-tip', (missing.length
+      ? `This side needs ${missing.map((m) => names[m] || m).join(' and ')}, which this game is not using, so it can't be picked here.`
+      : `This side's ability uses ${face.needsModules.map((m) => names[m] || m).join(' and ')}.`)
+      + (face.notRecommendedWithModule ? ` Not recommended with Module ${face.notRecommendedWithModule.slice(1)}.` : ''));
   } else if (face.notRecommendedWithModule) {
     const n = face.notRecommendedWithModule.slice(1);
     badge.className = 'card-module-badge is-caution';
@@ -1195,13 +1205,20 @@ function isSoloRoom(snapshot) {
 
 // Promo crew (data/crew.js#PROMO_CREW) are full-module-stack cards - their
 // abilities lean on M0 politics (delegates / lobby / anarchy), M1 terawatt
-// (freighters), and M2 futures / colonists - so they only work, and are only
-// offered, when ALL of m0+m1+m2 are active AND the viewer is an admin. Below
-// that bar picking one would commit to a faction whose privilege can't fire,
-// so the wizard must not show them. The server re-checks the same bar in
-// applyPickCrew (never trust the client for the gate).
+// (freighters), and M2 futures / colonists - so they are offered only when ALL
+// of m0+m1+m2 are active. RELEASED to every player (user 2026-11-14; it used
+// to be admin-only). An M4 / M5 face stays "Coming soon" and unpickable. The
+// server re-checks the same bar in applyPickCrew (never trust the client).
 function promoCrewAllowed(snapshot) {
-  return !!(activeProfile()?.isAdmin && snapshot && snapshot.m0 && snapshot.m1 && snapshot.m2);
+  return !!snapshot;
+}
+// The modules a crew face needs that this room does not run (data/crew.js
+// needsModules, e.g. ['M1'] for Life Raft). Empty = pickable here. Mirrors the
+// engine's crew_face_needs_modules refusal in applyPickCrew.
+function crewFaceMissingModules(face, snapshot = _onlineSnapshot) {
+  const need = (face && face.needsModules) || [];
+  if (!need.length || !snapshot) return [];
+  return need.filter((m) => !snapshot[String(m).toLowerCase()]);
 }
 
 // V9 The Sirens: the species step's inputs. A seat declares Sirenian or
@@ -1298,13 +1315,15 @@ function maybePromptCrewPick(snapshot) {
   openCrewWizard({
     description: solo
       ? (promoOn
-          ? 'Solo game: pick any crew as your starting faction, promo cards included (admin, full module stack). Your pick sets your colour and is permanent for this session.'
+          ? 'Solo game: pick any crew as your starting faction, promo cards included. Your pick sets your colour and is permanent for this session.'
           : 'Solo game: pick any crew as your starting faction. Your pick sets your colour and is permanent for this session.')
-      : 'Pick one of the two crew on your colour card. Your faction privilege is permanent for this session.',
+      : (promoOn
+          ? 'Pick a crew on your colour, promo cards included. Your faction privilege is permanent for this session.'
+          : 'Pick one of the two crew on your colour card. Your faction privilege is permanent for this session.'),
     // 2+ players: one colour only - restrict to this seat's assigned colour.
     restrictToColor: solo ? null : myp.color,
-    // Promo crew are only mixed in for an admin in a full m0+m1+m2 game
-    // (promoCrewAllowed); a normal player / lighter game never sees them.
+    // Promo crew are mixed in for every player in a full m0+m1+m2 game
+    // (promoCrewAllowed); a lighter game never sees them.
     includePromo: promoOn,
     takenCardIds: crewCardsTakenByOthers(snapshot, myId),
     species: sirensSpeciesChoice(snapshot, myId),
@@ -1984,15 +2003,15 @@ function maybePromptCrewPickForced(snapshot) {
   _crewWizardOpen = true;
   const solo = isSoloRoom(snapshot);
   const promoOn = promoCrewAllowed(snapshot);
-  const promoTail = promoOn ? ' Promo crew included (admin, full module stack).' : '';
+  const promoTail = promoOn ? ' Promo crew included.' : '';
   const desc = solo
     ? (myp.faction ? 'Switch to any other crew.' + promoTail : 'Pick any crew as your starting faction.' + promoTail)
-    : (myp.faction ? 'Switch to the other crew on your colour card while others are still picking.'
-                   : 'Pick one of the two crew on your colour card.');
+    : (myp.faction ? 'Switch to another crew on your colour while others are still picking.' + promoTail
+                   : 'Pick a crew on your colour.' + promoTail);
   openCrewWizard({
     description: desc,
     restrictToColor: solo ? null : myp.color,
-    // Promo crew only for an admin in a full m0+m1+m2 game (promoCrewAllowed).
+    // Promo crew in a full m0+m1+m2 game (promoCrewAllowed).
     includePromo: promoOn,
     takenCardIds: crewCardsTakenByOthers(snapshot, myId),
     species: sirensSpeciesChoice(snapshot, myId),
@@ -2015,8 +2034,9 @@ function maybePromptCrewPickForced(snapshot) {
 function openAdminPromoCrewPicker() {
   if (!_online || _spectator || _crewWizardOpen || !_onlineMe || !_onlineSnapshot) return;
   if (!isSoloRoom(_onlineSnapshot)) return;
-  // Promo crew need the full m0+m1+m2 module stack to function (promoCrewAllowed
-  // also checks admin) - without it the swap would hand you a dead privilege.
+  // The test drive is admin-only (it swaps factions after the draft closed);
+  // promo crew also need the full m0+m1+m2 module stack to function.
+  if (!activeProfile()?.isAdmin) return;
   if (!promoCrewAllowed(_onlineSnapshot)) { setStatus('Promo crew need a game with M0, M1, and M2 all enabled.'); return; }
   const myId = mySeatId();
   _crewWizardOpen = true;
@@ -9567,6 +9587,7 @@ function humanizeOnlineOpError(code, detail) {
     not_tied: 'That Ideology is not tied for the most delegates.',
     already_active_law: 'That Ideology already holds the Active Law.',
     no_arbiter: 'Only the Arbiter may count their delegates twice.',
+    crew_face_needs_module: 'That crew face needs a module this game does not have yet (Coming soon).',
     no_powersat: 'Your Powersat is not working right now (suspended in Anarchy, or waiting on your Home Bernal).',
     beam_self: 'Your Powersat already pushes your own craft.',
     bad_target: 'That player is not at this table.',
@@ -32041,8 +32062,8 @@ function renderPatents() {
   // cards) right from the library, to test its render + abilities. Hidden for
   // everyone else, in multiplayer (a live faction swap outside the draft only
   // makes sense solo), and in a game missing m0/m1/m2 (promo crew need the
-  // full stack to function - promoCrewAllowed also checks admin).
-  if (_online && !_spectator && isSoloRoom(_onlineSnapshot) && promoCrewAllowed(_onlineSnapshot)) {
+  // full stack to function; the test drive itself stays admin-only).
+  if (_online && !_spectator && activeProfile()?.isAdmin && isSoloRoom(_onlineSnapshot) && promoCrewAllowed(_onlineSnapshot)) {
     const adminSwapRow = document.createElement('div');
     adminSwapRow.className = 'patent-admin-crew-swap';
     const adminSwapBtn = document.createElement('button');
@@ -34820,7 +34841,7 @@ export function openCrewWizard(arg, maybeOnDone) {
     const byColour = [...filtered].sort((a, b) => PLAYER_COLORS.indexOf(a.color) - PLAYER_COLORS.indexOf(b.color));
     // Pickable sides first; taken and Coming-soon sides after a divider, so
     // what you can choose is never mixed in with what you can't.
-    const unpickable = (c) => takenSet.has(c.srcId) || !!c.requiresModule;
+    const unpickable = (c) => takenSet.has(c.srcId) || !!c.requiresModule || crewFaceMissingModules(c).length > 0;
     const faces = [...byColour.filter((c) => !unpickable(c)), ...byColour.filter(unpickable)];
     const firstUnpickable = faces.find(unpickable);
     for (const c of faces) {
@@ -34832,7 +34853,7 @@ export function openCrewWizard(arg, maybeOnDone) {
       // though the admin picker shows it (same "informational only" cards the
       // Library greys out, decorateForHand above). notRecommendedWithModule
       // is just a caution and stays fully selectable.
-      const locked = !!c.requiresModule;
+      const locked = !!c.requiresModule || crewFaceMissingModules(c).length > 0;
       const disabled = taken || locked;
       const tile = document.createElement('div');
       tile.className = 'crew-faction-card'
@@ -34845,7 +34866,9 @@ export function openCrewWizard(arg, maybeOnDone) {
       tile.dataset.face = c.face;
       if (locked) {
         tile.setAttribute('aria-disabled', 'true');
-        tile.title = `Coming soon: this side needs Module ${c.requiresModule.slice(1)}, which isn't available yet.`;
+        tile.title = c.requiresModule
+          ? `Coming soon: this side needs Module ${c.requiresModule.slice(1)}, which isn't available yet.`
+          : `This side needs ${crewFaceMissingModules(c).join(' + ')}, which this game is not using.`;
       } else if (taken) {
         tile.setAttribute('aria-disabled', 'true');
         tile.title = 'Another player has this crew.';
