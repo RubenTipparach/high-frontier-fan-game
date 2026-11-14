@@ -2,13 +2,17 @@
 // colony (rules fn 1: slimmed-down "Globus Bernals" of ~100 people, behind a
 // rubble radiation shield) and every one is a dirt rocket that moves by
 // flinging its own shield out of a mass driver (fn 5) - so each station wears
-// a lumpy shield and vents a stream of grey regolith. The two figure shapes
-// are the Stanford torus and the Kalpana finned sphere (2A1). The white face is
+// a lumpy shield and vents a stream of grey regolith. Each card is a
+// DIFFERENT real habitat architecture (user 2026-11-14: no more same-wheel
+// drawings), picked for its location and job from a research pass: elevator
+// bead, sunshade parasol, tethered bola, Lewis One on a launch loop,
+// accelerator ring, Y pinwheel, Stanford torus, buried rubble mound, Bernal
+// sphere, Aldrin's castle. Planets use kit.mjs#planetPaint. The white face is
 // the working station; the purple face is its Lab: the same hull with its
 // special equipment added. Purple faces wash through the deck's promoted
 // purple (#655ca8 -> #652d91) like the colonist backs. See docs/card-art-guide.md.
 import { BERNALS_BY_ID } from '../../data/bernals.js';
-import { W, H, f, lin, rad, stars, svg, seeded, beam } from './kit.mjs';
+import { W, H, f, lin, rad, stars, svg, seeded, beam, planetPaint } from './kit.mjs';
 
 export const ART = {};
 export const RIG = {};
@@ -77,171 +81,198 @@ function solarWing(x, y, w, h) {
 function scene(key, seed, defs, body) {
   const side = key.split(':')[1];
   const b = face(side, seed);
-  // Each station is drawn centred near y=200, then lifted into the open band
-  // around the thrust triangle: the supports box and the HOME / Lab text fill
-  // the lower half of a Bernal card, so art there sits hidden behind them.
-  return svg(b.defs + SHIELD + HULL + defs, `${b.body}<g transform="translate(15 -105) scale(0.9)">${body}</g>`);
+  // Drawn straight in card coordinates: the station lives in the open band
+  // around the thrust triangle (y 0-150); the supports box and HOME / Lab
+  // text cover the lower half, so only backdrop (planets) goes there.
+  return svg(b.defs + SHIELD + HULL + defs, `${b.body}${body}`);
 }
 
-// 1. GEO Elevator Bernal: threaded onto a space-elevator ribbon that runs
-// down to Earth's equator; a climber rides the ribbon.
-ART['ber_geo_elevator_bernal:primary'] = () => scene('ber_geo_elevator_bernal:primary', 401, '',
-  `${planet(150, 470, 240, '#7dd3fc', '#1d4ed8', '#0b1640', 'e1')}
-   <line x1="214" y1="0" x2="214" y2="240" stroke="#475569" stroke-width="1.6"/>
-   ${torus(214, 150, 56, 401)}
-   <rect x="208" y="196" width="12" height="16" rx="3" fill="#e2e8f0" stroke="#475569"/><rect x="211" y="200" width="6" height="4" fill="#fde68a"/>
-   ${massDriver(160, 168, 120, 186, 401)}`);
-// Space Elevator Lab: the same ribbon with a nanotube extrusion works at the
-// hub and a catapult arm throwing a payload up off the top.
-ART['ber_geo_elevator_bernal:secondary'] = () => scene('ber_geo_elevator_bernal:secondary', 402, '',
-  `${planet(150, 470, 240, '#7dd3fc', '#1d4ed8', '#0b1640', 'e2')}
-   <line x1="214" y1="0" x2="214" y2="240" stroke="#e2e8f0" stroke-width="1.6"/>
-   ${torus(214, 160, 52, 402)}
-   <rect x="196" y="140" width="36" height="16" rx="4" fill="#475569" stroke="#cbd5e1"/><circle cx="214" cy="148" r="5" fill="#94a3b8"/>
-   <path d="M232,146 L276,100" stroke="#cbd5e1" stroke-width="4"/><circle cx="282" cy="92" r="4" fill="#fde68a" filter="url(#glow)"/><path d="M282,92 l12,-12" stroke="#fde68a" stroke-width="1.4" stroke-dasharray="2 2"/>
-   <rect x="208" y="214" width="12" height="16" rx="3" fill="#e2e8f0"/>`);
 
-// 2. L1 Climate Control Bernal: tending a huge faint sunshade between the Sun
-// and a planet, its soft shadow falling on the world.
-ART['ber_l1_climate_control_bernal:primary'] = () => scene('ber_l1_climate_control_bernal:primary', 403, '',
-  `<circle cx="-30" cy="150" r="70" fill="#fde68a" opacity="0.45" filter="url(#soft)"/>
-   <ellipse cx="96" cy="170" rx="22" ry="92" fill="#1f2937" opacity="0.5" stroke="#cbd5e1" stroke-width="1.4"/>
-   ${planet(300, 200, 70, '#93c5fd', '#2563eb', '#0b1640', 'e3')}<path d="M248,150 Q236,200 248,250" stroke="#0f172a" stroke-width="16" opacity="0.35" fill="none"/>
-   ${kalpana(150, 196, 26, 403)}${massDriver(150, 222, 130, 262, 403)}`);
-// Climate Control Lab: sampling dishes and a tilted mirror aimed at the
-// planet, its atmosphere banded with a cooler colour.
-ART['ber_l1_climate_control_bernal:secondary'] = () => scene('ber_l1_climate_control_bernal:secondary', 404, '',
-  `<circle cx="-30" cy="150" r="70" fill="#fde68a" opacity="0.35" filter="url(#soft)"/>
-   <ellipse cx="90" cy="170" rx="20" ry="88" fill="#0f172a" opacity="0.45" stroke="#e2e8f0" stroke-width="1.4"/>
-   ${planet(300, 200, 70, '#a5f3fc', '#0891b2', '#083344', 'e4')}<path d="M240,186 Q270,176 300,186" stroke="#e0f2fe" stroke-width="5" fill="none" opacity="0.6"/>
-   ${kalpana(150, 196, 24, 404)}
-   <path d="M176,170 Q190,160 186,148" stroke="#e2e8f0" stroke-width="3" fill="none"/><path d="M174,206 l24,-6 l-4,16 Z" fill="#e5e7eb" stroke="#94a3b8"/>
-   <line x1="198" y1="206" x2="232" y2="200" stroke="#a5f3fc" stroke-width="1.2" stroke-dasharray="3 3"/>`);
+const INK = '#1f2937';
+// Deck signature on every white face: the little mass driver venting its own
+// rubble shield, always low on the left (rules fn 5: Bernals are dirt rockets).
+const SIG = (seed) => massDriver(70, 128, 40, 140, seed);
+function pp(id, cx, cy, r, o) { const p = planetPaint(id, cx, cy, r, o); return `<defs>${p.defs}</defs>${p.body}`; }
+function sun(x, y, r = 60) { return `<circle cx="${x}" cy="${y}" r="${r}" fill="#fde68a" opacity="0.35" filter="url(#soft)"/><circle cx="${x}" cy="${y}" r="${f(r * 0.35)}" fill="#fffbeb" opacity="0.9" filter="url(#soft)"/>`; }
+function lumps(cx, cy, rx, ry, seed, n = 14, from = 0, to = Math.PI * 2) {
+  const rnd = seeded(seed); let out = '';
+  for (let i = 0; i < n; i++) { const a = from + rnd() * (to - from); out += `<ellipse cx="${f(cx + Math.cos(a) * rx)}" cy="${f(cy + Math.sin(a) * ry)}" rx="${f(2.5 + rnd() * 3)}" ry="${f(2 + rnd() * 2.4)}" fill="url(#shd)" stroke="${INK}" stroke-width="0.4"/>`; }
+  return out;
+}
+const win = (x1, y, x2, step = 5) => { let o = ''; for (let x = x1; x < x2; x += step) o += `<rect x="${f(x)}" y="${f(y)}" width="2.4" height="2.4" fill="#fde68a"/>`; return o; };
 
-// 3. L2 Collimator Bernal: the habitat behind a huge collimating mirror fed by
-// solar wings; a pencil-thin beam pushes a sail far away.
-ART['ber_l2_collimator_bernal:primary'] = () => scene('ber_l2_collimator_bernal:primary', 405, lin('mir', [[0, '#fef3c7'], [1, '#a8a29e']], 0, 0, 1, 0),
-  `${solarWing(14, 160, 48, 22)}${solarWing(14, 214, 48, 22)}
-   ${kalpana(92, 200, 22, 405)}
-   <path d="M150,138 Q118,200 150,262 L158,262 Q128,200 158,138 Z" fill="url(#mir)" stroke="#78716c"/>
-   ${beam(156, 200, 300, 168, '#4ade80', 2)}
-   <path d="M282,150 L298,170 L282,176 Z" fill="#e5e7eb" opacity="0.8"/>`);
-// Collimator Lab: a second gimballed steering mirror splits the beam - the
-// bonus pivot.
-ART['ber_l2_collimator_bernal:secondary'] = () => scene('ber_l2_collimator_bernal:secondary', 406, lin('mir2', [[0, '#fef3c7'], [1, '#a8a29e']], 0, 0, 1, 0),
-  `${solarWing(14, 160, 48, 22)}${solarWing(14, 214, 48, 22)}
-   ${kalpana(92, 200, 22, 406)}
-   <path d="M150,138 Q118,200 150,262 L158,262 Q128,200 158,138 Z" fill="url(#mir2)" stroke="#78716c"/>
-   ${beam(156, 200, 222, 200, '#4ade80', 2)}
-   <circle cx="230" cy="200" r="12" fill="none" stroke="#cbd5e1" stroke-width="2"/><rect x="224" y="188" width="12" height="24" fill="#e2e8f0" transform="rotate(30 230 200)"/>
-   ${beam(232, 196, 300, 150, '#4ade80', 1.6)}${beam(232, 204, 300, 250, '#4ade80', 1.6)}`);
+// 1. GEO Elevator Bernal: a flat stacked-disc "bead" threaded onto the
+// space-elevator ribbon, which drops into Earth's equator below and runs up
+// to a counterweight - the vertical line is the read (fn 10: an electric car
+// riding a carbon-nanotube tether).
+function geo(side) {
+  const lab = side === 'secondary';
+  return `${pp('e' + side[0], 150, 560, 440, { kind: 'earth', seed: 4, light: [0.5, -0.8] })}
+   <line x1="205" y1="0" x2="205" y2="140" stroke="${lab ? '#e2e8f0' : '#475569'}" stroke-width="2"/>
+   <rect x="196" y="2" width="18" height="10" fill="#57534e" stroke="${INK}" stroke-width="0.8"/>
+   ${[0, 1, 2].map((i) => `<ellipse cx="205" cy="${52 + i * 9}" rx="${46 - i * 6}" ry="9" fill="url(#hul)" stroke="${INK}" stroke-width="1"/>`).join('')}
+   <path d="M161,58 Q205,66 249,58" stroke="#fde68a" stroke-width="2" stroke-dasharray="3 3" fill="none"/>
+   ${lumps(205, 56, 46, 9, 401, 12, Math.PI * 0.9, Math.PI * 1.6)}
+   ${lab ? `<rect x="198" y="100" width="14" height="16" rx="2" fill="#e2e8f0" stroke="${INK}"/><rect x="198" y="114" width="14" height="3" fill="#1e3a8a"/>
+     <line x1="205" y1="150" x2="205" y2="118" stroke="#fde047" stroke-width="3" opacity="0.8" filter="url(#glow)"/>
+     <line x1="205" y1="22" x2="240" y2="12" stroke="#cbd5e1" stroke-width="2.4"/><circle cx="246" cy="10" r="3" fill="#fde68a"/>
+     <path d="M246,10 Q272,4 290,16" stroke="#fde68a" stroke-width="1.2" stroke-dasharray="2 3" fill="none"/>` : SIG(401)}`;
+}
 
-// 4. L3 Lofstrom Loop Microgravity: the station above a launch loop - a
-// maglev belt in a long flat sheath above the air, ramps down at both ends.
-ART['ber_l3_lofstrom_loop_microgravity:primary'] = () => scene('ber_l3_lofstrom_loop_microgravity:primary', 407, '',
-  `${planet(150, 520, 300, '#86efac', '#15803d', '#052e16', 'e5')}
-   <path d="M0,250 L40,226 L260,226 L300,250" stroke="#64748b" stroke-width="4" fill="none"/>
-   <line x1="40" y1="226" x2="260" y2="226" stroke="#60a5fa" stroke-width="2" filter="url(#glow)"/>
-   <circle cx="246" cy="222" r="3" fill="#e0f2fe" filter="url(#glow)"/><path d="M250,220 L290,196" stroke="#e0f2fe" stroke-width="1.2" stroke-dasharray="3 3"/>
-   ${torus(160, 166, 46, 407)}${massDriver(116, 160, 80, 150, 407)}`);
-// Lofstrom Loop Lab: a small loop ring around the station itself plus
-// microgravity process modules.
-ART['ber_l3_lofstrom_loop_microgravity:secondary'] = () => scene('ber_l3_lofstrom_loop_microgravity:secondary', 408, '',
-  `${planet(150, 520, 300, '#86efac', '#15803d', '#052e16', 'e6')}
-   <path d="M0,250 L40,226 L260,226 L300,250" stroke="#94a3b8" stroke-width="3" fill="none"/>
-   ${torus(160, 170, 44, 408)}
-   <ellipse cx="160" cy="170" rx="74" ry="30" fill="none" stroke="#60a5fa" stroke-width="2.4" filter="url(#glow)"/>
-   ${[0, 1, 2].map((i) => `<rect x="${204 + i * 14}" y="${118 - i * 6}" width="12" height="10" rx="2" fill="#e2e8f0" stroke="#64748b"/>`).join('')}`);
+// 2. L1 Climate Control: a huge dark sunshade seen edge-on-ish with a bright
+// sunlit rim, an inflatable habitat stack sheltering in its shadow. The Lab
+// adds Roger Angel's sunshade: a coilgun firing a fanning cloud of tiny lens
+// flyers toward the Sun.
+function l1(side) {
+  const lab = side === 'secondary';
+  return `${sun(8, 20, 70)}
+   ${lab ? [...Array(34)].map((_, i) => { const t = i / 34, a = -2.6 + (i * 0.37) % 0.9; const d = 30 + t * 140; return `<ellipse cx="${f(206 + Math.cos(a) * d)}" cy="${f(104 + Math.sin(a) * d * 0.7)}" rx="2.6" ry="1.2" fill="#e0f2fe" stroke="#a78bfa" stroke-width="0.4" opacity="${f(0.95 - t * 0.5)}"/>`; }).join('') : ''}
+   <ellipse cx="172" cy="52" rx="86" ry="24" fill="#111827" stroke="#fde68a" stroke-width="2.2"/>
+   ${[...Array(8)].map((_, i) => { const a = i * Math.PI / 8; return `<line x1="${f(172 - Math.cos(a) * 84)}" y1="${f(52 - Math.sin(a) * 22)}" x2="${f(172 + Math.cos(a) * 84)}" y2="${f(52 + Math.sin(a) * 22)}" stroke="#374151" stroke-width="0.6"/>`; }).join('')}
+   <line x1="190" y1="62" x2="206" y2="92" stroke="#64748b" stroke-width="2.4"/>
+   ${[0, 1, 2].map((i) => `<rect x="${190 + i * 10}" y="${88 + i * 4}" width="30" height="16" rx="8" fill="#f1f5f9" stroke="${INK}" stroke-width="1"/>${[1, 2, 3].map((k) => `<line x1="${190 + i * 10 + k * 7.5}" y1="${89 + i * 4}" x2="${190 + i * 10 + k * 7.5}" y2="${103 + i * 4}" stroke="#94a3b8" stroke-width="0.6"/>`).join('')}`).join('')}
+   ${lab ? `<line x1="206" y1="104" x2="176" y2="86" stroke="#475569" stroke-width="4"/>` : SIG(403)}`;
+}
 
-// 5. L4 Antimatter Factory: the habitat docked beside a big solar-powered
-// accelerator ring of magnet segments, radiator fins for its waste heat.
-ART['ber_l4_antimatter_factory:primary'] = () => scene('ber_l4_antimatter_factory:primary', 409, '',
-  `<ellipse cx="190" cy="206" rx="88" ry="34" fill="none" stroke="#e879f9" stroke-width="3" opacity="0.7" filter="url(#glow)"/>
-   ${[...Array(14)].map((_, i) => { const a = i * Math.PI / 7; return `<rect x="${f(190 + Math.cos(a) * 88 - 5)}" y="${f(206 + Math.sin(a) * 34 - 4)}" width="10" height="8" rx="1.5" fill="#1d4ed8" stroke="#93c5fd" stroke-width="0.8"/>`; }).join('')}
-   ${solarWing(206, 120, 70, 22)}
-   ${kalpana(98, 196, 24, 409)}${massDriver(98, 222, 74, 262, 409)}`);
-// Antimatter Lab: rows of Penning-trap canisters, a hand-carried trap flask,
-// small magenta trap points glowing.
-ART['ber_l4_antimatter_factory:secondary'] = () => scene('ber_l4_antimatter_factory:secondary', 410, '',
-  `${kalpana(70, 196, 22, 410)}
-   ${[...Array(3)].map((_, r) => [...Array(4)].map((_, c) => `<rect x="${130 + c * 38}" y="${150 + r * 34}" width="26" height="22" rx="5" fill="#334155" stroke="#cbd5e1" stroke-width="1"/>${[0, 1, 2].map((k) => `<line x1="${133 + c * 38 + k * 8}" y1="${150 + r * 34}" x2="${133 + c * 38 + k * 8}" y2="${172 + r * 34}" stroke="#e3954f" stroke-width="1.6"/>`).join('')}<circle cx="${143 + c * 38}" cy="${161 + r * 34}" r="3" fill="#f0abfc" filter="url(#glow)"/>`).join('')).join('')}`);
+// 3. L2 Collimator: a tethered bola - two shielded capsule pods spinning on a
+// long tether about a small hub at the centre of mass. The Lab adds a big
+// hex-tiled collimating mirror on the hub; its laser beam kinks once off a
+// steering mirror (the Bonus Pivot).
+function l2(side) {
+  const lab = side === 'secondary';
+  const pod = (x, y, a) => `<g transform="rotate(${a} ${x} ${y})"><rect x="${x - 16}" y="${y - 9}" width="32" height="18" rx="9" fill="url(#hul)" stroke="${INK}" stroke-width="1"/>${win(x - 10, y - 1.2, x + 10)}</g>${lumps(x, y, 16, 9, x, 7, Math.PI, Math.PI * 1.8)}`;
+  let hex = '';
+  if (lab) for (let r = -2; r <= 2; r++) for (let c = -2; c <= 2; c++) { if (Math.abs(r) + Math.abs(c) > 3) continue; const x = 150 + c * 9 + (r % 2 ? 4.5 : 0), y = 82 + r * 8; hex += `<polygon points="${[...Array(6)].map((_, k) => `${f(x + Math.cos(k * Math.PI / 3 + Math.PI / 6) * 5)},${f(y + Math.sin(k * Math.PI / 3 + Math.PI / 6) * 5)}`).join(' ')}" fill="#fef3c7" stroke="#a16207" stroke-width="0.5"/>`; }
+  return `${pp('m' + side[0], 40, 150, 34, { kind: 'moon', seed: 6 })}
+   <line x1="44" y1="26" x2="256" y2="138" stroke="${lab ? '#e2e8f0' : '#475569'}" stroke-width="1.2"/>
+   <path d="M20,44 A30,30 0 0 1 60,8" stroke="#94a3b8" stroke-width="1" stroke-dasharray="3 3" fill="none"/><path d="M280,120 A30,30 0 0 1 240,156" stroke="#94a3b8" stroke-width="1" stroke-dasharray="3 3" fill="none"/>
+   ${pod(44, 26, 28)}${pod(256, 138, 28)}
+   <circle cx="150" cy="82" r="6" fill="#64748b" stroke="${INK}"/>
+   ${lab ? `${hex}${beam(160, 82, 236, 60, '#fde047', 2.4)}<rect x="234" y="52" width="6" height="16" fill="#e2e8f0" stroke="${INK}" transform="rotate(30 237 60)"/>${beam(238, 58, 300, 12, '#fde047', 2.2)}` : SIG(405)}`;
+}
 
-// 6. L4s Pharmaceutics Bernal: sealed clean-room lab modules docked to the
-// habitat hub; clinical teal and white.
-ART['ber_l4s_pharmaceutics_bernal:primary'] = () => scene('ber_l4s_pharmaceutics_bernal:primary', 411, '',
-  `${torus(130, 200, 54, 411)}
-   <line x1="130" y1="200" x2="230" y2="160" stroke="#94a3b8" stroke-width="3"/>
-   ${[0, 1, 2].map((i) => `<rect x="${206 + i * 22}" y="${144 + (i % 2) * 18}" width="20" height="16" rx="4" fill="#f0fdfa" stroke="#0d9488" stroke-width="1.5"/><rect x="${210 + i * 22}" y="${149 + (i % 2) * 18}" width="12" height="5" fill="#5eead4"/>`).join('')}
-   ${massDriver(84, 206, 50, 236, 411)}`);
-// Pharmaceutics Lab: a magnified view of perfectly uniform microspheres (the
-// first space-made product sold), a protein-crystal tray and a centrifuge.
-ART['ber_l4s_pharmaceutics_bernal:secondary'] = () => scene('ber_l4s_pharmaceutics_bernal:secondary', 412, rad('bead', [[0, '#ffffff'], [0.6, '#99f6e4'], [1, '#0d9488']], '35%', '35%'),
-  `<circle cx="200" cy="196" r="62" fill="#042f2e" stroke="#5eead4" stroke-width="2"/>
-   ${[...Array(4)].map((_, r) => [...Array(4)].map((_, c) => `<circle cx="${170 + c * 20 + (r % 2) * 10}" cy="${166 + r * 20}" r="8" fill="url(#bead)"/>`).join('')).join('')}
-   <rect x="34" y="228" width="80" height="22" rx="3" fill="#f0fdfa" stroke="#0d9488"/>${[...Array(6)].map((_, i) => `<path d="M${44 + i * 12},${244} l4,-10 l4,10 Z" fill="#a5f3fc" stroke="#0891b2" stroke-width="0.6"/>`).join('')}
-   <circle cx="70" cy="180" r="22" fill="none" stroke="#e2e8f0" stroke-width="3"/><line x1="48" y1="180" x2="92" y2="180" stroke="#e2e8f0" stroke-width="2"/><line x1="70" y1="158" x2="70" y2="202" stroke="#e2e8f0" stroke-width="2"/>`);
+// 4. L3 Lofstrom Loop: a Lewis One habitat - a flat-capped shielded cylinder
+// with a non-rotating micro-g module out of one end - riding the end of a
+// launch loop (a maglev racetrack over an ocean world). The Lab adds a sled
+// streaking along the loop and furnace racks glowing on the micro-g spine.
+function l3(side) {
+  const lab = side === 'secondary';
+  return `${pp('o' + side[0], 150, 610, 480, { kind: 'ocean', seed: 9, light: [0.6, -0.8] })}
+   <rect x="10" y="88" width="282" height="16" rx="8" fill="none" stroke="#475569" stroke-width="2.6"/>
+   <rect x="10" y="88" width="282" height="16" rx="8" fill="none" stroke="#60a5fa" stroke-width="1" stroke-dasharray="6 4"/>
+   <circle cx="18" cy="96" r="6" fill="#64748b" stroke="${INK}"/>
+   <rect x="208" y="54" width="70" height="32" rx="3" fill="url(#shd)" stroke="${INK}" stroke-width="1.2"/>${lumps(243, 70, 35, 16, 407, 14)}
+   <rect x="216" y="66" width="54" height="5" fill="#fde68a" opacity="0.85"/>
+   <rect x="170" y="65" width="38" height="10" fill="url(#hul)" stroke="${INK}"/><line x1="243" y1="86" x2="282" y2="96" stroke="#475569" stroke-width="2"/>
+   ${lab ? `${[0, 1, 2].map((i) => `<rect x="${174 + i * 11}" y="56" width="8" height="9" fill="#7c2d12" stroke="#fb923c" filter="url(#glow)"/>`).join('')}
+     <rect x="70" y="91" width="24" height="10" rx="3" fill="#f8fafc" stroke="${INK}"/><path d="M70,96 L20,96" stroke="#bfdbfe" stroke-width="5" opacity="0.6" filter="url(#glow)"/>` : SIG(407)}`;
+}
 
-// 7. L5 Solar Cell Factory: a robotic assembly truss rolling out huge dark-blue
-// photovoltaic blankets beside the habitat; a mass-driver stream brings rock in.
-ART['ber_l5_solar_cell_factory:primary'] = () => scene('ber_l5_solar_cell_factory:primary', 413, '',
-  `${kalpana(80, 200, 24, 413)}
-   <line x1="104" y1="200" x2="296" y2="200" stroke="#94a3b8" stroke-width="3"/>
-   ${solarWing(130, 150, 150, 40)}${solarWing(130, 210, 150, 40)}
-   ${[0, 1, 2, 3, 4].map((i) => `<circle cx="${10 + i * 12}" cy="${262 - i * 10}" r="2" fill="#a8a29e"/>`).join('')}`);
-// Solar Cell Lab: a thin-film deposition drum, and a solar sail being finished.
-ART['ber_l5_solar_cell_factory:secondary'] = () => scene('ber_l5_solar_cell_factory:secondary', 414, lin('film', [[0, '#fde68a'], [1, '#d6d3d1']], 0, 0, 1, 1),
-  `${kalpana(70, 210, 22, 414)}
-   <ellipse cx="140" cy="200" rx="14" ry="30" fill="#475569" stroke="#cbd5e1" stroke-width="2"/>
-   <path d="M140,170 Q210,160 280,140 L280,260 Q210,240 140,230 Z" fill="#1e3a8a" stroke="#93c5fd" stroke-width="1"/>
-   <path d="M200,110 L250,96 L262,140 L212,152 Z" fill="url(#film)" opacity="0.85" stroke="#a8a29e"/>`);
+// 5. L4 Antimatter Factory: a thin hubless accelerator ring of magnet
+// segments filling the frame, with a short wide Kalpana Two drum (the
+// detector hall) on its rim and two radiator wings (the card's Therms 2).
+// The Lab adds a beamline spur feeding Penning-trap canisters, cores glowing.
+function l4(side) {
+  const lab = side === 'secondary';
+  return `${pp('k' + side[0], 262, 140, 28, { kind: 'moon', seed: 12 })}
+   <ellipse cx="150" cy="78" rx="136" ry="58" fill="none" stroke="#475569" stroke-width="3"/>
+   ${[...Array(28)].map((_, i) => { const a = i * Math.PI / 14; return `<rect x="${f(150 + Math.cos(a) * 136 - 3)}" y="${f(78 + Math.sin(a) * 58 - 3)}" width="6" height="6" fill="#1d4ed8" stroke="${INK}" stroke-width="0.5"/>`; }).join('')}
+   <ellipse cx="150" cy="78" rx="136" ry="58" fill="none" stroke="#e879f9" stroke-width="1" opacity="0.6"/>
+   <rect x="214" y="14" width="44" height="30" rx="6" fill="url(#hul)" stroke="${INK}" stroke-width="1.2"/>${win(220, 27, 254)}${lumps(236, 29, 22, 15, 409, 8, Math.PI, Math.PI * 2)}
+   ${[-1, 1].map((s2) => `<rect x="${s2 < 0 ? 188 : 258}" y="20" width="26" height="12" fill="#334155" stroke="#94a3b8" stroke-width="0.8"/>`).join('')}
+   ${lab ? `<line x1="236" y1="44" x2="236" y2="70" stroke="#e879f9" stroke-width="2"/>${[0, 1, 2, 3].map((i) => `<rect x="${200 + i * 20}" y="70" width="14" height="22" rx="5" fill="#334155" stroke="${INK}"/><line x1="${200 + i * 20}" y1="76" x2="${214 + i * 20}" y2="76" stroke="#d97706" stroke-width="1.6"/><line x1="${200 + i * 20}" y1="86" x2="${214 + i * 20}" y2="86" stroke="#d97706" stroke-width="1.6"/><circle cx="${207 + i * 20}" cy="81" r="3" fill="#f0abfc" filter="url(#glow)"/>`).join('')}` : SIG(409)}`;
+}
 
-// 8. L5s Cancer Hospital: a spinning wheel marked with a red cross behind a
-// thick regolith shield around the wards.
-ART['ber_l5s_cancer_hospital:primary'] = () => scene('ber_l5s_cancer_hospital:primary', 415, '',
-  `${torus(170, 198, 64, 415, { lights: '#fecaca' })}
-   <rect x="160" y="182" width="20" height="32" fill="#ffffff"/><rect x="154" y="190" width="32" height="16" fill="#ffffff"/>
-   <rect x="164" y="186" width="12" height="24" fill="#dc2626"/><rect x="158" y="192" width="24" height="12" fill="#dc2626"/>
-   ${massDriver(110, 214, 70, 246, 415)}`);
-// Cancer Lab: a proton-therapy beamline into a treatment couch inside a
-// heavily shielded vault, the beam a soft blue.
-ART['ber_l5s_cancer_hospital:secondary'] = () => scene('ber_l5s_cancer_hospital:secondary', 416, '',
-  `<rect x="150" y="140" width="130" height="120" rx="8" fill="url(#shd)"/>
-   <rect x="166" y="156" width="98" height="88" rx="4" fill="#1e1b4b"/>
-   <ellipse cx="70" cy="200" rx="56" ry="18" fill="none" stroke="#94a3b8" stroke-width="6"/>
-   ${beam(122, 200, 214, 200, '#7dd3fc', 2.2)}
-   <rect x="196" y="206" width="56" height="8" rx="3" fill="#e2e8f0"/><circle cx="214" cy="200" r="6" fill="#bae6fd" filter="url(#glow)"/>
-   <rect x="160" y="182" width="12" height="18" fill="#ffffff"/><rect x="157" y="188" width="18" height="6" fill="#dc2626"/>`);
+// 6. L4s Pharmaceutics: a three-armed Y pinwheel - spinning arms give the
+// crew gravity in stubby shielded pods, the still hub gives microgravity
+// for production. The Lab adds a drop column at the hub releasing a chain of
+// perfectly uniform microspheres (fn 9, the first space pharmaceuticals).
+function l4s(side) {
+  const lab = side === 'secondary';
+  const hx = 196, hy = 70;
+  return `${pp('j' + side[0], 40, 140, 30, { kind: 'earth', seed: 21 })}
+   ${[90, 210, 330].map((d) => { const a = d * Math.PI / 180, x = hx + Math.cos(a) * 62, y = hy + Math.sin(a) * 50; return `<line x1="${hx}" y1="${hy}" x2="${f(x)}" y2="${f(y)}" stroke="#64748b" stroke-width="4"/><ellipse cx="${f(x)}" cy="${f(y)}" rx="15" ry="11" fill="url(#hul)" stroke="${INK}" stroke-width="1"/>${lumps(x, y, 14, 10, d, 7)}<rect x="${f(x - 8)}" y="${f(y - 1)}" width="16" height="2.4" fill="#fde68a"/>`; }).join('')}
+   <path d="M${hx - 74},${hy - 20} A80,64 0 0 1 ${hx + 30},${hy - 66}" stroke="#94a3b8" stroke-dasharray="3 4" fill="none"/>
+   <circle cx="${hx}" cy="${hy}" r="10" fill="#e2e8f0" stroke="${INK}" stroke-width="1.2"/>
+   ${lab ? `<rect x="${hx - 4}" y="${hy - 64}" width="8" height="54" rx="3" fill="#ccfbf1" fill-opacity="0.5" stroke="#0d9488"/>${[0, 1, 2, 3, 4, 5].map((i) => `<circle cx="${hx}" cy="${hy - 58 + i * 8}" r="3" fill="#5eead4" stroke="#0f766e" stroke-width="0.5"/>`).join('')}<path d="M${hx + 14},${hy + 4} l6,-10 l2,0 l0,6 l5,10 l-14,0 Z" fill="#ccfbf1" stroke="#0d9488"/>` : SIG(411)}`;
+}
 
-// 9. SSO Diplomatic: a stately torus with an assembly dome at its hub, a ring
-// of six faction banners, GPS satellites drifting nearby (semi-synchronous orbit).
-ART['ber_sso_diplomatic:primary'] = () => scene('ber_sso_diplomatic:primary', 417, '',
-  `${torus(160, 200, 62, 417)}
-   <path d="M144,198 Q160,176 176,198 Z" fill="#e0f2fe" stroke="#64748b"/>
-   ${['#b40054', '#eab308', '#9f7aea', '#34d399', '#9ca3af', '#f5f0dc'].map((c, i) => { const a = i * Math.PI / 3; const x = 160 + Math.cos(a) * 62, y = 200 + Math.sin(a) * 26; return `<line x1="${f(x)}" y1="${f(y)}" x2="${f(x)}" y2="${f(y - 18)}" stroke="#cbd5e1" stroke-width="1"/><rect x="${f(x)}" y="${f(y - 18)}" width="10" height="7" fill="${c}"/>`; }).join('')}
-   ${[[40, 150], [262, 136]].map(([x, y]) => `<rect x="${x - 5}" y="${y - 4}" width="10" height="8" fill="#cbd5e1"/><rect x="${x - 17}" y="${y - 2}" width="10" height="4" fill="#1e3a8a"/><rect x="${x + 7}" y="${y - 2}" width="10" height="4" fill="#1e3a8a"/>`).join('')}`);
-// Diplomatic Lab: a great chamber with a ring of delegate seats, and antenna
-// relay arrays for talking to every faction.
-ART['ber_sso_diplomatic:secondary'] = () => scene('ber_sso_diplomatic:secondary', 418, '',
-  `<ellipse cx="160" cy="210" rx="110" ry="40" fill="#1e1b4b" stroke="#c4b5fd" stroke-width="2"/>
-   <ellipse cx="160" cy="210" rx="34" ry="12" fill="#312e81" stroke="#e0e7ff"/>
-   ${[...Array(18)].map((_, i) => { const a = i * Math.PI / 9; const cols = ['#b40054', '#eab308', '#9f7aea', '#34d399', '#9ca3af', '#f5f0dc']; return `<rect x="${f(160 + Math.cos(a) * 82 - 4)}" y="${f(210 + Math.sin(a) * 28 - 3)}" width="8" height="6" rx="1.5" fill="${cols[i % 6]}"/>`; }).join('')}
-   ${[60, 250].map((x) => `<line x1="${x}" y1="176" x2="${x}" y2="130" stroke="#cbd5e1" stroke-width="2"/><path d="M${x - 12},${136} Q${x},${118} ${x + 12},${136}" fill="none" stroke="#e2e8f0" stroke-width="2"/>`).join('')}`);
+// 7. L5 Solar Cell Factory: the deck's one classic Stanford torus (NASA
+// SP-413 sited it at L5): a fat shielded wheel, six spokes to a hub, a big
+// flat primary mirror tilted above the hub and chevron mirror tabs round the
+// tube. The Lab unrolls deep-blue PV blankets off a mill on the hub.
+function l5(side) {
+  const lab = side === 'secondary';
+  const cx = 168, cy = 86, R = 84, r = 30;
+  return `${sun(292, 8, 50)}
+   <ellipse cx="${cx}" cy="${cy}" rx="${R}" ry="${r}" fill="none" stroke="url(#shd)" stroke-width="16"/>${lumps(cx, cy, R, r, 413, 20)}
+   <ellipse cx="${cx}" cy="${cy}" rx="${R}" ry="${r}" fill="none" stroke="#fde68a" stroke-width="1.4" stroke-dasharray="3 4"/>
+   ${[0, 30, 60, 90, 120, 150].map((a) => { const t = a * Math.PI / 180; return `<line x1="${f(cx - Math.cos(t) * R)}" y1="${f(cy - Math.sin(t) * r)}" x2="${f(cx + Math.cos(t) * R)}" y2="${f(cy + Math.sin(t) * r)}" stroke="#94a3b8" stroke-width="1.6"/>`; }).join('')}
+   <circle cx="${cx}" cy="${cy}" r="9" fill="url(#hul)" stroke="${INK}"/>
+   <line x1="${cx}" y1="${cy}" x2="${cx}" y2="${cy - 52}" stroke="#64748b" stroke-width="2"/>
+   <path d="M${cx - 46},${cy - 60} L${cx + 26},${cy - 74} L${cx + 46},${cy - 46} L${cx - 26},${cy - 32} Z" fill="#e5e7eb" stroke="${INK}" stroke-width="1"/>
+   ${[...Array(10)].map((_, i) => { const a = i * Math.PI / 5; return `<path d="M${f(cx + Math.cos(a) * (R + 10) - 3)},${f(cy + Math.sin(a) * (r + 6))} l3,-4 l3,4" stroke="#cbd5e1" fill="none" stroke-width="1.2"/>`; }).join('')}
+   ${lab ? `<rect x="${cx - 8}" y="${cy - 6}" width="16" height="12" fill="#475569" stroke="${INK}"/>${[-1, 1].map((s2) => `<rect x="${s2 < 0 ? cx - 108 : cx + 12}" y="${cy + 24}" width="96" height="26" fill="#1e3a8a" stroke="#93c5fd"/>${[1, 2, 3, 4, 5].map((k) => `<line x1="${(s2 < 0 ? cx - 108 : cx + 12) + k * 16}" y1="${cy + 24}" x2="${(s2 < 0 ? cx - 108 : cx + 12) + k * 16}" y2="${cy + 50}" stroke="#93c5fd" stroke-width="0.6"/>`).join('')}`).join('')}` : SIG(413)}`;
+}
 
-// 10. Tourism Cycler: Aldrin's castle, a wheel with a shielded storm shelter
-// looping forever between Earth and Mars; taxis dock as it flies past.
-ART['ber_tourism_cycler:primary'] = () => scene('ber_tourism_cycler:primary', 419, '',
-  `<ellipse cx="150" cy="200" rx="140" ry="54" fill="none" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4 4"/>
-   ${planet(18, 200, 16, '#7dd3fc', '#1d4ed8', '#0b1640', 'e7')}${planet(286, 200, 11, '#fdba74', '#c2410c', '#431407', 'e8')}
-   ${torus(170, 176, 42, 419)}
-   <rect x="160" y="168" width="20" height="16" rx="3" fill="#57534e" stroke="#e5e7eb"/>
-   <path d="M228,160 l10,-4 l2,6 Z" fill="#e2e8f0"/><path d="M110,196 l-10,4 l-2,-6 Z" fill="#e2e8f0"/>`);
-// Tourism Hotel: a panoramic viewing deck - big warm-lit windows and a lounge -
-// with Earth and Mars swinging by.
-ART['ber_tourism_cycler:secondary'] = () => scene('ber_tourism_cycler:secondary', 420, '',
-  `${planet(270, 140, 26, '#fdba74', '#c2410c', '#431407', 'e9')}
-   <path d="M30,250 Q30,170 150,166 Q270,170 270,250 Z" fill="#334155" stroke="#cbd5e1" stroke-width="2"/>
-   ${[...Array(7)].map((_, i) => `<rect x="${46 + i * 32}" y="${184 + Math.abs(3 - i) * 4}" width="24" height="34" rx="4" fill="#fde68a" opacity="0.85"/>`).join('')}
-   <line x1="40" y1="232" x2="260" y2="232" stroke="#94a3b8" stroke-width="2"/>`);
+// 8. L5s Cancer Hospital: the heaviest-shielded habitat in the deck - a
+// lumpy, cratered regolith mound with the wards buried inside; only a
+// docking collar and deep-set lit window slits show. The Lab adds a proton
+// therapy cyclotron and beam pipe, a white-on-green medical cross, and a
+// faint bright rim for the rad-hard 7 protection.
+function l5s(side) {
+  const lab = side === 'secondary';
+  const rnd = seeded(415);
+  const pts = [...Array(14)].map((_, i) => { const a = i * Math.PI / 7, rr = 1 + (rnd() - 0.5) * 0.18; return `${f(178 + Math.cos(a) * 70 * rr)},${f(74 + Math.sin(a) * 48 * rr)}`; });
+  return `<polygon points="${pts.join(' ')}" fill="url(#shd)" stroke="${lab ? '#bbf7d0' : INK}" stroke-width="${lab ? 2.4 : 1.2}" stroke-linejoin="round"/>
+   ${[[150, 60, 9], [206, 92, 7], [196, 50, 5], [140, 96, 6]].map(([x, y, rr]) => `<ellipse cx="${x}" cy="${y}" rx="${rr}" ry="${f(rr * 0.6)}" fill="#44403c" opacity="0.6"/>`).join('')}
+   ${[0, 1, 2].map((i) => `<rect x="${166 + i * 14}" y="72" width="7" height="3" fill="#fde68a"/>`).join('')}
+   <rect x="242" y="66" width="18" height="14" rx="3" fill="url(#hul)" stroke="${INK}"/>
+   ${lab ? `<circle cx="160" cy="34" r="13" fill="#94a3b8" stroke="${INK}"/><path d="M160,34 m0,-9 a9,9 0 1 1 -1,0 m1,4 a5,5 0 1 1 -1,0" stroke="#1d4ed8" fill="none" stroke-width="1"/>
+     <line x1="172" y1="36" x2="212" y2="48" stroke="#7dd3fc" stroke-width="2.4" filter="url(#glow)"/><path d="M210,40 Q222,46 214,58 Z" fill="#e2e8f0" stroke="${INK}"/>
+     <rect x="104" y="40" width="22" height="22" rx="3" fill="#15803d"/><rect x="113" y="43" width="4" height="16" fill="#fff"/><rect x="107" y="49" width="16" height="4" fill="#fff"/>` : SIG(415)}`;
+}
+
+// 9. SSO Diplomatic: a stately Bernal sphere (Island One) with a lit
+// equatorial window band, stacks of thin agricultural rings at each pole,
+// concentric mirror rings off one pole and radiator fins - in the 12-hour
+// GPS orbit over Earth. The Lab cuts the sphere open on the Assembly: a
+// tiered bowl of seats in the six ideology colours, comm dishes on the poles.
+function sso(side) {
+  const lab = side === 'secondary';
+  const cx = 186, cy = 70, R = 44;
+  const ideo = ['#c01f6e', '#eab308', '#9f7aea', '#34d399', '#9ca3af', '#f5f0dc'];
+  return `${pp('s' + side[0], 30, 170, 70, { kind: 'earth', seed: 33, light: [0.7, -0.7] })}
+   ${[-1, 1].map((s2) => [0, 1, 2].map((i) => `<ellipse cx="${cx + s2 * (R + 6 + i * 8)}" cy="${cy}" rx="4" ry="${26 - i * 3}" fill="url(#hul)" stroke="${INK}" stroke-width="0.8"/>`).join('')).join('')}
+   ${[0, 1].map((i) => `<ellipse cx="${cx + R + 44 + i * 10}" cy="${cy}" rx="3" ry="${34 + i * 6}" fill="none" stroke="#e5e7eb" stroke-width="2"/>`).join('')}
+   <rect x="${cx - 6}" y="${cy - R - 18}" width="12" height="16" fill="#334155" stroke="#94a3b8" stroke-width="0.6"/>
+   <circle cx="${cx}" cy="${cy}" r="${R}" fill="url(#shd)" stroke="${INK}" stroke-width="1.2"/>${lumps(cx, cy, R * 0.92, R * 0.92, 417, 14)}
+   ${lab ? `<path d="M${cx - R + 6},${cy - 4} A${R - 6},${R - 6} 0 0 0 ${cx + R - 6},${cy - 4} Z" fill="#1e1b4b" stroke="#c4b5fd"/>${[0, 1, 2].map((t) => ideo.map((c, i) => { const a = Math.PI * (0.12 + i * 0.15), rr = R - 12 - t * 8; return `<rect x="${f(cx + Math.cos(a) * rr - 3)}" y="${f(cy - 4 + Math.sin(a) * rr * 0.75 - 2)}" width="6" height="4" fill="${c}"/>`; }).join('')).join('')}
+     ${[-1, 1].map((s2) => `<path d="M${cx + s2 * (R + 30) - 8},${cy - 36} Q${cx + s2 * (R + 30)},${cy - 46} ${cx + s2 * (R + 30) + 8},${cy - 36}" fill="none" stroke="#e2e8f0" stroke-width="2"/>`).join('')}`
+    : `<path d="M${cx - R + 2},${cy} Q${cx},${cy + 14} ${cx + R - 2},${cy}" stroke="#fde68a" stroke-width="2.4" stroke-dasharray="3 3" fill="none"/>${SIG(417)}`}`;
+}
+
+// 10. Tourism Cycler: Aldrin's "castle" - a keep of a tall central tower
+// flanked by shorter towers on a spine, a domed observation cap, looping
+// forever between Earth and Mars on its cycler orbit inside a pale magnetic
+// bubble (its belt protection). The Lab turns it into the hotel: a glowing
+// panoramic window ring and glass cupola, rows of windows, a taxi docking.
+function cycler(side) {
+  const lab = side === 'secondary';
+  return `${pp('c1' + side[0], 22, 112, 16, { kind: 'earth', seed: 41 })}${pp('c2' + side[0], 282, 40, 10, { kind: 'mars', seed: 42 })}
+   <ellipse cx="152" cy="76" rx="134" ry="44" fill="none" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4 4" transform="rotate(-14 152 76)"/>
+   <ellipse cx="190" cy="70" rx="58" ry="60" fill="#bfdbfe" fill-opacity="0.12" stroke="#93c5fd" stroke-width="1" stroke-dasharray="3 5"/>
+   <rect x="148" y="84" width="84" height="12" fill="url(#hul)" stroke="${INK}"/>
+   ${[[160, 48, 18], [214, 54, 18], [182, 20, 26]].map(([x, y, w]) => `<rect x="${x}" y="${y}" width="${w}" height="${96 - y}" rx="3" fill="url(#hul)" stroke="${INK}" stroke-width="1"/>${lab ? [...Array(Math.floor((84 - y) / 9))].map((_, k) => win(x + 3, y + 8 + k * 9, x + w - 3)).join('') : ''}`).join('')}
+   <path d="M182,20 Q195,2 208,20 Z" fill="${lab ? '#fde68a' : '#cbd5e1'}" stroke="${INK}" ${lab ? 'filter="url(#glow)"' : ''}/>
+   ${lab ? `<rect x="180" y="36" width="30" height="7" fill="#fde68a" filter="url(#glow)"/><path d="M262,92 l14,-4 l2,8 Z" fill="#e2e8f0" stroke="${INK}"/><line x1="232" y1="90" x2="262" y2="92" stroke="#94a3b8" stroke-dasharray="2 2"/>` : `${lumps(195, 60, 38, 40, 419, 10, Math.PI * 0.8, Math.PI * 1.3)}${SIG(419)}`}`;
+}
+
+const DRAW = { ber_geo_elevator_bernal: geo, ber_l1_climate_control_bernal: l1, ber_l2_collimator_bernal: l2, ber_l3_lofstrom_loop_microgravity: l3, ber_l4_antimatter_factory: l4, ber_l4s_pharmaceutics_bernal: l4s, ber_l5_solar_cell_factory: l5, ber_l5s_cancer_hospital: l5s, ber_sso_diplomatic: sso, ber_tourism_cycler: cycler };
+let seed = 400;
+for (const [id, draw] of Object.entries(DRAW)) {
+  for (const side of ['primary', 'secondary']) { const s2 = seed++; ART[`${id}:${side}`] = () => scene(`${id}:${side}`, s2, '', draw(side)); }
+}
 
 for (const id of Object.keys(BERNALS_BY_ID)) {
   for (const side of ['primary', 'secondary']) {
