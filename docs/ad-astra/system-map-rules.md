@@ -59,6 +59,30 @@ Every rule is grounded in a measurement of the real Sol board
   a lone star; a binary partner or distant companion is drawn smaller and
   keeps to the low end of the range.
 
+- **SM-1h. Zones are tied to bodies.** On Sol every zone is a planet's or a
+  belt's: Mercury, Venus, Earth, Mars, the belt, then Jupiter, Saturn, Uranus
+  and Neptune each in their own zone, then the cold zone beyond. A system
+  map is laid out the same way, inside out:
+  - **Rocky zones** first: the innermost (the star's zone, radiation) holds
+    the innermost rocky world; the habitable-zone world takes its own zone
+    (about the third, round a yellow star; the second, round a red one); the
+    other rocky worlds share the rocky zones, at most 3 to a zone. No rocky
+    planet sits beyond the belt.
+  - **The main-belt zone** next: the main asteroid belt and a dwarf planet.
+  - **One zone per giant** after that (Sol's Jupiter zone is about zone 6 of
+    9; here the giants' zones run from about zone 4 to zone 8). A giant never
+    shares its zone with another giant or a planet.
+  - **The Oort zone** last (SM-1g).
+  A system without giants goes straight from the belt to the Oort zone.
+  Bands are not all the same width: the rocky zones and the belt's are wider
+  (their wells and asteroid groups must fit inside the band), the giants'
+  narrower (a giant's moons bulge out round it anyway, SM-1i).
+- **SM-1i. A giant's zone holds its moons.** A gas giant's moon system is far
+  bigger than a zone band, so its zone bulges out round the whole moon system
+  (HF hand-shapes Jupiter's and Saturn's zones the same way): every node of
+  the moon system is in the giant's zone, and the band is drawn round it. The
+  Oort zone wraps the outside of everything, giants' bulges included, so a
+  moon system never sits out in bare space.
 - **SM-1g. The Oort zone.** A primary star's outermost zone lies beyond
   its gas giants: the cold zone of Sol's board past Neptune, where Pluto, the
   Kuiper belt and most comets live. No planet or giant is placed there. It
@@ -176,6 +200,11 @@ for any other reason:
   - **Trojans** at each gas giant, on its ring 60 degrees ahead and behind;
   - a few **near-star rocks** inside the habitable zone;
   - an **outer belt** (Kuiper belt) in the outermost zone.
+  A group lies **along its band**: its Lagrange point 22 px off the ring, two
+  rocks either side of it along the ring and the third a little further out,
+  about 36 px deep in all (fanned straight out it was 48, deeper than the top
+  and bottom of most bands). A group with no clean place splits into single
+  rocks; a rock with no clean place is left off.
   Each group is a cluster: a ring pivot, one escape burn, a Lagrange point,
   then 1 to 3 asteroid sites straight off it (no landing, SM-5c).
 

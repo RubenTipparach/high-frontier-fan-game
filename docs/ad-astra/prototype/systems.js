@@ -9,7 +9,7 @@
 import { buildMap, zoneLayer } from '../mapgen/mapgen.js';
 import { rollSystem, REGIONS } from '../mapgen/roll.js';
 
-export const SYSTEM_LAYOUT = 12; // 12 = the Oort zone (SM-1g); 11 = rings open round giants (SM-2e, 7b)
+export const SYSTEM_LAYOUT = 13; // 13 = zones tied to bodies, giants' zones bulge (SM-1h, 1i); 12 = the Oort zone (SM-1g); 11 = rings open round giants (SM-2e, 7b)
 export { zoneLayer };
 const SPEC = ['C', 'S', 'M', 'V'];
 const CLASS_HYD = { Garden: [6, 9], Habitable: [4, 7], Marginal: [2, 5], Hostile: [0, 3] };
@@ -80,6 +80,6 @@ export function buildSystem({ star, chits, rint, worldName, keep, links = null }
       if (s.terra && old.step != null) for (const t of sites.filter((q) => q.body === s.body)) { t.step = Math.max(t.step, old.step); }
     }
   }
-  const stars = map.stars.map((x) => ({ name: x.name, type: x.type, role: x.role, zones: x.zones, x: x.x, y: x.y }));
-  return { nodes, edges, sites, display, stars, zones: stars[0].zones, report: map.report, landfall: [], blueprints: [], layout: SYSTEM_LAYOUT };
+  const stars = map.stars.map((x) => ({ name: x.name, type: x.type, role: x.role, zones: x.zones, widths: x.widths || null, x: x.x, y: x.y }));
+  return { nodes, edges, sites, display, stars, zones: stars[0].zones, bulges: map.bulges || [], report: map.report, landfall: [], blueprints: [], layout: SYSTEM_LAYOUT };
 }

@@ -57,7 +57,7 @@ const PRESETS = Object.fromEntries(Object.entries(ROLLS).map(([k, v]) => [k, rol
 const FIRST = 'Yellow sun with a gas giant';
 // bump when the presets or the rules change, so a saved map from an older
 // builder doesn't hide them (the old one simply isn't loaded)
-const SPEC_KEY = 'aa-mapgen-spec-v5';
+const SPEC_KEY = 'aa-mapgen-spec-v6';
 // older saved specs had one star at the top level
 const upgrade = (s) => (s.stars ? s : { name: s.name, stars: [{ name: s.name || 'Star', type: s.starType || 'yellow', zones: s.zones || 6 }], bodies: s.bodies || [] });
 let SPEC = (() => { try { const s = JSON.parse(localStorage.getItem(SPEC_KEY)); if (s && s.bodies) return upgrade(s); } catch (e) { /* none */ } return structuredClone(PRESETS[FIRST]); })();

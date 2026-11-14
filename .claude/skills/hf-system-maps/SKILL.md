@@ -137,9 +137,25 @@ Run `node docs/ad-astra/analyze-sol-map.mjs` to re-measure. The numbers:
    comet in the outermost zone climbs OUTWARD and up (`cometGeom`), away from
    the rings; straight up from the lower half of the board crossed every
    ring in between.
+7c. **Zones follow bodies (SM-1h, 1i).** `roll.js` lays a primary out
+   inside out: rocky zones (`ceil(R/3)`, at most 3 worlds each; the
+   habitable world its own zone), the belt zone, one zone per giant, the Oort
+   zone. Band widths come from `stars[i].widths` (rocky and belt 1.2, giants
+   1.0, read by `zoneBounds(n, L, widths)` everywhere: buildMap, zoneLayer,
+   the roller's ring capacity). A giant's moon system is IN its zone (every
+   node built for it gets the giant's zone) and `zoneLayer(stars, bulges)`
+   splices each giant's disk (`map.bulges`: centre, reach + 4) into its zone's
+   outline and every outline outside it (`unionDisk`: the outline's points
+   inside the disk give way to the disk's far arc), the Oort outline with a
+   26 px margin, so the renderer's nested even-odd fill colours the moon
+   system as the giant's zone and the Oort band wraps the lot. The game keeps
+   `bulges` and `widths` on the saved system to redraw the bands.
 8. **Asteroids (SM-5f).** `kind: 'belt'` (count up to 30, sizes) and a giant's
    `trojans: n` expand into groups: ring pivot -> one escape burn ->
-   Lagrange -> up to 3 rocks fanned 22 px out, alternating sides of the ring.
+   Lagrange (22 px off the ring) -> up to 3 rocks laid ALONG the band
+   (`rockSpots`: two at +-26 px along the ring, one 14 px further out),
+   alternating sides of the ring. A group with no clean place splits into
+   single rocks before anything is left off.
 9. **Comets (SM-5g).** `kind: 'comet'` (never zone 0): ring pivot -> 1 / 2 / 3
    escape burns (inner half / outer half / outermost zone) -> Lagrange -> a
    second Lagrange -> the comet site. Name it "Comet ..." and the renderer's
@@ -309,6 +325,18 @@ conversion to the planner-map shape `MapRenderer` already draws:
    `files` = every path in `dist/assets.json`.
 
 ## Failure modes already hit (don't repeat them)
+
+- **Giants floating outside the system, no Oort cloud** (user, 2026-11-14:
+  "wheres the ort cloud bud?"). Giants' moon systems stuck out past every
+  band, so the Oort zone read as nothing. On Sol every zone is a planet's or
+  a belt's and the giants own zones 4 to 8 or so: zones follow bodies
+  (SM-1h), a giant's zone bulges round its moons and the Oort zone wraps
+  everything (SM-1i). Rocky worlds scattered through the giant zones were the
+  same mistake.
+- **Uniform band widths starve the belt.** Narrow bands (about 34 px top and
+  bottom) left no clean room for 3-rock groups fanned straight out (48 px
+  deep): Epsilon Indi placed 0 of its belt. Groups lie along the band now,
+  bands are weighted, and a group that can't fit splits into single rocks.
 
 - **Full-circle rings through a giant's moons.** Every ring was a closed
   ellipse, and a moon system (200+ px) is far deeper than a zone band (about

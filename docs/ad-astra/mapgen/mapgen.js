@@ -56,10 +56,13 @@ export function starLayout(stars) {
 const normStars = (spec) => (spec.stars && spec.stars.length ? spec.stars : [{ name: spec.name, type: spec.starType, zones: spec.zones }])
   .map((s, i) => { const role = i === 0 ? 'primary' : (s.role === 'distant' ? 'distant' : 'binary'); const [lo, hi] = ZONES_FOR[role]; return { ...s, role, zones: clamp(s.zones | 0 || (role === 'primary' ? 6 : role === 'binary' ? 4 : 3), lo, hi) }; });
 
-export function zoneBounds(n, L = WORLD) { // SM-1a: b[0]=0 (star) .. b[n]=outer edge
-  const b = [0];
-  for (let k = 1; k <= n; k++) b.push(L.inner + ((L.outer - L.inner) * (k - 1)) / Math.max(1, n - 1));
-  return b;
+export function zoneBounds(n, L = WORLD, widths = null) { // SM-1a: b[0]=0 (star) .. b[n]=outer edge
+  // `widths` (one per zone, SM-1h) sets each band's share; the star's zone is fixed
+  const w = Array.from({ length: n }, (_, k) => (widths && widths[k] > 0 ? widths[k] : 1));
+  const tot = w.slice(1).reduce((a, c) => a + c, 0) || 1;
+  const b = [0, L.inner]; let acc = 0;
+  for (let k = 1; k < n; k++) { acc += w[k]; b.push(L.inner + ((L.outer - L.inner) * acc) / tot); }
+  return b.slice(0, n + 1);
 }
 const P = (L, a, r) => ({ x: round1(L.cx + Math.cos(deg(a)) * r * L.kx), y: round1(L.cy + Math.sin(deg(a)) * r * L.ky) });
 export function radiusOf(x, y, L = WORLD) { return Math.hypot((x - L.cx) / L.kx, (y - L.cy) / L.ky); }
@@ -79,19 +82,48 @@ const hash = (str) => { let h = 2166136261; for (const c of String(str)) { h ^= 
 // the Sol palette sampled inner to outer. Takes a zone count (one star) or the
 // star list, so a saved system can keep just its stars and redraw its bands.
 // `restart` names each further star's innermost zone: its nesting starts over.
-export function zoneLayer(starsOrN) {
+// SM-1i: `bulges` [{ star, zone, x, y, r }] are the giants' moon systems: a
+// giant's zone (and every zone outside it) takes in its disk, the Oort zone
+// with a margin, so the outlines stay nested and the Oort zone wraps them.
+const OORT_MARGIN = 26;
+export function zoneLayer(starsOrN, bulges = []) {
   const stars = typeof starsOrN === 'number' ? [{ zones: starsOrN, role: 'primary' }] : normStars({ stars: starsOrN });
   const Ls = starLayout(stars);
   const out = { order: [], colors: {}, polys: {}, bounds: [], restart: [] };
   stars.forEach((s, i) => {
-    const N = s.zones; const b = zoneBounds(N, Ls[i]); out.bounds.push(b);
+    const N = s.zones; const b = zoneBounds(N, Ls[i], s.widths); out.bounds.push(b);
     for (let k = 0; k < N; k++) {
       const z = i === 0 ? `Z${k + 1}` : `S${i + 1}-Z${k + 1}`;
       out.order.push(z); if (i > 0 && k === 0) out.restart.push(z);
       out.colors[z] = SOL_ZONE_PALETTE[Math.round((k * 8) / Math.max(1, N - 1))];
-      out.polys[z] = [Array.from({ length: 48 }, (_, j) => P(Ls[i], (j * 360) / 48, b[k + 1]))];
+      let pts = Array.from({ length: 144 }, (_, j) => P(Ls[i], (j * 360) / 144, b[k + 1]));
+      for (const g of bulges) if ((g.star | 0) === i && g.zone <= k) pts = unionDisk(pts, { x: g.x, y: g.y, r: g.r + (k === N - 1 && g.zone < N - 1 ? OORT_MARGIN : 0) }, { x: Ls[i].cx, y: Ls[i].cy });
+      out.polys[z] = [pts];
     }
   });
+  return out;
+}
+
+// the union of a closed outline round a star and a disk, as one outline: the
+// outline's points inside the disk give way to the disk's far arc (SM-1i)
+function unionDisk(pts, d, ctr) {
+  const n = pts.length; const inD = (p) => Math.hypot(p.x - d.x, p.y - d.y) < d.r;
+  const inside = pts.map(inD);
+  const s0 = inside.indexOf(false); if (s0 < 0 || !inside.some(Boolean)) return pts;
+  const cross = (a, b) => { let lo = 0, hi = 1; for (let t = 0; t < 22; t++) { const m = (lo + hi) / 2; if (inD({ x: a.x + (b.x - a.x) * m, y: a.y + (b.y - a.y) * m })) hi = m; else lo = m; } return { x: a.x + (b.x - a.x) * hi, y: a.y + (b.y - a.y) * hi }; };
+  const out = [];
+  for (let c = 0; c < n;) {
+    const i = (s0 + c) % n;
+    if (!inside[i]) { out.push(pts[i]); c++; continue; }
+    let c2 = c; while (c2 < n && inside[(s0 + c2) % n]) c2++;
+    const e1 = cross(pts[(s0 + c - 1 + n) % n], pts[i]), e2 = cross(pts[(s0 + c2) % n], pts[(s0 + c2 - 1) % n]);
+    const a1 = Math.atan2(e1.y - d.y, e1.x - d.x), a2 = Math.atan2(e2.y - d.y, e2.x - d.x);
+    const ccw = (((a2 - a1) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI), cw = ccw - 2 * Math.PI;
+    const far = (sw) => { const am = a1 + sw / 2; return Math.hypot(d.x + d.r * Math.cos(am) - ctr.x, d.y + d.r * Math.sin(am) - ctr.y); };
+    const sw = far(ccw) >= far(cw) ? ccw : cw; const steps = Math.max(2, Math.ceil(Math.abs(sw) / 0.1));
+    for (let k = 0; k <= steps; k++) out.push({ x: round1(d.x + d.r * Math.cos(a1 + (sw * k) / steps)), y: round1(d.y + d.r * Math.sin(a1 + (sw * k) / steps)) });
+    c = c2;
+  }
   return out;
 }
 
@@ -103,7 +135,7 @@ const giantReach = (it) => ((it.moons || []).some((m) => (m.size | 0 || 6) <= 2)
 export function buildMap(spec) {
   const stars = normStars(spec);
   const Ls = starLayout(stars);
-  const S = stars.map((s, i) => { const b = zoneBounds(s.zones, Ls[i]); return { ...s, i, L: Ls[i], N: s.zones, b, mid: (k) => (k === 0 ? b[1] * 0.62 : (b[k] + b[k + 1]) / 2) }; });
+  const S = stars.map((s, i) => { const b = zoneBounds(s.zones, Ls[i], s.widths); return { ...s, i, L: Ls[i], N: s.zones, b, mid: (k) => (k === 0 ? b[1] * 0.62 : (b[k] + b[k + 1]) / 2) }; });
   const where = (x, y) => { for (const st of S) { const r = radiusOf(x, y, st.L); if (r < st.b[st.N]) { for (let k = 0; k < st.N; k++) if (r < st.b[k + 1]) return { star: st.i, zone: k }; } } return { star: -1, zone: -1 }; };
   const nodes = []; const edges = []; const sites = []; const bodies = [];
   const byId = {};
@@ -204,7 +236,7 @@ export function buildMap(spec) {
   // SM-5j: where a body's sites will sit, exactly as the construction puts them
   const sitesAt = (it, a) => {
     const st = it.st, k = it.zone, L = st.L; const D = P(L, a, st.mid(k)); const outAng = outAngOf(L, a);
-    if (it.kind === 'cluster') { const c = clusterLag(L, a, it.side, D); return it.rocks.map((_, j) => fanAt(c, j, it.rocks.length, it.side > 0 ? outAng : outAng + 180, 22, 100)); }
+    if (it.kind === 'cluster') { const c = clusterLag(L, a, it.side, D); return rockSpots(c, it.side > 0 ? outAng : outAng + 180, it.rocks.length); }
     if (it.kind === 'comet') return [cometGeom(it, L, a, D, k, st.N).site];
     if (it.kind === 'giant') return [];
     const g = bodyGeom(it, L, a, D); const n = it.kind === 'planet' ? clamp(it.sites | 0 || 1, 1, 3) : 1;
@@ -219,14 +251,20 @@ export function buildMap(spec) {
     let d = { x: sideOf(it) * 0.5, y: -0.866 };
     if (k === N - 1) { const o = deg(outAngOf(L, a)); const v = { x: Math.cos(o) + sideOf(it) * 0.25, y: Math.sin(o) - 0.6 }; const l = Math.hypot(v.x, v.y) || 1; d = { x: v.x / l, y: v.y / l }; }
     return { d, esc, lag1: along(D, d, n1), lag2: along(D, d, n1 + 18), site: along(D, d, n1 + 38) }; };
-  const clusterLag = (L, a, side, D) => along(D, wellDir(L, a, 0), side * 2 * STEP);
+  const clusterLag = (L, a, side, D) => along(D, wellDir(L, a, 0), side * 22);
+  // SM-5f: an asteroid group lies ALONG its band, not across it: two rocks
+  // either side of the Lagrange point along the ring, the third a little
+  // further out, so a group fits a band about 50 px deep (fanned straight out
+  // it needed 60, and the top and bottom of most boards are shallower)
+  const rockSpots = (c, around, n) => { const o = deg(around), t = o + Math.PI / 2; const at2 = (r, s2) => ({ x: round1(c.x + Math.cos(o) * r + Math.cos(t) * s2), y: round1(c.y + Math.sin(o) * r + Math.sin(t) * s2) });
+    return n === 1 ? [at2(14, 0)] : n === 2 ? [at2(8, -14), at2(8, 14)] : [at2(-2, -26), at2(14, 0), at2(-2, 26)]; };
   const footprint = (it, a) => {
     const st = it.st, k = it.zone, w = wOf(st, k), L = st.L;
     if (it.kind === 'giant') { const g = giantPlan(it, a); return { x: g.C.x, y: g.C.y, r: g.reach }; } // SM-7c
     // footprint = the farthest site from the centre, plus half a gap (SM-5e)
     const D = P(L, a, st.mid(k));
     const seg = (p, q, pad) => ({ x: (p.x + q.x) / 2, y: (p.y + q.y) / 2, r: Math.hypot(q.x - p.x, q.y - p.y) / 2 + pad });
-    if (it.kind === 'cluster') { const c = clusterLag(L, a, it.side, D); return [{ x: c.x, y: c.y, r: 22 + HALF_GAP }, seg(D, c, 6)]; }
+    if (it.kind === 'cluster') { const c = clusterLag(L, a, it.side, D); const far = Math.max(14, ...rockSpots(c, 0, it.rocks.length).map((p) => Math.hypot(p.x - c.x, p.y - c.y))); return [{ x: c.x, y: c.y, r: far + HALF_GAP }, seg(D, c, 6)]; }
     if (it.kind === 'comet') { const g = cometGeom(it, L, a, D, k, st.N); return [seg(g.lag1, g.site, HALF_GAP), seg(D, g.lag1, 6)]; }
     const g = bodyGeom(it, L, a, D);
     return [{ x: g.centre.x, y: g.centre.y, r: (it.kind === 'planet' ? 26 : 12) + HALF_GAP }, seg(D, g.lag, 6)];
@@ -410,7 +448,13 @@ export function buildMap(spec) {
     }
     // SM-5f: an asteroid group with no clean place is left off (a crowded board
     // holds fewer); anything else takes the best place it found
-    if (it.kind === 'cluster' && best.bad > 2) { it.skip = true; return; }
+    if (it.kind === 'cluster' && best.bad > 2) {
+      it.skip = true;
+      // a group with no clean place splits into single rocks, which fit
+      // where a group cannot; any that still don't fit are left off (SM-5f)
+      if (it.rocks.length > 1 && !it.trojanOf) it.rocks.forEach((r, j) => { const one = { ...it, name: `${it.name}/${j}`, rocks: [r], skip: false, fixed: false, angle: null }; items.push(one); placeOne(one); });
+      return;
+    }
     Object.assign(it, best.v); it.angle = best.a; commit(it, best.a, best.f);
   };
   for (const it of order) {
@@ -524,7 +568,8 @@ export function buildMap(spec) {
   const rockGroup = (fromId, lagPos, around, rocks, bodyKind, extra, dist = 22, spread = 100, key = null) => {
     const lag = add('lagrange', lagPos, { purpose: 'orbit', body: extra.belt || extra.moonOf, ...(extra.moonOf ? { moonOf: extra.moonOf } : {}) });
     route(fromId, lag, [{ kind: 'burn', t: 0.5, extra: { purpose: 'escape', body: extra.belt || rocks[0].name, ...(extra.moonOf ? { moonOf: extra.moonOf } : {}) } }], 0.08, 16, key);
-    rocks.forEach((r, j) => link(lag, addSite(fanPos(byId[lag], j, rocks.length, around, dist, spread), { ...extra, body: r.name, bodyKind, size: r.size, region: 0 })));
+    const spots = rockSpots(byId[lag], around, rocks.length);
+    rocks.forEach((r, j) => link(lag, addSite(spots[j], { ...extra, body: r.name, bodyKind, size: r.size, region: 0 })));
     return lag;
   };
   let cometNo = 0;
@@ -553,6 +598,7 @@ export function buildMap(spec) {
     }
     const size = clamp(it.size | 0 || 4, 1, 11);
     if (it.kind === 'giant') {
+      const nodes0 = nodes.length; // SM-1i: everything built here is in the giant's zone
       const g = it.plan; const C = g.C; const { dep: dep0, D0, D2 } = it.piv;
       const pol = (ang, r) => ({ x: round1(C.x + Math.cos(deg(ang)) * r), y: round1(C.y + Math.sin(deg(ang)) * r) });
       // SM-7a: the slingshot point, on the transfer layer: in from the ring and
@@ -585,6 +631,7 @@ export function buildMap(spec) {
         route(hub, mlag, stops, 0, 14, `moon:${m.name}`);
         br.sites.forEach((p, j) => { const sid = addSite(p, { body: m.name, bodyKind: 'moon', size: msize, region: j, ...tag, ocean: !!m.ocean, home: st.i }); landTo(mlag, sid, landingOf(msize), j === 0 && msize >= 8, false); });
       });
+      for (let q = nodes0; q < nodes.length; q++) { nodes[q].star = st.i; nodes[q].zone = k; }
       continue;
     }
     // planets, dwarfs, lone asteroids: pivot -> escape burns -> orbit -> landing -> sites
@@ -599,8 +646,10 @@ export function buildMap(spec) {
     const ss = placeSites(it.name, it.kind, centre, count, around, it.kind === 'planet' ? 26 : 12, size, { cls: it.cls || null, home: st.i }, 64);
     ss.forEach((s, j) => landTo(lag, s.sid, landing, false, !!it.atmosphere && j === 0)); // SM-6c aerobrake on one landing
   }
-  const zones = zoneLayer(stars);
-  const map = { spec, stars: S.map((st) => ({ id: starNodes[st.i], name: st.name, type: st.type || 'yellow', role: st.role, zones: st.N, x: st.L.cx, y: st.L.cy })), nodes, edges, sites, bodies, zones, routes };
+  // SM-1i: each giant's zone bulges round its moon system; the Oort zone wraps them
+  const bulges = giantsList.map((it) => ({ star: it.st.i, zone: it.zone, x: it.plan.C.x, y: it.plan.C.y, r: round1(it.plan.reach + 4) }));
+  const zones = zoneLayer(stars, bulges);
+  const map = { bulges, spec, stars: S.map((st) => ({ id: starNodes[st.i], name: st.name, type: st.type || 'yellow', role: st.role, zones: st.N, ...(st.widths ? { widths: st.widths } : {}), x: st.L.cx, y: st.L.cy })), nodes, edges, sites, bodies, zones, routes };
   map.report = validateMap(map);
   return map;
 }

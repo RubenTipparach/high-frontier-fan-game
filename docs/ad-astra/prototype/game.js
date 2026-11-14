@@ -245,7 +245,7 @@ function migrateSystems() {
   for (const [starId, sys] of Object.entries(S.systems || {})) {
     if (sys.layout === SYSTEM_LAYOUT) continue;
     const fresh = genSystem(starId, sys.sites);
-    Object.assign(sys, { nodes: fresh.nodes, edges: fresh.edges, sites: fresh.sites, display: fresh.display, stars: fresh.stars, zones: fresh.zones, layout: SYSTEM_LAYOUT });
+    Object.assign(sys, { nodes: fresh.nodes, edges: fresh.edges, sites: fresh.sites, display: fresh.display, stars: fresh.stars, zones: fresh.zones, bulges: fresh.bulges, layout: SYSTEM_LAYOUT });
     if (S.ship.orbit === starId && !sys.nodes.some((n) => n.id === S.ship.sysNode)) S.ship.sysNode = firstEdge(sys);
     delete _sysData[starId]; delete _adjCache[starId];
   }
@@ -1140,7 +1140,7 @@ function rendererFor(key) {
   if (key !== 'stars' && key !== 'sol' && sysOf(key)) { // a system board: tint its helio zones as Sol's are (SM-1c)
     Object.assign(renderer.options, { visualizeZones: true, zoneFill: true, zoneOpacity: 0.14 });
     const sy = sysOf(key);
-    const z = zoneLayer(sy.stars ? sy.stars.map((x) => ({ zones: x.zones, role: x.role })) : (sy.zones || 6));
+    const z = zoneLayer(sy.stars ? sy.stars.map((x) => ({ zones: x.zones, role: x.role, widths: x.widths, cx: x.x, cy: x.y })) : (sy.zones || 6), sy.bulges || []); // SM-1i: giants' zones bulge
     renderer.setCanonicalZones({ polys: z.polys, colors: z.colors, order: z.order, restart: z.restart });
   }
   try { renderer.setAmbientRocketCount(0); } catch (e) { /* optional */ }
