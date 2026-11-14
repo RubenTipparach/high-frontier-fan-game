@@ -41,14 +41,14 @@ const DECKS = {
   radiators: { ...radiators, approved: new Set(['*']) },
   bernals: { ...bernals, approved: new Set([]) },   // mock-up: awaiting the user's sign-off
   reactors: { ...reactors, approved: new Set(['*']) },
-  freighters: { ...freighters, approved: new Set([]) },   // mock-up: awaiting the user's sign-off
-  gwthrusters: { ...gwthrusters, approved: new Set([]) },   // mock-up: awaiting the user's sign-off
+  freighters: { ...freighters, approved: new Set([]), frontBackdrop: true },   // mock-up: awaiting the user's sign-off
+  gwthrusters: { ...gwthrusters, approved: new Set([]), frontBackdrop: true },   // mock-up: awaiting the user's sign-off
   crew: { ...crew, approved: new Set([]) },   // mock-up: awaiting the user's sign-off
 };
 
 const manifest = {};
 let count = 0;
-for (const [deck, { ART, RIG = {}, approved }] of Object.entries(DECKS)) {
+for (const [deck, { ART, RIG = {}, approved, frontBackdrop = false }] of Object.entries(DECKS)) {
   mkdirSync(join(ROOT, 'assets', 'cards', deck), { recursive: true });
   for (const [key, draw] of Object.entries(ART)) {
     const [card, face] = key.split(':');
@@ -58,7 +58,9 @@ for (const [deck, { ART, RIG = {}, approved }] of Object.entries(DECKS)) {
     // White (front) faces have no space backdrop: the card's own cream face
     // shows through and only the machine is drawn (user 2026-11-13). Strip
     // the backdrop rect and the starfield; everything after them stays.
-    if (face === 'primary') out = out.replace(BACKDROP, '').replace(STAR, '');
+    // M1 decks (freighters, GW/TW) print their front on a black face, so they
+    // keep the space backdrop there (frontBackdrop).
+    if (face === 'primary' && !frontBackdrop) out = out.replace(BACKDROP, '').replace(STAR, '');
     writeFileSync(join(ROOT, rel), out);
     (manifest[card] ||= {})[face] = { src: rel, approved: approved.has('*') || approved.has(key) };
     count++;

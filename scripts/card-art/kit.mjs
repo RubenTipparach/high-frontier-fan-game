@@ -297,3 +297,51 @@ export function sputter(x, y, color, seed) {
   }
   return out;
 }
+
+// ---- painterly planets -----------------------------------------------------
+// A planet with real surface texture: SVG's own noise (feTurbulence) paints
+// continents / clouds / maria inside the disc, then a day-night shading
+// overlay and an atmosphere limb make it read as a lit sphere - close to the
+// Blender planets (user 2026-11-14: "if only we can use that same quality in
+// svg"). Returns { defs, body }; `id` must be unique within the SVG.
+//   kind: 'earth' | 'ocean' | 'mars' | 'moon' | 'ice'
+//   light: [dx, dy] direction the sunlight comes FROM (unit-ish), default upper left.
+export function planetPaint(id, cx, cy, r, { kind = 'earth', seed = 3, light = [-0.6, -0.7], scale = 1, atmo = true } = {}) {
+  const P = {
+    earth: { sea: ['#1e5aa8', '#0b2a5c'], land: ['#2f6b3a', '#8a7a4a'], landCut: 0.52, cloud: 0.5, atmo: '#7dd3fc' },
+    ocean: { sea: ['#0e7490', '#082f49'], land: ['#a8a29e', '#e7e5e4'], landCut: 0.66, cloud: 0.53, atmo: '#a5f3fc' },
+    mars: { sea: ['#c2410c', '#7c2d12'], land: ['#9a3412', '#fdba74'], landCut: 0.45, cloud: 0.8, atmo: '#fdba74' },
+    moon: { sea: ['#a8a29e', '#57534e'], land: ['#57534e', '#d6d3d1'], landCut: 0.5, cloud: 2, atmo: null },
+    ice: { sea: ['#e0f2fe', '#7dd3fc'], land: ['#bae6fd', '#ffffff'], landCut: 0.5, cloud: 0.7, atmo: '#e0f2fe' },
+  }[kind];
+  const f0 = 1 / (r * scale);             // texture scale tracks the planet size: ~3 continents across
+  const lx = 50 + light[0] * 32, ly = 50 + light[1] * 32;
+  const defs = `
+    <clipPath id="${id}c"><circle cx="${cx}" cy="${cy}" r="${r}"/></clipPath>
+    <radialGradient id="${id}s" cx="${lx}%" cy="${ly}%" r="75%"><stop offset="0" stop-color="${P.sea[0]}"/><stop offset="1" stop-color="${P.sea[1]}"/></radialGradient>
+    <filter id="${id}l" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="${+(f0 * 1.5).toFixed(5)}" numOctaves="7" seed="${seed}"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  14 0 0 0 ${f(-14 * P.landCut)}"/>
+      <feComposite in="SourceGraphic" operator="in"/>
+    </filter>
+    <filter id="${id}k" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="${+(f0 * 2.2).toFixed(5)} ${+(f0 * 3.6).toFixed(5)}" numOctaves="6" seed="${seed + 7}"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  5 0 0 0 ${f(-5 * P.cloud)}"/>
+      <feGaussianBlur stdDeviation="${f(Math.min(1.2, r / 200 + 0.2))}"/>
+    </filter>
+    <linearGradient id="${id}lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${P.land[0]}"/><stop offset="1" stop-color="${P.land[1]}"/></linearGradient>
+    <radialGradient id="${id}n" cx="${lx}%" cy="${ly}%" r="95%"><stop offset="0.35" stop-color="#000" stop-opacity="0"/><stop offset="0.72" stop-color="#020617" stop-opacity="0.55"/><stop offset="1" stop-color="#000" stop-opacity="0.92"/></radialGradient>
+    <radialGradient id="${id}h" cx="${lx}%" cy="${ly}%" r="45%"><stop offset="0" stop-color="#fff" stop-opacity="0.35"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>
+    ${P.atmo ? `<radialGradient id="${id}a" cx="50%" cy="50%" r="50%"><stop offset="${f(r / (r + r * 0.07))}" stop-color="${P.atmo}" stop-opacity="0.9"/><stop offset="1" stop-color="${P.atmo}" stop-opacity="0"/></radialGradient>` : ''}`;
+  const box = `x="${f(cx - r)}" y="${f(cy - r)}" width="${f(r * 2)}" height="${f(r * 2)}"`;
+  const body = `${P.atmo && atmo ? `<circle cx="${cx}" cy="${cy}" r="${f(r * 1.07)}" fill="url(#${id}a)"/>` : ''}
+    <g clip-path="url(#${id}c)">
+      <circle cx="${cx}" cy="${cy}" r="${r}" fill="url(#${id}s)"/>
+      <rect ${box} fill="url(#${id}lg)" filter="url(#${id}l)"/>
+      ${P.cloud < 1.5 ? `<rect ${box} fill="#fff" filter="url(#${id}k)" opacity="0.85"/>` : ''}
+      <circle cx="${cx}" cy="${cy}" r="${r}" fill="url(#${id}h)"/>
+      <circle cx="${cx}" cy="${cy}" r="${r}" fill="url(#${id}n)"/>
+    </g>
+    ${P.atmo && atmo ? `<circle cx="${cx}" cy="${cy}" r="${f(r * 1.004)}" fill="none" stroke="${P.atmo}" stroke-width="${f(Math.max(1, r * 0.012))}" stroke-opacity="0.55"/>` : ''}`;
+  return { defs, body };
+}

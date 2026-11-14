@@ -24,6 +24,8 @@ function svg(defs, body) {
   ${lin('org', [[0, '#9a3412'], [0.4, '#fb923c'], [1, '#9a3412']], 0, 0, 1, 0)}
   ${lin('blk', [[0, '#111827'], [0.4, '#4b5563'], [1, '#111827']], 0, 0, 1, 0)}
   ${lin('flm', [[0, '#ffffff'], [0.25, '#fde68a'], [0.7, '#f97316', 0.8], [1, '#f97316', 0]])}
+  ${lin('bel', [[0, '#1f2937'], [0.35, '#94a3b8'], [0.6, '#cbd5e1'], [1, '#1f2937']], 0, 0, 1, 0)}
+  ${lin('gnd', [[0, '#000', 0], [1, '#000', 0.35]])}
   ${defs}
 </defs>
 ${body}
@@ -31,38 +33,48 @@ ${body}
 `;
 }
 // A stage: a cylinder from y0 (top) to y1 at centre x, width w.
-const stage = (x, y0, y1, w, fill = 'url(#wht)') => `<rect x="${f(x - w / 2)}" y="${y0}" width="${w}" height="${f(y1 - y0)}" fill="${fill}" stroke="${INK}" stroke-width="1.2"/>`;
+// Shaded: a specular strip on the lit side, a core shadow on the far side and
+// faint panel joints, so each stage reads as a lit metal cylinder.
+const stage = (x, y0, y1, w, fill = 'url(#wht)') => {
+  const h = y1 - y0, l = x - w / 2;
+  let joints = '';
+  for (let y = y0 + 30; y < y1 - 8; y += 30) joints += `<line x1="${f(l)}" y1="${f(y)}" x2="${f(l + w)}" y2="${f(y)}" stroke="${INK}" stroke-width="0.5" opacity="0.28"/>`;
+  return `<rect x="${f(l)}" y="${y0}" width="${w}" height="${f(h)}" fill="${fill}" stroke="${INK}" stroke-width="1.2"/>`
+    + `<rect x="${f(l + w * 0.22)}" y="${y0 + 1}" width="${f(Math.max(1, w * 0.1))}" height="${f(h - 2)}" fill="#fff" opacity="0.55"/>`
+    + `<rect x="${f(l + w * 0.76)}" y="${y0 + 1}" width="${f(w * 0.2)}" height="${f(h - 2)}" fill="#0f172a" opacity="0.14"/>${joints}`;
+};
 const band = (x, y, w, h, c) => `<rect x="${f(x - w / 2)}" y="${y}" width="${w}" height="${h}" fill="${c}"/>`;
 // An ogive nose / fairing on top of a stage of width w at y.
 const nose = (x, y, w, h, fill = 'url(#wht)') => `<path d="M${f(x - w / 2)},${y} Q${f(x - w / 2)},${f(y - h * 0.7)} ${x},${f(y - h)} Q${f(x + w / 2)},${f(y - h * 0.7)} ${f(x + w / 2)},${y} Z" fill="${fill}" stroke="${INK}" stroke-width="1.2"/>`;
 // A payload fairing wider than the stage below (hammerhead).
 const fairing = (x, y, w, h, wBelow, fill = 'url(#wht)') => `<path d="M${f(x - wBelow / 2)},${y} L${f(x - w / 2)},${f(y - 8)} L${f(x - w / 2)},${f(y - h * 0.55)} Q${f(x - w / 2)},${f(y - h)} ${x},${f(y - h)} Q${f(x + w / 2)},${f(y - h)} ${f(x + w / 2)},${f(y - h * 0.55)} L${f(x + w / 2)},${f(y - 8)} L${f(x + wBelow / 2)},${y} Z" fill="${fill}" stroke="${INK}" stroke-width="1.2"/>`;
 const booster = (x, y0, y1, w, fill = 'url(#wht)') => `${stage(x, y0, y1, w, fill)}${nose(x, y0, w, w * 1.3, fill)}`;
-const bells = (x, y, n, w) => [...Array(n)].map((_, i) => { const bx = x - ((n - 1) * w) / 2 + i * w; return `<path d="M${f(bx - w * 0.3)},${y} L${f(bx - w * 0.45)},${y + 8} L${f(bx + w * 0.45)},${y + 8} L${f(bx + w * 0.3)},${y} Z" fill="#475569" stroke="${INK}" stroke-width="0.8"/>`; }).join('');
+const bells = (x, y, n, w) => [...Array(n)].map((_, i) => { const bx = x - ((n - 1) * w) / 2 + i * w; return `<path d="M${f(bx - w * 0.3)},${y} Q${f(bx - w * 0.34)},${y + 5} ${f(bx - w * 0.47)},${y + 9} L${f(bx + w * 0.47)},${y + 9} Q${f(bx + w * 0.34)},${y + 5} ${f(bx + w * 0.3)},${y} Z" fill="url(#bel)" stroke="${INK}" stroke-width="0.8"/><ellipse cx="${f(bx)}" cy="${y + 9}" rx="${f(w * 0.46)}" ry="1.4" fill="#0b0f17"/>`; }).join('');
 // A launch escape tower + capsule on top at y (capsule base).
 const capsuleLES = (x, y, w) => `<path d="M${f(x - w / 2)},${y} L${f(x - w * 0.22)},${f(y - w * 0.55)} L${f(x + w * 0.22)},${f(y - w * 0.55)} L${f(x + w / 2)},${y} Z" fill="url(#wht)" stroke="${INK}" stroke-width="1.2"/><line x1="${x}" y1="${f(y - w * 0.55)}" x2="${x}" y2="${f(y - w * 1.5)}" stroke="${INK}" stroke-width="2.2"/><path d="M${f(x - 3)},${f(y - w * 1.1)} L${f(x + 3)},${f(y - w * 1.1)} L${x},${f(y - w * 1.6)} Z" fill="#dc2626" stroke="${INK}" stroke-width="0.8"/>`;
 // Liftoff: a flame under the engines and a billowing ground cloud.
 function liftoff(x, y, w, seed, len = 60) {
   const rnd = seeded(seed);
   let cloud = '';
-  for (let i = 0; i < 14; i++) cloud += `<circle cx="${f(x + (rnd() - 0.5) * 170)}" cy="${f(G - 4 - rnd() * 26)}" r="${f(10 + rnd() * 16)}" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1"/>`;
-  return `<path d="M${f(x - w / 2)},${y} Q${x},${y + len * 1.2} ${f(x + w / 2)},${y} Z" fill="url(#flm)" filter="url(#glow)"/>${cloud}`;
+  const puffs = [...Array(16)].map(() => [x + (rnd() - 0.5) * 180, G - 4 - rnd() * 30, 10 + rnd() * 17]).sort((a, b) => a[1] - b[1]);
+  for (const [cx, cy, r] of puffs) cloud += `<circle cx="${f(cx + 2)}" cy="${f(cy + 3)}" r="${f(r)}" fill="#cbd5e1"/><circle cx="${f(cx)}" cy="${f(cy)}" r="${f(r * 0.94)}" fill="#f8fafc"/><circle cx="${f(cx - r * 0.3)}" cy="${f(cy - r * 0.3)}" r="${f(r * 0.4)}" fill="#fff"/>`;
+  return `<path d="M${f(x - w / 2)},${y} Q${x},${y + len * 1.3} ${f(x + w / 2)},${y} Z" fill="url(#flm)" filter="url(#glow)"/><path d="M${f(x - w / 4)},${y} Q${x},${y + len * 0.6} ${f(x + w / 4)},${y} Z" fill="#fff"/>${cloud}`;
 }
 // The pad: a ground strip, a flame trench and a launch tower beside the rocket.
 function pad(x, color, { tower = true, th = 230, tx = -34, ground = '#a8a29e' } = {}) {
   const towerX = x + tx;
   let t = '';
   if (tower) {
-    t = `<rect x="${towerX - 9}" y="${G - th}" width="18" height="${th}" fill="none" stroke="#475569" stroke-width="2"/>`;
+    t = `<rect x="${towerX - 6}" y="${G - th - 4}" width="18" height="${th + 4}" fill="none" stroke="#94a3b8" stroke-width="1"/><rect x="${towerX - 9}" y="${G - th}" width="18" height="${th}" fill="none" stroke="#475569" stroke-width="2"/><rect x="${towerX - 11}" y="${G - th - 6}" width="22" height="6" fill="#475569" stroke="${INK}" stroke-width="0.8"/><circle cx="${towerX}" cy="${G - th - 9}" r="2.4" fill="#ef4444" filter="url(#glow)"/>`;
     for (let y = G - th; y < G; y += 14) t += `<path d="M${towerX - 9},${y} L${towerX + 9},${y + 14} M${towerX + 9},${y} L${towerX - 9},${y + 14}" stroke="#64748b" stroke-width="1"/>`;
     t += [0.3, 0.55, 0.8].map((k) => `<line x1="${towerX + 9}" y1="${f(G - th * k)}" x2="${f(x - 6)}" y2="${f(G - th * k)}" stroke="#475569" stroke-width="2.4"/>`).join('');
   }
-  return `<rect x="0" y="${G}" width="${W}" height="${H - G}" fill="${ground}"/><rect x="0" y="${G}" width="${W}" height="3" fill="${color}"/>
-    <rect x="${x - 40}" y="${G - 6}" width="80" height="8" fill="#57534e" stroke="${INK}"/>${t}`;
+  return `<rect x="0" y="${G}" width="${W}" height="${H - G}" fill="${ground}"/><rect x="0" y="${G}" width="${W}" height="${H - G}" fill="url(#gnd)"/><rect x="0" y="${G}" width="${W}" height="3" fill="${color}"/>
+    <path d="M${x - 46},${G + 2} L${x - 40},${G - 8} L${x + 40},${G - 8} L${x + 46},${G + 2} Z" fill="#57534e" stroke="${INK}"/><rect x="${x - 14}" y="${G - 8}" width="28" height="4" fill="#292524"/>${t}`;
 }
 // Small suited crew figures at the foot of the scene, in the faction colour.
 function crew(x, color, n = 3) {
-  return [...Array(n)].map((_, i) => { const cx = x + i * 13; return `<circle cx="${cx}" cy="${G - 20}" r="4.2" fill="#f8fafc" stroke="${INK}" stroke-width="1"/><rect x="${cx - 2.6}" y="${G - 22}" width="5.2" height="2.6" rx="1" fill="#0f172a"/><path d="M${cx - 5},${G - 2} L${cx - 4.5},${G - 15} Q${cx},${G - 18} ${cx + 4.5},${G - 15} L${cx + 5},${G - 2} Z" fill="${color}" stroke="${INK}" stroke-width="1"/>`; }).join('');
+  return [...Array(n)].map((_, i) => { const cx = x + i * 13; return `<rect x="${cx + 2}" y="${G - 15}" width="4.5" height="8" rx="1" fill="#e5e7eb" stroke="${INK}" stroke-width="0.7"/><path d="M${cx - 5},${G - 2} L${cx - 4.5},${G - 15} Q${cx},${G - 18} ${cx + 4.5},${G - 15} L${cx + 5},${G - 2} Z" fill="${color}" stroke="${INK}" stroke-width="1"/><line x1="${cx}" y1="${G - 7}" x2="${cx}" y2="${G - 2}" stroke="${INK}" stroke-width="0.8"/><rect x="${cx - 4.5}" y="${G - 13}" width="9" height="1.6" fill="#f8fafc" opacity="0.7"/><circle cx="${cx}" cy="${G - 20}" r="4.4" fill="#f8fafc" stroke="${INK}" stroke-width="1"/><rect x="${cx - 2.8}" y="${G - 22.2}" width="5.6" height="3" rx="1.3" fill="#0f172a"/><rect x="${cx - 2}" y="${G - 21.6}" width="1.6" height="1" fill="#93c5fd"/>`; }).join('');
 }
 const C = Object.fromEntries([...CREW, ...PROMO_CREW].map((c) => [c.id, c.color]));
 
@@ -131,15 +143,24 @@ ART['crew_nasa_isro:secondary'] = () => svg('', `${pad(222, C.crew_nasa_isro, { 
   ${bells(222, 392, 2, 9)}${crew(36, C.crew_nasa_isro)}
   <path d="M0,${G + 12} Q80,${G + 4} 150,${G + 14} T300,${G + 10} L300,${H} L0,${H} Z" fill="#0e7490" opacity="0.7"/>`);
 
-// Anonymous P2P - Skylon: the single-stage spaceplane, white with its two
-// wingtip engine nacelles and canards, climbing off a long runway.
-ART['crew_anonp2p_esa:primary'] = () => svg('', `<rect x="0" y="${G}" width="${W}" height="${H - G}" fill="#78716c"/>${[0, 1, 2, 3, 4].map((i) => `<rect x="${10 + i * 60}" y="${G + 12}" width="30" height="3" fill="#f8fafc"/>`).join('')}
-  <g transform="translate(206 300) rotate(-28)">
-    <path d="M-90,0 Q-80,-9 -40,-10 L80,-10 Q100,-8 112,0 Q100,8 80,10 L-40,10 Q-80,9 -90,0 Z" fill="url(#wht)" stroke="${INK}" stroke-width="1.4"/>
-    <path d="M-10,8 L30,40 L48,40 L40,8 Z" fill="#e2e8f0" stroke="${INK}" stroke-width="1.2"/>
-    <rect x="18" y="34" width="40" height="10" rx="5" fill="url(#ste)" stroke="${INK}"/><path d="M-30,8 L-10,22 L0,22 L-10,8 Z" fill="#cbd5e1" stroke="${INK}"/>
-    <path d="M70,-8 L84,-24 L92,-24 L84,-8 Z" fill="#cbd5e1" stroke="${INK}"/>
-    <path d="M58,39 Q30,40 -10,46 Q30,50 58,47 Z" fill="url(#flm)" filter="url(#glow)"/>
+// Anonymous P2P - Skylon (Reaction Engines' single-stage spaceplane): a long
+// slim BLACK fuselage with a needle nose, small canards up front, delta wings
+// set well back carrying the two SABRE engine nacelles at their tips (conical
+// intake spike forward, nozzle aft) and a tail fin; climbing, centred on the
+// card, off a long runway.
+ART['crew_anonp2p_esa:primary'] = () => svg(lin('skb', [[0, '#4b5563'], [0.45, '#1f2937'], [1, '#030712']]) + lin('nac', [[0, '#6b7280'], [0.5, '#1f2937'], [1, '#0b0f17']]), `<rect x="0" y="${G}" width="${W}" height="${H - G}" fill="#78716c"/>${[0, 1, 2, 3, 4].map((i) => `<rect x="${10 + i * 60}" y="${G + 12}" width="30" height="3" fill="#f8fafc"/>`).join('')}
+  <g transform="translate(128 272) rotate(-36)">
+    ${[-1, 1].map((s2) => `<path d="M-74,${s2 * 8} L-8,${s2 * 8} L-30,${s2 * 50} L-62,${s2 * 50} Z" fill="url(#skb)" stroke="${INK}" stroke-width="1"/>
+      <path d="M-74,${s2 * 50} L-30,${s2 * 50}" stroke="#9ca3af" stroke-width="0.6"/>
+      <rect x="-70" y="${s2 * 50 - 6}" width="40" height="12" rx="5" fill="url(#nac)" stroke="${INK}"/>
+      <path d="M-30,${s2 * 50 - 5} L-14,${s2 * 50} L-30,${s2 * 50 + 5} Z" fill="#9ca3af" stroke="${INK}" stroke-width="0.8"/>
+      <path d="M-70,${s2 * 50 - 4} L-76,${s2 * 50 - 5} L-76,${s2 * 50 + 5} L-70,${s2 * 50 + 4} Z" fill="#374151" stroke="${INK}" stroke-width="0.6"/>
+      <path d="M-76,${s2 * 50 - 4} Q-110,${s2 * 50} -76,${s2 * 50 + 4} Z" fill="#93c5fd" opacity="0.8" filter="url(#glow)"/>
+      <path d="M54,${s2 * 7} L70,${s2 * 18} L76,${s2 * 18} L68,${s2 * 7} Z" fill="url(#skb)" stroke="${INK}" stroke-width="0.8"/>`).join('')}
+    <path d="M-104,0 Q-100,-8 -80,-9 L60,-9 Q96,-7 128,0 Q96,7 60,9 L-80,9 Q-100,8 -104,0 Z" fill="url(#skb)" stroke="${INK}" stroke-width="1.2"/>
+    <path d="M-60,-7 L40,-7" stroke="#6b7280" stroke-width="1" opacity="0.6"/>
+    <path d="M-100,-2 L-92,-20 L-82,-20 L-84,-4 Z" fill="url(#skb)" stroke="${INK}" stroke-width="0.8"/>
+    <rect x="-20" y="-3" width="26" height="6" rx="1" fill="#e5e7eb" stroke="${INK}" stroke-width="0.5" opacity="0.85"/>
   </g>${crew(30, C.crew_anonp2p_esa)}`);
 // ESA Space Unionists - Ariane 64: a white core with four solid strap-ons and
 // a tall fairing, rising out of the green coast of a tropical spaceport.
@@ -217,7 +238,7 @@ promo('crew_brin', (side) => svg('', `${SEA('#0891b2')}<path d="M0,${G} L120,${G
 // night, lit up like a floating casino for the Power Brokers.
 promo('crew_the_sea_peoples', (side) => {
   const night = side === 'secondary';
-  return svg('', `${night ? `<rect x="0" y="180" width="${W}" height="${G - 180}" fill="#0f172a" opacity="0.18"/>` : ''}${SEA(night ? '#1e3a5f' : '#0e7490')}
+  return svg('', `${SEA(night ? '#1e3a5f' : '#0e7490')}
   <rect x="150" y="${G - 22}" width="140" height="12" fill="#57534e" stroke="${INK}"/>${[160, 190, 250, 280].map((x) => `<rect x="${x}" y="${G - 10}" width="8" height="18" fill="#57534e" stroke="${INK}"/>`).join('')}
   <rect x="246" y="${G - 140}" width="12" height="118" fill="none" stroke="#475569" stroke-width="2"/>
   ${stage(222, 250, G - 22, 12)}${nose(222, 250, 12, 22)}${band(222, 300, 12, 3, '#b45309')}
@@ -388,6 +409,41 @@ promo('crew_cerulean', (side) => side === 'primary'
   : svg('', `<path d="M0,${G - 30} Q150,${G - 60} 300,${G - 30} L300,${H} L0,${H} Z" fill="#e0f2fe" stroke="${INK}"/>${[[40, G - 20], [200, G - 26], [260, G - 10]].map(([x, y]) => `<path d="M${x},${y} l30,6" stroke="#7dd3fc" stroke-width="1.4"/>`).join('')}
      <circle cx="160" cy="${G - 92}" r="8" fill="#f8fafc" stroke="${INK}"/><rect x="155" y="${G - 96}" width="10" height="5" rx="2" fill="#0f172a"/><path d="M150,${G - 30} L152,${G - 82} L168,${G - 82} L170,${G - 30} Z" fill="#e3e0d4" stroke="${INK}"/>
      <path d="M170,${G - 70} L196,${G - 56} M170,${G - 70} L194,${G - 74} M195,${G - 65} L214,${G - 52}" stroke="#78350f" stroke-width="2.4" fill="none"/>`));
+
+
+// A horizon glow behind each scene, coloured for its place and hour, fading
+// up into the cream so the privilege text above stays clean.
+const SKY = {
+  'crew_un_b612:primary': '#fdba74', 'crew_un_b612:secondary': '#312e81',
+  'crew_roscosmos_taikonauts:primary': '#bfdbfe', 'crew_roscosmos_taikonauts:secondary': '#7dd3fc',
+  'crew_nasa_isro:primary': '#93c5fd', 'crew_nasa_isro:secondary': '#fcd34d',
+  'crew_anonp2p_esa:primary': '#c4b5fd', 'crew_anonp2p_esa:secondary': '#86efac',
+  'crew_shimizu_nasrda:primary': '#1e293b', 'crew_shimizu_nasrda:secondary': '#7dd3fc',
+  'crew_spacex_norse:primary': '#fb923c', 'crew_spacex_norse:secondary': '#1e293b',
+  'crew_brin:primary': '#7dd3fc', 'crew_brin:secondary': '#fca5a5',
+  'crew_the_sea_peoples:primary': '#67e8f9', 'crew_the_sea_peoples:secondary': '#1e1b4b',
+  'crew_the_martian_way:primary': '#0f172a', 'crew_the_martian_way:secondary': '#0f172a',
+  'crew_jaxa:primary': '#93c5fd', 'crew_jaxa:secondary': '#c4b5fd',
+  'crew_space_force:primary': '#cbd5e1', 'crew_space_force:secondary': '#cbd5e1',
+  'crew_aeb:primary': '#fcd34d', 'crew_aeb:secondary': '#fb923c',
+  'crew_explorers_without_borders:primary': '#0f172a', 'crew_explorers_without_borders:secondary': '#0f172a',
+  'crew_baltimore_gun_club:primary': '#fdba74', 'crew_baltimore_gun_club:secondary': '#312e81',
+  'crew_african_union_space_directorate:primary': '#fcd34d', 'crew_african_union_space_directorate:secondary': '#fb923c',
+  'crew_leo_workers_union:primary': '#0f172a', 'crew_leo_workers_union:secondary': '#0f172a',
+  'crew_makers_guild:primary': '#1e293b', 'crew_makers_guild:secondary': '#1e293b',
+  'crew_new_pilgrims:primary': '#fbbf24', 'crew_new_pilgrims:secondary': '#fbbf24',
+  'crew_utopia_inc:primary': '#a7f3d0', 'crew_utopia_inc:secondary': '#a7f3d0',
+  'crew_galahad_group:primary': '#fef08a', 'crew_galahad_group:secondary': '#0f172a',
+  'crew_brotherhood_of_cryptobankers:primary': '#450a0a', 'crew_brotherhood_of_cryptobankers:secondary': '#450a0a',
+  'crew_verisai:primary': '#67e8f9', 'crew_verisai:secondary': '#7dd3fc',
+  'crew_heliocentricity:primary': '#fdba74', 'crew_heliocentricity:secondary': '#0f172a',
+  'crew_cerulean:primary': '#7dd3fc', 'crew_cerulean:secondary': '#bae6fd',
+};
+for (const [key, color] of Object.entries(SKY)) {
+  const draw = ART[key];
+  if (!draw) continue;
+  ART[key] = () => draw().replace('</defs>\n', `<linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${color}" stop-opacity="0"/><stop offset="1" stop-color="${color}" stop-opacity="0.8"/></linearGradient>\n</defs>\n<rect x="0" y="150" width="${W}" height="${G - 150}" fill="url(#sky)"/>`);
+}
 
 for (const card of [...CREW, ...PROMO_CREW]) {
   for (const side of ['primary', 'secondary']) {

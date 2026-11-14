@@ -17,7 +17,9 @@ const Y = 212;   // the engine axis
 function scene(key, seed, defs, body) {
   const side = key.split(':')[1];
   const bg = side === 'primary'
-    ? `<radialGradient id="bg"><stop offset="0" stop-color="#05060c"/></radialGradient>`
+    // M1 front (black) faces keep a space backdrop (user 2026-11-14), unlike
+    // the patent decks' white fronts which sit straight on the cream card.
+    ? `<radialGradient id="bg" cx="50%" cy="45%" r="85%"><stop offset="0%" stop-color="#141a2c"/><stop offset="100%" stop-color="#04050a"/></radialGradient>`
     : `<radialGradient id="bg" cx="50%" cy="44%" r="80%"><stop offset="0%" stop-color="#655ca8"/><stop offset="100%" stop-color="#652d91"/></radialGradient>`;
   return svg(bg + lin('mt', [[0, '#94a3b8'], [0.45, '#e2e8f0'], [1, '#475569']]) + defs,
     `<rect width="300" height="288" fill="url(#bg)"/>${stars(36, seed)}${body}`);
