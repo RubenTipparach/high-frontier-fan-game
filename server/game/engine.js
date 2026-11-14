@@ -3690,6 +3690,10 @@ function effectiveRadHardness(player, slot, state) {
 //   -> { ok, assist, needsRoll, size }
 function maneuverGate(state, slug, thrust, opts = {}) {
   const size = nodeSizeNumber(slug);
+  if (size > 0 && thrust > size && opts.electiveFor) {
+    const elective = electiveLiftoffAssist(state, slug, opts.electiveFor, opts.powersat);
+    if (elective) return elective;
+  }
   if (size <= 0 || thrust > size) return { ok: true, assist: false, needsRoll: false, size };
   if (size === 1 && opts.isFreighter && thrust > 0) return { ok: true, assist: false, needsRoll: false, size };
   // High-Gravity Limit (H5e / H6c): factory-assist cannot carry a maneuver into
@@ -3712,6 +3716,23 @@ function maneuverGate(state, slug, thrust, opts = {}) {
   // Safe Factory-Assist (Powersat rule e): a Powersat holder's factory-assist
   // needs no Hazard Roll, the same waiver a colony pad grants.
   return { ok: true, assist: true, needsRoll: !colony && !opts.powersat, size };
+}
+// Elective factory-assist liftoff (H6c). Factory-assist is a choice, not only a
+// last resort for a ship too weak to leave: "If the Space first moved into with a
+// factory-assist liftoff is a Hazard, ignore the Hazard." A ship whose own thrust
+// already beats the site size may still take the assist for that reason. Taken
+// only when the assist itself is SAFE (a colony, or Powersat), so it never trades
+// one Hazard Roll for another: then the first space's Hazard is ignored at no
+// cost. Needs a Factory the player may use as their own (canUseFactoryNonVictory)
+// and never applies at a lander-burn site (the H5e/H6c high-gravity limit).
+// Liftoff only: callers pass opts.electiveFor (the moving player) for a liftoff
+// gate, never for a landing. Mirror of browse.js#electiveLiftoffAssist.
+function electiveLiftoffAssist(state, slug, player, powersat) {
+  if (siteHasLanderBurn(slug)) return null;
+  const fac = state.factories[slug];
+  if (!fac || !canUseFactoryNonVictory(state, player, fac)) return null;
+  if (!state.colonies[slug] && !powersat) return null;
+  return { ok: true, assist: true, needsRoll: false, size: nodeSizeNumber(slug), elective: true };
 }
 const LOFSTROM_LOOP_BERNAL_ID = 'ber_l3_lofstrom_loop_microgravity';
 // GEO Elevator Bernal / L3 Lofstrom Loop (promoted, anchored anywhere - no
@@ -4248,7 +4269,7 @@ function applyMoveFreighter(state, op, player) {
   const fromSize = nodeSizeNumber(here);
   let liftG = (from == null || fromSize <= 1 || (frNoAssistUnder6 && fromSize < 6))
     ? { ok: true, needsRoll: false }
-    : maneuverGate(state, here, frThrust, { powersat, isFreighter: true, acetylene: frAcetylene, replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) });
+    : maneuverGate(state, here, frThrust, { powersat, isFreighter: true, acetylene: frAcetylene, replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player), electiveFor: player });
   // A promoted Freighter's big cube is a Mobile Factory too (1B6), so it may
   // assist ITSELF off a Site the way a small cube does (1B6b): size 5 or less.
   // Like a parked small cube, it needs no Claim to lift off.
@@ -5595,7 +5616,7 @@ function applyMove(state, op, player) {
   // is a hazard roll unless a colony waives it. No factory => hard block.
   // Liftoff gates the origin (skipped at LEO, siteId null); landing gates
   // the destination.
-  const liftG = from ? maneuverGate(state, from, thrust, { powersat, acetylene, isFreighter: asFreighter, replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) }) : { ok: true, needsRoll: false };
+  const liftG = from ? maneuverGate(state, from, thrust, { powersat, acetylene, isFreighter: asFreighter, replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player), electiveFor: player }) : { ok: true, needsRoll: false };
   if (!liftG.ok) return fail('cannot_liftoff', { thrust, siteSize: liftG.size, site: from, landerBurn: !!liftG.landerBurn });
   // Aerobrake landing: a destination that sits next to an aerobrake corridor
   // (the 🪂 symbol) can be reached by parachute - no thrust-to-land
@@ -6133,6 +6154,10 @@ function applyMove(state, op, player) {
     log += ` Rolled through ${nItems} hazard${nItems === 1 ? '' : 's'}.`;
   }
   if (finaoRefund > 0) log += ` ${finaoRefund} aqua of FINAO came back for ${skippedPaid} hazard${skippedPaid === 1 ? '' : 's'} never reached.`;
+  if (crashIgnoredSlugs.length) {
+    log += ` Factory-assist liftoff from ${originName}${liftG.needsRoll ? '' : ' (no Hazard Roll)'}:`
+      + ` the hazard on the first space out was ignored.`;
+  }
   log += describeHazardRolls(rolls);
   if (decommissioned.length) log += ` Radiation decommissioned ${countedCards(decommissioned)}.`;
   if (degradedRadiators.length) log += ` Radiation degraded ${countedCards(degradedRadiators, 'radiator')} to the light side.`;

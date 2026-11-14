@@ -8259,6 +8259,29 @@ check('a promoted Freighter assists itself on and off a size 2-5 Claim', () => {
   return `${mid} (size ${sizeOf(mid)}): unpromoted refused both ways; promoted lands on a Claim and lifts off with one roll each, no Claim refused`;
 });
 
+// The Antimatter Future asks for a promoted Bernal with an S Dirtside. A Factory
+// on Luna is a Dirtside only by the isostandard exception (Moon Treaty, 2Ba /
+// 1Cb) - which the engine already applied when anchoring - but the Future check
+// dropped every Luna site, so a Bernal over an S Factory at Luna Shackleton, with
+// S as the player's isostandard, could never complete it (reported 2026-11-11).
+check('a Luna isostandard Factory counts as a Dirtside for a Future', () => {
+  const goal = FUTURE_GOALS.fre_fusion_fragment_sail;
+  const run = (iso, m1 = true) => {
+    const st = startedGame({ seats: 1, m1, m2: true });
+    const me = st.players[0];
+    me.bernals = [{ cardId: 'ber_l4_antimatter_factory', figure: 'kalpana', face: 'secondary', promoted: true, anchored: true, siteId: 'lag-qofv5', stack: [], tank: 0, wiring: {}, route: [] }];
+    st.factories['luna-shackleton-polar-rim'] = { ownerId: me.profileId, spectralType: 'S' };
+    me.isostandards = iso;
+    return checkFutureGoal(goal, { state: st, player: me,
+      neighborsOf: (slug) => plannerNeighborSlugs(slug),
+      dirtsideSitesOf: (slug) => [...lineOfSightSites(String(slug), { includeBouncedSites: true })] }).met;
+  };
+  assert(run(['S']) === true, 'an S isostandard did not open the Luna S Factory as a Dirtside');
+  assert(run([]) === false, 'the Moon Treaty let a Luna Factory count with no isostandard');
+  assert(run(['C']) === false, 'a different isostandard opened the Luna S Factory');
+  return 'isostandard S: met; none or another: Moon Treaty holds';
+});
+
 // ----- fuel cargo never reaches a hand -----
 //
 // Reported 2026-09-10: a bare `fuel_2` chip sat in a hand, counted against the
@@ -10400,4 +10423,59 @@ check('a Pad Explosion cannot see a black GW thruster or Freighter', () => {
       'a black-side ordinary patent lost its immunity');
   }
   return 'GW thrusters and Freighters are invisible on either face; white sides still burn';
+});
+
+// H6c elective factory-assist (game 987, room qdapt8, reported 2026-11-14): a
+// rocket lifting off its own Factory at Okyrhoe (size 2) with net thrust above
+// 2 still had to FINAO the skull on the first space out, though the player held
+// Powersat. Factory-assist is a choice, not only a fallback for a weak ship:
+// "If the Space first moved into with a factory-assist liftoff is a Hazard,
+// ignore the Hazard", and with Powersat (or a colony) the assist itself rolls
+// nothing. So a strong ship takes the assist when it is SAFE; without Powersat
+// or a colony nothing changes (it would only trade one roll for another).
+check('a strong rocket takes a safe factory-assist liftoff to skip the first-space hazard', () => {
+  const SITE = 'prospero', SKULL = 'lag-liadb', NEXT = 'lag-3y19p';
+  const fly = ({ powersat = false, factory = true, owner = 'me', thr = strong, debug = false } = {}) => {
+    const st = startedGame({ seats: 2 });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    const other = st.players[1];
+    me.rocket.siteId = SITE;
+    me.rocket.stack = [
+      { id: thr.id, kind: 'patent', face: 'primary' },
+      ...supportsFor(thr),
+      { id: me.faction.cardId, kind: 'crew', face: 'primary' },
+    ];
+    me.rocket.activeThrusterId = thr.id;
+    me.rocket.tank = 12;
+    me.aqua = 60;
+    me.grantedPrivileges = powersat ? ['POWERSAT'] : [];
+    st.factories = factory ? { [SITE]: { ownerId: (owner === 'me' ? me : other).profileId, spectralType: 'D' } } : {};
+    st.colonies = {};
+    st.turnActions = [];
+    const r = applyOperation(st, { kind: 'MOVE', hazardPay: true, debug,
+      segments: [{ from: SITE, to: SKULL, burns: 0, turn: 1 }, { from: SKULL, to: NEXT, burns: 0, turn: 1 }] },
+      { profileId: me.profileId });
+    if (debug) return r;
+    assert(r.ok, `the liftoff was refused: ${r.error}`);
+    const after = r.state.players[0];
+    return { log: r.log, spent: 60 - after.aqua };
+  };
+  // The ship must out-thrust the size-2 site on its own, or this is not the case:
+  // take the first thruster (with its lightest supports) that can leave unassisted.
+  let strong = null;
+  for (const c of PATENTS.filter((p) => p.type === 'thruster')) {
+    if (fly({ factory: false, thr: c, debug: true }).ok) { strong = c; break; }
+  }
+  assert(strong, 'no thruster lifts off a size-2 site on its own');
+  const probe = fly({ factory: false });
+  assert(probe.spent > 0, `with no factory the skull should cost FINAO, spent ${probe.spent} (${probe.log})`);
+  const plain = fly();
+  assert(plain.spent === probe.spent, `without Powersat the move should be unchanged (spent ${plain.spent}, want ${probe.spent}): ${plain.log}`);
+  const ps = fly({ powersat: true });
+  assert(ps.spent === 0, `with Powersat the first-space skull should be ignored, spent ${ps.spent}: ${ps.log}`);
+  assert(/Factory-assist liftoff from Prospero \(no Hazard Roll\)/.test(ps.log), `the log does not say why: ${ps.log}`);
+  const theirs = fly({ powersat: true, owner: 'other' });
+  assert(theirs.spent === probe.spent, `an opponent's Factory should not be borrowed for it, spent ${theirs.spent}: ${theirs.log}`);
+  return `${strong.id}: no factory ${probe.spent} aqua; own factory ${plain.spent}; + Powersat ${ps.spent}; opponent's factory ${theirs.spent}`;
 });
