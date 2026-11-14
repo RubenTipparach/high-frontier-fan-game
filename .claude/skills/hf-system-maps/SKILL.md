@@ -115,6 +115,16 @@ Run `node docs/ad-astra/analyze-sol-map.mjs` to re-measure. The numbers:
    escape burns (inner half / outer half / outermost zone) -> Lagrange -> a
    second Lagrange -> the comet site. Name it "Comet ..." and the renderer's
    comet palette applies. Comets skip the well-depth check.
+   - **Seasons** (`SEASONS` red / yellow / blue; `season` on the spec or
+     dealt round in turn): every node of the comet's route carries `season`
+     and `siteSynodic`, so the real renderer draws the route and the hex in
+     the season's colour (its Sol idiom for seasonal comets). The game's
+     Comet Cycle (AA-D3a) is 2 Generations a season; a comet's route can only
+     be entered in its season (`canSysMove` / `sysPathCost` skip off-season
+     nodes; leaving is always allowed).
+   - **Off the plane**: `COMET_LIFT` [20, 36, 52] px lifts the near orbit,
+     far orbit and comet toward the top of the board, so the route visibly
+     climbs off the ring. 16 / 28 / 38 read as "just further out".
 10. **Placement (SM-5h).** Every body has a footprint: its farthest site from
    its centre plus `HALF_GAP` (13). A giant's is a circle of
    `SHELL.minor + 24 + 13` round it. Bodies with an `angle` keep it; the rest

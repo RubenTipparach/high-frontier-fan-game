@@ -1,6 +1,6 @@
 # High Frontier: Ad Astra - Rulebook
 
-**Draft v0.9 (2026-11-14).** A fan variant of High Frontier 4: All that
+**Draft v0.10 (2026-11-14).** A fan variant of High Frontier 4: All that
 takes the game past the edge of the Sol map. Not affiliated with Sierra Madre
 Games. Original rules; it borrows only the hooks HF4 already prints (TW
 thrusters, the three Ad Astra exits, the Ad Astra and Sunlens Futures).
@@ -133,7 +133,7 @@ Each star has **4 to 15 planets** (gas giants included), and each board
 | Gas giants | outer zones | 4 to 10 major moons (size 4-9) and 10 to 15 minor moons (size 1-2), 2 Trojan asteroids at each Lagrange point on its orbit. A buried-ocean chit makes the second major moon an ocean world. A yellow sun has up to 3, a red dwarf up to 1-2; a binary's stars none beyond their chits |
 | Dwarf planets | the main-belt zone (and the outermost zone on a big system) | size 5-7 |
 | Asteroids | near-star rocks, the main belt, Trojans, an outer belt; a binary partner and a distant companion get their own | size 1-4, in groups of up to 3 |
-| Comets | half in the main-belt zone, the rest further out (one round a binary partner) | water-rich (hydration 3-5) on far orbits (SM-5g) |
+| Comets | half in the main-belt zone, the rest further out (one round a binary partner) | water-rich (hydration 3-5) on far, tilted orbits that climb off the plane; each has a season, red, yellow or blue, and can only be reached in it (D3a, SM-5g) |
 
 A lone yellow sun has 6 to 15 planets on up to 9 zones; a red dwarf 4 to 9;
 a binary's primary 4 to 6 on 4 zones, its partner 4 to 5 on 3 zones; a
@@ -224,6 +224,16 @@ or the game ends in defeat ("Grounded").
 **D3. Generations Clock (Acts II and III).** Every turn after launch is one
 Generation. Advance the marker at the end of each turn. The game ends at the
 end of **Generation 16** [TUNE].
+
+**D3a. Comet Cycle.** Comets swing in from far out on long, tilted orbits,
+so each is in the plane of its system only part of the time. The Comet Cycle
+runs through three seasons, **red, yellow, blue**, each lasting **2
+Generations** [TUNE], so a full cycle is 6 Generations (about 150 years).
+Generations 1-2 are red, 3-4 yellow, 5-6 blue, 7-8 red again, and so on.
+Every comet has a season (shown by the colour of its route). A ship may
+enter a comet's route, its Lagrange points or the comet itself only during
+its season; a ship already there may stay or leave at any time. This is the
+HF4 Sunspot Cycle's seasons, stretched to the Generation scale.
 
 **D4. Generation event.** At the start of each Generation turn, roll 1d6 on
 the Generation Event table (AA-G7).
@@ -675,6 +685,10 @@ itself is still to be drawn [OPEN Z8]. Data from public catalogues as of Nov
   Replicator cube). Each gets a rendered preview for sign-off before use.
 
 ### Changelog
+- **v0.10 (2026-11-14):** Comet seasons (D3a, SM-5g): the Comet Cycle runs
+  red, yellow, blue, 2 Generations each; a comet can only be reached in its
+  season. Comet routes climb off the orbital plane, drawn in their season's
+  colour.
 - **v0.9 (2026-11-14):** Sol-scale boards (B7a): 4 to 15 planets a star, 30
   to 50 asteroids and 10 comets a board, gas giants with 4 to 10 major and
   10 to 15 minor moons. Bodies are packed by footprint (SM-5h); sites 26 px

@@ -108,3 +108,6 @@ html, body { margin: 0; height: 100%; background: var(--bg, #07060f); color: var
 .aa-dbgrow { display: flex; gap: 6px; align-items: stretch; margin: 6px 0; }
 .aa-dbgrow select { flex: 1; min-width: 0; background: var(--panel-2, #1a1830); color: var(--ink, #e6e9ff); border: 1px solid var(--border, #2a2740); border-radius: 6px; padding: 4px 6px; }
 .aa-dbgrow .aa-op { flex: 0 0 auto; }
+
+/* AA-D3a: the Comet Cycle chip wears the season's colour */
+.turn-tag.aa-season { border-color: var(--season); color: var(--season); text-transform: capitalize; }

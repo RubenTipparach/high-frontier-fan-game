@@ -74,7 +74,7 @@ function toPlanner(map) {
   for (const n of map.nodes) {
     const id2 = `mg-${n.id}`;
     if (n.tags && Object.keys(n.tags).length) NODE_TAGS[id2] = { ...n.tags };
-    const base = { id: n.id, id2, x: n.x, y: n.y, isDecorative: false, isWaypoint: true, solarZone: null, aeroLandable: false, hazard: !!(n.tags && n.tags.hazard), name: '' };
+    const base = { id: n.id, id2, x: n.x, y: n.y, isDecorative: false, isWaypoint: true, solarZone: null, aeroLandable: false, hazard: !!(n.tags && n.tags.hazard), name: '', siteSynodic: n.season || null };
     if (n.kind === 'star') {
       const st = starById[n.id] || {};
       const r = (st.type === 'red' ? 20 : st.type === 'brown' || st.type === 'white' ? 12 : 26) * (st.role === 'distant' ? 0.6 : st.role === 'binary' ? 0.8 : 1);
@@ -131,10 +131,11 @@ function popup(id) {
   const acts = [];
   if (n && n.kind === 'site') {
     acts.push(info(`${n.bodyKind} · size ${n.size}${n.belt ? ` · ${n.belt}` : ''}`));
-    acts.push(info(n.bodyKind === 'moon' ? `Off ${n.moonOf}'s escape ladder (SM-7b)` : n.bodyKind === 'comet' ? 'Comet: a water-rich far orbit (SM-5g)' : n.belt ? 'Asteroid group: one burn out (SM-5f)' : `${wellBurns(n.size)} escape, ${landingOf(n.size) === 'none' ? 'no' : landingOf(n.size)} lander (SM-4a)`));
+    acts.push(info(n.bodyKind === 'moon' ? `Off ${n.moonOf}'s escape ladder (SM-7b)` : n.bodyKind === 'comet' ? `Comet, ${n.season} season: reachable only then (SM-5g)` : n.belt ? 'Asteroid group: one burn out (SM-5f)' : `${wellBurns(n.size)} escape, ${landingOf(n.size) === 'none' ? 'no' : landingOf(n.size)} lander (SM-4a)`));
   } else if (n) {
     const why = { transition: 'Zone transition (SM-3a)', escape: n.rung ? `${n.body} escape ladder, burn ${n.rung} (SM-7b)` : `${n.body} escape burn (SM-3b)`, landing: `${n.land === 'half' ? 'Half' : 'Full'} lander burn (SM-5c)`, orbit: `${n.body} orbit (SM-4a)`, flyby: `${n.body} slingshot: no moons from here (SM-7a)` }[n.purpose];
     acts.push(info(why || { hohmann: 'Hohmann pivot: free, slow (SM-2a)', radhaz: 'Radiation (SM-6a)', orbit: 'System edge arrival (SM-9a)', star: 'A star' }[n.kind] || n.kind));
+    if (n.season) acts.push(info(`${n.body}'s route: ${n.season} season, off the plane (SM-5g)`));
     if (n.star >= 0) acts.push(info(`${SPEC.stars.length > 1 ? `${SPEC.stars[n.star].name}, ` : ''}zone ${n.zone + 1}`));
     else acts.push(info('Between the stars'));
   }
@@ -158,6 +159,7 @@ function bodyRow(bd, i) {
       h('label', { class: 'mg-f' }, 'Zone', h('select', { onchange: (e) => upd('zone', +e.target.value) }, Array.from({ length: st.zones }, (_, k) => h('option', { value: k, selected: (bd.zone | 0) === k }, k + 1)))),
       bd.kind === 'belt' ? num('count', 1, 12, 'Rocks') : num('size', 1, bd.kind === 'comet' ? 3 : 11, 'Size'),
       h('label', { class: 'mg-f wide' }, `Angle ${bd.angle ?? 'auto'}`, h('input', { type: 'range', min: 0, max: 359, value: bd.angle ?? 0, oninput: (e) => { bd.angle = +e.target.value; e.target.previousSibling.textContent = `Angle ${bd.angle}`; }, onchange: () => rebuild() })),
+      bd.kind === 'comet' ? h('label', { class: 'mg-f' }, 'Season', h('select', { onchange: (e) => upd('season', e.target.value || undefined) }, ['', 'red', 'yellow', 'blue'].map((x) => h('option', { value: x, selected: (bd.season || '') === x }, x || 'auto')))) : null,
       bd.kind === 'planet' ? num('sites', 1, 3, 'Sites') : null,
       bd.kind === 'planet' ? h('label', { class: 'mg-f' }, 'Air', h('input', { type: 'checkbox', checked: !!bd.atmosphere, onchange: (e) => upd('atmosphere', e.target.checked) })) : null,
       bd.kind === 'planet' ? h('label', { class: 'mg-f' }, 'Class', h('select', { onchange: (e) => upd('cls', e.target.value) }, ['Hostile', 'Marginal', 'Habitable', 'Garden'].map((c) => h('option', { selected: (bd.cls || 'Hostile') === c }, c)))) : null,

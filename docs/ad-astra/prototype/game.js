@@ -279,8 +279,15 @@ function sysAdjMap(starId) {
   return map;
 }
 const sysAdj = (starId, id) => sysAdjMap(starId)[id] || [];
+// AA-D3a: the Comet Cycle. Red, yellow, blue, TUNE.cometSeasonGens Generations each.
+const SEASON_NAMES = ['red', 'yellow', 'blue'];
+const SEASON_COLOR = { red: '#ef4444', yellow: '#facc15', blue: '#60a5fa' };
+const cometSeason = (gen = S.gen) => SEASON_NAMES[Math.floor((Math.max(1, gen) - 1) / TUNE.cometSeasonGens) % 3];
+function nextSeasonGen(season, from = S.gen) { for (let g = Math.max(1, from); g < from + 3 * TUNE.cometSeasonGens + 1; g++) if (cometSeason(g) === season) return g; return from; }
+const seasonSpan = (season) => { const g0 = nextSeasonGen(season, Math.max(1, S.gen)); const start = cometSeason(S.gen) === season ? Math.max(1, S.gen - ((Math.max(1, S.gen) - 1) % TUNE.cometSeasonGens)) : g0; return `Gen ${start}-${start + TUNE.cometSeasonGens - 1}`; };
 function sysPathCost(starId, from, to) { // entering a magenta burn pad costs 1 burn, as on Sol
-  const kind = {}; for (const n of sysOf(starId).nodes) kind[n.id] = n.kind;
+  const kind = {}; const off = new Set(); const now = cometSeason();
+  for (const n of sysOf(starId).nodes) { kind[n.id] = n.kind; if (n.season && n.season !== now) off.add(n.id); } // AA-D3a: a comet out of the plane can't be entered
   const adj = sysAdjMap(starId);
   const dist = { [from]: 0 }, prev = {}, done = new Set(), open = [from];
   while (open.length) {
@@ -289,6 +296,7 @@ function sysPathCost(starId, from, to) { // entering a magenta burn pad costs 1 
     if (done.has(best)) continue; done.add(best);
     if (best === to) break;
     for (const nb of adj[best] || []) {
+      if (off.has(nb)) continue; // leaving is always allowed; entering only in season
       const nd = dist[best] + (kind[nb] === 'burn' ? 1 : 0);
       if (dist[nb] == null || nd < dist[nb]) { dist[nb] = nd; prev[nb] = best; open.push(nb); }
     }
@@ -302,6 +310,8 @@ function canSysMove(starId, to) { // AA-B7b
   if (!shipActive() || sh.orbit !== starId) return { ok: false, why: 'not here' };
   if (!['Pulse', 'Fusion', 'Antimatter'].includes(f)) return { ok: false, why: 'this drive cannot maneuver in a system' };
   const prob = driveProblem(); if (prob) return { ok: false, why: prob };
+  const tn = sysOf(starId).nodes.find((n) => n.id === to);
+  if (tn && tn.season && tn.season !== cometSeason()) return { ok: false, why: `out of the plane until the ${tn.season} season (Gen ${nextSeasonGen(tn.season)})` }; // AA-D3a
   const pc = sysPathCost(starId, sh.sysNode, to); if (!pc) return { ok: false, why: 'no route' };
   const used = sh.sysBurnsGen === S.gen ? sh.sysBurns : 0;
   const thrust = driveDef().thrust;
@@ -1076,7 +1086,7 @@ function systemMapData(starId) { // AA-B7a, drawn exactly as the Sol board draws
     if (st) {
       const cls = st.cls;
       const type = st.kind === 'world' ? 'inner-planet' : st.kind === 'moon' || st.kind === 'ocean' ? 'moon' : st.big ? 'dwarf' : st.comet ? 'comet' : 'asteroid';
-      const x = baseSite({ id: n.id, id2: `aa-${starId}-${n.id}`, name: st.label || st.name, type, x: n.x, y: n.y, siteSize: `${st.size}${st.spec}`, hydration: st.hyd, bodyKey: st.body,
+      const x = baseSite({ id: n.id, id2: `aa-${starId}-${n.id}`, name: st.label || st.name, type, x: n.x, y: n.y, siteSynodic: n.season || null, siteSize: `${st.size}${st.spec}`, hydration: st.hyd, bodyKey: st.body,
         submarine: st.kind === 'ocean', astrobiology: st.kind === 'world' && (cls === 'Garden' || cls === 'Habitable'), atmospheric: st.role === 'hz' && cls !== 'Hostile' });
       x._palette = st.kind === 'world' ? (st.role === 'rock' ? BODY_ART.mercury : cls === 'Marginal' ? BODY_ART.mars : cls === 'Hostile' ? BODY_ART.mercury : BODY_ART.earth)
         : st.kind === 'ocean' ? BODY_ART.europa
@@ -1088,7 +1098,7 @@ function systemMapData(starId) { // AA-B7a, drawn exactly as the Sol board draws
       const isDeco = n.kind === 'decorative';
       const id2 = `aa-${starId}-${n.id}`;
       if (n.tags && Object.keys(n.tags).length) NODE_TAGS[id2] = { ...n.tags }; // lander / half / hazard / aerobrake glyphs (SM-5c, 6c)
-      sites.push(baseSite({ id: n.id, id2, name: n.label || '', type: isDeco ? 'decorative' : n.kind, isDecorative: isDeco, x: n.x, y: n.y, landing: n.land ? (n.land === 'half' ? 0.5 : 1) : null, hazard: n.kind === 'radhaz' || !!(n.tags && n.tags.hazard), flybyBoost: n.fly || null }));
+      sites.push(baseSite({ id: n.id, id2, name: n.label || '', type: isDeco ? 'decorative' : n.kind, isDecorative: isDeco, x: n.x, y: n.y, landing: n.land ? (n.land === 'half' ? 0.5 : 1) : null, hazard: n.kind === 'radhaz' || !!(n.tags && n.tags.hazard), flybyBoost: n.fly || null, siteSynodic: n.season || null })); // AA-D3a: comet routes in their season's colour
     }
   }
   for (const b of sys.display || []) { // the giants themselves, as the Sol board draws Jupiter
@@ -1268,6 +1278,8 @@ function systemActions(starId, id) {
   const colonyHere = sysOf(starId).sites.some((x) => x.pop > 0);
   if (site) {
     if (site.label && site.label !== site.name) out.push(info(site.name));
+    const sn = sysOf(starId).nodes.find((q) => q.id === id);
+    if (sn && sn.season) out.push(info(sn.season === cometSeason() ? `☄ ${sn.season} season comet: in the plane now (${seasonSpan(sn.season)})` : `☄ ${sn.season} season comet: out of the plane until Gen ${nextSeasonGen(sn.season)} (AA-D3a)`));
     out.push(info(site.kind === 'mine' ? (site.comet ? 'Comet, a water-rich mine' : 'Mine') : site.kind === 'ocean' ? 'Buried ocean, Hostile surface' : site.kind === 'moon' ? 'Moon, Hostile surface' : `${site.cls} world`));
     out.push(info(`Size ${site.size} · Hydration ${site.hyd} · Spectral ${site.spec}`));
     const status = [site.goo ? 'Consumed by grey goo' : site.claimed ? 'Claimed' : 'Unclaimed', site.cubes ? `${site.cubes} cubes (cap ${site.size})` : '', site.pop ? `Colony ${site.pop}${isOpen(site) ? ' (open)' : ' (domed)'}` : '', site.kind === 'world' && site.terra ? `Terraform ${site.step}/4` : ''].filter(Boolean).join(' · ');
@@ -1294,6 +1306,7 @@ function systemActions(starId, id) {
     const n = sysOf(starId).nodes.find((q) => q.id === id);
     const burnWhy = (x) => (x.land ? `${x.land === 'half' ? 'Half landing' : 'Landing'} burn${x.body ? ` onto ${x.body}` : ''}` : x.purpose === 'transition' ? 'Zone transition burn' : x.purpose === 'escape' ? (x.rung ? `${x.body}'s escape ladder, burn ${x.rung} of 3` : `Escape burn, ${x.body}'s well`) : 'Burn pad');
     if (n) out.push(info(n.kind === 'burn' ? `${burnWhy(n)}: entering it costs 1 burn` : n.kind === 'orbit' ? 'The system edge: where ships arrive' : n.kind === 'lagrange' ? (n.purpose === 'flyby' ? `${n.body} slingshot: free, +${n.fly || 0} flyby; no route to its moons from here` : (n.label || 'Lagrange point: free to enter')) : n.kind === 'hohmann' ? 'Hohmann transfer: free to enter' : n.kind === 'radhaz' ? 'Radiation belt: free, but roll for damage (AA-B7c)' : (n.label || '')));
+    if (n && n.season) out.push(info(n.season === cometSeason() ? `On a ${n.season} season comet's route: open now` : `On a ${n.season} season comet's route: out of the plane until Gen ${nextSeasonGen(n.season)}`));
     if (here && n && n.skim) out.push({ label: '⛽ Skim gas giant', disabled: fops || sh.sysNode !== id, onClick: act(opSkim) });
   }
   if (here && sh.sysNode !== id && (site || sysOf(starId).nodes.some((q) => q.id === id))) {
@@ -1390,6 +1403,7 @@ function render() {
   const tags = [`<span class="turn-tag${S.ops.home ? '' : ' is-spent'}" title="Home operation (AA-D1)">☉ Home op:${S.ops.home}</span>`];
   if (S.phase === 'voyage') tags.push(`<span class="turn-tag${S.ops.frontier ? '' : ' is-spent'}" title="Frontier operations: one per starship and one per colony system (AA-D1)">🛰 Frontier:${S.ops.frontier}</span>`);
   if (sh.launched && !sh.lost) tags.push(`<span class="turn-tag" title="Velocity: spaces moved each Generation (AA-B4)">🚀 V${sh.V}</span>`);
+  if (S.phase === 'voyage') { const cs = cometSeason(); tags.push(`<span class="turn-tag aa-season" style="--season:${SEASON_COLOR[cs]}" title="Comet Cycle (AA-D3a): comets of the ${cs} season are in the plane, ${seasonSpan(cs)}. Seasons last ${TUNE.cometSeasonGens} Generations: red, yellow, blue.">☄ ${cs} season</span>`); }
   $('#aa-budget').innerHTML = tags.join('');
   $('#route-status').textContent = statusLine();
   $('#aa-mode-stars').classList.toggle('is-active', MAPMODE === 'stars');

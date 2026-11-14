@@ -138,6 +138,15 @@ for any other reason:
   far orbit) -> the site. Its tail points away from its own star. Comets are
   not counted in the gravity-well check (SM-4a): their burns buy an orbit,
   not a climb out of a well.
+  - **Seasons.** Every comet has a season, red, yellow or blue (Sol's 12
+    comets: 8 seasonal, coloured by the Sunspot season they can be reached
+    in). The seasons are shared out evenly. The comet's whole route (its
+    escape burns, both Lagrange points and the site) carries the season and is
+    drawn in the season's colour, as Sol draws its seasonal comets.
+  - **Out of the plane.** A comet's orbit is inclined, so its route leaves the
+    orbital plane: from its ring pivot it climbs toward the top of the board,
+    the far orbit and the comet sitting higher (20, 36 and 52 px) than the
+    plane would put them.
 
 ## SM-6. Hazards
 
@@ -205,5 +214,6 @@ for any other reason:
 9. Each star has 4 to 15 planets (SM-1f); the board has 30 to 50 asteroids
    (SM-5f) and 10 comets (SM-5g).
 10. Every comet sits outside its star's innermost zone, on its own route with
-    two Lagrange points (SM-5g).
+    two Lagrange points, and its whole route carries one season; with 3 or
+    more comets, all three seasons are used (SM-5g).
 11. Each gas giant has 4 to 10 major and 10 to 15 minor moons (SM-7c).

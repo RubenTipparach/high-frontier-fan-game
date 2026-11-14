@@ -9,7 +9,7 @@
 import { buildMap, zoneLayer } from '../mapgen/mapgen.js';
 import { rollSystem, REGIONS } from '../mapgen/roll.js';
 
-export const SYSTEM_LAYOUT = 8; // 8 = Sol-scale boards: 30-50 asteroids, 10 comets, major + minor moons
+export const SYSTEM_LAYOUT = 9; // 9 = Sol-scale boards, comets with seasons off the plane
 export { zoneLayer };
 const SPEC = ['C', 'S', 'M', 'V'];
 const CLASS_HYD = { Garden: [6, 9], Habitable: [4, 7], Marginal: [2, 5], Hostile: [0, 3] };

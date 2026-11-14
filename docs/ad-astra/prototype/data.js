@@ -10,6 +10,7 @@ export const TUNE = {
   startAqua: 16,          // AA-C3
   launchWindow: 6,        // AA-D2
   generations: 16,        // AA-D3
+  cometSeasonGens: 2,     // AA-D3a: Generations per Comet Cycle season (red, yellow, blue)
   maxV: 6,                // AA-B4
   researchCost: 1,        // AA-S2b, aqua per card
   beamRangeSpaces: 8,     // AA-F3, 4 ly

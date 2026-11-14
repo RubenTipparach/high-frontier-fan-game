@@ -26,6 +26,9 @@ export const moonEscape = (size) => Math.max(1, wellBurns(size) - 1); // SM-4b: 
 export const SITE_GAP = 26; // SM-5e: the Sol board's own closest pair of sites
 export const GIANT_HALO = 24; // a giant's sphere radius on these boards (world px)
 // SM-1f / 5f / 5g / 7c design targets
+export const SEASONS = ['red', 'yellow', 'blue']; // SM-5g / AA-D3a: the Comet Cycle
+export const COMET_LIFT = [20, 36, 52]; // SM-5g: px above the plane for the near orbit, far orbit, comet
+const lift = (p, dy) => ({ x: p.x, y: round1(p.y - dy) });
 export const TARGETS = { planets: [4, 15], asteroids: [30, 50], comets: 10, majors: [4, 10], minors: [10, 15] };
 const deg = (a) => (a * Math.PI) / 180;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -178,7 +181,7 @@ export function buildMap(spec) {
     if (it.kind === 'giant') { const C = P(L, a, st.mid(k) + 0.42 * w); return { x: C.x, y: C.y, r: giantReach(it) }; } // the moons fan almost all the way round
     // footprint = the farthest site from the centre, plus half a gap (SM-5e)
     if (it.kind === 'cluster') { const c = P(L, a, st.mid(k) + it.side * 0.3 * w); return { x: c.x, y: c.y, r: 22 + HALF_GAP }; }
-    if (it.kind === 'comet') { const c = P(L, a + 9, st.mid(k) + 0.44 * w); return { x: c.x, y: c.y, r: HALF_GAP + 1 }; }
+    if (it.kind === 'comet') { const c = lift(P(L, a + 9, st.mid(k) + 0.44 * w), COMET_LIFT[2]); return { x: c.x, y: c.y, r: HALF_GAP + 1 }; }
     const c = P(L, a, st.mid(k) + 0.36 * w);
     return { x: c.x, y: c.y, r: (it.kind === 'planet' ? 26 : 12) + HALF_GAP };
   };
@@ -289,6 +292,7 @@ export function buildMap(spec) {
     rocks.forEach((r, j) => link(lag, addSite(fanPos(byId[lag], j, rocks.length, around, dist, spread), { ...extra, body: r.name, bodyKind, size: r.size, region: 0 })));
     return lag;
   };
+  let cometNo = 0;
   for (const it of items) {
     const st = it.st; const L = st.L; const k = it.zone; const a = it.angle;
     const dep = pivotAt(st, k, a);
@@ -300,13 +304,15 @@ export function buildMap(spec) {
       if (k === 0) byId[lag].tags.hazard = true; // SM-6b
       continue;
     }
-    if (it.kind === 'comet') { // SM-5g: pivot -> escape burns -> orbit -> far orbit -> the comet
+    if (it.kind === 'comet') { // SM-5g: pivot -> escape burns -> orbit -> far orbit -> the comet, climbing off the plane
+      const season = SEASONS.includes(it.season) ? it.season : SEASONS[cometNo++ % SEASONS.length];
+      const tag = { comet: true, season, siteSynodic: season };
       const esc = k === st.N - 1 ? 3 : k >= st.N / 2 ? 2 : 1;
-      const lag1 = add('lagrange', P(L, a, st.mid(k) + 0.2 * w), { purpose: 'orbit', body: it.name, comet: true });
-      route(dep.id, lag1, Array.from({ length: esc }, (_, i) => ({ kind: 'burn', t: (i + 1) / (esc + 1), extra: { purpose: 'escape', body: it.name } })), 0.18, 16);
-      const lag2 = add('lagrange', P(L, a + 5, st.mid(k) + 0.34 * w), { purpose: 'orbit', body: it.name, comet: true });
+      const lag1 = add('lagrange', lift(P(L, a, st.mid(k) + 0.2 * w), COMET_LIFT[0]), { purpose: 'orbit', body: it.name, ...tag });
+      route(dep.id, lag1, Array.from({ length: esc }, (_, i) => ({ kind: 'burn', t: (i + 1) / (esc + 1), extra: { purpose: 'escape', body: it.name, ...tag } })), 0.18, 16);
+      const lag2 = add('lagrange', lift(P(L, a + 5, st.mid(k) + 0.34 * w), COMET_LIFT[1]), { purpose: 'orbit', body: it.name, ...tag });
       route(lag1, lag2, [], 0.25, 14);
-      link(lag2, addSite(P(L, a + 9, st.mid(k) + 0.44 * w), { body: it.name, bodyKind: 'comet', size: clamp(it.size | 0 || 2, 1, 3), region: 0, home: st.i }));
+      link(lag2, addSite(lift(P(L, a + 9, st.mid(k) + 0.44 * w), COMET_LIFT[2]), { body: it.name, bodyKind: 'comet', size: clamp(it.size | 0 || 2, 1, 3), region: 0, home: st.i, ...tag }));
       continue;
     }
     const size = clamp(it.size | 0 || 4, 1, 11);
@@ -467,8 +473,13 @@ export function validateMap(map) {
     pCounts.every((c) => c >= p0 && c <= p1) && rocks >= a0 && rocks <= a1 && comets.length === TARGETS.comets,
     `planets ${pCounts.join(' + ')}, asteroids ${rocks}, comets ${comets.length}`);
   // 10. comets: outside the star's zone, two Lagrange points on their route
-  const badComet = comets.filter((c) => c.zone === 0 || nodes.filter((n) => n.comet && n.body === c.body && n.kind === 'lagrange').length !== 2);
-  check('SM-5g comets on their own far orbits', badComet.length === 0, badComet.length ? `${badComet.length} comets misplaced` : `${comets.length} comets`);
+  const badComet = comets.filter((c) => c.zone === 0 || !SEASONS.includes(c.season)
+    || nodes.filter((n) => n.comet && n.body === c.body && n.kind === 'lagrange').length !== 2
+    || nodes.some((n) => n.body === c.body && (n.kind === 'burn' || n.kind === 'lagrange') && n.season !== c.season));
+  const seasonsUsed = new Set(comets.map((c) => c.season));
+  const bySeason = SEASONS.map((x) => `${comets.filter((c) => c.season === x).length} ${x}`).join(', ');
+  check('SM-5g comets on seasonal far orbits', badComet.length === 0 && (comets.length < 3 || seasonsUsed.size === 3),
+    badComet.length ? `${badComet.length} comets misplaced or missing a season` : comets.length ? bySeason : 'no comets');
   // 11. gas giants: 4-10 major and 10-15 minor moons
   const moonsOf = {};
   for (const n of moonSites) { const e = (moonsOf[n.moonOf] = moonsOf[n.moonOf] || { major: new Set(), minor: new Set() }); (n.size > 2 ? e.major : e.minor).add(n.body); }
