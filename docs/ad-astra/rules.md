@@ -1,6 +1,6 @@
 # High Frontier: Ad Astra - Rulebook
 
-**Draft v0.5 (2026-11-13).** A fan variant of High Frontier 4: All that
+**Draft v0.6 (2026-11-14).** A fan variant of High Frontier 4: All that
 takes the game past the edge of the Sol map. Not affiliated with Sierra Madre
 Games. Original rules; it borrows only the hooks HF4 already prints (TW
 thrusters, the three Ad Astra exits, the Ad Astra and Sunlens Futures).
@@ -114,23 +114,30 @@ when the star is first explored (G12) and stay face up for the game.
   moon of a gas giant, or a dark world circling a brown or white dwarf. A
   buried ocean is always Hostile on the surface but rich in water.
 
-**B7a. System board.** Every explored star gets a detailed system map in the
-same idiom as the Sol map: flat-top hex sites with Size, Hydration and
-spectral type, magenta burn pads and orange Lagrange rings. Each system is a
-**gravity well**: you arrive at its **edge** (G4) and burn DOWN a single
-descent path, with a parking orbit at each band. Burns from the edge [TUNE]:
-outer (companion) band 2, belt 3, habitable-zone band 5, inner band 7; one
-more landing burn to a world's surface. Moving around a band to a body is
-free (green Hohmann dots). Each system has:
-- an **inner rocky world** (Hostile, dry), always;
-- the **Habitable-zone world** from its chit, if any;
-- an **asteroid belt** of 2 or 3 mines;
-- each **companion** at its Lagrange node, with its buried ocean if its chit
-  shows one.
+**B7a. System board.** Every explored star gets a system board built from
+the Sol board itself: its bodies are clusters of the real Sol map, at Sol's
+scale, so a system reads exactly like Sol (burn ladders, Lagrange points,
+Hohmann transfers, radiation belts, curved routes, bodies with several sites):
+- a **gas giant** (or brown / white dwarf) companion is Jupiter's cluster:
+  you come into the giant's own well first, then branch out to its moons
+  (four large moons with two sites each, plus small moonlets). A buried-ocean
+  chit makes its second moon an ocean world;
+- the **habitable-zone world** is Mars's cluster: three surface regions of
+  one world plus two small moons;
+- the **inner rocky world** is Mercury's cluster (two regions);
+- the **asteroid belt** is the Ceres neighbourhood.
+Sol-style transfer chains join them into one gravity well: you arrive at the
+system's **edge** (G4) and each band further in costs more burns. A world's
+regions share its class and terraform track (H10); small moons and moonlets
+are mines; large moons are Hostile surfaces that take domed Colonies.
 
 **B7b. In-system moves (free action).** As on the Sol map, entering a magenta
-burn pad costs 1 burn; parking orbits, Hohmann dots and Lagrange points are
-free. Pay each burn in propellant at
+burn pad (or landing burn) costs 1 burn; parking orbits, Hohmann dots and
+Lagrange points are free. A trip longer than your Thrust allows in one
+Generation continues the next, as on Sol.
+
+**B7c. Radiation belts.** Each radiation-belt node a move crosses: roll 1d6,
+on a 1 your card with the lowest rad hardness is destroyed. Pay each burn in propellant at
 the Burn rate (Fuel x weight class, G3), up to your Drive's Thrust in burns
 per Generation. A move may cross several nodes along the cheapest route. Beam and Ramscoop drives cannot
 maneuver inside a system: they work from High Orbit by raygun and Landers.
@@ -639,6 +646,10 @@ itself is still to be drawn [OPEN Z8]. Data from public catalogues as of Nov
   Replicator cube). Each gets a rendered preview for sign-off before use.
 
 ### Changelog
+- **v0.6 (2026-11-14):** System boards are built from the Sol board's own
+  clusters (B7a): gas giants are hubs whose moons branch off their well;
+  habitable worlds are Mars-like multi-region bodies; radiation belts (B7c);
+  multi-Generation in-system trips (B7b).
 - **v0.5.2 (2026-11-13):** System maps are gravity wells: arrive at the edge,
   burn down band by band (B7a). Prototype: tapping a star offers View system.
 - **v0.5.1 (2026-11-13):** In-system moves use the Sol map's burn-pad idiom

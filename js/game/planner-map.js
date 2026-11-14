@@ -313,7 +313,7 @@ function disambiguateRefIds(sites) {
 // decorative nodes connecting two non-mid-chain endpoints. Returns
 //   chains:        [[idStart, idDec1, idDec2, ..., idEnd], ...]
 //   straightEdges: [[a, b, dv], ...] for edges NOT consumed by a chain
-function buildChains(sites, edges, byId) {
+export function buildChains(sites, edges, byId) {
   const adj = new Map();
   for (const s of sites) adj.set(s.id, []);
   for (const [a, b, dv] of edges) {
