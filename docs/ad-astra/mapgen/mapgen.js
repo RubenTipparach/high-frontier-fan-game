@@ -238,8 +238,10 @@ export function buildMap(spec) {
   const size0 = (it) => (it.kind === 'giant' ? 1000 + giantReach(it) : it.kind === 'planet' ? 500 + (it.sites | 0) : it.kind === 'comet' ? 200 : it.kind === 'cluster' ? (it.trojanOf ? 50 : 100) : 300);
   const order = items.filter((it) => !it.trojanOf).sort((p, q) => (q.fixed - p.fixed) || (size0(q) - size0(p)));
   // variants a body may fall back on when its ring is full: an asteroid group
-  // may sit on either side of its ring, a comet one zone further out
-  const variants = (it) => (it.kind === 'cluster' && !it.trojanOf && it.zone > 0 ? [{ side: it.side }, { side: -it.side }]
+  // may sit on either side of its ring, then on the rings beside it (SM-5f);
+  // a comet one zone further out
+  const variants = (it) => (it.kind === 'cluster' && !it.trojanOf && it.zone > 0
+    ? [it.zone, it.zone + 1, it.zone - 1, it.zone + 2, it.zone - 2].filter((z) => z >= 1 && z < it.st.N).flatMap((z) => [{ zone: z, side: it.side }, { zone: z, side: -it.side }])
     : it.kind === 'comet' ? Array.from({ length: it.st.N - it.zone }, (_, d) => ({ zone: it.zone + d })) : [{}]);
   const commit = (it, a, fs) => { placed.push(...circles(fs)); pivotAnglesOf(it, a).forEach((p) => { useAngle(it.st, it.zone, ((p % 360) + 360) % 360); }); };
   const placeOne = (it) => {
