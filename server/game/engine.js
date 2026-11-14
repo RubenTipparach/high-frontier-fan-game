@@ -740,7 +740,16 @@ function maybeAwardGlory(state, player, site, turn, stack = player.rocket.stack)
 // at most one chit. A chit follows its crew into any stack the player controls
 // (rocket, LEO, outposts, freighter, Bernals), so every one of those Humans is a
 // potential carrier, not just the ones aboard the rocket.
+// HEROIC (Galahad Group, white): "This character can carry any number of glory
+// chits." The Galahad crew card itself has no carry limit, so while it is in
+// play its holder's capacity is unbounded. Returns the card id or null.
+function heroicCarrierId(state, player) {
+  if (!player || !player.faction || player.faction.cardId !== 'crew_galahad_group') return null;
+  if (!hasPrivilege(state, player, 'HEROIC')) return null;
+  return humanCardInPlay(state, player, player.faction.cardId) ? player.faction.cardId : null;
+}
 function gloryCarriers(state, player) {
+  if (heroicCarrierId(state, player)) return Infinity;
   let n = 0;
   const count = (slots) => { for (const s of (slots || [])) if (isHumanSlot(state, s)) n += 1; };
   count(player.leo);
@@ -765,6 +774,9 @@ function pickGloryCarrier(state, player, stack = player.rocket && player.rocket.
   for (const s of (stack || [])) {
     if (isHumanSlot(state, s) && !taken.has(s.id)) return s.id;
   }
+  // Heroic: the Galahad crew may take another chit on top of the ones it holds.
+  const hero = heroicCarrierId(state, player);
+  if (hero && (stack || []).some((s) => s && s.id === hero)) return hero;
   return null;
 }
 
@@ -1568,6 +1580,38 @@ function finaoPerFor(state, player) {
   if (state.internationalAssistance) per = Math.floor(per / 2);
   if (playerHasColonistPower(state, player, 'finaoHalved')) per = Math.floor(per / 2);
   return Math.max(1, per);
+}
+// Pay `cost` aqua of FINAO. Every place FINAO is charged goes through here so
+// POWER BROKERS (The Sea Peoples, black) settles on all of them: "After you pay
+// FINAO, gain 1 Aqua per Seniority Disk on the Assembly (max half FINAO paid,
+// round down)." The rebate is read after the payment, from the disks sitting on
+// the Assembly right now (a disk still on the Sunspot track is not on the
+// Assembly). Its note is queued on state.__opNotes and appended to this op's log
+// line by the dispatcher. Returns the rebate.
+function seniorityDisksOnAssembly(state) {
+  if (!state.m0 || !state.assembly) return 0;
+  return ASSEMBLY_PLACES.reduce((n, p) => n + seniorityInPlace(state.assembly, p), 0);
+}
+function payFinao(state, player, cost) {
+  const paid = Math.max(0, cost | 0);
+  if (paid <= 0) return 0;
+  player.aqua = (player.aqua | 0) - paid;
+  return finaoRebate(state, player, paid);
+}
+// The Power Brokers settlement on its own, for a caller that pays up front and
+// settles once the net payment is known (MOVE refunds FINAO for a hazard the
+// ship never reached, and only the FINAO actually kept is "paid").
+function finaoRebate(state, player, paidIn) {
+  const paid = Math.max(0, paidIn | 0);
+  if (paid <= 0) return 0;
+  if (!hasPrivilege(state, player, 'POWER_BROKERS')) return 0;
+  const rebate = Math.min(seniorityDisksOnAssembly(state), Math.floor(paid / 2));
+  if (rebate <= 0) return 0;
+  player.aqua += rebate;
+  const note = `${player.name} collected +${rebate} aqua back from the ${paid} FINAO paid (Power Brokers).`;
+  (state.__opNotes = state.__opNotes || []).push(note);
+  pushNews(state, '\u{1F4B0}', note);
+  return rebate;
 }
 
 // A colonist COLOCATED with an operation's site (2C1): at the site itself, OR on
@@ -4166,7 +4210,7 @@ function applyMoveFreighter(state, op, player) {
   const finaoPer = finaoPerFor(state, player);
   const finaoCost = wantPay ? rollItems.length * finaoPer : 0;
   if (finaoCost > 0 && finaoCost > (player.aqua | 0)) return fail('insufficient_aqua');
-  if (finaoCost > 0) player.aqua -= finaoCost;
+  if (finaoCost > 0) payFinao(state, player, finaoCost);
 
   const gen = makeRng(state.seed, state.rng.cursor);
   const rolls = [];
@@ -4504,7 +4548,7 @@ function applyMoveBernal(state, op, player) {
   const finaoPer = finaoPerFor(state, player);
   const finaoCost = wantPay ? rollItems.length * finaoPer : 0;
   if (finaoCost > 0 && finaoCost > (player.aqua | 0)) return fail('insufficient_aqua');
-  if (finaoCost > 0) player.aqua -= finaoCost;
+  if (finaoCost > 0) payFinao(state, player, finaoCost);
 
   const gen = makeRng(state.seed, state.rng.cursor);
   const rolls = [];
@@ -4928,7 +4972,7 @@ function applyMoveFactory(state, op, player) {
   const finaoPer = finaoPerFor(state, player);
   const finaoCost = wantPay ? rollItems.length * finaoPer : 0;
   if (finaoCost > 0 && finaoCost > (player.aqua | 0)) return fail('insufficient_aqua');
-  if (finaoCost > 0) player.aqua -= finaoCost;
+  if (finaoCost > 0) payFinao(state, player, finaoCost);
   // Acetylene: the boosters burn the site's stored water, never the cube.
   if (cubeAcet && cubeAcetCost > 0) {
     let owed = cubeAcetCost;
@@ -5509,6 +5553,7 @@ function applyMove(state, op, player) {
   // Spend the fuel: walk the wet chit down `stepsNeeded` black connections;
   // the new tank water is whatever mass is left above dry (often fractional).
   player.rocket.tank = round6(walkBlackDown(wetMass, stepsNeeded) - dryMass);
+  // Paid now; the Power Brokers settlement waits for the refund below.
   if (finaoCost > 0) player.aqua -= finaoCost;
   // Acetylene liftoff: burn the site's stored water (the player's outpost
   // tank(s) here), oldest outpost first. Whole units; validated above.
@@ -5720,6 +5765,7 @@ function applyMove(state, op, player) {
   // FINAO paid for a hazard the ship never entered comes back.
   const finaoRefund = skippedPaid * finaoPer;
   if (finaoRefund > 0) player.aqua += finaoRefund;
+  if (finaoCost > 0) finaoRebate(state, player, finaoCost - finaoRefund);
   const enteredArrivals = haltedShort ? arrivals.slice(0, coastLimit + 1) : arrivals;
   state.rng.cursor = gen.cursor;
   player.movesRemaining -= 1;
@@ -8478,7 +8524,7 @@ function applyAnchorBernal(state, op, player) {
     else player.opsRemaining -= 1;
     opSpent = true;
     if (wantPay) {
-      player.aqua -= finaoPer;
+      payFinao(state, player, finaoPer);
       hazardNote = ` (paid ${finaoPer} FINAO to skip the Epic Hazard)`;
     } else {
       const gen = makeRng(state.seed, state.rng.cursor);
@@ -10275,7 +10321,21 @@ function lawInForce(state, key) {
 // law the player Lobbied this turn (O4: pay 1 aqua + discard a delegate there).
 function playerCanUseLaw(state, player, key) {
   if (lawInForce(state, key)) return true;
-  return Array.isArray(player.lobbiedLaws) && player.lobbiedLaws.includes(key);
+  if (Array.isArray(player.lobbiedLaws) && player.lobbiedLaws.includes(key)) return true;
+  return emissaryLawActive(state, player, key);
+}
+// EMISSARIES (African Union, white): "On your turn, you may treat any or all
+// Ideologies tied for the most delegates as the Active Law." The player names
+// the tied Ideologies with the EMISSARIES free action; each counts for them only
+// while it is still tied for the most delegates, only on their own turn, and
+// only while the privilege holds (Anarchy suspends it, the M2 lock holds it).
+function emissaryLawActive(state, player, key) {
+  if (!state.m0 || !player || !Array.isArray(player.emissaryLaws) || !player.emissaryLaws.includes(key)) return false;
+  const cur = currentPlayer(state);
+  if (!cur || cur.profileId !== player.profileId) return false;
+  if (!hasPrivilege(state, player, 'EMISSARIES')) return false;
+  const winners = voteWinners(assemblyOf(state));
+  return winners.length >= 2 && winners.includes(key);
 }
 // May `player` operate at this factory for a NON-VICTORY purpose (site refuel,
 // ET production, delivery)? Their own always; an opponent's only when
@@ -10390,7 +10450,10 @@ function applyFundraise(state, op, player) {
   // Vote tally (the final step): move the active-law star onto the winner. One
   // winner -> auto; a tie -> the fundraiser's pick (op.star ∈ the tied winners);
   // no delegates anywhere -> the Centrist center.
-  const winners = voteWinners(asm);
+  // ARBITER (African Union, black): "Your vote tallies may treat your delegates
+  // as 2 delegates each" - opt-in on the Fundraise's own tally (op.arbiterDouble).
+  if (op.arbiterDouble && !hasPrivilege(state, player, 'ARBITER')) return fail('no_arbiter');
+  const winners = op.arbiterDouble ? arbiterWinners(asm, pid, true) : voteWinners(asm);
   let newStar;
   if (winners.length === 0) newStar = 'centrist';
   else if (winners.length === 1) [newStar] = winners;
@@ -10429,7 +10492,7 @@ function applyFundraise(state, op, player) {
     : '';
   return {
     ok: true, state,
-    log: `${player.name} fundraised - ${did}, +${gain} aqua${honor ? ' (Honor: per glory chit)' : ''}.${starNote}${martial}`,
+    log: `${player.name} fundraised - ${did}, +${gain} aqua${honor ? ' (Honor: per glory chit)' : ''}.${op.arbiterDouble ? ' As Arbiter, their delegates counted twice in the vote tally.' : ''}${starNote}${martial}`,
   };
 }
 
@@ -10471,6 +10534,10 @@ function applyLobby(state, op, player) {
   // opt-in flag on the Lobby instead of firing on its own. Checked here, BEFORE
   // the aqua and the delegate are spent, so a refused rouse never costs a Lobby.
   const rouse = !!op.rabbleRouser;
+  // AMBASSADOR (AEB, white): "During lobby, may move a delegate into centrist
+  // instead of Decommission." Opt-in, refused before anything is spent.
+  const ambassador = !!op.ambassador;
+  if (ambassador && !hasPrivilege(state, player, 'AMBASSADOR')) return fail('no_ambassador');
   if (rouse) {
     if (!mayRabbleRouse(state, player)) return fail('no_rabble_rouser');
     if (key !== 'authority') return fail('rouse_needs_authority');
@@ -10481,8 +10548,21 @@ function applyLobby(state, op, player) {
   if (!freeLobby && (player.aqua | 0) < 1) return fail('insufficient_aqua');
   if (!freeLobby) player.aqua -= 1;
   // Supreme Cult Future: lobby without removing the delegate used.
-  const keepDelegate = hasFutureEffect(player, 'lobbyKeepDelegate');
+  // HEROIC (Galahad Group, white): "You may lobby honor without losing a
+  // delegate." Pure benefit, so it applies without asking.
+  const heroicKeep = key === 'honor' && hasPrivilege(state, player, 'HEROIC');
+  const keepDelegate = hasFutureEffect(player, 'lobbyKeepDelegate') || heroicKeep;
+  // Ambassador only matters when the delegate would otherwise leave.
+  const toCentrist = ambassador && !keepDelegate;
   if (!keepDelegate) setPlaceCount(asm, key, player.profileId, placeCount(asm, key, player.profileId) - 1);
+  let ambassadorTail = '';
+  if (toCentrist) {
+    setPlaceCount(asm, 'centrist', player.profileId, placeCount(asm, 'centrist', player.profileId) + 1);
+    ambassadorTail = ' Ambassador: the delegate crossed the floor to the Centrists instead of leaving the Assembly.';
+    // A delegate moved, so the vote tally runs (O3a). A tie leaves the star put.
+    const moved = quietVoteTally(state);
+    if (moved) ambassadorTail += ` The vote tally moves the active-law star to ${moved}.`;
+  }
   player.lobbiedLaws = Array.isArray(player.lobbiedLaws) ? player.lobbiedLaws : [];
   if (!player.lobbiedLaws.includes(key)) player.lobbiedLaws.push(key);
   player.lobbiedThisTurn = true;
@@ -10507,13 +10587,31 @@ function applyLobby(state, op, player) {
   }
   return {
     ok: true, state,
-    log: `${player.name} lobbied ${key} - ${freeLobby ? 'free (Sol Unification)' : 'paid 1 aqua'} and ${keepDelegate ? 'kept the delegate (Supreme Cult)' : 'discarded a delegate'} to use its Law this turn.${rouseTail}`,
+    log: `${player.name} lobbied ${key} - ${freeLobby ? 'free (Sol Unification)' : 'paid 1 aqua'} and ${heroicKeep ? 'kept the delegate (Heroic)' : keepDelegate ? 'kept the delegate (Supreme Cult)' : toCentrist ? 'moved a delegate to the Centrists' : 'discarded a delegate'} to use its Law this turn.${ambassadorTail}${rouseTail}`,
   };
 }
 
-// EMISSARIES (African Union, white). STUB - filled in by the politics pass.
-function applyEmissaries(_state, _op, _player) {
-  return fail('not_implemented');
+// EMISSARIES (African Union, white): free action on your own turn. op =
+// { ideologies: [...] }, each one of the places tied for the most delegates.
+// They count as the Active Law for this player for the rest of the turn (see
+// emissaryLawActive, read by playerCanUseLaw). Delegates are counted plainly
+// here: the Arbiter's doubling belongs to a vote tally, not to this tie.
+function applyEmissaries(state, op, player) {
+  if (!state.m0) return fail('not_m0');
+  if (!hasPrivilege(state, player, 'EMISSARIES')) return fail('no_emissaries');
+  const want = Array.isArray(op.ideologies) ? [...new Set(op.ideologies.map(String))] : [];
+  if (!want.length) return fail('no_ideologies');
+  const winners = voteWinners(assemblyOf(state));
+  if (winners.length < 2) return fail('no_tie');
+  if (want.some((k) => !winners.includes(k))) return fail('not_tied', { winners });
+  const fresh = want.filter((k) => k !== state.activeLawStar);
+  if (!fresh.length) return fail('already_active_law');
+  player.emissaryLaws = [...new Set([...(player.emissaryLaws || []), ...fresh])];
+  const names = fresh.map((k) => (k === 'centrist' ? 'Centrist' : ((IDEOLOGY_BY_KEY[k] || {}).name || k)));
+  return {
+    ok: true, state,
+    log: `${player.name}'s Emissaries treat ${names.join(' and ')} as the Active Law this turn (tied for the most delegates).`,
+  };
 }
 
 // placeholder separator for merge hygiene
@@ -10529,9 +10627,51 @@ function applyEmissaries(_state, _op, _player) {
 
 
 
-// ARBITER (African Union, black). STUB - filled in by the politics pass.
-function applyArbiterTally(_state, _op, _player) {
-  return fail('not_implemented');
+// ARBITER (African Union, black): "At the start of your turn you may perform a
+// vote tally. Your vote tallies may treat your delegates as 2 delegates each."
+// Free action, only before anything else this turn and once a turn. op =
+// { double?: false to count your delegates once, star?: a tied winner }. The
+// tally follows O3a: the star moves onto the place with the most delegates; on
+// a tie the Arbiter picks (op.star) or the star may stay where it is if it sits
+// on one of the tied places; no delegates at all sends it to the center.
+function arbiterWinners(asm, profileId, double) {
+  const totals = {};
+  let max = 0;
+  for (const k of ASSEMBLY_PLACES) {
+    const m = (asm.delegates && asm.delegates[k]) || {};
+    let n = 0;
+    for (const [pid, c] of Object.entries(m)) n += (c | 0) * ((double && String(pid) === String(profileId)) ? 2 : 1);
+    totals[k] = n;
+    if (n > max) max = n;
+  }
+  if (max <= 0) return [];
+  return ASSEMBLY_PLACES.filter((k) => totals[k] === max);
+}
+function applyArbiterTally(state, op, player) {
+  if (!state.m0) return fail('not_m0');
+  if (!hasPrivilege(state, player, 'ARBITER')) return fail('no_arbiter');
+  if (player.arbiterTallied) return fail('already_tallied');
+  if ((state.turnActions || []).length > 0) return fail('not_turn_start');
+  const double = op.double !== false;
+  const asm = assemblyOf(state);
+  const winners = arbiterWinners(asm, player.profileId, double);
+  let star;
+  if (!winners.length) star = 'centrist';
+  else if (winners.length === 1) [star] = winners;
+  else if (op.star != null) {
+    star = String(op.star);
+    if (!winners.includes(star)) return fail('star_choice_required', { winners });
+  } else if (winners.includes(state.activeLawStar)) star = state.activeLawStar;
+  else return fail('star_choice_required', { winners });
+  const moved = star !== state.activeLawStar;
+  state.activeLawStar = star;
+  player.arbiterTallied = true;
+  const starName = star === 'centrist' ? 'the center' : ((IDEOLOGY_BY_KEY[star] || {}).name || star);
+  return {
+    ok: true, state,
+    log: `${player.name} called a vote tally as Arbiter${double ? ', counting each of their delegates twice' : ''}: `
+      + (moved ? `the active-law star moves to ${starName}.` : `the active-law star stays on ${starName}.`),
+  };
 }
 
 // Does the player currently OWN a GW/TW thruster of this spectral type anywhere
@@ -11514,7 +11654,7 @@ function applyAirEaterRefuel(state, op, player) {
   if (safeAero) {
     // Parachute generator: the dive is safe, no Diver Orbit roll.
   } else if (wantPay) {
-    player.aqua -= finaoPer;
+    payFinao(state, player, finaoPer);
   } else {
     const d6 = gen.d6();
     rolls.push({ slug: here, kind: 'aero', phase: 'diver', d6, crit: d6 === 1 });
@@ -11910,7 +12050,7 @@ function applyBuildElevator(state, op, player) {
 
   let rolled = false, d6 = null, failed = false;
   if (wantPay) {
-    player.aqua -= finaoPer;
+    payFinao(state, player, finaoPer);
   } else {
     const gen = makeRng(state.seed, state.rng.cursor);
     d6 = gen.d6();
@@ -12253,7 +12393,7 @@ function applyEpicHazard(state, op, player) {
   if (wantPay && finaoPer > (player.aqua | 0) - aquaCost) return fail('insufficient_aqua');
   let rolled = false, d6 = null, failed = false;
   if (wantPay) {
-    player.aqua -= finaoPer;
+    payFinao(state, player, finaoPer);
   } else {
     const gen = makeRng(state.seed, state.rng.cursor);
     d6 = gen.d6();
@@ -12507,13 +12647,13 @@ function pickPayload(op) {
     case 'LOAD_FUEL': return { cardId: op.cardId, holder: op.holder };
     case 'DUMP_FUEL_CARD': return { cardId: op.cardId, holder: op.holder };
     case 'FREE_MARKET': return { cardId: op.cardId, cardIds: op.cardIds, leoCardId: op.leoCardId, leoCardIds: op.leoCardIds };
-    case 'FUNDRAISE': return { place: op.place, moveFrom: op.moveFrom, moveTo: op.moveTo, freeDelegate: op.freeDelegate, discard: op.discard, star: op.star };
+    case 'FUNDRAISE': return { place: op.place, moveFrom: op.moveFrom, moveTo: op.moveTo, freeDelegate: op.freeDelegate, discard: op.discard, star: op.star, ...(op.arbiterDouble ? { arbiterDouble: true } : {}) };
     // rabbleRouser MUST ride along: without it an UNDO/REDO replay would re-run
     // the Lobby with the rouse dropped and quietly lose the Anarchy flip.
     case 'LOBBY': return { ideology: op.ideology, ...(op.rabbleRouser ? { rabbleRouser: true } : {}), ...(op.ambassador ? { ambassador: true } : {}) };
     // Promo crew ops (EMISSARIES / ARBITER, TRADE PORT).
     case 'EMISSARIES': return { ideologies: Array.isArray(op.ideologies) ? op.ideologies.slice() : [] };
-    case 'ARBITER_TALLY': return { ...(op.double === false ? { double: false } : {}) };
+    case 'ARBITER_TALLY': return { ...(op.double === false ? { double: false } : {}), ...(op.star != null ? { star: op.star } : {}) };
     case 'TRADE_PORT': return { cardIds: Array.isArray(op.cardIds) ? op.cardIds.slice() : [], deckType: op.deckType };
     case 'DISCARD': return { cardId: op.cardId };
     // stackId or the replay re-applies a Bernal / Freighter / Outpost's own
@@ -12615,6 +12755,7 @@ function rebuildFromBase(baseState, actions, report = null) {
       return note({ at: i, of: actions.length, kind: a.kind, error: res.error || 'replay_rejected', detail: res.detail || null });
     }
     s = res.state;
+    if (s.__opNotes) delete s.__opNotes;
     // Re-record each replayed action onto the turn history AS we go, exactly
     // like the dispatcher does, so handlers that read turnActions during the
     // replay see the same prior actions they saw the first time. This is what
@@ -15983,6 +16124,11 @@ export function applyOperation(prevState, op, ctx) {
     const cursorBefore = state.rng.cursor;
     const res = FUNCTIONAL[op.kind](state, op, player);
     if (!res.ok) return res;
+    // Settlement notes a handler queued mid-op (Power Brokers' FINAO rebate).
+    if (res.state && res.state.__opNotes) {
+      if (res.state.__opNotes.length) res.log = (res.log ? res.log + ' ' : '') + res.state.__opNotes.join(' ');
+      delete res.state.__opNotes;
+    }
     // Glitch trigger: if this op is a trigger and the stack is glitched, roll
     // 1d6 and decommission every colocated card whose rad-hardness matches.
     // Done BEFORE autoFixGlitches so a human arriving on this same op doesn't

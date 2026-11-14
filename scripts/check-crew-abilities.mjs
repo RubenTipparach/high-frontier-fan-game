@@ -1011,6 +1011,242 @@ check('DOWSERS: suspended by Anarchy; locked under m0+m1+m2 until a Home Bernal'
 // ================================================================ promo group B
 // politics: AMBASSADOR, EMISSARIES, ARBITER, POWER BROKERS, HEROIC
 // (group B checks go here)
+// ---- AMBASSADOR (AEB, white) ----
+// "During lobby, may move a delegate into centrist instead of Decommission."
+function ambassadorLobby({ face = 'primary', anarchy = false, game = { m0: true }, home = false, flag = true } = {}) {
+  const st = playing(2, game);
+  const me = only(st, 0, 'crew_aeb', face);
+  if (home) anchorHome(me);
+  st.anarchy = anarchy;
+  st.activeLawStar = 'centrist';
+  me.aqua = 5;
+  me.lobbiedThisTurn = false;
+  const pid = me.profileId;
+  for (const k of Object.keys(st.assembly.delegates)) delete st.assembly.delegates[k][pid];
+  st.assembly.delegates.freedom = { ...(st.assembly.delegates.freedom || {}), [pid]: 1 };
+  const r = op(st, 0, { kind: 'LOBBY', ideology: 'freedom', ...(flag ? { ambassador: true } : {}) });
+  const d = r.ok ? r.state.assembly.delegates : null;
+  return { r, freedom: d ? (d.freedom[pid] | 0) : null, centrist: d ? ((d.centrist || {})[pid] | 0) : null };
+}
+check('AMBASSADOR: the lobbied delegate moves to Centrist instead of leaving; Rabble-Rouser face cannot', () => {
+  const a = ambassadorLobby();
+  assert(a.r.ok, `Ambassador lobby refused: ${a.r.error}`);
+  eq(a.freedom, 0, 'delegate left Freedom');
+  eq(a.centrist, 1, 'delegate in Centrist');
+  assert(/Centrist/.test(a.r.log), 'Ambassador missing from the log');
+  eq(ambassadorLobby({ face: 'secondary' }).r.error, 'no_ambassador', 'Rabble-Rouser face');
+  const plain = ambassadorLobby({ flag: false });
+  assert(plain.r.ok, plain.r.error);
+  eq(plain.centrist, 0, 'a plain lobby (no Ambassador choice) still discards');
+});
+check('AMBASSADOR: suspended by Anarchy; locked under m0+m1+m2 until a Home Bernal', () => {
+  eq(ambassadorLobby({ anarchy: true }).r.error, 'no_ambassador', 'Anarchy');
+  eq(ambassadorLobby({ game: PROMO }).r.error, 'no_ambassador', 'promo game, no Home Bernal');
+  const ok = ambassadorLobby({ game: PROMO, home: true });
+  assert(ok.r.ok && ok.centrist === 1, `promo game, Home Bernal: ${ok.r.error}`);
+});
+
+// ---- EMISSARIES (African Union, white) ----
+// "On your turn, you may treat any or all Ideologies tied for the most
+// delegates as the Active Law."
+// Freedom and Equality tied at 2 delegates each (Equality's law is Free Market
+// Socialism, a law the player can feel: playerCanUseLaw('equality')). The star
+// sits on Freedom. The check reads the law through the engine's own gate: the
+// Equality research grant on AUCTION_START (`researchGrant`).
+function emissaryGame({ face = 'primary', anarchy = false, game = { m0: true }, home = false } = {}) {
+  const st = playing(2, game);
+  const me = only(st, 0, 'crew_african_union_space_directorate', face);
+  if (home) anchorHome(me);
+  st.anarchy = anarchy;
+  const [a, b] = st.players.map((p) => p.profileId);
+  for (const k of Object.keys(st.assembly.delegates)) st.assembly.delegates[k] = {};
+  st.assembly.delegates.freedom = { [a]: 1, [b]: 1 };
+  st.assembly.delegates.equality = { [a]: 2 };
+  st.activeLawStar = 'freedom';
+  return st;
+}
+check('EMISSARIES: a tied Ideology counts as the Active Law for the African Union seat only', () => {
+  const st = emissaryGame();
+  const r = op(st, 0, { kind: 'EMISSARIES', ideologies: ['equality'] });
+  assert(r.ok, `Emissaries refused: ${r.error}`);
+  eq(JSON.stringify(r.state.players[0].emissaryLaws), '["equality"]', 'emissary laws recorded');
+  assert(/Emissaries/.test(r.log), 'log');
+  eq(op(emissaryGame({ face: 'secondary' }), 0, { kind: 'EMISSARIES', ideologies: ['equality'] }).error, 'no_emissaries', 'Arbiter face');
+  // Not tied: name a place that is not among the winners.
+  eq(op(emissaryGame(), 0, { kind: 'EMISSARIES', ideologies: ['honor'] }).error, 'not_tied', 'untied ideology');
+  // A clear winner is no tie at all.
+  const solo = emissaryGame();
+  solo.assembly.delegates.equality[solo.players[0].profileId] = 3;
+  eq(op(solo, 0, { kind: 'EMISSARIES', ideologies: ['equality'] }).error, 'no_tie', 'single winner');
+});
+check('EMISSARIES: the law reaches the holder through the normal law gate (Equality Research Grants)', () => {
+  // Equality's Research Grants ignore the academia hand limit, so a full hand
+  // can start one only while Equality is usable.
+  const run = (emissary, face = 'primary') => {
+    const st = emissaryGame({ face });
+    st.players.forEach((p) => { p.hand = PATENTS.slice(0, 4).map((c) => c.id); p.aqua = 20; });
+    let s = st;
+    if (emissary) { const r = op(s, 0, { kind: 'EMISSARIES', ideologies: ['equality'] }); assert(r.ok, r.error); s = r.state; }
+    return op(s, 0, { kind: 'AUCTION_START', deckType: 'thruster', useEquality: true });
+  };
+  const withE = run(true);
+  assert(withE.ok, `Emissaries + Equality grant refused: ${withE.error}`);
+  eq(run(false).error, 'hand_limit', 'no Emissaries: Equality is not usable');
+  // The law lasts the holder's turn only: once the turn passes it is gone.
+  const st = emissaryGame();
+  const r = op(st, 0, { kind: 'EMISSARIES', ideologies: ['equality'] });
+  r.state.activeIndex = 1;
+  r.state.players.forEach((p) => { p.hand = PATENTS.slice(0, 4).map((c) => c.id); p.aqua = 20; p.opsRemaining = 4; });
+  eq(op(r.state, 1, { kind: 'AUCTION_START', deckType: 'thruster', useEquality: true }).error, 'hand_limit', 'the other seat on its turn');
+});
+check('EMISSARIES: suspended by Anarchy; locked under m0+m1+m2 until a Home Bernal', () => {
+  eq(op(emissaryGame({ anarchy: true }), 0, { kind: 'EMISSARIES', ideologies: ['equality'] }).error, 'no_emissaries', 'Anarchy');
+  eq(op(emissaryGame({ game: PROMO }), 0, { kind: 'EMISSARIES', ideologies: ['equality'] }).error, 'no_emissaries', 'promo, no Home Bernal');
+  assert(op(emissaryGame({ game: PROMO, home: true }), 0, { kind: 'EMISSARIES', ideologies: ['equality'] }).ok, 'promo + Home Bernal');
+});
+
+// ---- ARBITER (African Union, black) ----
+// "At the start of your turn you may perform a vote tally. Your vote tallies
+// may treat your delegates as 2 delegates each."
+// Seat 0 holds 1 Honor delegate; seat 1 holds 2 Freedom. Star on Freedom. A
+// doubled tally ties Honor with Freedom, so the Arbiter may pull the star to
+// Honor; a plain tally leaves Freedom the clear winner.
+function arbiterGame({ face = 'secondary', anarchy = false, game = { m0: true }, home = false } = {}) {
+  const st = playing(2, game);
+  const me = only(st, 0, 'crew_african_union_space_directorate', face);
+  if (home) anchorHome(me);
+  st.anarchy = anarchy;
+  const [a, b] = st.players.map((p) => p.profileId);
+  for (const k of Object.keys(st.assembly.delegates)) st.assembly.delegates[k] = {};
+  st.assembly.delegates.honor = { [a]: 1 };
+  st.assembly.delegates.freedom = { [b]: 2 };
+  st.activeLawStar = 'freedom';
+  return st;
+}
+check('ARBITER: a start-of-turn tally with doubled delegates moves the star; Emissaries face cannot', () => {
+  const r = op(arbiterGame(), 0, { kind: 'ARBITER_TALLY', star: 'honor' });
+  assert(r.ok, `Arbiter tally refused: ${r.error}`);
+  eq(r.state.activeLawStar, 'honor', 'star after the doubled tally');
+  eq(r.state.players[0].opsRemaining, 4, 'the tally spent an operation');
+  assert(/Arbiter/.test(r.log), 'log');
+  const single = op(arbiterGame(), 0, { kind: 'ARBITER_TALLY', double: false, star: 'honor' });
+  assert(single.ok, single.error);
+  eq(single.state.activeLawStar, 'freedom', 'an undoubled tally leaves Freedom the clear winner');
+  eq(op(arbiterGame({ face: 'primary' }), 0, { kind: 'ARBITER_TALLY', star: 'honor' }).error, 'no_arbiter', 'Emissaries face');
+});
+check('ARBITER: only at the start of the turn, once per turn', () => {
+  const r = op(arbiterGame(), 0, { kind: 'ARBITER_TALLY', star: 'honor' });
+  eq(op(r.state, 0, { kind: 'ARBITER_TALLY', star: 'honor' }).error, 'already_tallied', 'second tally');
+  const st = arbiterGame();
+  st.turnActions = [{ kind: 'INCOME', payload: {} }];
+  eq(op(st, 0, { kind: 'ARBITER_TALLY', star: 'honor' }).error, 'not_turn_start', 'after another action');
+});
+check('ARBITER: the holder\'s Fundraise tally may count delegates twice; nobody else\'s can', () => {
+  const fr = (face, dbl) => op(arbiterGame({ face }), 0, { kind: 'FUNDRAISE', star: 'honor', ...(dbl ? { arbiterDouble: true } : {}) });
+  const ok = fr('secondary', true);
+  assert(ok.ok, `doubled fundraise: ${ok.error}`);
+  eq(ok.state.activeLawStar, 'honor', 'star after the doubled fundraise');
+  eq(fr('secondary', false).state.activeLawStar, 'freedom', 'a plain fundraise leaves Freedom the clear winner');
+  eq(fr('primary', true).error, 'no_arbiter', 'Emissaries face asking to double');
+});
+check('ARBITER: suspended by Anarchy; locked under m0+m1+m2 until a Home Bernal', () => {
+  eq(op(arbiterGame({ anarchy: true }), 0, { kind: 'ARBITER_TALLY', star: 'honor' }).error, 'no_arbiter', 'Anarchy');
+  eq(op(arbiterGame({ game: PROMO }), 0, { kind: 'ARBITER_TALLY', star: 'honor' }).error, 'no_arbiter', 'promo, no Home Bernal');
+  assert(op(arbiterGame({ game: PROMO, home: true }), 0, { kind: 'ARBITER_TALLY', star: 'honor' }).ok, 'promo + Home Bernal');
+});
+
+// ---- POWER BROKERS (The Sea Peoples, black) ----
+// "After you pay FINAO, gain 1 Aqua per Seniority Disk on the Assembly (max
+// half FINAO paid, round down)."
+// Same one-hazard FINAO route the Open Source FINAO check flies.
+function brokerMove({ face = 'secondary', disks = 3, anarchy = false, game = { m0: true }, home = false, idx = 0 } = {}) {
+  const st = playing(2, game);
+  st.activeIndex = idx;
+  const me = st.players[idx];
+  only(st, idx, 'crew_the_sea_peoples', face);
+  if (home) anchorHome(me);
+  st.anarchy = anarchy;
+  for (const k of Object.keys(st.assembly.seniority)) st.assembly.seniority[k] = 0;
+  st.assembly.seniority.honor = disks;
+  me.rocket.siteId = 'lag-m0sea';
+  me.rocket.stack = [{ id: SOLAR_PUSH, kind: 'patent', face: 'primary' }];
+  me.rocket.activeThrusterId = SOLAR_PUSH;
+  me.rocket.tank = 12;
+  me.aqua = 30;
+  const r = op(st, idx, { kind: 'MOVE', hazardPay: true, segments: [{ from: 'lag-m0sea', to: 'burn-5eobz', burns: 1, turn: 1 }, { from: 'burn-5eobz', to: 'lag-c3cha', burns: 0, turn: 1 }] });
+  assert(r.ok, `move refused: ${r.error}`);
+  return { net: 30 - r.state.players[idx].aqua, log: r.log, others: r.state.players.filter((_, i) => i !== idx).map((p) => p.aqua) };
+}
+check('POWER BROKERS: FINAO pays back 1 aqua per Seniority Disk, capped at half the FINAO', () => {
+  const pb = brokerMove({ disks: 1 });
+  const ctl = brokerMove({ face: 'primary', disks: 1 });   // Courier face
+  eq(ctl.net - pb.net, 1, 'one disk rebate');
+  assert(/Power Brokers/.test(pb.log), 'rebate missing from the log');
+  const big = brokerMove({ disks: 9 });
+  const cap = Math.floor(ctl.net / 2);
+  eq(ctl.net - big.net, cap, `nine disks capped at half of ${ctl.net} FINAO`);
+  eq(brokerMove({ disks: 0 }).net, ctl.net, 'no disks, no rebate');
+  return `FINAO ${ctl.net}: 1 disk back 1, 9 disks back ${cap}`;
+});
+check('POWER BROKERS: suspended by Anarchy; locked under m0+m1+m2 until a Home Bernal', () => {
+  const ctl = brokerMove({ face: 'primary', disks: 2 }).net;
+  eq(brokerMove({ disks: 2, anarchy: true }).net, ctl, 'Anarchy');
+  eq(brokerMove({ disks: 2, game: PROMO }).net, brokerMove({ face: 'primary', disks: 2, game: PROMO }).net, 'promo, no Home Bernal');
+  assert(brokerMove({ disks: 2, game: PROMO, home: true }).net < brokerMove({ face: 'primary', disks: 2, game: PROMO, home: true }).net, 'promo + Home Bernal pays');
+});
+
+// ---- HEROIC (Galahad Group, white) ----
+// "This character can carry any number of glory chits. You may lobby honor
+// without losing a delegate."
+function heroicLobby({ face = 'primary', ideology = 'honor', anarchy = false, game = { m0: true }, home = false } = {}) {
+  const st = playing(2, game);
+  const me = only(st, 0, 'crew_galahad_group', face);
+  if (home) anchorHome(me);
+  st.anarchy = anarchy;
+  st.activeLawStar = 'centrist';
+  me.aqua = 5;
+  const pid = me.profileId;
+  st.assembly.delegates[ideology] = { ...(st.assembly.delegates[ideology] || {}), [pid]: 1 };
+  const r = op(st, 0, { kind: 'LOBBY', ideology });
+  assert(r.ok, `lobby refused: ${r.error}`);
+  return (r.state.assembly.delegates[ideology] || {})[pid] | 0;
+}
+check('HEROIC: Galahad lobbies honor and keeps the delegate; Quest face loses it; other laws cost one', () => {
+  eq(heroicLobby({}), 1, 'Heroic honor lobby');
+  eq(heroicLobby({ face: 'secondary' }), 0, 'Quest face honor lobby');
+  eq(heroicLobby({ ideology: 'freedom' }), 0, 'Heroic freedom lobby');
+});
+check('HEROIC lobby: suspended by Anarchy; locked under m0+m1+m2 until a Home Bernal', () => {
+  eq(heroicLobby({ anarchy: true }), 0, 'Anarchy');
+  eq(heroicLobby({ game: PROMO }), 0, 'promo, no Home Bernal');
+  eq(heroicLobby({ game: PROMO, home: true }), 1, 'promo + Home Bernal');
+});
+// Glory: the Galahad crew already carries a chit and loads a second at a fresh
+// zone. Any other lone Human would be refused glory_carry_full.
+function heroicGlory({ face = 'primary', anarchy = false, game = {}, home = false, crewId = 'crew_galahad_group' } = {}) {
+  const st = playing(2, game);
+  const me = only(st, 0, 'crew_galahad_group', face);
+  if (home) anchorHome(me);
+  st.anarchy = anarchy;
+  st.players.forEach((p) => { p.rocket.stack = []; p.leo = []; });
+  me.rocket.siteId = 'mars-north-pole';
+  me.rocket.stack = [{ id: SOLAR_PUSH, kind: 'patent', face: 'primary' }, { id: crewId, kind: 'crew', face }];
+  me.glory.visited = ['Earth'];
+  me.glory.chits = [{ zone: 'Earth', earnedTurn: 0, crewId }];
+  return op(st, 0, { kind: 'LOAD_GLORY' });
+}
+check('HEROIC: the Galahad crew carries a second glory chit; Quest face cannot', () => {
+  const h = heroicGlory({});
+  assert(h.ok, `Heroic load refused: ${h.error}`);
+  eq(h.state.players[0].glory.chits.length, 2, 'chits carried');
+  assert(h.state.players[0].glory.chits.every((c) => c.crewId === 'crew_galahad_group'), 'both chits ride the Galahad crew');
+  eq(heroicGlory({ face: 'secondary' }).error, 'glory_carry_full', 'Quest face');
+});
+check('HEROIC glory: suspended by Anarchy; locked under m0+m1+m2 until a Home Bernal', () => {
+  eq(heroicGlory({ anarchy: true }).error, 'glory_carry_full', 'Anarchy');
+  eq(heroicGlory({ game: PROMO }).error, 'glory_carry_full', 'promo, no Home Bernal');
+  assert(heroicGlory({ game: PROMO, home: true }).ok, 'promo + Home Bernal');
+});
 
 
 
