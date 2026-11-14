@@ -16908,7 +16908,7 @@ function boardTextIndex() {
     const node = byId2.get(slug);
     if (!node) continue;
     const near = nearestNamedSite(node.x, node.y);
-    out.push({ __board: true, text, x: node.x, y: node.y, nodeId: node.id,
+    out.push({ __board: true, text, x: node.x, y: node.y, nodeId: node.id, slug,
       where: near ? near.name : '' });
     seen.add(`${text.toLowerCase()}@${Math.round(node.x / 6)},${Math.round(node.y / 6)}`);
   }
@@ -16944,7 +16944,7 @@ function saveMapPins(pins) {
 let _mapPinsMem = null;
 function mapPins() { if (!_mapPinsMem) _mapPinsMem = loadMapPins(); return _mapPinsMem; }
 function pinBoardResults(query, hits) {
-  const items = hits.map((h) => ({ text: h.text, where: h.where, x: h.x, y: h.y, nodeId: h.nodeId || null }));
+  const items = hits.map((h) => ({ text: h.text, where: h.where, x: h.x, y: h.y, nodeId: h.nodeId || null, slug: h.slug || null }));
   const pins = mapPins().filter((p) => p.query.toLowerCase() !== query.toLowerCase());
   pins.unshift({ query, items, open: true });
   _mapPinsMem = pins.slice(0, 8);
@@ -16997,7 +16997,7 @@ function renderMapPins(root) {
     const ul = document.createElement('ul');
     for (const it of pin.items) {
       const li = document.createElement('li');
-      const b = document.createElement('strong'); b.textContent = it.text;
+      const b = document.createElement('strong'); b.textContent = it.slug ? `${it.slug} (${it.text})` : it.text;
       const w = document.createElement('em'); w.textContent = it.where ? `near ${it.where}` : '';
       li.append(b, w);
       li.title = 'Show on the map';
@@ -17067,9 +17067,9 @@ function wireSearch(host) {
     // row that pins the whole list to the map.
     const board = searchBoardText(q);
     const pinRow = board.length ? [{ __pin: { query: q.trim(), hits: board },
-      name: `📌 Pin these ${board.length} board-text result${board.length === 1 ? '' : 's'}`, type: 'keep this list on the map' }] : [];
+      name: `📌 Pin these ${board.length} result${board.length === 1 ? '' : 's'}`, type: 'keep this list on the map' }] : [];
     return groups.concat(nameStarts, nameIncl, idStarts, idIncl).slice(0, 12)
-      .concat(pinRow, board.map((h) => ({ ...h, name: h.text, type: h.where ? `board text · near ${h.where}` : 'board text' })));
+      .concat(pinRow, board.map((h) => ({ ...h, name: h.slug ? `${h.slug} (${h.text})` : h.text, type: h.where ? `near ${h.where}` : '' })));
   }
 
   function renderList(items) {
