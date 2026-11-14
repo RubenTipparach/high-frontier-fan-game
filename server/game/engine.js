@@ -6407,8 +6407,14 @@ function applyBoost(state, op, player) {
     log = `${player.name} boosted ${countedCards(ids)} to ${homeName} for ${cost} aqua${tail}.`;
   }
   if (isoShuttle) log += ` Iso-Shuttles took ${ISO_SHUTTLES_DISCOUNT} aqua off the launch.`;
-  // Launch Fees: a boost pays every Launch Fees holder +1 aqua from the pool.
-  const fees = creditPrivilegeIncome(state, 'LAUNCH_FEES', 'Launch Fees');
+  // Launch Fees: "+1 Aqua after any player performs a boost OPERATION". A turn's
+  // boosting is ONE operation (the first boost spends it, later ones ride free
+  // as part of it), so pay only on the turn's first boost - not on every BOOST
+  // op (audit bug LAUNCH-FEES-PER-OP: three one-card boosts paid NASA 3).
+  // turnActions does not hold this boost yet, so hasBoostedThisTurn reads the
+  // turn BEFORE it. A solitaire Launch Contracts boost (a free action by law)
+  // still counts as the turn's boost operation.
+  const fees = hasBoostedThisTurn(state) ? [] : creditPrivilegeIncome(state, 'LAUNCH_FEES', 'Launch Fees');
   if (fees.length) log += ' ' + fees.join(' ');
   const piggy = openPiggybackWindow(state, player, piggyMass);
   if (piggy.length) log += ' ' + piggy.join(' ');

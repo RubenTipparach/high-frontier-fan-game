@@ -2296,6 +2296,18 @@ function playerHasPushFactory(player) {
 function playerPowersatBernal(player) {
   return playerBernalPrivilege(player, 'POWERSAT');
 }
+// POWERSAT beam: the rival (if any) whose live Powersat is trained on this
+// player. Mirror of the engine's powersatBeamedTo - thrust only, no assist.
+function playerPowersatBeamedBy(target) {
+  if (!target) return null;
+  const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
+  for (const p of players) {
+    if (!p || String(p.profileId) === String(target.profileId)) continue;
+    const beams = Array.isArray(p.powersatBeams) ? p.powersatBeams : [];
+    if (beams.some((id) => String(id) === String(target.profileId)) && playerHasPrivilege(p, 'POWERSAT')) return p;
+  }
+  return null;
+}
 function playerHasPowersat(player) {
   return playerHasPrivilege(player, 'POWERSAT') || playerHasPushFactory(player)
     || playerPowersatBernal(player);
@@ -8431,6 +8443,35 @@ function renderMpPlayer(p, isMe, isActive) {
     });
     headRow.append(tradeBtn);
   }
+  // POWERSAT beam (ESA): "During any player's Turn, may give +1 thrust to any
+  // Spacecraft that has a push icon. Negotiable." The holder trains a standing
+  // beam on a rival from that rival's row, any time (on or off turn, like a
+  // trade), and switches it off the same way. Hidden unless I hold the live
+  // privilege (Anarchy / the Module 2 lock hide it); the engine re-checks.
+  if (!isMe && !_spectator) {
+    const meP = mySnapshotPlayer();
+    if (meP && playerHasPrivilege(meP, 'POWERSAT')) {
+      const beaming = (Array.isArray(meP.powersatBeams) ? meP.powersatBeams : [])
+        .some((id) => String(id) === String(p.profileId));
+      const beamBtn = document.createElement('button');
+      beamBtn.type = 'button';
+      beamBtn.className = 'mp-player-trade mp-powersat-beam' + (beaming ? ' is-active' : '');
+      beamBtn.textContent = '🛰';
+      beamBtn.dataset.beam = beaming ? 'on' : 'off';
+      beamBtn.title = beaming
+        ? `Powersat: beaming @${p.name} (+1 thrust to their push-icon craft). Tap to switch the beam off.`
+        : `Powersat: beam @${p.name}'s push-icon craft for +1 thrust (negotiable - strike a deal first if you like).`;
+      beamBtn.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        if (!_online || _spectator || !_onlineGameId || !_onlineMe) return;
+        const r = await submitSeatOp(_onlineGameId,
+          { kind: 'POWERSAT_BEAM', targetId: p.profileId, on: !beaming }, _onlineMe.token).catch(() => null);
+        if (!r || !r.ok) { _onlineToast(humanizeOnlineOpError((r && r.error) || 'network', r && r.detail), 'error'); return; }
+        if (r.data && r.data.game) applySnapshot(r.data.game.state, r.data.game.seq);
+      });
+      headRow.append(beamBtn);
+    }
+  }
   if (isTradePartner) wrap.classList.add('mp-trade-with');
   // Crew-ability badges: this player's own faction power plus any borrowed
   // through a trade (timed grants show a turn counter, permanent ones a lock).
@@ -8635,10 +8676,18 @@ function renderAbilityBadges(p) {
   const showPowersat = playerHasPowersat(p)
     && own !== 'POWERSAT'
     && !borrowed.some((g) => g && g.ability === 'POWERSAT');
-  if (!own && !borrowed.length && !showPowersat) return null;
+  const beamer = playerPowersatBeamedBy(p);
+  if (!own && !borrowed.length && !showPowersat && !beamer) return null;
   const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
   const row = document.createElement('div');
   row.className = 'mp-ability-badges';
+  if (beamer) {
+    const b = document.createElement('span');
+    b.className = 'mp-ability powersat beamed';
+    b.textContent = '🛰 Beamed';
+    b.title = `@${beamer.name}'s Powersat gives this player's push-icon craft +1 thrust.`;
+    row.appendChild(b);
+  }
   if (showPowersat) {
     const b = document.createElement('span');
     b.className = 'mp-ability powersat';
@@ -9517,6 +9566,9 @@ function humanizeOnlineOpError(code, detail) {
     not_tied: 'That Ideology is not tied for the most delegates.',
     already_active_law: 'That Ideology already holds the Active Law.',
     no_arbiter: 'Only the Arbiter may count their delegates twice.',
+    no_powersat: 'Your Powersat is not working right now (suspended in Anarchy, or waiting on your Home Bernal).',
+    beam_self: 'Your Powersat already pushes your own craft.',
+    bad_target: 'That player is not at this table.',
     already_tallied: 'You already called your Arbiter vote tally this turn.',
     not_turn_start: 'The Arbiter tally may only be called at the start of your turn.',
     no_such_chit: 'You are not carrying that glory chit.',
@@ -15195,7 +15247,7 @@ function myFreighterOriginThrustBonus() {
   return bonus;
 }
 function myFreighterThrust() {
-  return freighterNetThrust(playerHasPowersat(mySnapshotPlayer())) + myFreighterOriginThrustBonus();
+  return freighterNetThrust(playerHasPowersat(mySnapshotPlayer()) || !!playerPowersatBeamedBy(mySnapshotPlayer())) + myFreighterOriginThrustBonus();
 }
 // Enter the manual route plotter. opts.unit selects the mover:
 //   'rocket'    (default) - budget = active thruster thrust, pivots = thruster
@@ -25987,7 +26039,8 @@ function syncSandboxRocket() {
   setSolarZone(solarZone);
   // Powersat (ESA): my faction grants +1 thrust to a push-icon thruster.
   // Mirror the engine so the client's thrust/fuel math stays byte-identical.
-  setHasPowersat(myHasPowersat());
+  // A rival ESA's Powersat beam adds the push thrust too (not the assist).
+  setHasPowersat(myHasPowersat() || !!playerPowersatBeamedBy(mySnapshotPlayer()));
   // MASS BEAM Future: +2 Powersat push thrust. Mirror the engine
   // (hasFutureEffect(player, 'powersatPlus2')).
   setPowersatFutureBonus(myHasFutureEffect('powersatPlus2') ? 2 : 0);
@@ -33958,7 +34011,7 @@ const MP_LOG_ICONS = {
   DRAFT_BONUS_SELL: '💱', DRAFT_BONUS_DONE: '✅',
   UNDO: '↩', REDO: '↪',
   FUNDRAISE: '🗳', LOBBY: '📜',
-  EMISSARIES: '🤝', ARBITER_TALLY: '⚖', TRADE_PORT: '🏪', PIGGYBACK: '🚀',
+  EMISSARIES: '🤝', ARBITER_TALLY: '⚖', TRADE_PORT: '🏪', PIGGYBACK: '🚀', POWERSAT_BEAM: '🛰',
   ADMIN_REPAIR: '🔧', ADMIN_EDIT: '🔧',
 };
 

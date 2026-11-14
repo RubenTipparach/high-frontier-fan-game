@@ -317,7 +317,7 @@ check('LAUNCH FEES: suspended by Anarchy; locked under M2 until a Home Bernal', 
   eq(boostWith({ holderIdx: 1, actorIdx: 0, m2: true, home: true }).delta[1], 1, 'M2 unlocked');
 });
 
-bug('LAUNCH-FEES-PER-OP', 'LAUNCH FEES: one boost OPERATION pays +1 once, not once per follow-up boost', () => {
+check('LAUNCH FEES: one boost OPERATION pays +1 once, not once per follow-up boost', () => {
   // Boost is one operation per turn; later boosts the same turn ride free as
   // part of it (hasBoostedThisTurn). "+1 Aqua after any player performs a boost
   // operation" should therefore pay once per operation. The engine credits on
@@ -427,23 +427,45 @@ check('POWERSAT: +1 thrust to the ESA seat\'s own push-icon thruster', () => {
 check('POWERSAT: suspended by Anarchy', () => {
   eq(pushThrust({ holderIdx: 0, moverIdx: 0, anarchy: true }), pushThrust({ holderIdx: 1, moverIdx: 0 }), 'ESA under Anarchy');
 });
-bug('POWERSAT-ANY', 'POWERSAT: "any Spacecraft ... during any player\'s Turn" - an opponent\'s push thruster gets the +1', () => {
-  // The printed text lets ESA beam ANY push-icon spacecraft, on anyone's turn.
-  // The engine only ever reads hasPowersat(mover), so ESA cannot extend it to
-  // a rival without a negotiated ability loan (a trade).
-  const withEsaAtTable = pushThrust({ holderIdx: 1, moverIdx: 0 });
-  const st = playing(2);
-  // No ESA anywhere: control.
-  st.players.forEach((p, i) => give(st, i, CREW[i].id, 'primary'));
-  const noEsa = (() => {
-    const me = st.players[0];
-    const from = leoSlug(); const to = neighborSlugs(from)[0];
-    me.rocket.siteId = null;
-    me.rocket.stack = [{ id: SOLAR_PUSH, kind: 'patent', face: 'primary' }];
-    me.rocket.activeThrusterId = SOLAR_PUSH; me.rocket.tank = 12;
-    return op(st, 0, { kind: 'MOVE', debug: true, segments: [{ from, to, burns: 0, turn: 1 }] }).calc.finalThrust;
-  })();
-  assert(withEsaAtTable === noEsa + 1, `an opponent of ESA got ${withEsaAtTable - noEsa} extra thrust, not the offered +1 (engine has no way for ESA to offer it outside a trade)`);
+// POWERSAT reaching a rival (audit POWERSAT-ANY, now built): the ESA seat
+// trains a standing beam on a named rival with the off-turn POWERSAT_BEAM op,
+// and that rival's push-icon thruster gets +1 thrust (thrust only).
+function beamedThrust({ face = 'secondary', on = true, anarchyAfter = false, game = {}, home = false } = {}) {
+  let st = playing(2, game);
+  const esa = only(st, 1, 'crew_anonp2p_esa', face);
+  if (home) anchorHome(esa);
+  st.activeIndex = 0;                                   // seat 0's turn: the beam is set OFF turn
+  const b = op(st, 1, { kind: 'POWERSAT_BEAM', targetId: st.players[0].profileId, on });
+  if (!b.ok) return { error: b.error };
+  st = b.state;
+  if (anarchyAfter) st.anarchy = true;
+  const me = st.players[0];
+  const from = leoSlug(); const to = neighborSlugs(from)[0];
+  me.rocket.siteId = null;
+  me.rocket.stack = [{ id: SOLAR_PUSH, kind: 'patent', face: 'primary' }];
+  me.rocket.activeThrusterId = SOLAR_PUSH; me.rocket.tank = 12;
+  const r = op(st, 0, { kind: 'MOVE', debug: true, segments: [{ from, to, burns: 0, turn: 1 }] });
+  assert(r.ok, `debug move refused: ${r.error}`);
+  return { thrust: r.calc.finalThrust, log: b.log, state: st };
+}
+check('POWERSAT: ESA beams a rival\'s push-icon craft off turn (+1), and can switch it off', () => {
+  const plain = pushThrust({ holderIdx: 1, moverIdx: 0 });
+  const beamed = beamedThrust();
+  eq(beamed.thrust - plain, 1, 'rival thrust with the beam');
+  assert(/Powersat/.test(beamed.log), 'beam missing from the log');
+  eq(beamedThrust({ on: false }).thrust, plain, 'rival thrust with the beam switched off');
+  // The beam reaches only the named rival: the ESA seat's own +1 is unchanged
+  // and a third party is not beamed (2-seat table: the only other is the target).
+  return `${plain} -> ${beamed.thrust}`;
+});
+check('POWERSAT: Open Source FINAO (other face) cannot beam; Anarchy cuts a standing beam', () => {
+  eq(beamedThrust({ face: 'primary' }).error, 'no_powersat', 'Open Source face beam');
+  eq(beamedThrust({ anarchyAfter: true }).thrust, pushThrust({ holderIdx: 1, moverIdx: 0 }), 'beam under Anarchy');
+});
+check('POWERSAT: under M2 the beam is locked until the ESA seat anchors a Home Bernal', () => {
+  eq(beamedThrust({ game: { m2: true } }).error, 'no_powersat', 'M2, no Home Bernal');
+  const ok = beamedThrust({ game: { m2: true }, home: true });
+  assert(ok.thrust != null, `M2 + Home Bernal: ${ok.error}`);
 });
 
 // ---- SKUNKWORKS (Shimizu) ----
