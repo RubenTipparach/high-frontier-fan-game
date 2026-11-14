@@ -129,6 +129,14 @@ Run `node docs/ad-astra/analyze-sol-map.mjs` to re-measure. The numbers:
      opening would swallow a pivot already placed, a spoke or an Ad Astra
      route (`giantPen`). As a last resort the shorter of two openings beside a
      stranded pivot is kept (a counted crossing) so no pivot dead-ends.
+7b. **The Oort zone (SM-1g).** On a lone star or one with a distant
+   companion, `roll.js` adds one zone past the planets (`stars[0].oort`): no
+   planet or giant goes there; it holds the far dwarf planet (a Pluto), the
+   `Kuiper belt` and 7 of the 10 comets (3 stay in the main-belt zone as
+   short-period comets). A binary board's primary is too small for one. A
+   comet in the outermost zone climbs OUTWARD and up (`cometGeom`), away from
+   the rings; straight up from the lower half of the board crossed every
+   ring in between.
 8. **Asteroids (SM-5f).** `kind: 'belt'` (count up to 30, sizes) and a giant's
    `trojans: n` expand into groups: ring pivot -> one escape burn ->
    Lagrange -> up to 3 rocks fanned 22 px out, alternating sides of the ring.

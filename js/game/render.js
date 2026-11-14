@@ -6,6 +6,7 @@ import { assetUrl } from '../base.js';
 import { isBatterySave, onBatterySaveChange } from '../prefs.js';
 import { isSirens, isHermes } from './online-mode.js';
 import { toLayoutPx, uiScale } from '../ui-scale.js';
+import { makePlanetTexture, PlanetSphere } from './planet-texture.js';
 import { fleetLabel } from '../../data/fleet-tags.js';
 import { NODE_TAGS, spriteForTags } from '../../data/node-tags.js';
 import { serverTagLabels, tagInfo } from '../../data/node-labels.js';
@@ -1043,7 +1044,12 @@ export class MapRenderer {
       // asteroid belt. Maps of other places (e.g. the Ad Astra star map and
       // its star systems) turn this off; Sol keeps it.
       solDecor: true,
+      // Painted, turning body spheres (planet-texture.js) for sites that name a
+      // `planetStyle`. Off by default: only the Ad Astra mockups turn it on;
+      // every other site keeps the classic shaded sphere.
+      texturedBodies: false,
     };
+    this._planetSpheres = new Map(); // texturedBodies: one painted sphere per body
     // Canonical zone polygons (the frozen source-of-truth data),
     // wired in from browse.js: { polys: {zone:[[{x,y}]]}, colors, order }.
     this._canonicalZones = { polys: {}, colors: {}, order: [] };
@@ -3641,6 +3647,41 @@ export class MapRenderer {
     };
 
     const palSig = (p) => `${p.light}|${p.base}|${p.dark}|${p.atmosphere || '-'}`;
+    // texturedBodies: a body with a planetStyle is painted once and turns,
+    // lit from its nearest star. Painting is budgeted per frame (~12 ms) and a
+    // body waits on its classic sphere until its turn; under 5 px on screen,
+    // or in battery-save mode, it holds still.
+    const textured = !!this.options.texturedBodies;
+    const now = performance.now() / 1000; let paintBudget = 12; let animating = false; let pending = false;
+    const suns = textured ? this._realSites.filter((s) => (TYPE_VIS[s.type] || {}).kind === 'sun') : [];
+    const mkCanvas = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+    const seedOf = (str) => { let h = 2166136261; for (const ch of String(str)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); } return Math.abs(h) % 100000; };
+    const drawTextured = (site, wx, wy, haloR, pal) => {
+      const sr = Math.min(haloR * eff, cap); if (sr < 0.5) return true;
+      const sx = this.pan.x + wx * eff, sy = this.pan.y + wy * eff; const m = sr * 1.6 + 40;
+      if (sx < -m || sx > hostW + m || sy < -m || sy > hostH + m) return true;
+      const id = `${site.id2 || site.id}|${site.planetStyle}`;
+      const R = Math.max(2, Math.round(sr * this.dpr)); const texW = R > 40 ? 192 : 96;
+      let ent = this._planetSpheres.get(id);
+      if (!ent || ent.texW < texW) {
+        if (paintBudget <= 0) { pending = true; return false; } // its turn comes next frame
+        const t0 = performance.now(); const seed = site.planetSeed ?? seedOf(site.bodyKey || site.name || site.id);
+        const sphere = new PlanetSphere(makePlanetTexture(site.planetStyle, pal, seed, texW, texW / 2), { tilt: 0.1 + (seed % 7) * 0.06, atmosphere: pal.atmosphere || null });
+        ent = { sphere, texW, key: '', speed: (site.planetStyle === 'gas' || site.planetStyle === 'ice-giant' || site.planetStyle === 'brown' ? 0.32 : 0.16) * (0.8 + (seed % 5) * 0.1), phase: (seed % 628) / 100 };
+        this._planetSpheres.set(id, ent); paintBudget -= performance.now() - t0;
+      }
+      let sun = null, best = Infinity; for (const s of suns) { const d = (s.x - wx) ** 2 + (s.y - wy) ** 2; if (d < best) { best = d; sun = s; } }
+      const light = sun && best > 1 ? { x: sun.x - wx, y: sun.y - wy } : { x: -1, y: -1 };
+      const moving = sr >= 5 && !isBatterySave(); if (moving) animating = true;
+      const spin = moving ? ent.phase + now * ent.speed : ent.phase;
+      const key = `${R}|${Math.round(spin * 60)}|${Math.round(Math.atan2(light.y, light.x) * 20)}`;
+      if (ent.key !== key) { ent.sphere.render(R, spin, light, mkCanvas); ent.key = key; }
+      if (pal.atmosphere) { const g = ctx.createRadialGradient(sx, sy, sr * 0.85, sx, sy, sr * 1.45); g.addColorStop(0, pal.atmosphere); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(sx, sy, sr * 1.45, 0, Math.PI * 2); ctx.fill(); }
+      const cv = ent.sphere.canvas; const half = cv.width / this.dpr / 2;
+      ctx.drawImage(cv, sx - half, sy - half, half * 2, half * 2);
+      if (site.hazard) { ctx.lineWidth = 1.1; ctx.strokeStyle = '#f87171'; ctx.beginPath(); ctx.arc(sx, sy, sr, 0, Math.PI * 2); ctx.stroke(); }
+      return true;
+    };
     const sphereExtent = (p, rings) => (rings ? 2.3 : (p.atmosphere ? 1.55 : 1.12));
     const paintSphere = (pal, rings, hazard) => (c, cx, cy, r) => {
       if (rings) {
@@ -3661,6 +3702,7 @@ export class MapRenderer {
       const haloR = vis.haloR || 20;
       const pal = paletteFor(g.exemplar);
       const rings = ringDefFor(g.exemplar);
+      if (textured && g.exemplar.planetStyle && !rings && drawTextured(g.exemplar, g.cx, g.cy, haloR, pal)) continue;
       // Ring-bearing groups key per-group (rings differ per planet);
       // ring-free groups dedupe on palette so similar bodies share a
       // sprite.
@@ -3690,9 +3732,12 @@ export class MapRenderer {
         continue;
       }
       const rings = ringDefFor(site);
+      if (textured && site.planetStyle && !rings && drawTextured(site, site.x, site.y, haloR, pal)) continue;
       const key = rings ? `ring|${site.id}` : `sph|${palSig(pal)}|${site.hazard ? 'h' : '-'}`;
       blit(key, site.x, site.y, haloR, sphereExtent(pal, rings), paintSphere(pal, rings, site.hazard));
     }
+    // turning bodies redraw about 10 times a second; unpainted ones next frame
+    if ((animating || pending) && !this._spinTimer) this._spinTimer = setTimeout(() => { this._spinTimer = null; this._scheduleDraw(); }, pending ? 16 : 100);
   }
 
   // The Sun + comets, drawn live in WORLD space. Their coronas / tails

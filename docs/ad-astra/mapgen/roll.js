@@ -30,7 +30,10 @@ export function rollSystem({ star, chits = {}, rint, worldName = () => 'World', 
   // ---- per-star plans (SM-1f): planets, zones, giants
   const plan = [];
   const primaryPlanets = planets ? Math.max(TARGETS.planets[0], Math.min(TARGETS.planets[1], planets)) : hasB ? rint(4, 6) : hasD ? (star.type === 'yellow' ? rint(5, 10) : rint(4, 7)) : star.type === 'yellow' ? rint(6, 15) : star.type === 'red' ? rint(4, 9) : rint(4, 6);
-  const zonesFor = (n, role) => (role === 'primary' ? (hasB ? 4 : Math.max(4, Math.min(hasD ? 7 : 9, Math.ceil(n / 2) + 1))) : 3);
+  // SM-1f zones for the planets, plus the primary's Oort zone (SM-1g)
+  // (a binary board's primary is too small for an Oort zone; the biggest systems keep 9 bands in all)
+  const oort = !hasB;
+  const zonesFor = (n, role) => (role === 'primary' ? (hasB ? 4 : Math.max(4, Math.min(hasD ? 6 : 8, Math.ceil(n / 2) + 1)) + 1) : 3);
   plan.push({ i: 0, name: comps.length ? `${star.name} A` : star.name, type: star.type, role: 'primary', planets: primaryPlanets, hz: chits.hz, short, giants: chits.comps || [] });
   comps.forEach((c) => plan.push({ i: plan.length, name: c.name, type: c.type, role: c.role, planets: c.role === 'binary' ? rint(4, 5) : 4, hz: (c.type === 'yellow' || c.type === 'red') ? c.chit : null, ocean: c.chit === 'Ocean' && (c.type === 'white' || c.type === 'brown'), known: c.known, short: c.name.replace(`${star.name} `, '').replace(' Centauri', ''), giants: [] }));
   const stars = plan.map((p) => ({ name: p.name, type: p.type, role: p.role, zones: zonesFor(p.planets, p.role) }));
@@ -38,11 +41,12 @@ export function rollSystem({ star, chits = {}, rint, worldName = () => 'World', 
   let gasGiants = 0;
   for (const p of plan) {
     const Z = stars[p.i].zones;
-    const hzZone = p.type === 'yellow' ? Math.max(1, Math.round(Z * 0.34)) : 1;
-    const beltZone = Math.min(Z - 1, hzZone + 1);
-    p.beltZone = beltZone; p.Z = Z;
+    const Zp = p.role === 'primary' && oort ? Z - 1 : Z; // the planets' zones: the primary's outermost is its Oort zone (SM-1g)
+    const hzZone = p.type === 'yellow' ? Math.max(1, Math.round(Zp * 0.34)) : 1;
+    const beltZone = Math.min(Zp - 1, hzZone + 1);
+    p.beltZone = beltZone; p.Z = Z; p.Zp = Zp;
     let left = p.planets;
-    const zoneSlots = Array.from({ length: Z }, (_, k) => k);
+    const zoneSlots = Array.from({ length: Zp }, (_, k) => k);
     // the inner rocky world (2 regions, Hostile)
     add({ kind: 'planet', name: `${p.short} ${ROMAN[0]}`, star: p.i, zone: 0, size: rint(4, 6), sites: 2, cls: 'Hostile' }, { role: 'rock', regions: REGIONS.rock }); left--;
     // the habitable-zone world: 3 regions sharing class + terraform track
@@ -63,7 +67,7 @@ export function rollSystem({ star, chits = {}, rint, worldName = () => 'World', 
       const moons = [];
       for (let j = 0; j < nMaj; j++) { const sz = rint(4, 9); moons.push({ name: `${name}-${ROMAN[j]}`, size: sz, sites: sz >= 7 ? 2 : 1, ocean: g.chit === 'Ocean' && j === Math.min(1, nMaj - 1) }); }
       for (let j = 0; j < nMin; j++) moons.push({ name: `${name} m${j + 1}`, size: rint(1, 2) });
-      const zone = outerZones.length ? outerZones[Math.min(outerZones.length - 1, outerZones.length - 1 - (gi % outerZones.length))] : Z - 1;
+      const zone = outerZones.length ? outerZones[Math.min(outerZones.length - 1, outerZones.length - 1 - (gi % outerZones.length))] : Zp - 1;
       (p.giantZones = p.giantZones || []).push(zone);
       add({ kind: 'giant', name, star: p.i, zone, giantKind: g.kind, size: g.kind === 'white' ? 10 : 11, moons, trojans: g.kind === 'gas' ? 2 : 0 }, { giant: g.kind });
       if (g.kind === 'gas') gasGiants++;
@@ -71,13 +75,13 @@ export function rollSystem({ star, chits = {}, rint, worldName = () => 'World', 
     });
     // the rest are rocky worlds spread out through the zones
     for (let j = 0; j < left; j++) {
-      const zone = zoneSlots[1 + ((j * 3 + 1) % Math.max(1, Z - 1))] ?? Z - 1;
+      const zone = zoneSlots[1 + ((j * 3 + 1) % Math.max(1, Zp - 1))] ?? Zp - 1;
       const sz = rint(3, 9);
       add({ kind: 'planet', name: `${p.short} ${ROMAN[1 + j] || `P${j + 2}`}`, star: p.i, zone, size: sz, sites: sz >= 6 ? 2 : 1, cls: 'Hostile' }, { role: 'rock', regions: REGIONS.rock });
     }
-    // dwarf planets: one in the belt, one far out on a big system
+    // dwarf planets: one in the belt, one out in the primary's Oort zone (a Pluto)
     add({ kind: 'dwarf', name: `${p.short} dwarf planet`, star: p.i, zone: beltZone, size: rint(5, 7) }, { mine: true, big: true });
-    if (Z >= 6) add({ kind: 'dwarf', name: `${p.short} far dwarf planet`, star: p.i, zone: Z - 1, size: rint(5, 7) }, { mine: true, big: true });
+    if (p.role === 'primary' && (oort || Z >= 6)) add({ kind: 'dwarf', name: `${p.short} far dwarf planet`, star: p.i, zone: Z - 1, size: rint(5, 7) }, { mine: true, big: true });
   }
 
   // ---- asteroids for the whole board (SM-5f): Trojans first, then belts.
@@ -106,20 +110,21 @@ export function rollSystem({ star, chits = {}, rint, worldName = () => 'World', 
   const near = Math.max(1, Math.round(rest * 0.1));
   const outer = P0.Z - 1 > P0.beltZone ? Math.round(rest * 0.32) : 0;
   pour(0, Math.max(0, P0.beltZone - 2), near, `${P0.short} near rocks`);
-  pour(0, P0.Z - 1, outer, `${P0.short} outer belt`);
+  pour(0, P0.Z - 1, outer, oort ? `${P0.short} Kuiper belt` : `${P0.short} outer belt`); // SM-1g: in the Oort zone
   pour(0, P0.beltZone, rest - near - outer, `${P0.short} belt`);
   if (pB) pour(pB.i, pB.Z - 1, toB, `${pB.short} belt`);
   if (pD) pour(pD.i, pD.Z - 1, toD, `${pD.short} rocks`);
   for (const b of Object.values(belts)) if (b.count > 0) add({ kind: 'belt', name: b.name, star: b.si, zone: b.z, count: b.count, sizes: Array.from({ length: b.count }, () => rint(1, 4)) }, { belt: true });
 
-  // ---- comets for the whole board (SM-5g): half in the main-belt zone
+  // ---- comets for the whole board (SM-5g): 3 short-period ones in the
+  // main-belt zone, the rest out in the Oort zone (SM-1g)
   const cometHomes = [];
   for (let c = 0; c < TARGETS.comets; c++) {
     if (pB && c === TARGETS.comets - 1) { cometHomes.push([pB.i, pB.Z - 1]); continue; }
-    if (c < TARGETS.comets / 2) cometHomes.push([0, P0.beltZone]);
-    else cometHomes.push([0, rint(Math.min(P0.Z - 1, P0.beltZone + 1), P0.Z - 1)]);
+    cometHomes.push([0, c < 3 ? P0.beltZone : P0.Z - 1]);
   }
   const NAMES = ['Ardo', 'Vey', 'Ilse', 'Marrow', 'Tess', 'Quill', 'Orrin', 'Sable', 'Hale', 'Corin', 'Nyx', 'Pell'];
   cometHomes.forEach(([si, z], c) => add({ kind: 'comet', name: `Comet ${short} ${NAMES[c % NAMES.length]}`, star: si, zone: Math.max(1, z), size: rint(1, 3) }, { comet: true }));
+  if (oort) stars[0].oort = true; // SM-1g: the primary's outermost zone is its Oort zone
   return { spec: { name: star.name, stars, bodies, ...(links ? { links } : {}) }, meta, pick };
 }

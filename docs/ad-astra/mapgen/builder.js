@@ -35,6 +35,9 @@ const ART = {
   ceres: { base: '#9c9387', light: '#d4cbbd', dark: '#2f2b25' },
 };
 const MOON_ART = ['io', 'europa', 'ganymede', 'callisto', 'ceres'];
+// the painted, turning sphere each body art reads as (planet-texture.js)
+const STYLE_OF = { earth: 'earth', mars: 'mars', mercury: 'rock', venus: 'venus', jupiter: 'gas', saturn: 'gas', neptune: 'ice-giant', io: 'volcanic', europa: 'ice', ganymede: 'rock', callisto: 'rock', ceres: 'rock' };
+const styleOfArt = (pal) => STYLE_OF[Object.keys(ART).find((k) => ART[k] === pal)] || null;
 
 // Presets are rolled by the same roller the game uses (roll.js), from a fixed
 // seed so each preset is the same every load.
@@ -54,7 +57,7 @@ const PRESETS = Object.fromEntries(Object.entries(ROLLS).map(([k, v]) => [k, rol
 const FIRST = 'Yellow sun with a gas giant';
 // bump when the presets or the rules change, so a saved map from an older
 // builder doesn't hide them (the old one simply isn't loaded)
-const SPEC_KEY = 'aa-mapgen-spec-v4';
+const SPEC_KEY = 'aa-mapgen-spec-v5';
 // older saved specs had one star at the top level
 const upgrade = (s) => (s.stars ? s : { name: s.name, stars: [{ name: s.name || 'Star', type: s.starType || 'yellow', zones: s.zones || 6 }], bodies: s.bodies || [] });
 let SPEC = (() => { try { const s = JSON.parse(localStorage.getItem(SPEC_KEY)); if (s && s.bodies) return upgrade(s); } catch (e) { /* none */ } return structuredClone(PRESETS[FIRST]); })();
@@ -87,6 +90,7 @@ function toPlanner(map) {
       if (n.bodyKind === 'planet') s._palette = n.cls === 'Habitable' || n.cls === 'Garden' ? ART.earth : n.cls === 'Marginal' ? ART.mars : n.size >= 11 ? ART.venus : ART.mercury;
       if (n.bodyKind === 'moon') { if (!(n.body in moonArt)) moonArt[n.body] = Object.keys(moonArt).length; s._palette = n.ocean ? ART.europa : ART[MOON_ART[moonArt[n.body] % MOON_ART.length]]; }
       if (n.bodyKind === 'dwarf') { s._palette = ART.ceres; s.haloR = 12; } // a dwarf planet is Ceres-sized, not a giant
+      if (s._palette) s.planetStyle = styleOfArt(s._palette);
       sites.push(s); continue;
     }
     const type = n.kind === 'decorative' ? 'decorative' : n.kind;
@@ -94,7 +98,7 @@ function toPlanner(map) {
   }
   for (const g of map.bodies) {
     const pal = g.size >= 11 ? ART.jupiter : ART.neptune;
-    sites.push({ id: g.id, id2: `mg-${g.id}`, x: g.x, y: g.y, type: 'gas-giant', name: g.name, isWaypoint: false, isLandable: false, bodyKey: g.id, _palette: pal, solarZone: null, haloR: GIANT_HALO });
+    sites.push({ id: g.id, id2: `mg-${g.id}`, x: g.x, y: g.y, type: 'gas-giant', name: g.name, isWaypoint: false, isLandable: false, bodyKey: g.id, _palette: pal, planetStyle: styleOfArt(pal), solarZone: null, haloR: GIANT_HALO });
   }
   const byId = Object.fromEntries(sites.map((s) => [s.id, s]));
   const edges = map.edges.map(([a, b]) => [a, b]);
@@ -113,7 +117,7 @@ function draw(spec) {
   if (!RENDERER) {
     RENDERER = new MapRenderer(host, { data: PLANNER, onSelect: (hit) => popup(hit && typeof hit === 'object' ? hit.id : hit) });
     RENDERER.options.initialZoom = 1; RENDERER._initialViewDone = true;
-    RENDERER.options.solDecor = false; RENDERER.options.visualizeZones = true; RENDERER.options.zoneFill = true; RENDERER.options.zoneOpacity = 0.14;
+    RENDERER.options.solDecor = false; RENDERER.options.texturedBodies = true; RENDERER.options.visualizeZones = true; RENDERER.options.zoneFill = true; RENDERER.options.zoneOpacity = 0.14;
     requestAnimationFrame(() => { try { RENDERER.reset(); } catch (e) { /* sizing */ } });
   } else {
     // swap the data in place (the renderer has no teardown, so keep one instance)

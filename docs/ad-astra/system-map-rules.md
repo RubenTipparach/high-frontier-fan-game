@@ -59,6 +59,19 @@ Every rule is grounded in a measurement of the real Sol board
   a lone star; a binary partner or distant companion is drawn smaller and
   keeps to the low end of the range.
 
+- **SM-1g. The Oort zone.** A primary star's outermost zone lies beyond
+  its gas giants: the cold zone of Sol's board past Neptune, where Pluto, the
+  Kuiper belt and most comets live. No planet or giant is placed there. It
+  holds the system's far dwarf planet, its Kuiper belt (the outer asteroid
+  belt) and most of its comets, and a giant's moon system may reach out into
+  it (its ring opens round them, SM-2e). It is the inner edge of the comet
+  cloud the star map's Oort spaces stand for (AA-B6). It is drawn in the
+  darkest band colour and comes on top of the planets' zones (SM-1f: up to 8
+  of them, so the biggest system still has 9 bands in all). Binary partners
+  and distant companions are too small to have one, and so is the primary of
+  a binary board, which shares the board with its partner; there the comets
+  that would go to the Oort zone go to the outermost zone instead.
+
 ## SM-2. Hohmann pivots (green dots): the transfer layer
 
 - **SM-2a.** Green dots are Hohmann transfers: the slow but fuel-efficient way
@@ -167,8 +180,8 @@ for any other reason:
   then 1 to 3 asteroid sites straight off it (no landing, SM-5c).
 
 - **SM-5g. Comets: 10 per board (design target; Sol has 12).** Never in a
-  star's innermost zone: about half in the main-belt zone (as on Sol, 7 of
-  12), the rest in the outer zones. A comet is one
+  star's innermost zone: 3 in the main-belt zone (short-period comets, the
+  ones that come in close), the rest out in the Oort zone (SM-1g). A comet is one
   water-rich site (size 1 to 3, hydration 3 to 5) on its own route: its ring
   pivot -> escape burns (1 in the inner half of the zones, 2 beyond, 3 in the
   outermost zone) -> a Lagrange orbit point -> a second Lagrange point (its

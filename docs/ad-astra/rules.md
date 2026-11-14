@@ -810,7 +810,10 @@ regenerate it rather than editing it by hand.
   moon routes cross (SM-7b, 7c). Sites stay 12 px clear of lines they are not
   on (SM-5j); a board has at most 4 line crossings (SM-5k); small companions
   get zone bands deep enough to hold a well (SM-1e). A crowded board drops
-  the asteroid groups it has no clean room for.
+  the asteroid groups it has no clean room for. A primary star (not on a binary
+  board) gets an Oort zone past its giants, the cold zone past Neptune on the
+  Sol board: its far dwarf planet, its Kuiper belt and most of its comets
+  (SM-1g).
 - **v0.12 (2026-11-14):** Asteroids: 30 to 100 a board (was 30 to 50; Sol has
   about 99 asteroids and small bodies) (B7a, SM-5f).
 - **v0.11 (2026-11-14):** The star map is the 94 star systems within 20

@@ -1034,7 +1034,11 @@ const BODY_ART = {
   brownDwarf: { base: '#7c3f1d', light: '#c27a45', dark: '#2a1208', atmosphere: 'rgba(190, 90, 40, 0.35)' },
   whiteDwarf: { base: '#e8f1ff', light: '#ffffff', dark: '#8aa0c0', atmosphere: 'rgba(220, 235, 255, 0.6)' },
   ceres: { base: '#9c9387', light: '#d4cbbd', dark: '#2f2b25' },
+  neptune: { base: '#3c66c7', light: '#9bb9f0', dark: '#0e1f55', atmosphere: 'rgba(120, 160, 240, 0.45)' },
 };
+// the painted, turning sphere each body art reads as (planet-texture.js)
+const STYLE_OF = { earth: 'earth', mars: 'mars', mercury: 'rock', europa: 'ice', callisto: 'rock', io: 'volcanic', ganymede: 'rock', jupiter: 'gas', neptune: 'ice-giant', brownDwarf: 'brown', ceres: 'rock' };
+const styleOfArt = (pal) => STYLE_OF[Object.keys(BODY_ART).find((k) => BODY_ART[k] === pal)] || null;
 let _starData = null;
 // stars that keep their names zoomed out: the ones the game always featured and
 // those with proper names; catalogue designations (Gliese 445, 2MASS ...) fade in
@@ -1088,6 +1092,8 @@ function systemMapData(starId) { // AA-B7a, drawn exactly as the Sol board draws
         : st.big ? BODY_ART.ceres : undefined;
       if (st.big) x.haloR = 12; // a dwarf planet is Ceres-sized, not a giant
       if (st.role === 'hz') x.haloR = 20; // the habitable world reads bigger, like Earth
+      if (x._palette) x.planetStyle = styleOfArt(x._palette);
+      if (st.role === 'hz' && cls === 'Hostile') x.planetStyle = 'venus'; // a hostile world in the habitable zone: a cloud world
       sites.push(x);
     } else {
       const isDeco = n.kind === 'decorative';
@@ -1098,7 +1104,9 @@ function systemMapData(starId) { // AA-B7a, drawn exactly as the Sol board draws
   }
   for (const b of sys.display || []) { // the giants themselves, as the Sol board draws Jupiter
     const g = baseSite({ id: b.id, name: b.name, type: 'gas-giant', x: b.x, y: b.y, isLandable: false });
-    g._palette = b.kind === 'gas' ? BODY_ART.jupiter : b.kind === 'brown' ? BODY_ART.brownDwarf : BODY_ART.whiteDwarf;
+    // gas giants alternate Jupiter-like and Neptune-like, by name
+    g._palette = b.kind === 'gas' ? ([...b.name].reduce((h, c) => h + c.charCodeAt(0), 0) % 2 ? BODY_ART.neptune : BODY_ART.jupiter) : b.kind === 'brown' ? BODY_ART.brownDwarf : BODY_ART.whiteDwarf;
+    g.planetStyle = styleOfArt(g._palette);
     g.haloR = b.kind === 'white' ? 14 : GIANT_HALO; // SM-7: the ladder curls just outside the sphere
     sites.push(g);
   }
@@ -1123,6 +1131,7 @@ function rendererFor(key) {
   renderer._initialViewDone = true;
   // Sol's orbit rings and asteroid-belt dust belong only on the Sol board
   if (key !== 'sol') renderer.options.solDecor = false;
+  if (key !== 'sol' && key !== 'stars') renderer.options.texturedBodies = true; // painted, turning planets on system maps
   // these maps are read zoomed out, so keep site names visible at fit zoom
   // (the Sol board keeps the HF default fade: it has hundreds of sites)
   // (system maps are as dense as Sol now, so they keep Sol's fade: names

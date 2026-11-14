@@ -36,7 +36,7 @@ export const TARGETS = { planets: [4, 15], asteroids: [30, 100], comets: 10, maj
 const deg = (a) => (a * Math.PI) / 180;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const round1 = (v) => Math.round(v * 10) / 10;
-const ZONES_FOR = { primary: [4, 9], binary: [3, 6], distant: [2, 3] };
+const ZONES_FOR = { primary: [4, 10], binary: [3, 6], distant: [2, 3] }; // a primary's 4-9 planet zones plus its Oort zone (SM-1g)
 
 // SM-1e: where each star's system sits on the 1400 x 900 board
 export function starLayout(stars) {
@@ -214,7 +214,10 @@ export function buildMap(spec) {
   // SM-5g: a comet's route climbs off the plane: up the board and to one side,
   // never folding back on itself (an outward direction plus a lift cancelled on
   // the lower half of the board and stacked the stops)
-  const cometGeom = (it, L, a, D, k, N) => { const esc = cometEsc(k, N); const n1 = (esc + 1) * STEP; const d = { x: sideOf(it) * 0.5, y: -0.866 };
+  // (from the outermost zone, the Oort zone, it climbs outward and up, away from the rings)
+  const cometGeom = (it, L, a, D, k, N) => { const esc = cometEsc(k, N); const n1 = (esc + 1) * STEP;
+    let d = { x: sideOf(it) * 0.5, y: -0.866 };
+    if (k === N - 1) { const o = deg(outAngOf(L, a)); const v = { x: Math.cos(o) + sideOf(it) * 0.25, y: Math.sin(o) - 0.6 }; const l = Math.hypot(v.x, v.y) || 1; d = { x: v.x / l, y: v.y / l }; }
     return { d, esc, lag1: along(D, d, n1), lag2: along(D, d, n1 + 18), site: along(D, d, n1 + 38) }; };
   const clusterLag = (L, a, side, D) => along(D, wellDir(L, a, 0), side * 2 * STEP);
   const footprint = (it, a) => {
