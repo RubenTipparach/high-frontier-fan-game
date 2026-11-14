@@ -28,6 +28,7 @@ import { PATENTS, PATENTS_BY_ID } from '../data/patents.js';
 import { COLONISTS_BY_ID } from '../data/colonists.js';
 import { lineOfSightSites, leoSlug, neighborSlugs, siteBySlug } from '../server/game/planner-graph.js';
 import { FACTION_BANK_AQUA } from '../data/altruism.js';
+import { NODE_LABELS, NODE_LABEL_KINDS } from '../data/map-labels.js';
 
 const STRICT = process.argv.includes('--strict');
 let failures = 0;
@@ -317,7 +318,7 @@ check('LAUNCH FEES: suspended by Anarchy; locked under M2 until a Home Bernal', 
   eq(boostWith({ holderIdx: 1, actorIdx: 0, m2: true, home: true }).delta[1], 1, 'M2 unlocked');
 });
 
-bug('LAUNCH-FEES-PER-OP', 'LAUNCH FEES: one boost OPERATION pays +1 once, not once per follow-up boost', () => {
+check('LAUNCH FEES: one boost OPERATION pays +1 once, not once per follow-up boost', () => {
   // Boost is one operation per turn; later boosts the same turn ride free as
   // part of it (hasBoostedThisTurn). "+1 Aqua after any player performs a boost
   // operation" should therefore pay once per operation. The engine credits on
@@ -427,23 +428,45 @@ check('POWERSAT: +1 thrust to the ESA seat\'s own push-icon thruster', () => {
 check('POWERSAT: suspended by Anarchy', () => {
   eq(pushThrust({ holderIdx: 0, moverIdx: 0, anarchy: true }), pushThrust({ holderIdx: 1, moverIdx: 0 }), 'ESA under Anarchy');
 });
-bug('POWERSAT-ANY', 'POWERSAT: "any Spacecraft ... during any player\'s Turn" - an opponent\'s push thruster gets the +1', () => {
-  // The printed text lets ESA beam ANY push-icon spacecraft, on anyone's turn.
-  // The engine only ever reads hasPowersat(mover), so ESA cannot extend it to
-  // a rival without a negotiated ability loan (a trade).
-  const withEsaAtTable = pushThrust({ holderIdx: 1, moverIdx: 0 });
-  const st = playing(2);
-  // No ESA anywhere: control.
-  st.players.forEach((p, i) => give(st, i, CREW[i].id, 'primary'));
-  const noEsa = (() => {
-    const me = st.players[0];
-    const from = leoSlug(); const to = neighborSlugs(from)[0];
-    me.rocket.siteId = null;
-    me.rocket.stack = [{ id: SOLAR_PUSH, kind: 'patent', face: 'primary' }];
-    me.rocket.activeThrusterId = SOLAR_PUSH; me.rocket.tank = 12;
-    return op(st, 0, { kind: 'MOVE', debug: true, segments: [{ from, to, burns: 0, turn: 1 }] }).calc.finalThrust;
-  })();
-  assert(withEsaAtTable === noEsa + 1, `an opponent of ESA got ${withEsaAtTable - noEsa} extra thrust, not the offered +1 (engine has no way for ESA to offer it outside a trade)`);
+// POWERSAT reaching a rival (audit POWERSAT-ANY, now built): the ESA seat
+// trains a standing beam on a named rival with the off-turn POWERSAT_BEAM op,
+// and that rival's push-icon thruster gets +1 thrust (thrust only).
+function beamedThrust({ face = 'secondary', on = true, anarchyAfter = false, game = {}, home = false } = {}) {
+  let st = playing(2, game);
+  const esa = only(st, 1, 'crew_anonp2p_esa', face);
+  if (home) anchorHome(esa);
+  st.activeIndex = 0;                                   // seat 0's turn: the beam is set OFF turn
+  const b = op(st, 1, { kind: 'POWERSAT_BEAM', targetId: st.players[0].profileId, on });
+  if (!b.ok) return { error: b.error };
+  st = b.state;
+  if (anarchyAfter) st.anarchy = true;
+  const me = st.players[0];
+  const from = leoSlug(); const to = neighborSlugs(from)[0];
+  me.rocket.siteId = null;
+  me.rocket.stack = [{ id: SOLAR_PUSH, kind: 'patent', face: 'primary' }];
+  me.rocket.activeThrusterId = SOLAR_PUSH; me.rocket.tank = 12;
+  const r = op(st, 0, { kind: 'MOVE', debug: true, segments: [{ from, to, burns: 0, turn: 1 }] });
+  assert(r.ok, `debug move refused: ${r.error}`);
+  return { thrust: r.calc.finalThrust, log: b.log, state: st };
+}
+check('POWERSAT: ESA beams a rival\'s push-icon craft off turn (+1), and can switch it off', () => {
+  const plain = pushThrust({ holderIdx: 1, moverIdx: 0 });
+  const beamed = beamedThrust();
+  eq(beamed.thrust - plain, 1, 'rival thrust with the beam');
+  assert(/Powersat/.test(beamed.log), 'beam missing from the log');
+  eq(beamedThrust({ on: false }).thrust, plain, 'rival thrust with the beam switched off');
+  // The beam reaches only the named rival: the ESA seat's own +1 is unchanged
+  // and a third party is not beamed (2-seat table: the only other is the target).
+  return `${plain} -> ${beamed.thrust}`;
+});
+check('POWERSAT: Open Source FINAO (other face) cannot beam; Anarchy cuts a standing beam', () => {
+  eq(beamedThrust({ face: 'primary' }).error, 'no_powersat', 'Open Source face beam');
+  eq(beamedThrust({ anarchyAfter: true }).thrust, pushThrust({ holderIdx: 1, moverIdx: 0 }), 'beam under Anarchy');
+});
+check('POWERSAT: under M2 the beam is locked until the ESA seat anchors a Home Bernal', () => {
+  eq(beamedThrust({ game: { m2: true } }).error, 'no_powersat', 'M2, no Home Bernal');
+  const ok = beamedThrust({ game: { m2: true }, home: true });
+  assert(ok.thrust != null, `M2 + Home Bernal: ${ok.error}`);
 });
 
 // ---- SKUNKWORKS (Shimizu) ----
@@ -557,7 +580,7 @@ check('MARKETEER: suspended by Anarchy', () => {
   r = op(r.state, 0, { kind: 'AUCTION_BID', amount: 2 });
   eq(r.state.auction.highBidderId, r.state.players[0].profileId, 'leader on a tie under Anarchy');
 });
-bug('MARKETEER-STRID', 'MARKETEER: a Marketeer buyer with a non-numeric profileId can be sold the tied lot', () => {
+check('MARKETEER: a Marketeer buyer with a non-numeric profileId can be sold the tied lot', () => {
   // applyAuctionSell compares Number(mktPid) !== buyerId; for a string id
   // (tutorial bot seats) Number('x') is NaN, so selling to the Marketeer
   // themself is refused as marketeer_wins_tie.
@@ -734,24 +757,48 @@ check('SCRUM TROUBLESHOOTERS: the Sunspot Glitch event skips Norse, hits SpaceX'
 // (PROMO = m0+m1+m2) as well as in a bare core game.
 const PROMO = { m0: true, m1: true, m2: true };
 
-check('promo crew: refused without the admin flag, refused without m0+m1+m2', () => {
-  const pickIn = (opts, ctx) => {
+// Promo crew is RELEASED to every player (user 2026-11-14): no admin flag,
+// and each face needs only the modules its own text uses (data/crew.js
+// needsModules); a face that needs M4 / M5 is refused outright.
+check('promo crew: any player may pick a face whose modules the room runs', () => {
+  const pick = (cardId, face, opts, ctx = {}) => {
     const st = freshGame(2, opts);
-    st.players[0].color = colorOf('crew_brin');
-    return op(st, 0, { kind: 'PICK_CREW', cardId: 'crew_brin', face: 'primary' }, ctx);
+    st.players[0].color = colorOf(cardId);
+    return op(st, 0, { kind: 'PICK_CREW', cardId, face }, ctx);
   };
-  eq(pickIn(PROMO, {}).error, 'promo_crew_admin_only', 'non-admin promo pick');
-  eq(pickIn({ m0: true, m1: true }, { allowPromoCrew: true }).error, 'promo_crew_needs_modules', 'admin pick without m2');
-  assert(pickIn(PROMO, { allowPromoCrew: true }).ok, 'admin pick with m0+m1+m2 refused');
+  // No module needed: a core game is enough, no admin.
+  assert(pick('crew_brin', 'primary', {}).ok, 'BRIN (no module) refused in a core game');
+  assert(pick('crew_utopia_inc', 'secondary', {}).ok, 'Piggyback (no module) refused in a core game');
+  // M1 face (Life Raft moves as a Freighter).
+  const lr = pick('crew_space_force', 'primary', { m0: true });
+  eq(lr.error, 'crew_face_needs_modules', 'Life Raft without M1');
+  eq(JSON.stringify(lr.missing || (lr.detail && lr.detail.missing)), JSON.stringify(['M1']), 'missing list');
+  assert(pick('crew_space_force', 'primary', { m1: true }).ok, 'Life Raft with M1');
+  // M0 face (Arbiter tallies the Assembly), refused for an admin too.
+  eq(pick('crew_african_union_space_directorate', 'secondary', {}, { allowPromoCrew: true }).error, 'crew_face_needs_modules', 'Arbiter without M0, admin');
+  assert(pick('crew_african_union_space_directorate', 'secondary', { m0: true }).ok, 'Arbiter with M0');
+  // M2 face (Quest exomigrates) vs its no-module card-mate (Heroic needs none).
+  eq(pick('crew_galahad_group', 'secondary', { m0: true, m1: true }).error, 'crew_face_needs_modules', 'Quest without M2');
+  assert(pick('crew_galahad_group', 'primary', {}).ok, 'Heroic in a core game');
 });
-check('promo crew: M4 / M5 "requiresModule" cards are still pickable by an admin (no per-card gate)', () => {
-  // Recorded behaviour: the server gate is the blanket m0+m1+m2 check only, so
-  // a "Coming soon" card (e.g. JAXA, M4) is accepted and does nothing.
-  const st = freshGame(2, PROMO);
-  st.players[0].color = colorOf('crew_jaxa');
-  const r = op(st, 0, { kind: 'PICK_CREW', cardId: 'crew_jaxa', face: 'primary' }, { allowPromoCrew: true });
-  assert(r.ok, `admin JAXA pick refused: ${r.error}`);
-  return 'accepted';
+check('promo crew: an M4 / M5 face ("Coming soon") is refused; its in-scope card-mate is not', () => {
+  const pick = (cardId, face, ctx = {}) => {
+    const st = freshGame(2, PROMO);
+    st.players[0].color = colorOf(cardId);
+    return op(st, 0, { kind: 'PICK_CREW', cardId, face }, ctx);
+  };
+  eq(pick('crew_jaxa', 'primary').error, 'crew_face_needs_module', 'JAXA Futurists (M4)');
+  eq(pick('crew_jaxa', 'secondary', { allowPromoCrew: true }).error, 'crew_face_needs_module', 'JAXA Starchild (M4), admin too');
+  eq(pick('crew_utopia_inc', 'primary').error, 'crew_face_needs_module', 'Utopia Executive Discount (M5)');
+  assert(pick('crew_utopia_inc', 'secondary').ok, 'Utopia Piggyback refused');
+  assert(pick('crew_verisai', 'secondary').ok, 'VerisAI Cavitation Engineers refused');
+  eq(pick('crew_verisai', 'primary').error, 'crew_face_needs_module', 'VerisAI Incubator (M5)');
+});
+check('promo crew: swapping a promo card in after the draft closed stays an admin test drive', () => {
+  const st = promoDraft('crew_brin', 'primary');
+  const plain = op(st, 0, { kind: 'PICK_CREW', cardId: 'crew_brin', face: 'secondary' });
+  eq(plain.error, 'crew_draft_closed', 'non-admin re-pick after the draft');
+  assert(op(st, 0, { kind: 'PICK_CREW', cardId: 'crew_brin', face: 'secondary' }, { allowPromoCrew: true }).ok, 'admin test-drive swap refused');
 });
 
 // A promo seat closes the draft for real (admin pick), the other seat picks
@@ -774,7 +821,7 @@ function promoDraft(cardId, face, opts = PROMO) {
 
 // ---- COLLECTIVE BARGAINING (LEO Workers' Union, white) ----
 // "Receive 2 Aqua at game start. You may commit Murder/Suicide."
-bug('CB-M2LOCK', 'COLLECTIVE BARGAINING: +2 aqua at game start in a real promo game (m0+m1+m2)', () => {
+check('COLLECTIVE BARGAINING: +2 aqua at game start in a real promo game (m0+m1+m2)', () => {
   // The payout goes through playersWithPrivilege -> privilegeOf, which the M2
   // lock nulls at draft close (nobody has a Home Bernal yet). Promo picks are
   // only legal under M2, so the printed "+2 at game start" is never paid in
@@ -985,6 +1032,1035 @@ check('DOWSERS: suspended by Anarchy; locked under m0+m1+m2 until a Home Bernal'
   eq(dowse({ game: PROMO }).error, 'isru_too_high', 'promo game, no Home Bernal');
   assert(dowse({ game: PROMO, home: true }).ok, 'promo game, Home Bernal anchored');
 });
+
+// ================================================================ promo group A
+// movement and hazards: LIFE RAFT, LIFEBOAT, WEAK STABILITY BOUNDARY, CAVITATION ENGINEERS, POWER SERIES CHAOS MODEL, BLUE PLANET
+// (group A checks go here)
+//
+// Each fixture seats the holder on seat 0 with the card's crew aboard the
+// rocket. `game` defaults to a core game; PROMO + `home` exercises the M2 lock.
+const AERO_VENUS = 'lag-c3cha';      // Venus aerobrake corridor
+const GEYSER_SKULL = 'lag-qeogw';    // Enceladus "electric geysers" hazard
+const PLAIN_SKULL = 'lag-olko7';     // "rubble pile" hazard: no geyser / ring / spin / wind (data/map-labels.js)
+function promoSeat(cardId, face, { game = {}, anarchy = false, home = false, crewAboard = true } = {}) {
+  const st = playing(2, game);
+  const me = only(st, 0, cardId, face);
+  if (anarchy) st.anarchy = true;
+  if (home) anchorHome(me);
+  me.rocket.siteId = null;
+  me.rocket.stack = crewAboard ? [{ id: cardId, kind: 'crew', face }] : [{ id: SOLAR_PUSH, kind: 'patent', face: 'primary' }];
+  me.rocket.activeThrusterId = crewAboard ? cardId : SOLAR_PUSH;
+  me.rocket.tank = 0;
+  me.aqua = 20;
+  return { st, me };
+}
+const rollsOf = (r) => (r.state.players[0].rocket.lastMove || {}).rolls || [];
+
+// ---- LIFE RAFT / LIFEBOAT (Space Force) ----
+// "May move as a Freighter (1B4) if the stack Wet Mass is less than 5 & doesn't
+// contain a glory chit." / "... if the stack Wet Mass is less than 7."
+function raft(face, opts = {}) {
+  const { st, me } = promoSeat('crew_space_force', face, opts);
+  if (opts.tank != null) me.rocket.tank = opts.tank;
+  if (opts.chit) me.glory.chits = [{ zone: 'Earth', crewId: 'crew_space_force' }];
+  return op(st, 0, { kind: 'MOVE', asFreighter: true, hazardPay: true,
+    segments: [{ from: null, to: 'burn-gz7tn', burns: opts.burns || 1, turn: 1 }] });
+}
+check('LIFE RAFT: an empty-tank Space Force rocket flies as a Freighter, burning no fuel', () => {
+  const r = raft('primary');
+  assert(r.ok, `Life Raft move refused: ${r.error}`);
+  eq(r.state.players[0].rocket.siteId, 'burn-gz7tn', 'Life Raft destination');
+  eq(r.state.players[0].rocket.tank, 0, 'tank after a Freighter move');
+  assert(/Life Raft moved as a Freighter/.test(r.log), `log: ${r.log}`);
+  // The same move flown normally needs fuel the tank does not have.
+  const { st } = promoSeat('crew_space_force', 'primary');
+  const plain = op(st, 0, { kind: 'MOVE', hazardPay: true, segments: [{ from: null, to: 'burn-gz7tn', burns: 1, turn: 1 }] });
+  eq(plain.ok ? 'moved' : plain.error, 'insufficient_water', 'the same move without the Life Raft');
+});
+check('LIFE RAFT: refused over Net Thrust 1, at wet mass 5+, or carrying a glory chit; Lifeboat takes 5-6 and the chit', () => {
+  eq(raft('primary', { burns: 2 }).error, 'freighter_over_thrust', 'two burns');
+  eq(raft('primary', { tank: 5 }).error, 'life_raft_too_heavy', 'Life Raft at wet mass 6');
+  eq(raft('primary', { chit: true }).error, 'life_raft_glory_chit', 'Life Raft with a chit');
+  assert(raft('secondary', { tank: 5 }).ok, 'Lifeboat at wet mass 6 refused');
+  assert(raft('secondary', { chit: true }).ok, 'Lifeboat with a chit refused');
+  eq(raft('secondary', { tank: 6 }).error, 'life_raft_too_heavy', 'Lifeboat at wet mass 7');
+});
+check('LIFE RAFT: another seat and a stack without the crew cannot; Anarchy suspends; M2 locks until a Home Bernal', () => {
+  const st = playing(2);
+  only(st, 1, 'crew_space_force', 'primary');
+  st.players[0].rocket.stack = [{ id: 'crew_space_force', kind: 'crew', face: 'primary' }];
+  st.players[0].rocket.siteId = null;
+  eq(op(st, 0, { kind: 'MOVE', asFreighter: true, segments: [{ from: null, to: 'burn-gz7tn', burns: 1, turn: 1 }] }).error,
+    'no_life_raft', 'a seat without the privilege');
+  eq(raft('primary', { crewAboard: false }).error, 'life_raft_needs_crew', 'crew not aboard');
+  eq(raft('primary', { anarchy: true }).error, 'no_life_raft', 'Anarchy');
+  eq(raft('secondary', { game: PROMO }).error, 'no_life_raft', 'promo game, no Home Bernal');
+  assert(raft('secondary', { game: PROMO, home: true }).ok, 'promo game, Home Bernal anchored');
+});
+
+// ---- WEAK STABILITY BOUNDARY (Heliocentricity, white) ----
+// "After its Stack moves, you may activate this thruster to coast as a second movement."
+function wsbCoast(face, opts = {}) {
+  const { st, me } = promoSeat('crew_heliocentricity', face, opts);
+  if (opts.notMoved !== true) me.movesRemaining = 0;   // the stack already moved this turn
+  if (opts.active) me.rocket.activeThrusterId = opts.active;
+  return op(st, 0, { kind: 'MOVE', wsbCoast: !opts.plain, hazardPay: true,
+    segments: [{ from: null, to: 'burn-gz7tn', burns: opts.burns || 0, turn: 1 }] });
+}
+check('WEAK STABILITY BOUNDARY: a second, coasting movement after the stack moved; the Sundiver goes active', () => {
+  const r = wsbCoast('primary');
+  assert(r.ok, `WSB coast refused: ${r.error}`);
+  const me = r.state.players[0];
+  eq(me.rocket.siteId, 'burn-gz7tn', 'WSB destination');
+  eq(me.wsbCoastUsed, true, 'once-per-turn ledger');
+  eq(me.rocket.activeThrusterId, 'crew_heliocentricity', 'active thruster after the coast');
+  eq(wsbCoast('primary', { plain: true }).error, 'no_moves_left', 'a plain second move');
+});
+check('WEAK STABILITY BOUNDARY: coast only, after a move, once a turn; the other face and Anarchy refuse; M2 locks', () => {
+  eq(wsbCoast('primary', { burns: 1 }).error, 'wsb_must_coast', 'a burning second move');
+  eq(wsbCoast('primary', { notMoved: true }).error, 'wsb_move_first', 'before the first move');
+  const once = wsbCoast('primary');
+  once.state.players[0].rocket.siteId = null;
+  const twice = op(once.state, 0, { kind: 'MOVE', wsbCoast: true, segments: [{ from: null, to: 'burn-gz7tn', burns: 0, turn: 1 }] });
+  eq(twice.error, 'wsb_already_used', 'a third movement');
+  eq(wsbCoast('secondary').error, 'no_weak_stability_boundary', 'Power Series face');
+  eq(wsbCoast('primary', { anarchy: true }).error, 'no_weak_stability_boundary', 'Anarchy');
+  eq(wsbCoast('primary', { game: PROMO }).error, 'no_weak_stability_boundary', 'promo game, no Home Bernal');
+  assert(wsbCoast('primary', { game: PROMO, home: true }).ok, 'promo game, Home Bernal anchored');
+});
+
+// ---- CAVITATION ENGINEERS (VerisAI, black) ----
+// "[Ignore Aerobrake] once per turn."
+function cavitate(face, opts = {}) {
+  const { st } = promoSeat('crew_verisai', face, opts);
+  st.rng.cursor = opts.cursor || 0;
+  return op(st, 0, { kind: 'MOVE', segments: [{ from: null, to: AERO_VENUS, burns: 0, turn: 1 }] });
+}
+// A cursor where the first d6 is not a 1, so the control's aero roll never kills it.
+function safeCursor(face) {
+  for (let c = 0; c < 200; c++) {
+    const r = cavitate(face, { cursor: c });
+    if (r.ok && rollsOf(r).some((x) => x.slug === AERO_VENUS && x.d6 != null && !x.crit)) return c;
+  }
+  throw new Error('no safe cursor for the control');
+}
+check('CAVITATION ENGINEERS: the first aerobrake of the turn is ignored; the Incubator face rolls it', () => {
+  const c = safeCursor('primary');
+  const hold = cavitate('secondary', { cursor: c });
+  assert(hold.ok, `move: ${hold.error}`);
+  const hr = rollsOf(hold).find((x) => x.slug === AERO_VENUS);
+  assert(hr && hr.cavitation && hr.d6 == null, `holder aero roll: ${JSON.stringify(hr)}`);
+  eq(hold.state.players[0].cavitationUsed, true, 'ledger spent');
+  const ctl = rollsOf(cavitate('primary', { cursor: c })).find((x) => x.slug === AERO_VENUS);
+  assert(ctl && ctl.d6 != null, `control aero roll: ${JSON.stringify(ctl)}`);
+});
+check('CAVITATION ENGINEERS: once per turn - a spent ledger rolls; Anarchy suspends; M2 locks', () => {
+  const spent = (() => { const { st } = promoSeat('crew_verisai', 'secondary'); st.players[0].cavitationUsed = true;
+    return op(st, 0, { kind: 'MOVE', segments: [{ from: null, to: AERO_VENUS, burns: 0, turn: 1 }] }); })();
+  assert(!rollsOf(spent).some((x) => x.cavitation), 'ignored a second aerobrake in one turn');
+  assert(!rollsOf(cavitate('secondary', { anarchy: true })).some((x) => x.cavitation), 'Anarchy');
+  assert(!rollsOf(cavitate('secondary', { game: PROMO })).some((x) => x.cavitation), 'promo game, no Home Bernal');
+  assert(rollsOf(cavitate('secondary', { game: PROMO, home: true })).some((x) => x.cavitation), 'promo game, Home Bernal');
+});
+check('CAVITATION ENGINEERS: a rocket parked on an aerobrake skips the turn-start descent roll', () => {
+  const park = (face) => {
+    const { st } = promoSeat('crew_verisai', face);
+    st.players[0].rocket.siteId = AERO_VENUS;
+    st.activeIndex = 1;
+    const r = op(st, 1, { kind: 'END_TURN' });
+    assert(r.ok, r.error);
+    return r.state;
+  };
+  const h = park('secondary');
+  assert((h.news || []).some((n) => /Cavitation Engineers/.test(n.text)), 'no Cavitation news at turn open');
+  eq(h.players[0].cavitationUsed, true, 'parked descent spent the turn\'s use');
+  assert(!(park('primary').news || []).some((n) => /Cavitation Engineers/.test(n.text)), 'Incubator face skipped the roll');
+});
+
+// ---- POWER SERIES CHAOS MODEL (Heliocentricity, black) ----
+// "Immune to Hazards mentioning geysers, rings, spin, and winds."
+function chaos(face, to, opts = {}) {
+  const { st } = promoSeat('crew_heliocentricity', face, opts);
+  return op(st, 0, { kind: 'MOVE', hazardPay: true, segments: [{ from: null, to, burns: 0, turn: 1 }] });
+}
+check('POWER SERIES CHAOS MODEL: a geyser hazard needs no roll or FINAO; WSB face pays for it', () => {
+  const h = chaos('secondary', GEYSER_SKULL);
+  assert(h.ok, h.error);
+  assert(rollsOf(h).some((x) => x.slug === GEYSER_SKULL && x.chaosModel), 'no chaos-model pass');
+  eq(h.state.players[0].aqua, 20, 'FINAO charged to the immune holder');
+  const c = chaos('primary', GEYSER_SKULL);
+  assert(c.ok, c.error);
+  assert(c.state.players[0].aqua < 20, 'control paid no FINAO for the geysers');
+});
+// The flavours come from the caption the board prints beside each hazard
+// (data/map-labels.js). Walk EVERY captioned skull hazard on the board: the
+// holder passes exactly the ones whose caption mentions geysers / rings / spin /
+// winds, and rolls (pays FINAO) for every other.
+check('POWER SERIES CHAOS MODEL: immune on every board hazard captioned geysers / rings / spin / winds, and only those', () => {
+  const MENTIONS = /\b(geysers?|rings?|spin|winds?)\b/i;
+  let immune = 0; let plain = 0;
+  for (const [slug, caption] of Object.entries(NODE_LABELS)) {
+    const k = NODE_LABEL_KINDS[slug] || [];
+    if (!k.includes('skull') || k.includes('aero')) continue;
+    // A hazard on a space the ship may not stop on (a lander burn) is flown
+    // THROUGH, onto a neighbour.
+    let r = chaos('secondary', slug);
+    const paths = r.ok ? [] : neighborSlugs(slug).flatMap((nb) => [[nb], ...neighborSlugs(nb).filter((n2) => n2 !== slug).map((n2) => [nb, n2])]);
+    for (const path of paths) {
+      const { st } = promoSeat('crew_heliocentricity', 'secondary');
+      const hops = [slug, ...path];
+      const segments = [{ from: null, to: slug, burns: 0, turn: 1 }, ...path.map((to, i) => ({ from: hops[i], to, burns: 0, turn: 1 }))];
+      r = op(st, 0, { kind: 'MOVE', hazardPay: true, segments });
+      if (r.ok) break;
+    }
+    assert(r.ok, `${slug} (${caption}): ${r.error}`);
+    const passed = rollsOf(r).some((x) => x.slug === slug && x.chaosModel);
+    eq(passed, MENTIONS.test(caption), `${slug} "${caption}" chaos pass`);
+    if (passed) immune++; else plain++;
+  }
+  assert(immune > 20 && plain > 20, `too few hazards walked: ${immune} immune, ${plain} plain`);
+  return `${immune} immune, ${plain} roll as normal`;
+});
+check('POWER SERIES CHAOS MODEL: a plain hazard still costs FINAO; Anarchy suspends; M2 locks', () => {
+  assert(chaos('secondary', PLAIN_SKULL).state.players[0].aqua < 20, 'immune to a hazard with no geysers / rings / spin / winds');
+  assert(chaos('secondary', GEYSER_SKULL, { anarchy: true }).state.players[0].aqua < 20, 'Anarchy');
+  assert(chaos('secondary', GEYSER_SKULL, { game: PROMO }).state.players[0].aqua < 20, 'promo game, no Home Bernal');
+  eq(chaos('secondary', GEYSER_SKULL, { game: PROMO, home: true }).state.players[0].aqua, 20, 'promo game, Home Bernal');
+});
+
+// ---- BLUE PLANET (Cerulean, white) ----
+// "If ending turn on an aerobrake Hazard, cost of FINAO = 1 Aqua, which gains 1 FT."
+function bluePlanet(face, opts = {}) {
+  const { st } = promoSeat('crew_cerulean', face, opts);
+  st.players[0].rocket.siteId = opts.at === undefined ? AERO_VENUS : opts.at;
+  // An anchored Home Bernal opens a colonist berth that must be filled before
+  // the turn ends; empty the queue so END_TURN is not held by exomigration.
+  st.colonistQueue = [];
+  return op(st, 0, { kind: 'END_TURN', bluePlanet: true });
+}
+check('BLUE PLANET: 1 aqua at END_TURN on an aerobrake gains 1 FT and the next descent needs no roll', () => {
+  const r = bluePlanet('primary');
+  assert(r.ok, `Blue Planet refused: ${r.error}`);
+  const me = r.state.players[0];
+  // END_TURN with the operation unspent also takes income (+1), so net 0.
+  eq(me.aqua, 20, 'bank after 1 aqua FINAO + passing income');
+  assert(me.rocket.tank > 0, 'no FT scooped');
+  assert(/Blue Planet/.test(r.log), `log: ${r.log}`);
+  const next = op(r.state, 1, { kind: 'END_TURN' });
+  assert(next.ok, next.error);
+  assert((next.state.news || []).some((n) => /Blue Planet FINAO paid/.test(n.text)), 'descent rolled anyway');
+  assert(!next.state.players[0].rocket.bluePlanetFinao, 'FINAO stamp outlived its descent');
+});
+check('BLUE PLANET: Dowsers face refused; off an aerobrake refused; Anarchy suspends; M2 locks', () => {
+  eq(bluePlanet('secondary').error, 'no_blue_planet', 'Dowsers face');
+  eq(bluePlanet('primary', { at: null }).error, 'not_on_aerobrake', 'at LEO');
+  eq(bluePlanet('primary', { anarchy: true }).error, 'no_blue_planet', 'Anarchy');
+  eq(bluePlanet('primary', { game: PROMO }).error, 'no_blue_planet', 'promo game, no Home Bernal');
+  { const bp = bluePlanet('primary', { game: PROMO, home: true }); assert(bp.ok, `promo game, Home Bernal: ${bp.error}`); }
+});
+
+
+
+
+
+
+
+
+
+
+// ---------------------------------------------------------------- end promo group A
+
+
+
+
+
+
+
+
+// ================================================================ promo group B
+// politics: AMBASSADOR, EMISSARIES, ARBITER, POWER BROKERS, HEROIC
+// (group B checks go here)
+// ---- AMBASSADOR (AEB, white) ----
+// "During lobby, may move a delegate into centrist instead of Decommission."
+function ambassadorLobby({ face = 'primary', anarchy = false, game = { m0: true }, home = false, flag = true } = {}) {
+  const st = playing(2, game);
+  const me = only(st, 0, 'crew_aeb', face);
+  if (home) anchorHome(me);
+  st.anarchy = anarchy;
+  st.activeLawStar = 'centrist';
+  me.aqua = 5;
+  me.lobbiedThisTurn = false;
+  const pid = me.profileId;
+  for (const k of Object.keys(st.assembly.delegates)) delete st.assembly.delegates[k][pid];
+  st.assembly.delegates.freedom = { ...(st.assembly.delegates.freedom || {}), [pid]: 1 };
+  const r = op(st, 0, { kind: 'LOBBY', ideology: 'freedom', ...(flag ? { ambassador: true } : {}) });
+  const d = r.ok ? r.state.assembly.delegates : null;
+  return { r, freedom: d ? (d.freedom[pid] | 0) : null, centrist: d ? ((d.centrist || {})[pid] | 0) : null };
+}
+check('AMBASSADOR: the lobbied delegate moves to Centrist instead of leaving; Rabble-Rouser face cannot', () => {
+  const a = ambassadorLobby();
+  assert(a.r.ok, `Ambassador lobby refused: ${a.r.error}`);
+  eq(a.freedom, 0, 'delegate left Freedom');
+  eq(a.centrist, 1, 'delegate in Centrist');
+  assert(/Centrist/.test(a.r.log), 'Ambassador missing from the log');
+  eq(ambassadorLobby({ face: 'secondary' }).r.error, 'no_ambassador', 'Rabble-Rouser face');
+  const plain = ambassadorLobby({ flag: false });
+  assert(plain.r.ok, plain.r.error);
+  eq(plain.centrist, 0, 'a plain lobby (no Ambassador choice) still discards');
+});
+check('AMBASSADOR: suspended by Anarchy; locked under m0+m1+m2 until a Home Bernal', () => {
+  eq(ambassadorLobby({ anarchy: true }).r.error, 'no_ambassador', 'Anarchy');
+  eq(ambassadorLobby({ game: PROMO }).r.error, 'no_ambassador', 'promo game, no Home Bernal');
+  const ok = ambassadorLobby({ game: PROMO, home: true });
+  assert(ok.r.ok && ok.centrist === 1, `promo game, Home Bernal: ${ok.r.error}`);
+});
+
+// ARBITER's "your vote tallies" also covers a tally the holder's own action
+// triggers mid-op (here an Ambassador lobby; Arbiter held through a card grant
+// so one seat carries both faces).
+check('ARBITER: a tally the holder\'s own Lobby triggers counts their delegates twice', () => {
+  const run = (arbiter) => {
+    const st = playing(2, { m0: true });
+    const me = only(st, 0, 'crew_aeb', 'primary');
+    if (arbiter) me.grantedPrivileges = ['ARBITER'];
+    st.activeLawStar = 'centrist';
+    me.aqua = 5; me.lobbiedThisTurn = false;
+    const pid = me.profileId, rid = st.players[1].profileId;
+    for (const k of Object.keys(st.assembly.delegates)) st.assembly.delegates[k] = {};
+    st.assembly.delegates.freedom = { [pid]: 3 };
+    st.assembly.delegates.equality = { [rid]: 3 };
+    const r = op(st, 0, { kind: 'LOBBY', ideology: 'freedom', ambassador: true });
+    assert(r.ok, r.error);
+    return r.state.activeLawStar;
+  };
+  eq(run(true), 'freedom', 'Arbiter-weighted tally (freedom 4 vs equality 3)');
+  eq(run(false), 'equality', 'plain tally (freedom 2 vs equality 3)');
+});
+
+// ---- EMISSARIES (African Union, white) ----
+// "On your turn, you may treat any or all Ideologies tied for the most
+// delegates as the Active Law."
+// Freedom and Equality tied at 2 delegates each (Equality's law is Free Market
+// Socialism, a law the player can feel: playerCanUseLaw('equality')). The star
+// sits on Freedom. The check reads the law through the engine's own gate: the
+// Equality research grant on AUCTION_START (`researchGrant`).
+function emissaryGame({ face = 'primary', anarchy = false, game = { m0: true }, home = false } = {}) {
+  const st = playing(2, game);
+  const me = only(st, 0, 'crew_african_union_space_directorate', face);
+  if (home) anchorHome(me);
+  st.anarchy = anarchy;
+  const [a, b] = st.players.map((p) => p.profileId);
+  for (const k of Object.keys(st.assembly.delegates)) st.assembly.delegates[k] = {};
+  st.assembly.delegates.freedom = { [a]: 1, [b]: 1 };
+  st.assembly.delegates.equality = { [a]: 2 };
+  st.activeLawStar = 'freedom';
+  return st;
+}
+check('EMISSARIES: a tied Ideology counts as the Active Law for the African Union seat only', () => {
+  const st = emissaryGame();
+  const r = op(st, 0, { kind: 'EMISSARIES', ideologies: ['equality'] });
+  assert(r.ok, `Emissaries refused: ${r.error}`);
+  eq(JSON.stringify(r.state.players[0].emissaryLaws), '["equality"]', 'emissary laws recorded');
+  assert(/Emissaries/.test(r.log), 'log');
+  eq(op(emissaryGame({ face: 'secondary' }), 0, { kind: 'EMISSARIES', ideologies: ['equality'] }).error, 'no_emissaries', 'Arbiter face');
+  // Not tied: name a place that is not among the winners.
+  eq(op(emissaryGame(), 0, { kind: 'EMISSARIES', ideologies: ['honor'] }).error, 'not_tied', 'untied ideology');
+  // A clear winner is no tie at all.
+  const solo = emissaryGame();
+  solo.assembly.delegates.equality[solo.players[0].profileId] = 3;
+  eq(op(solo, 0, { kind: 'EMISSARIES', ideologies: ['equality'] }).error, 'no_tie', 'single winner');
+});
+check('EMISSARIES: the law reaches the holder through the normal law gate (Equality Research Grants)', () => {
+  // Equality's Research Grants ignore the academia hand limit, so a full hand
+  // can start one only while Equality is usable.
+  const run = (emissary, face = 'primary') => {
+    const st = emissaryGame({ face });
+    st.players.forEach((p) => { p.hand = PATENTS.slice(0, 4).map((c) => c.id); p.aqua = 20; });
+    let s = st;
+    if (emissary) { const r = op(s, 0, { kind: 'EMISSARIES', ideologies: ['equality'] }); assert(r.ok, r.error); s = r.state; }
+    return op(s, 0, { kind: 'AUCTION_START', deckType: 'thruster', useEquality: true });
+  };
+  const withE = run(true);
+  assert(withE.ok, `Emissaries + Equality grant refused: ${withE.error}`);
+  eq(run(false).error, 'hand_limit', 'no Emissaries: Equality is not usable');
+  // The law lasts the holder's turn only: once the turn passes it is gone.
+  const st = emissaryGame();
+  const r = op(st, 0, { kind: 'EMISSARIES', ideologies: ['equality'] });
+  r.state.activeIndex = 1;
+  r.state.players.forEach((p) => { p.hand = PATENTS.slice(0, 4).map((c) => c.id); p.aqua = 20; p.opsRemaining = 4; });
+  eq(op(r.state, 1, { kind: 'AUCTION_START', deckType: 'thruster', useEquality: true }).error, 'hand_limit', 'the other seat on its turn');
+});
+check('EMISSARIES: suspended by Anarchy; locked under m0+m1+m2 until a Home Bernal', () => {
+  eq(op(emissaryGame({ anarchy: true }), 0, { kind: 'EMISSARIES', ideologies: ['equality'] }).error, 'no_emissaries', 'Anarchy');
+  eq(op(emissaryGame({ game: PROMO }), 0, { kind: 'EMISSARIES', ideologies: ['equality'] }).error, 'no_emissaries', 'promo, no Home Bernal');
+  assert(op(emissaryGame({ game: PROMO, home: true }), 0, { kind: 'EMISSARIES', ideologies: ['equality'] }).ok, 'promo + Home Bernal');
+});
+
+// ---- ARBITER (African Union, black) ----
+// "At the start of your turn you may perform a vote tally. Your vote tallies
+// may treat your delegates as 2 delegates each."
+// Seat 0 holds 1 Honor delegate; seat 1 holds 2 Freedom. Star on Freedom. A
+// doubled tally ties Honor with Freedom, so the Arbiter may pull the star to
+// Honor; a plain tally leaves Freedom the clear winner.
+function arbiterGame({ face = 'secondary', anarchy = false, game = { m0: true }, home = false } = {}) {
+  const st = playing(2, game);
+  const me = only(st, 0, 'crew_african_union_space_directorate', face);
+  if (home) anchorHome(me);
+  st.anarchy = anarchy;
+  const [a, b] = st.players.map((p) => p.profileId);
+  for (const k of Object.keys(st.assembly.delegates)) st.assembly.delegates[k] = {};
+  st.assembly.delegates.honor = { [a]: 1 };
+  st.assembly.delegates.freedom = { [b]: 2 };
+  st.activeLawStar = 'freedom';
+  return st;
+}
+check('ARBITER: a start-of-turn tally with doubled delegates moves the star; Emissaries face cannot', () => {
+  const r = op(arbiterGame(), 0, { kind: 'ARBITER_TALLY', star: 'honor' });
+  assert(r.ok, `Arbiter tally refused: ${r.error}`);
+  eq(r.state.activeLawStar, 'honor', 'star after the doubled tally');
+  eq(r.state.players[0].opsRemaining, 4, 'the tally spent an operation');
+  assert(/Arbiter/.test(r.log), 'log');
+  const single = op(arbiterGame(), 0, { kind: 'ARBITER_TALLY', double: false, star: 'honor' });
+  assert(single.ok, single.error);
+  eq(single.state.activeLawStar, 'freedom', 'an undoubled tally leaves Freedom the clear winner');
+  eq(op(arbiterGame({ face: 'primary' }), 0, { kind: 'ARBITER_TALLY', star: 'honor' }).error, 'no_arbiter', 'Emissaries face');
+});
+check('ARBITER: only at the start of the turn, once per turn', () => {
+  const r = op(arbiterGame(), 0, { kind: 'ARBITER_TALLY', star: 'honor' });
+  eq(op(r.state, 0, { kind: 'ARBITER_TALLY', star: 'honor' }).error, 'already_tallied', 'second tally');
+  const st = arbiterGame();
+  st.turnActions = [{ kind: 'INCOME', payload: {} }];
+  eq(op(st, 0, { kind: 'ARBITER_TALLY', star: 'honor' }).error, 'not_turn_start', 'after another action');
+});
+check('ARBITER: the holder\'s Fundraise tally may count delegates twice; nobody else\'s can', () => {
+  const fr = (face, dbl) => op(arbiterGame({ face }), 0, { kind: 'FUNDRAISE', star: 'honor', ...(dbl ? { arbiterDouble: true } : {}) });
+  const ok = fr('secondary', true);
+  assert(ok.ok, `doubled fundraise: ${ok.error}`);
+  eq(ok.state.activeLawStar, 'honor', 'star after the doubled fundraise');
+  eq(fr('secondary', false).state.activeLawStar, 'freedom', 'a plain fundraise leaves Freedom the clear winner');
+  eq(fr('primary', true).error, 'no_arbiter', 'Emissaries face asking to double');
+});
+check('ARBITER: suspended by Anarchy; locked under m0+m1+m2 until a Home Bernal', () => {
+  eq(op(arbiterGame({ anarchy: true }), 0, { kind: 'ARBITER_TALLY', star: 'honor' }).error, 'no_arbiter', 'Anarchy');
+  eq(op(arbiterGame({ game: PROMO }), 0, { kind: 'ARBITER_TALLY', star: 'honor' }).error, 'no_arbiter', 'promo, no Home Bernal');
+  assert(op(arbiterGame({ game: PROMO, home: true }), 0, { kind: 'ARBITER_TALLY', star: 'honor' }).ok, 'promo + Home Bernal');
+});
+
+// ---- POWER BROKERS (The Sea Peoples, black) ----
+// "After you pay FINAO, gain 1 Aqua per Seniority Disk on the Assembly (max
+// half FINAO paid, round down)."
+// Same one-hazard FINAO route the Open Source FINAO check flies.
+function brokerMove({ face = 'secondary', disks = 3, anarchy = false, game = { m0: true }, home = false, idx = 0 } = {}) {
+  const st = playing(2, game);
+  st.activeIndex = idx;
+  const me = st.players[idx];
+  only(st, idx, 'crew_the_sea_peoples', face);
+  if (home) anchorHome(me);
+  st.anarchy = anarchy;
+  for (const k of Object.keys(st.assembly.seniority)) st.assembly.seniority[k] = 0;
+  st.assembly.seniority.honor = disks;
+  me.rocket.siteId = 'lag-m0sea';
+  me.rocket.stack = [{ id: SOLAR_PUSH, kind: 'patent', face: 'primary' }];
+  me.rocket.activeThrusterId = SOLAR_PUSH;
+  me.rocket.tank = 12;
+  me.aqua = 30;
+  const r = op(st, idx, { kind: 'MOVE', hazardPay: true, segments: [{ from: 'lag-m0sea', to: 'burn-5eobz', burns: 1, turn: 1 }, { from: 'burn-5eobz', to: 'lag-c3cha', burns: 0, turn: 1 }] });
+  assert(r.ok, `move refused: ${r.error}`);
+  return { net: 30 - r.state.players[idx].aqua, log: r.log, others: r.state.players.filter((_, i) => i !== idx).map((p) => p.aqua) };
+}
+check('POWER BROKERS: FINAO pays back 1 aqua per Seniority Disk, capped at half the FINAO', () => {
+  const pb = brokerMove({ disks: 1 });
+  const ctl = brokerMove({ face: 'primary', disks: 1 });   // Courier face
+  eq(ctl.net - pb.net, 1, 'one disk rebate');
+  assert(/Power Brokers/.test(pb.log), 'rebate missing from the log');
+  const big = brokerMove({ disks: 9 });
+  const cap = Math.floor(ctl.net / 2);
+  eq(ctl.net - big.net, cap, `nine disks capped at half of ${ctl.net} FINAO`);
+  eq(brokerMove({ disks: 0 }).net, ctl.net, 'no disks, no rebate');
+  return `FINAO ${ctl.net}: 1 disk back 1, 9 disks back ${cap}`;
+});
+check('POWER BROKERS: suspended by Anarchy; locked under m0+m1+m2 until a Home Bernal', () => {
+  const ctl = brokerMove({ face: 'primary', disks: 2 }).net;
+  eq(brokerMove({ disks: 2, anarchy: true }).net, ctl, 'Anarchy');
+  eq(brokerMove({ disks: 2, game: PROMO }).net, brokerMove({ face: 'primary', disks: 2, game: PROMO }).net, 'promo, no Home Bernal');
+  assert(brokerMove({ disks: 2, game: PROMO, home: true }).net < brokerMove({ face: 'primary', disks: 2, game: PROMO, home: true }).net, 'promo + Home Bernal pays');
+});
+
+// ---- HEROIC (Galahad Group, white) ----
+// "This character can carry any number of glory chits. You may lobby honor
+// without losing a delegate."
+function heroicLobby({ face = 'primary', ideology = 'honor', anarchy = false, game = { m0: true }, home = false } = {}) {
+  const st = playing(2, game);
+  const me = only(st, 0, 'crew_galahad_group', face);
+  if (home) anchorHome(me);
+  st.anarchy = anarchy;
+  st.activeLawStar = 'centrist';
+  me.aqua = 5;
+  const pid = me.profileId;
+  st.assembly.delegates[ideology] = { ...(st.assembly.delegates[ideology] || {}), [pid]: 1 };
+  const r = op(st, 0, { kind: 'LOBBY', ideology });
+  assert(r.ok, `lobby refused: ${r.error}`);
+  return (r.state.assembly.delegates[ideology] || {})[pid] | 0;
+}
+check('HEROIC: Galahad lobbies honor and keeps the delegate; Quest face loses it; other laws cost one', () => {
+  eq(heroicLobby({}), 1, 'Heroic honor lobby');
+  eq(heroicLobby({ face: 'secondary' }), 0, 'Quest face honor lobby');
+  eq(heroicLobby({ ideology: 'freedom' }), 0, 'Heroic freedom lobby');
+});
+check('HEROIC lobby: suspended by Anarchy; locked under m0+m1+m2 until a Home Bernal', () => {
+  eq(heroicLobby({ anarchy: true }), 0, 'Anarchy');
+  eq(heroicLobby({ game: PROMO }), 0, 'promo, no Home Bernal');
+  eq(heroicLobby({ game: PROMO, home: true }), 1, 'promo + Home Bernal');
+});
+// Glory: the Galahad crew already carries a chit and loads a second at a fresh
+// zone. Any other lone Human would be refused glory_carry_full.
+function heroicGlory({ face = 'primary', anarchy = false, game = {}, home = false, crewId = 'crew_galahad_group' } = {}) {
+  const st = playing(2, game);
+  const me = only(st, 0, 'crew_galahad_group', face);
+  if (home) anchorHome(me);
+  st.anarchy = anarchy;
+  st.players.forEach((p) => { p.rocket.stack = []; p.leo = []; });
+  me.rocket.siteId = 'mars-north-pole';
+  me.rocket.stack = [{ id: SOLAR_PUSH, kind: 'patent', face: 'primary' }, { id: crewId, kind: 'crew', face }];
+  me.glory.visited = ['Earth'];
+  me.glory.chits = [{ zone: 'Earth', earnedTurn: 0, crewId }];
+  return op(st, 0, { kind: 'LOAD_GLORY' });
+}
+check('HEROIC: the Galahad crew carries a second glory chit; Quest face cannot', () => {
+  const h = heroicGlory({});
+  assert(h.ok, `Heroic load refused: ${h.error}`);
+  eq(h.state.players[0].glory.chits.length, 2, 'chits carried');
+  assert(h.state.players[0].glory.chits.every((c) => c.crewId === 'crew_galahad_group'), 'both chits ride the Galahad crew');
+  eq(heroicGlory({ face: 'secondary' }).error, 'glory_carry_full', 'Quest face');
+});
+check('HEROIC glory: suspended by Anarchy; locked under m0+m1+m2 until a Home Bernal', () => {
+  eq(heroicGlory({ anarchy: true }).error, 'glory_carry_full', 'Anarchy');
+  eq(heroicGlory({ game: PROMO }).error, 'glory_carry_full', 'promo, no Home Bernal');
+  assert(heroicGlory({ game: PROMO, home: true }).ok, 'promo + Home Bernal');
+});
+
+
+
+
+
+
+
+
+
+
+// ---------------------------------------------------------------- end promo group B
+
+
+
+
+
+
+
+
+// ================================================================ promo group C
+// economy and cards: SHUTTLES, ISO-SHUTTLES, TRADE PORT, PIGGYBACK, THERMAL LABS, TAILINGS REMINING
+// (group C checks go here)
+// ---- THERMAL LABS (BRIN, black) ----
+// "As a 1/turn free action, flip a radiator at your Colony/Bernal to its heavy side."
+const RAD_A = 'rad_dielectric_x_ray_window';
+const RAD_B = 'rad_ether_charged_dust';
+function thermalLabs({ face = 'secondary', anarchy = false, game = {}, home = false, where = 'bernal', twice = false } = {}) {
+  const st = playing(2, game);
+  const me = only(st, 0, 'crew_brin', face);
+  if (anarchy) st.anarchy = true;
+  const rads = [{ id: RAD_A, kind: 'patent', face: 'primary', radSide: 'light' },
+    { id: RAD_B, kind: 'patent', face: 'primary', radSide: 'light' }];
+  if (home) { anchorHome(me); me.bernals[0].stack = rads; }
+  else if (where === 'bernal') {
+    me.bernals = [{ cardId: PLAIN_BERNAL, siteId: EARTH_ORBIT, anchored: false, face: 'primary', stack: rads }];
+  } else {
+    me.bernals = [];
+    me.rocket.siteId = 'hathor';
+    me.rocket.stack = rads;
+    if (where === 'colony') st.colonies = { hathor: { ownerId: me.profileId } };
+  }
+  let r = op(st, 0, { kind: 'SET_RADIATOR_SIDE', cardId: RAD_A, radSide: 'heavy' });
+  if (!r.ok || !twice) return r;
+  return op(r.state, 0, { kind: 'SET_RADIATOR_SIDE', cardId: RAD_B, radSide: 'heavy' });
+}
+const radSideOf = (st, id) => {
+  const me = st.players[0];
+  const all = [...(me.rocket.stack || []), ...((me.bernals || []).flatMap((b) => b.stack || []))];
+  return (all.find((s) => s.id === id) || {}).radSide;
+};
+check('THERMAL LABS: flips a light radiator aboard a Bernal to heavy, free; Thermal Research face cannot', () => {
+  const r = thermalLabs();
+  assert(r.ok, `Thermal Labs refused: ${r.error}`);
+  eq(radSideOf(r.state, RAD_A), 'heavy', 'radiator side after the flip');
+  eq(r.state.players[0].opsRemaining, 4, 'the flip spent an operation');
+  assert(/Thermal Labs/.test(r.log), 'log line does not name the ability');
+  eq(thermalLabs({ face: 'primary' }).error, 'no_thermal_labs', 'Thermal Research face');
+});
+check('THERMAL LABS: works at your Colony, not at a bare site; once per turn', () => {
+  assert(thermalLabs({ where: 'colony' }).ok, 'refused at own Colony');
+  eq(thermalLabs({ where: 'site' }).error, 'not_at_colony_or_bernal', 'bare site');
+  eq(thermalLabs({ twice: true }).error, 'thermal_labs_used', 'second flip in one turn');
+});
+check('THERMAL LABS: suspended by Anarchy; locked under m0+m1+m2 until a Home Bernal', () => {
+  eq(thermalLabs({ anarchy: true }).error, 'no_thermal_labs', 'Anarchy');
+  eq(thermalLabs({ game: PROMO }).error, 'no_thermal_labs', 'promo game, no Home Bernal');
+  assert(thermalLabs({ game: PROMO, home: true }).ok, 'promo game, Home Bernal anchored');
+});
+
+// ---- SHUTTLES (Explorers Without Borders, white) ----
+// "1/turn you may cargo transfer Aqua from your Bank to an operational thruster in a Home Orbit or LEO."
+function shuttle({ face = 'primary', anarchy = false, game = {}, home = false, at = EARTH_ORBIT, thruster = true, twice = false } = {}) {
+  const st = playing(2, game);
+  const me = only(st, 0, 'crew_explorers_without_borders', face);
+  if (anarchy) st.anarchy = true;
+  if (home) anchorHome(me);
+  me.rocket.siteId = at;
+  me.rocket.stack = thruster ? [{ id: SOLAR_PUSH, kind: 'patent', face: 'primary' }] : [{ id: RAD_A, kind: 'patent', face: 'primary', radSide: 'light' }];
+  me.rocket.activeThrusterId = thruster ? SOLAR_PUSH : null;
+  me.rocket.tank = 0;
+  me.aqua = 20;
+  let r = op(st, 0, { kind: 'REFUEL', amount: 2 });
+  if (!r.ok || !twice) return r;
+  return op(r.state, 0, { kind: 'REFUEL', amount: 1 });
+}
+check('SHUTTLES: bank aqua reaches a ship in a Home Orbit; Iso-Shuttles face cannot', () => {
+  const r = shuttle();
+  assert(r.ok, `Shuttles refused: ${r.error}`);
+  eq(20 - r.state.players[0].aqua, 2, 'aqua drawn');
+  assert(r.state.players[0].rocket.tank > 0, 'no water went in');
+  eq(r.state.players[0].opsRemaining, 4, 'spent an operation');
+  eq(shuttle({ face: 'secondary' }).error, 'rocket_not_at_leo', 'Iso-Shuttles face');
+});
+check('SHUTTLES: once per turn, needs an operational thruster, not at an ordinary site', () => {
+  eq(shuttle({ twice: true }).error, 'shuttles_used', 'second shuttle this turn');
+  eq(shuttle({ thruster: false }).error, 'no_operational_thruster', 'no thruster aboard');
+  eq(shuttle({ at: 'hathor' }).error, 'rocket_not_at_leo', 'a non-Home-Orbit site');
+});
+check('SHUTTLES: suspended by Anarchy; locked under m0+m1+m2 until a Home Bernal', () => {
+  eq(shuttle({ anarchy: true }).error, 'rocket_not_at_leo', 'Anarchy');
+  eq(shuttle({ game: PROMO }).error, 'rocket_not_at_leo', 'promo game, no Home Bernal');
+  assert(shuttle({ game: PROMO, home: true }).ok, 'promo game, Home Bernal anchored');
+});
+
+// ---- ISO-SHUTTLES (Explorers Without Borders, black) ----
+// "If you have an isotope in your Bank or isovault, pay 10 less Aqua/1 less isotope when boosting (min 0)."
+const ISO_CARD = 'rea_project_orion';
+function isoBoost({ face = 'secondary', anarchy = false, game = {}, home = false, isotope = true, second = false } = {}) {
+  const st = playing(2, game);
+  const me = only(st, 0, 'crew_explorers_without_borders', face);
+  if (anarchy) st.anarchy = true;
+  if (home) anchorHome(me);
+  me.hand = [ISO_CARD, 'thr_hall_effect'];
+  me.leo = isotope ? [{ id: 'fuel_9001', kind: 'fuel', grade: 'isotope', amount: 1 }] : [];
+  me.aqua = 40;
+  let r = op(st, 0, { kind: 'BOOST', cardIds: [ISO_CARD] });
+  assert(r.ok, `boost: ${r.error}`);
+  if (!second) return 40 - r.state.players[0].aqua;
+  const before = r.state.players[0].aqua;
+  r = op(r.state, 0, { kind: 'BOOST', cardIds: ['thr_hall_effect'] });
+  assert(r.ok, `second boost: ${r.error}`);
+  return before - r.state.players[0].aqua;
+}
+check('ISO-SHUTTLES: an isotope in the bank takes up to 10 aqua off a boost; Shuttles face pays full', () => {
+  const full = isoBoost({ face: 'primary' });
+  const iso = isoBoost();
+  assert(full > 0, 'fixture card costs nothing to boost');
+  eq(iso, Math.max(0, full - 10), 'Iso-Shuttles boost cost');
+  eq(isoBoost({ isotope: false }), full, 'no isotope in the bank');
+  return `full ${full}, Iso-Shuttles ${iso}`;
+});
+check('ISO-SHUTTLES: once per boost operation (a continued boost pays full)', () => {
+  eq(isoBoost({ second: true }), isoBoost({ face: 'primary', second: true }), 'continued boost');
+});
+check('ISO-SHUTTLES: suspended by Anarchy; locked under m0+m1+m2 until a Home Bernal', () => {
+  const full = isoBoost({ face: 'primary' });
+  eq(isoBoost({ anarchy: true }), full, 'Anarchy');
+  eq(isoBoost({ game: PROMO }), full, 'promo game, no Home Bernal');
+  eq(isoBoost({ game: PROMO, home: true }), Math.max(0, full - 10), 'promo game, Home Bernal anchored');
+});
+
+// ---- TRADE PORT (Makers Guild, black) ----
+// "At the start of your turn, you may discard 2 cards to take the top card of a patent queue."
+function tradePort({ face = 'secondary', anarchy = false, game = {}, home = false, late = false, twice = false } = {}) {
+  const st = playing(2, game);
+  const me = only(st, 0, 'crew_makers_guild', face);
+  if (anarchy) st.anarchy = true;
+  if (home) anchorHome(me);
+  me.hand = ['thr_hall_effect', RAD_A, RAD_B];
+  if (late) me.opsRemaining = 0;
+  const top = st.decks.thruster[0];
+  let r = op(st, 0, { kind: 'TRADE_PORT', cardIds: ['thr_hall_effect', RAD_A], deckType: 'thruster' });
+  if (r.ok && twice) r = op(r.state, 0, { kind: 'TRADE_PORT', cardIds: [RAD_B, top], deckType: 'thruster' });
+  return { r, top, base: st };
+}
+check('TRADE PORT: discard 2 at the start of the turn, take the top patent card; Nexus face cannot', () => {
+  const { r, top } = tradePort();
+  assert(r.ok, `Trade Port refused: ${r.error}`);
+  const me = r.state.players[0];
+  assert(me.hand.includes(top), 'the top thruster did not reach the hand');
+  assert(!me.hand.includes('thr_hall_effect') && !me.hand.includes(RAD_A), 'discards stayed in hand');
+  eq(me.hand.length, 2, 'hand size after the swap');
+  eq(me.opsRemaining, 4, 'spent an operation');
+  eq(r.state.decks.thruster[r.state.decks.thruster.length - 1], 'thr_hall_effect', 'discard went under the deck');
+  eq(tradePort({ face: 'primary' }).r.error, 'no_trade_port', 'Offworld Trade Nexus face');
+});
+check('TRADE PORT: start of turn only, once per turn, and the reveal cannot be undone', () => {
+  eq(tradePort({ late: true }).r.error, 'not_start_of_turn', 'after spending the operation');
+  eq(tradePort({ twice: true }).r.error, 'trade_port_used', 'second swap in one turn');
+  const { r, base } = tradePort();
+  const u = op(r.state, 0, { kind: 'UNDO' }, { turnBaseState: base });
+  eq(u.error, 'reveal_blocks_undo', 'undo after the swap');
+});
+check('TRADE PORT: suspended by Anarchy; locked under m0+m1+m2 until a Home Bernal', () => {
+  eq(tradePort({ anarchy: true }).r.error, 'no_trade_port', 'Anarchy');
+  eq(tradePort({ game: PROMO }).r.error, 'no_trade_port', 'promo game, no Home Bernal');
+  assert(tradePort({ game: PROMO, home: true }).r.ok, 'promo game, Home Bernal anchored');
+});
+
+// ---- PIGGYBACK (Utopia, Inc., black) ----
+// "Whenever an opponent boosts cards, you may immediately boost cards up to the mass of the cards boosted, for free."
+// Seat 0 boosts on their turn; seat 1 holds the card and answers off turn.
+function piggyBoost({ face = 'secondary', anarchy = false, game = {}, home = false } = {}) {
+  const st = playing(2, game);
+  only(st, 1, 'crew_utopia_inc', face);
+  if (anarchy) st.anarchy = true;
+  if (home) anchorHome(st.players[1]);
+  st.players[0].hand = [ISO_CARD, 'thr_hall_effect'];
+  st.players[0].aqua = 40;
+  st.players[1].hand = ['thr_hall_effect', ISO_CARD];
+  st.players[1].aqua = 7;
+  st.players[1].leo = [];
+  const base = clone(st);
+  const r = op(st, 0, { kind: 'BOOST', cardIds: [ISO_CARD] });
+  assert(r.ok, `opponent boost: ${r.error}`);
+  return { st: r.state, base, log: r.log };
+}
+const allowOf = (st) => ((st.piggyback && st.piggyback.allow) || {})[String(st.players[1].profileId)] | 0;
+check('PIGGYBACK: an opponent\'s boost lets the Utopia seat boost up to that mass free, off turn', () => {
+  const { st } = piggyBoost();
+  const mass = allowOf(st);
+  assert(mass > 0, 'no piggyback window opened');
+  const r = op(st, 1, { kind: 'PIGGYBACK', cardIds: ['thr_hall_effect'] });
+  assert(r.ok, `piggyback refused: ${r.error}`);
+  const me = r.state.players[1];
+  assert(me.leo.some((s) => s.id === 'thr_hall_effect'), 'card did not reach LEO');
+  eq(me.aqua, 7, 'piggyback cost aqua');
+  assert(/Piggyback/.test(r.log), 'log line does not name the ability');
+  return `window ${mass} mass`;
+});
+check('PIGGYBACK: capped at the boosted mass; Executive Discount face and the booster get no window', () => {
+  const { st } = piggyBoost();
+  const over = op(st, 1, { kind: 'PIGGYBACK', cardIds: ['thr_hall_effect', ISO_CARD] });
+  eq(over.error, 'piggyback_over_mass', 'two cards over the boosted mass');
+  const other = piggyBoost({ face: 'primary' });
+  eq(allowOf(other.st), 0, 'Executive Discount face window');
+  eq(op(other.st, 1, { kind: 'PIGGYBACK', cardIds: ['thr_hall_effect'] }).error, 'no_piggyback_window', 'Executive Discount face');
+  eq(op(st, 0, { kind: 'PIGGYBACK', cardIds: ['thr_hall_effect'] }).error, 'no_piggyback_window', 'the booster');
+});
+check('PIGGYBACK: the window closes with the booster\'s turn; the ridden boost cannot be undone', () => {
+  const { st, base } = piggyBoost();
+  const ended = op(st, 0, { kind: 'END_TURN' });
+  assert(ended.ok, ended.error);
+  eq(op(ended.state, 1, { kind: 'PIGGYBACK', cardIds: ['thr_hall_effect'] }).error, 'no_piggyback_window', 'after the booster ended the turn');
+  const rode = op(st, 1, { kind: 'PIGGYBACK', cardIds: ['thr_hall_effect'] });
+  eq(op(rode.state, 0, { kind: 'UNDO' }, { turnBaseState: base }).error, 'reveal_blocks_undo', 'booster undo after a piggyback');
+  // A later action of the booster's is still undoable, and the rebuild keeps
+  // the piggybacked card where it landed.
+  const more = op(rode.state, 0, { kind: 'BOOST', cardIds: ['thr_hall_effect'] });
+  assert(more.ok, more.error);
+  const u = op(more.state, 0, { kind: 'UNDO' }, { turnBaseState: base });
+  assert(u.ok, `undo of the later boost: ${u.error}`);
+  assert(u.state.players[1].leo.some((s) => s.id === 'thr_hall_effect'), 'the rebuild lost the piggybacked card');
+});
+check('PIGGYBACK: suspended by Anarchy; locked under m0+m1+m2 until a Home Bernal', () => {
+  eq(allowOf(piggyBoost({ anarchy: true }).st), 0, 'Anarchy');
+  eq(allowOf(piggyBoost({ game: PROMO }).st), 0, 'promo game, no Home Bernal');
+  assert(allowOf(piggyBoost({ game: PROMO, home: true }).st) > 0, 'promo game, Home Bernal anchored');
+});
+
+// ---- TAILINGS REMINING (The Martian Way, black) ----
+// "If this Crew is colocated, can produce ET products of Spectral Type C at any Factory."
+function tailings({ face = 'secondary', anarchy = false, game = {}, home = false, crew = true, card = 'thr_hall_effect' } = {}) {
+  const SITE = 'mathilde';
+  const st = playing(2, game);
+  const me = only(st, 0, 'crew_the_martian_way', face);
+  if (anarchy) st.anarchy = true;
+  if (home) anchorHome(me);
+  st.factories = { [SITE]: { ownerId: me.profileId, spectralType: 'S' } };
+  me.rocket.siteId = SITE;
+  me.rocket.stack = crew ? [{ id: 'crew_the_martian_way', kind: 'crew', face }] : [];
+  me.hand = [card];
+  return op(st, 0, { kind: 'ET_PRODUCE', siteId: SITE, cardId: card, letter: 'A' });
+}
+check('TAILINGS REMINING: a C product comes out of an S Factory with the crew there; Rocketeers face cannot', () => {
+  const r = tailings();
+  assert(r.ok, `Tailings Remining refused: ${r.error}`);
+  eq(tailings({ face: 'primary' }).error, 'wrong_spectral', 'Rocketeers face');
+});
+check('TAILINGS REMINING: needs the crew colocated, and only Spectral C', () => {
+  eq(tailings({ crew: false }).error, 'wrong_spectral', 'crew not at the Factory');
+  eq(tailings({ card: 'thr_re_solar_moth' }).error, 'wrong_spectral', 'a Spectral D product');
+  assert(tailings({ card: 'thr_dumbo', face: 'primary' }).ok, 'a matching S product is refused for anyone');
+});
+check('TAILINGS REMINING: suspended by Anarchy; locked under m0+m1+m2 until a Home Bernal', () => {
+  eq(tailings({ anarchy: true }).error, 'wrong_spectral', 'Anarchy');
+  eq(tailings({ game: PROMO }).error, 'wrong_spectral', 'promo game, no Home Bernal');
+  assert(tailings({ game: PROMO, home: true }).ok, 'promo game, Home Bernal anchored');
+});
+
+
+
+
+
+
+
+
+
+
+// ---------------------------------------------------------------- end promo group C
+
+
+
+
+
+
+
+
+// ================================================================ promo group D
+// colonists and factories: REFUGEE, IMMIGRANT, QUEST, SITDOWN
+
+// ---- REFUGEE (New Pilgrims, white) ----
+// "May industrialize an opponent's Claim (not a Felony); both may use the
+// Factory (even if this card is flipped)."
+function refugee({ face = 'primary', anarchy = false, game = {}, home = false, claimBy = 1 } = {}) {
+  const REFINERY = 'ref_atomic_layer_deposition';
+  const ROBONAUT = 'rob_phase_locked_diode_laser';
+  const st = playing(2, game);
+  const me = only(st, 0, 'crew_new_pilgrims', face);
+  if (anarchy) st.anarchy = true;
+  if (home) anchorHome(me);
+  me.rocket.siteId = 'mathilde';
+  const ids = [REFINERY, ROBONAUT];
+  me.rocket.stack = ids.map((id) => ({ id, kind: 'patent', face: 'primary' }));
+  const owner = st.players[claimBy];
+  st.discs.mathilde = { outcome: 'success', ownerId: owner.profileId, by: owner.name };
+  return op(st, 0, { kind: 'INDUSTRIALIZE', siteId: 'mathilde', cardIds: ids });
+}
+check('REFUGEE: industrializes an opponent\'s Claim; the Factory is shared with the Claim owner', () => {
+  const r = refugee();
+  assert(r.ok, `Refugee industrialize refused: ${r.error}`);
+  const f = r.state.factories.mathilde;
+  eq(f.ownerId, r.state.players[0].profileId, 'Factory owner');
+  assert(f.grants && f.grants[String(r.state.players[1].profileId)], 'Claim owner was not given use of the Factory');
+  assert(/Refugee/.test(r.log), 'log does not name Refugee');
+  eq(r.state.players[0].felonies | 0, 0, 'Refugee build counted as a felony');
+  return r.log;
+});
+check('REFUGEE: Immigrant face (other face) and a core faction may not build on an opponent\'s Claim', () => {
+  eq(refugee({ face: 'secondary' }).error, 'not_claimed', 'Immigrant face');
+  const st = refugee({ claimBy: 0 });
+  assert(st.ok, `Refugee on its own Claim: ${st.error}`);
+  assert(!st.state.factories.mathilde.refugeeShare, 'own-claim build marked as shared');
+});
+check('REFUGEE: suspended by Anarchy; m0+m1+m2 locked until a Home Bernal', () => {
+  eq(refugee({ anarchy: true }).error, 'not_claimed', 'Anarchy');
+  eq(refugee({ game: PROMO }).error, 'not_claimed', 'promo game, no Home Bernal');
+  assert(refugee({ game: PROMO, home: true }).ok, 'promo game, Home Bernal anchored');
+});
+check('REFUGEE: the shared use survives a flip and cannot be revoked', () => {
+  const r = refugee();
+  const st = r.state;
+  st.players[0].faction = { cardId: 'crew_new_pilgrims', face: 'secondary' };   // flipped
+  const claimer = st.players[1];
+  const rev = applyOperation(st, { kind: 'REVOKE_FACTORY_USE', siteId: 'mathilde', granteeId: claimer.profileId }, { profileId: st.players[0].profileId });
+  eq(rev.ok ? 'accepted' : rev.error, 'refugee_share', 'revoking the Claim owner\'s share');
+  // The Claim owner uses the Factory (Factory Refuel) on their own turn.
+  st.activeIndex = 1;
+  claimer.opsRemaining = 4;
+  st.turnActions = [];
+  claimer.rocket.siteId = 'mathilde';
+  claimer.rocket.stack = [{ id: SOLAR_PUSH, kind: 'patent', face: 'primary' }];
+  claimer.rocket.activeThrusterId = SOLAR_PUSH;
+  claimer.rocket.tank = 0;
+  const use = op(st, 1, { kind: 'SITE_REFUEL', siteId: 'mathilde', mode: 'factory' });
+  assert(use.ok, `Claim owner could not use the shared Factory: ${use.error}`);
+  assert(use.state.players[1].rocket.tank > 0, 'no water went in');
+  // A plain opponent's Factory is still refused to a non-grantee.
+  const plain = refugee({ claimBy: 0 }).state;
+  plain.activeIndex = 1; plain.players[1].opsRemaining = 4; plain.turnActions = [];
+  Object.assign(plain.players[1].rocket, { siteId: 'mathilde', stack: [{ id: SOLAR_PUSH, kind: 'patent', face: 'primary' }], activeThrusterId: SOLAR_PUSH, tank: 0 });
+  assert(!op(plain, 1, { kind: 'SITE_REFUEL', siteId: 'mathilde', mode: 'factory' }).ok, 'a non-grantee used an opponent\'s Factory');
+});
+
+// ---- IMMIGRANT (New Pilgrims, black) ----
+// "When exomigrating, may first name a specialty to search the chosen queue for
+// the 1st Human with that specialty (if any), then shuffle."
+const humanOf = (spec) => Object.values(COLONISTS_BY_ID).filter((c) => c.colonistKind === 'Human' && c.specialty === spec);
+function exomigrant({ cardId = 'crew_new_pilgrims', face = 'secondary', anarchy = false, home = true, specialty = 'Engineer', to = undefined, setup = null } = {}) {
+  const st = playing(2, PROMO);
+  const me = only(st, 0, cardId, face);
+  if (anarchy) st.anarchy = true;
+  if (home) anchorHome(me);
+  else me.bernals = [{ cardId: 'ber_tourism_cycler', anchored: true, siteId: 'ceres', face: 'primary', stack: [] }];
+  // A queue with the only Engineer buried at the bottom.
+  st.colonistQueue = [...humanOf('Miner'), ...humanOf('Prospector'), humanOf('Engineer')[0]].map((c) => c.id);
+  if (setup) setup(st, me);
+  const body = { kind: 'EXOMIGRATE', placeDelegate: false };
+  if (specialty) body.specialty = specialty;
+  if (to) body.to = to;
+  const r = op(st, 0, body);
+  if (!r.ok) return r;
+  const landed = [...(r.state.players[0].leo || []), ...r.state.players[0].bernals.flatMap((b) => b.stack || []),
+    ...Object.values(r.state.players[0].outposts || {}).flatMap((o) => o.cards || [])].find((s) => s.kind === 'colonist');
+  return { ...r, landed: landed && COLONISTS_BY_ID[landed.id] };
+}
+check('IMMIGRANT: names Engineer and the buried Engineer exomigrates; the queue is shuffled', () => {
+  const r = exomigrant();
+  assert(r.ok, `Immigrant exomigration refused: ${r.error}`);
+  eq(r.landed && r.landed.specialty, 'Engineer', 'specialty of the arriving colonist');
+  assert(/Immigrant/.test(r.log), 'log does not name Immigrant');
+  const plain = exomigrant({ specialty: null });
+  assert(plain.ok && plain.landed.specialty === 'Miner', 'a plain exomigration did not take the top card');
+  const none = exomigrant({ setup: (st) => { st.colonistQueue = humanOf('Miner').map((c) => c.id); } });
+  assert(none.ok && /found none/.test(none.log), `no-match search: ${none.error || none.log}`);
+  return `${r.landed.name} arrived`;
+});
+check('IMMIGRANT: Refugee face (other face) and a core faction cannot search the queue', () => {
+  eq(exomigrant({ face: 'primary' }).error, 'no_immigrant', 'Refugee face');
+  eq(exomigrant({ cardId: 'crew_un_b612', face: 'primary' }).error, 'no_immigrant', 'UN Cosmonauts');
+});
+check('IMMIGRANT: suspended by Anarchy; locked without a Home Bernal', () => {
+  eq(exomigrant({ anarchy: true }).error, 'no_immigrant', 'Anarchy');
+  eq(exomigrant({ home: false }).error, 'no_immigrant', 'anchored Bernal that is not a Home Bernal');
+});
+
+// ---- QUEST (Galahad Group, black) ----
+// "During exomigration, your Human Colonist may appear at any Colony in a zone
+// for which you hold a glory chit."
+const QUEST_COLONY = 'ceres';
+function quest({ face = 'secondary', anarchy = false, home = true, chitZone = 'auto', to = `colony:${QUEST_COLONY}` } = {}) {
+  return exomigrant({ cardId: 'crew_galahad_group', face, anarchy, home, specialty: null, to,
+    setup: (st, me) => {
+      st.colonies[QUEST_COLONY] = { ownerId: st.players[1].profileId, type: 'other' };
+      const zone = chitZone === 'auto' ? siteBySlug(QUEST_COLONY).solarZone : chitZone;
+      me.glory.claimed = zone ? [{ zone, side: 'front', vp: 1, turn: 1, crewId: null }] : [];
+    } });
+}
+check('QUEST: the Human appears at an opponent\'s Colony in a zone the player holds a chit for', () => {
+  const r = quest();
+  assert(r.ok, `Quest exomigration refused: ${r.error}`);
+  const o = Object.values(r.state.players[0].outposts || {}).find((x) => x && x.siteId === QUEST_COLONY);
+  assert(o && o.cards.some((s) => s.kind === 'colonist'), 'the colonist is not at the Colony');
+  assert(/Quest/.test(r.log), 'log does not name Quest');
+  return r.log;
+});
+check('QUEST: no chit for that zone, Heroic face (other face), or no Colony there: refused', () => {
+  eq(quest({ chitZone: null }).error, 'no_glory_chit_for_zone', 'no chit');
+  eq(quest({ face: 'primary' }).error, 'no_quest', 'Heroic face');
+  eq(quest({ to: 'colony:vesta' }).error, 'no_colony_there', 'no Colony there');
+});
+check('QUEST: suspended by Anarchy; locked without a Home Bernal', () => {
+  eq(quest({ anarchy: true }).error, 'no_quest', 'Anarchy');
+  eq(quest({ home: false }).error, 'no_quest', 'not a Home Bernal');
+});
+
+// ---- SITDOWN (LEO Workers' Union, black) ----
+// "Factory hijack; works even if another player's Humans are present. You
+// choose 1st Player."
+function sitdown({ face = 'secondary', anarchy = false, game = {}, home = false, myHuman = true, felonious = false } = {}) {
+  const SITE = 'mathilde';
+  const card = PATENTS.find((c) => c.type === 'thruster' && c.spectralType);
+  const st = playing(2, game);
+  const me = only(st, 0, 'crew_leo_workers_union', face);
+  if (felonious) give(st, 0, 'crew_roscosmos_taikonauts', 'secondary');
+  if (anarchy) st.anarchy = true;
+  if (home) anchorHome(me);
+  const rival = st.players[1];
+  st.factories[SITE] = { ownerId: rival.profileId, spectralType: card.spectralType };
+  // The defender: a Human crew card on the rival's rocket at the Factory.
+  rival.rocket.siteId = SITE;
+  rival.rocket.stack = [{ id: 'crew_spacex_norse', kind: 'crew', face: 'primary' }];
+  me.rocket.siteId = SITE;
+  me.rocket.stack = myHuman ? [{ id: me.faction.cardId, kind: 'crew', face: me.faction.face }] : [{ id: SOLAR_PUSH, kind: 'patent', face: 'primary' }];
+  me.hand = [card.id];
+  return op(st, 0, { kind: 'ET_PRODUCE', siteId: SITE, cardId: card.id, letter: 'A', isNewOutpost: true });
+}
+check('SITDOWN: hijacks a defended opponent Factory with no Anarchy; Collective Bargaining cannot', () => {
+  const r = sitdown();
+  assert(r.ok, `Sitdown hijack refused: ${r.error}`);
+  eq(sitdown({ face: 'primary' }).error, 'not_your_factory', 'Collective Bargaining face');
+  eq(sitdown({ myHuman: false }).error, 'felony_needs_human', 'Sitdown without its own Human');
+});
+check('SITDOWN: a Felonious hijacker is still stopped by defenders', () => {
+  eq(sitdown({ felonious: true, anarchy: true }).error, 'factory_defended', 'Taikonauts hijack in Anarchy, defended');
+});
+check('SITDOWN: suspended by Anarchy; m0+m1+m2 locked until a Home Bernal', () => {
+  eq(sitdown({ anarchy: true }).error, 'factory_defended', 'Anarchy (felony open to all, but defended)');
+  eq(sitdown({ game: PROMO }).error, 'not_your_factory', 'promo game, no Home Bernal');
+  assert(sitdown({ game: PROMO, home: true }).ok, 'promo game, Home Bernal anchored');
+});
+// Close a round in a 3-seat rotation game with seat `holderAt` (counted from
+// the leader) holding the Union face under test.
+function sitdownRound(face, holderAt = 1, anarchyAtClose = false) {
+  let st = playing(3, { m0: true });
+  st.firstPlayerRotation = true;
+  const lead = st.firstPlayerIndex || 0;
+  const seatAt = (n) => (lead + n) % 3;
+  only(st, seatAt(holderAt), 'crew_leo_workers_union', face);
+  st.activeIndex = lead;
+  const startRound = st.round;
+  for (let guard = 0; guard < 80; guard++) {
+    // A Sunspot Anarchy rolled during the round is noise here: pin it.
+    st.anarchy = !!anarchyAtClose;
+    const sen = st.pendingSeniority;
+    const ev = st.pendingEvent && (st.pendingEvent.waiting || [])[0];
+    let r;
+    if (sen) r = applyOperation(st, { kind: 'PLACE_SENIORITY', place: 'unity' }, { profileId: sen.chooserId });
+    else if (ev != null) r = applyOperation(st, { kind: 'EVENT_CHOICE' }, { profileId: ev });
+    else r = applyOperation(st, { kind: 'END_TURN' }, { profileId: st.players[st.activeIndex].profileId });
+    assert(r.ok, `round close: ${r.error}`);
+    st = r.state;
+    if (st.round !== startRound && !st.pendingSeniority) break;
+  }
+  return { st, leadId: st.players[seatAt(0)].profileId, holderId: st.players[seatAt(holderAt)].profileId, otherId: st.players[seatAt(2)].profileId };
+}
+check('SITDOWN: the Union holder names the next first player and may name themselves', () => {
+  const g = sitdownRound('secondary');
+  const pend = g.st.pendingFirstPlayer;
+  assert(pend, 'no first-player choice opened');
+  eq(String(pend.chooserId), String(g.holderId), 'chooser');
+  const back = applyOperation(g.st, { kind: 'SET_FIRST_PLAYER', profileId: g.leadId }, { profileId: g.holderId });
+  eq(back.ok ? 'accepted' : back.error, 'must_choose_another', 'naming the outgoing leader');
+  const lead = applyOperation(g.st, { kind: 'SET_FIRST_PLAYER', profileId: g.leadId }, { profileId: g.leadId });
+  eq(lead.ok ? 'accepted' : lead.error, 'not_first_player_chooser', 'the outgoing leader picking');
+  const self = applyOperation(g.st, { kind: 'SET_FIRST_PLAYER', profileId: g.holderId }, { profileId: g.holderId });
+  assert(self.ok, `Sitdown naming themselves refused: ${self.error}`);
+  eq(String(self.state.players[self.state.firstPlayerIndex].profileId), String(g.holderId), 'new first player');
+});
+check('SITDOWN: Collective Bargaining face leaves the choice with the outgoing leader; Anarchy suspends it', () => {
+  const g = sitdownRound('primary');
+  eq(String(g.st.pendingFirstPlayer && g.st.pendingFirstPlayer.chooserId), String(g.leadId), 'chooser (other face)');
+  const a = sitdownRound('secondary', 1, true);
+  eq(String(a.st.pendingFirstPlayer && a.st.pendingFirstPlayer.chooserId), String(a.leadId), 'chooser under Anarchy');
+});
+
+
+
+
+
+
+
+
+
+
+// ---------------------------------------------------------------- end promo group D
+
+
+
+
+
+
+
 
 // ---- inventory: in-scope faces with no engine rule ----
 // Not a behaviour test: lists every in-scope face whose privilege key appears

@@ -78,6 +78,16 @@ function crewModuleBadge(face) {
     badge.className = 'card-module-badge is-required';
     badge.textContent = `Coming soon · ${face.requiresModule}`;
     badge.setAttribute('data-tip', `Coming soon: this side needs Module ${n}, which isn't available yet, so it can't be picked.`);
+  } else if (face.needsModules && face.needsModules.length) {
+    const missing = crewFaceMissingModules(face);
+    const mods = face.needsModules.join(' + ');
+    badge.className = 'card-module-badge ' + (missing.length ? 'is-required' : 'is-needs');
+    badge.textContent = `Needs ${mods}${face.notRecommendedWithModule ? ` · ⚠ ${face.notRecommendedWithModule}` : ''}`;
+    const names = { M0: 'Module 0 (Politics)', M1: 'Module 1 (Terawatt)', M2: 'Module 2 (Futures)' };
+    badge.setAttribute('data-tip', (missing.length
+      ? `This side needs ${missing.map((m) => names[m] || m).join(' and ')}, which this game is not using, so it can't be picked here.`
+      : `This side's ability uses ${face.needsModules.map((m) => names[m] || m).join(' and ')}.`)
+      + (face.notRecommendedWithModule ? ` Not recommended with Module ${face.notRecommendedWithModule.slice(1)}.` : ''));
   } else if (face.notRecommendedWithModule) {
     const n = face.notRecommendedWithModule.slice(1);
     badge.className = 'card-module-badge is-caution';
@@ -123,6 +133,8 @@ import { renderAssemblyPanel, renderAssemblyLaws } from './assembly.js';
 import { uiIcon, cardPileBadge } from './ui-icons.js';
 import { SITE_TAGS, normaliseTag, tagDisplay } from '../../data/site-tags.js';
 import { NODE_TAGS } from '../../data/node-tags.js';
+import { hazardFlavorOf } from '../../data/hazard-flavors.js';
+import { NODE_LABELS, MAP_LABELS } from '../../data/map-labels.js';
 import { routeFlewAerobrake } from '../../data/lander-burn.js';
 import { nodeSeason, seasonEntryBlocked } from '../../data/season-gate.js';
 import { serverTagLabels, tagInfo } from '../../data/node-labels.js';
@@ -1172,6 +1184,7 @@ function applySnapshot(snapshot, seq) {
   maybePromptSpeciesDeclaration(snapshot);
   syncCrewDraftOverlay(snapshot);
   syncCardDraftOverlay(snapshot);
+  maybePromptPiggyback(snapshot);
 }
 
 // One-at-a-time guard so a flurry of snapshots (e.g. another player's
@@ -1192,13 +1205,20 @@ function isSoloRoom(snapshot) {
 
 // Promo crew (data/crew.js#PROMO_CREW) are full-module-stack cards - their
 // abilities lean on M0 politics (delegates / lobby / anarchy), M1 terawatt
-// (freighters), and M2 futures / colonists - so they only work, and are only
-// offered, when ALL of m0+m1+m2 are active AND the viewer is an admin. Below
-// that bar picking one would commit to a faction whose privilege can't fire,
-// so the wizard must not show them. The server re-checks the same bar in
-// applyPickCrew (never trust the client for the gate).
+// (freighters), and M2 futures / colonists - so they are offered only when ALL
+// of m0+m1+m2 are active. RELEASED to every player (user 2026-11-14; it used
+// to be admin-only). An M4 / M5 face stays "Coming soon" and unpickable. The
+// server re-checks the same bar in applyPickCrew (never trust the client).
 function promoCrewAllowed(snapshot) {
-  return !!(activeProfile()?.isAdmin && snapshot && snapshot.m0 && snapshot.m1 && snapshot.m2);
+  return !!snapshot;
+}
+// The modules a crew face needs that this room does not run (data/crew.js
+// needsModules, e.g. ['M1'] for Life Raft). Empty = pickable here. Mirrors the
+// engine's crew_face_needs_modules refusal in applyPickCrew.
+function crewFaceMissingModules(face, snapshot = _onlineSnapshot) {
+  const need = (face && face.needsModules) || [];
+  if (!need.length || !snapshot) return [];
+  return need.filter((m) => !snapshot[String(m).toLowerCase()]);
 }
 
 // V9 The Sirens: the species step's inputs. A seat declares Sirenian or
@@ -1295,13 +1315,15 @@ function maybePromptCrewPick(snapshot) {
   openCrewWizard({
     description: solo
       ? (promoOn
-          ? 'Solo game: pick any crew as your starting faction, promo cards included (admin, full module stack). Your pick sets your colour and is permanent for this session.'
+          ? 'Solo game: pick any crew as your starting faction, promo cards included. Your pick sets your colour and is permanent for this session.'
           : 'Solo game: pick any crew as your starting faction. Your pick sets your colour and is permanent for this session.')
-      : 'Pick one of the two crew on your colour card. Your faction privilege is permanent for this session.',
+      : (promoOn
+          ? 'Pick a crew on your colour, promo cards included. Your faction privilege is permanent for this session.'
+          : 'Pick one of the two crew on your colour card. Your faction privilege is permanent for this session.'),
     // 2+ players: one colour only - restrict to this seat's assigned colour.
     restrictToColor: solo ? null : myp.color,
-    // Promo crew are only mixed in for an admin in a full m0+m1+m2 game
-    // (promoCrewAllowed); a normal player / lighter game never sees them.
+    // Promo crew are mixed in for every player in a full m0+m1+m2 game
+    // (promoCrewAllowed); a lighter game never sees them.
     includePromo: promoOn,
     takenCardIds: crewCardsTakenByOthers(snapshot, myId),
     species: sirensSpeciesChoice(snapshot, myId),
@@ -1981,15 +2003,15 @@ function maybePromptCrewPickForced(snapshot) {
   _crewWizardOpen = true;
   const solo = isSoloRoom(snapshot);
   const promoOn = promoCrewAllowed(snapshot);
-  const promoTail = promoOn ? ' Promo crew included (admin, full module stack).' : '';
+  const promoTail = promoOn ? ' Promo crew included.' : '';
   const desc = solo
     ? (myp.faction ? 'Switch to any other crew.' + promoTail : 'Pick any crew as your starting faction.' + promoTail)
-    : (myp.faction ? 'Switch to the other crew on your colour card while others are still picking.'
-                   : 'Pick one of the two crew on your colour card.');
+    : (myp.faction ? 'Switch to another crew on your colour while others are still picking.' + promoTail
+                   : 'Pick a crew on your colour.' + promoTail);
   openCrewWizard({
     description: desc,
     restrictToColor: solo ? null : myp.color,
-    // Promo crew only for an admin in a full m0+m1+m2 game (promoCrewAllowed).
+    // Promo crew in a full m0+m1+m2 game (promoCrewAllowed).
     includePromo: promoOn,
     takenCardIds: crewCardsTakenByOthers(snapshot, myId),
     species: sirensSpeciesChoice(snapshot, myId),
@@ -2012,8 +2034,9 @@ function maybePromptCrewPickForced(snapshot) {
 function openAdminPromoCrewPicker() {
   if (!_online || _spectator || _crewWizardOpen || !_onlineMe || !_onlineSnapshot) return;
   if (!isSoloRoom(_onlineSnapshot)) return;
-  // Promo crew need the full m0+m1+m2 module stack to function (promoCrewAllowed
-  // also checks admin) - without it the swap would hand you a dead privilege.
+  // The test drive is admin-only (it swaps factions after the draft closed);
+  // promo crew also need the full m0+m1+m2 module stack to function.
+  if (!activeProfile()?.isAdmin) return;
   if (!promoCrewAllowed(_onlineSnapshot)) { setStatus('Promo crew need a game with M0, M1, and M2 all enabled.'); return; }
   const myId = mySeatId();
   _crewWizardOpen = true;
@@ -2293,6 +2316,18 @@ function playerHasPushFactory(player) {
 // hasPowersatBernal so the badge + roll waiver agree.
 function playerPowersatBernal(player) {
   return playerBernalPrivilege(player, 'POWERSAT');
+}
+// POWERSAT beam: the rival (if any) whose live Powersat is trained on this
+// player. Mirror of the engine's powersatBeamedTo - thrust only, no assist.
+function playerPowersatBeamedBy(target) {
+  if (!target) return null;
+  const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
+  for (const p of players) {
+    if (!p || String(p.profileId) === String(target.profileId)) continue;
+    const beams = Array.isArray(p.powersatBeams) ? p.powersatBeams : [];
+    if (beams.some((id) => String(id) === String(target.profileId)) && playerHasPrivilege(p, 'POWERSAT')) return p;
+  }
+  return null;
 }
 function playerHasPowersat(player) {
   return playerHasPrivilege(player, 'POWERSAT') || playerHasPushFactory(player)
@@ -3516,9 +3551,14 @@ function renderFirstPlayerChooser(pending) {
   choices.innerHTML = '';
 
   if (amChooser) {
-    sub.textContent = 'A new round begins. Name the next first player.';
+    // Sitdown (LEO Workers' Union) hands the pick to its holder: the marker
+    // must still leave the outgoing leader, but the holder may name themselves.
+    const outgoing = pending.outgoingId != null ? pending.outgoingId : myId;
+    sub.textContent = pending.sitdown
+      ? 'A new round begins. Sitdown: you choose the next first player (anyone but the outgoing leader).'
+      : 'A new round begins. Name the next first player.';
     for (const p of players) {
-      if (p.profileId === myId) continue;          // "another player" only
+      if (p.profileId === outgoing) continue;      // "another player" only
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'mp-first-player-pick player-name';
@@ -5843,6 +5883,25 @@ function clientColonistPowerAt(slug, flag) {
 }
 // Does MY snapshot player hold an in-play colonist granting a GLOBAL power
 // flag (not location-conditioned)? Mirrors the server's playerHasColonistPower.
+// Spectral C at any Factory: the Blue Goo Sybonts colonist power, or TAILINGS
+// REMINING (The Martian Way, black) with that crew card standing at the
+// Factory. Mirror of the engine's spectral gate in ET Production. `siteId`
+// may be a map id or a server slug.
+function myEtProduceAnyC(siteId) {
+  if (myHasColonistPower('etProduceCAnywhere')) return true;
+  if (!_online) return false;
+  const me = mySnapshotPlayer();
+  if (!me || !playerHasPrivilege(me, 'TAILINGS_REMINING')) return false;
+  const slug = SITES_BY_ID[siteId] ? siteId : (toServerId(_onlineMaps, siteId) || siteId);
+  const stacks = [
+    { slots: (me.rocket && me.rocket.stack) || [], siteId: me.rocket ? me.rocket.siteId : null },
+    ...Object.values(me.outposts || {}).filter(Boolean).map((o) => ({ slots: o.cards || [], siteId: o.siteId })),
+    ...(me.freighter ? [{ slots: me.freighter.stack || [], siteId: me.freighter.siteId }] : []),
+    ...(me.bernals || []).filter(Boolean).map((bn) => ({ slots: bn.stack || [], siteId: bn.siteId })),
+  ];
+  return stacks.some((st) => String(st.siteId) === String(slug)
+    && st.slots.some((x) => x && x.id === 'crew_the_martian_way'));
+}
 function myHasColonistPower(key) {
   if (!isM2()) return false;
   const me = mySnapshotPlayer();
@@ -6330,6 +6389,21 @@ function buildColonySection(me) {
   return wrap;
 }
 
+// QUEST (Galahad Group, black) destinations: every Colony on the board in a
+// zone this player holds a glory chit for (carried or banked). Each entry's
+// `to` is the wire form the server reads ('colony:<server slug>').
+function exomigrateQuestColonies(me) {
+  if (!me || !playerHasPrivilege(me, 'QUEST')) return [];
+  const g = me.glory || {};
+  const zones = new Set([...(g.chits || []), ...(g.claimed || [])].map((c) => c && c.zone).filter(Boolean));
+  const out = [];
+  for (const slug of Object.keys((_onlineSnapshot && _onlineSnapshot.colonies) || {})) {
+    const site = SITES_BY_ID[slug];
+    if (site && zones.has(site.solarZone)) out.push({ to: `colony:${slug}`, name: site.name || slug, zone: site.solarZone });
+  }
+  return out;
+}
+
 // Exomigration confirm (free action): the topmost queue colonist boards a
 // station of your choice - an anchored Bernal, or the LEO Stack - and you
 // decide whether its delegate takes a seat in the Assembly (the colonist
@@ -6367,17 +6441,21 @@ function openExomigrateModal(me) {
   // Default to the Home Bernal when one exists (the colony is the crew's home),
   // but let the player send them to LEO instead.
   let chosenTo = homeBernalTo || 'leo';
+  // QUEST (Galahad Group): the Human may instead appear at any Colony in a zone
+  // you hold a glory chit for. Mirror of the server's colony destination.
+  const questDest = exomigrateQuestColonies(me);
   const destWrap = document.createElement('div');
   destWrap.style.margin = '0 0 10px';
   const destLabel = document.createElement('div');
   destLabel.className = 'mp-detail-label';
-  destLabel.textContent = homeBernalTo ? 'Boards (choose)' : 'Boards';
+  destLabel.textContent = (homeBernalTo || questDest.length) ? 'Boards (choose)' : 'Boards';
   destWrap.appendChild(destLabel);
-  if (homeBernalTo) {
-    // Two radio options: the Home Bernal or the LEO Stack.
+  if (homeBernalTo || questDest.length) {
+    // Radio options: the Home Bernal, the LEO Stack, and any Quest colonies.
     const opts = [
-      { to: homeBernalTo, glyph: '🛰', label: homeBernalName },
+      ...(homeBernalTo ? [{ to: homeBernalTo, glyph: '🛰', label: homeBernalName }] : []),
       { to: 'leo', glyph: '🌍', label: `the ${homeLabel()} Stack` },
+      ...questDest.map((q) => ({ to: q.to, glyph: '🏰', label: `the Colony at ${q.name} (Quest, ${q.zone} chit)` })),
     ];
     for (const o of opts) {
       const row = document.createElement('label');
@@ -6418,6 +6496,25 @@ function openExomigrateModal(me) {
     modal.appendChild(delegateRow);
   }
 
+  // IMMIGRANT (New Pilgrims): optionally name a specialty first; the queue is
+  // searched for the first Human with it (if any), then shuffled.
+  let specialtySel = null;
+  if (playerHasPrivilege(me, 'IMMIGRANT')) {
+    const row = document.createElement('label');
+    row.style.cssText = 'display:flex;gap:6px;align-items:center;margin:0 0 10px';
+    row.appendChild(document.createTextNode('🧳 Immigrant: search the queue for '));
+    specialtySel = document.createElement('select');
+    specialtySel.className = 'exo-immigrant-specialty';
+    for (const [v, t] of [['', 'nobody (draw the top)'], ['Miner', 'a Miner'], ['Prospector', 'a Prospector'], ['Engineer', 'an Engineer'], ['Industrialist', 'an Industrialist']]) {
+      const o = document.createElement('option');
+      o.value = v; o.textContent = t;
+      specialtySel.appendChild(o);
+    }
+    row.appendChild(specialtySel);
+    row.dataset.tip = 'Name a specialty: the first Human with it comes to the top of the queue, then the rest is shuffled. Nobody with it? The queue is still shuffled.';
+    modal.appendChild(row);
+  }
+
   const btns = document.createElement('div');
   btns.className = 'mp-trade-btns';
   const go = document.createElement('button');
@@ -6431,6 +6528,7 @@ function openExomigrateModal(me) {
     close();
     const op = { kind: 'EXOMIGRATE', to: chosenTo };
     if (delegateRow && !delegateRow._cb.checked) op.placeDelegate = false;
+    if (specialtySel && specialtySel.value) op.specialty = specialtySel.value;
     const ok = await submitOnlineOp(op);
     if (ok) {
       const after = mySnapshotPlayer();
@@ -7142,6 +7240,7 @@ function renderAssemblyView(body, snapshot) {
   btns.className = 'assembly-fr-btns';
   if (!_spectator && !lobbyMode) {
     btns.append(mkBtn('🗳 Lobby', 'modal-btn primary', () => { _assemblyMode = 'lobby'; refreshAssemblyModal(); }));
+    for (const b of promoAssemblyButtons(snapshot)) btns.append(b);
   } else if (lobbyMode) {
     btns.append(mkBtn('↩ Done', 'modal-btn', () => { _assemblyMode = 'view'; refreshAssemblyModal(); }));
   }
@@ -7166,6 +7265,96 @@ function lobbyRouseReady(snapshot, place) {
   if (!isAnarchy() || factionPrivilegesLocked(me)) return false;
   return factionAbilityOf(me) === 'RABBLE-ROUSER';
 }
+// Promo crew Assembly controls (shown beside Lobby, on my own turn only):
+//   EMISSARIES (African Union, white): one button per Ideology tied for the most
+//     delegates that is not already the Active Law, "treat it as the Active Law".
+//   ARBITER (African Union, black): at the very start of my turn, a vote tally
+//     that may count my delegates twice.
+// Both mirror the engine gate (applyEmissaries / applyArbiterTally): the server
+// re-checks the privilege, the tie and the start-of-turn rule.
+function placeLabel(k) {
+  return k === 'centrist' ? 'Centrist' : ((ASSEMBLY_IDEOLOGY_BY_KEY[k] || {}).name || k);
+}
+function promoAssemblyButtons(snapshot) {
+  const out = [];
+  const me = mySnapshotPlayer();
+  if (!me || !snapshot || !snapshot.m0 || !isOnlineMyTurn()) return out;
+  const asm = snapshot.assembly || {};
+  if (playerHasPrivilege(me, 'EMISSARIES')) {
+    const tied = assemblyVoteWinners(asm);
+    const have = new Set(Array.isArray(me.emissaryLaws) ? me.emissaryLaws : []);
+    if (tied.length >= 2) {
+      for (const k of tied) {
+        if (k === snapshot.activeLawStar || have.has(k)) continue;
+        const b = mkBtn(`🤝 Emissaries: ${placeLabel(k)} as Active Law`, 'modal-btn', () => {
+          confirmModal({
+            title: '🤝 Emissaries',
+            body: `${esc(placeLabel(k))} is tied for the most delegates. Treat it as the Active Law for the rest of your turn?`,
+            yes: '🤝 Treat as Active Law', no: 'Cancel',
+          }).then((ok) => { if (ok) submitOnlineOp({ kind: 'EMISSARIES', ideologies: [k] }); });
+        });
+        b.dataset.tip = 'Emissaries: an Ideology tied for the most delegates counts as the Active Law for you this turn.';
+        b.classList.add('promo-emissaries-btn');
+        out.push(b);
+      }
+    }
+  }
+  if (playerHasPrivilege(me, 'ARBITER') && !me.arbiterTallied) {
+    const acts = Array.isArray(snapshot.turnActions) ? snapshot.turnActions : [];
+    const b = mkBtn('⚖ Arbiter vote tally', 'modal-btn', () => openArbiterTally(snapshot));
+    b.classList.add('promo-arbiter-btn');
+    if (acts.length) {
+      b.disabled = true;
+      b.dataset.tip = 'Arbiter: the vote tally may only be called at the start of your turn.';
+    } else {
+      b.dataset.tip = 'Arbiter: call a vote tally now, at the start of your turn. Your delegates may count twice.';
+    }
+    out.push(b);
+  }
+  return out;
+}
+// Tally winners with my delegates optionally counted twice (mirror of the
+// engine's arbiterWinners).
+function arbiterProjectedWinners(delegates, double) {
+  const myId = mySeatId();
+  const totals = {};
+  let max = 0;
+  for (const k of ASSEMBLY_PLACES) {
+    const m = (delegates && delegates[k]) || {};
+    let n = 0;
+    for (const [pid, c] of Object.entries(m)) n += (c | 0) * ((double && String(pid) === String(myId)) ? 2 : 1);
+    totals[k] = n;
+    if (n > max) max = n;
+  }
+  if (max <= 0) return [];
+  return ASSEMBLY_PLACES.filter((k) => totals[k] === max);
+}
+function openArbiterTally(snapshot) {
+  const delegates = (snapshot.assembly && snapshot.assembly.delegates) || {};
+  const star = snapshot.activeLawStar;
+  confirmModal({
+    title: '⚖ Arbiter',
+    body: 'Call a vote tally at the start of your turn. Count each of your delegates as two?',
+    yes: '⚖ Count mine twice', no: 'Count once',
+  }).then((double) => {
+    const winners = arbiterProjectedWinners(delegates, double);
+    const send = (pick) => submitOnlineOp({ kind: 'ARBITER_TALLY', ...(double ? {} : { double: false }), ...(pick ? { star: pick } : {}) });
+    if (winners.length <= 1) { send(null); return; }
+    // A tie: the Arbiter chooses which tied place holds the star (it may stay
+    // where it is when it already sits on one of them).
+    confirmModal({
+      title: '⚖ Arbiter: tie vote',
+      body: `The tally is tied between ${winners.map((k) => `<strong>${esc(placeLabel(k))}</strong>`).join(', ')}. `
+        + `The star ${winners.includes(star) ? `may stay on ${esc(placeLabel(star))} or move` : 'must move'} to one of them. Move it to ${esc(placeLabel(winners.find((k) => k !== star) || winners[0]))}?`,
+      yes: `⚖ ${placeLabel(winners.find((k) => k !== star) || winners[0])}`,
+      no: winners.includes(star) ? `Keep ${placeLabel(star)}` : `⚖ ${placeLabel(winners[winners.length - 1])}`,
+    }).then((first) => {
+      const alt = winners.find((k) => k !== star) || winners[0];
+      if (first) send(alt);
+      else send(winners.includes(star) ? star : winners[winners.length - 1]);
+    });
+  });
+}
 // Click a delegate to Lobby that ideology (server LOBBY: 1 aqua + discard, only
 // an inactive ideology, not while Unity disables lobbying).
 function tryLobbyAt(snapshot, place) {
@@ -7180,16 +7369,31 @@ function tryLobbyAt(snapshot, place) {
   const name = (ASSEMBLY_IDEOLOGY_BY_KEY[place] || {}).name || place;
   // Supreme Cult Future: lobby without removing the delegate used.
   const meLob = mySnapshotPlayer();
-  const keepDelegate = !!(meLob && Array.isArray(meLob.futureEffects) && meLob.futureEffects.includes('lobbyKeepDelegate'));
+  // HEROIC (Galahad Group, white): an honor lobby keeps the delegate too.
+  const heroicKeep = place === 'honor' && playerHasPrivilege(meLob, 'HEROIC');
+  const keepDelegate = heroicKeep
+    || !!(meLob && Array.isArray(meLob.futureEffects) && meLob.futureEffects.includes('lobbyKeepDelegate'));
   confirmModal({
     title: '🗳 Lobby',
     body: keepDelegate
-      ? `Lobby <strong>${esc(name)}</strong>? Pay 1 aqua to use its law this turn. Your delegate stays (Supreme Cult).`
+      ? `Lobby <strong>${esc(name)}</strong>? Pay 1 aqua to use its law this turn. Your delegate stays (${heroicKeep ? 'Heroic' : 'Supreme Cult'}).`
       : `Lobby <strong>${esc(name)}</strong>? Pay 1 aqua and discard your delegate there to use its law this turn.`,
     yes: '🗳 Lobby (1 aqua)', no: 'Cancel',
   }).then((ok) => {
     if (!ok) return;
     _assemblyMode = 'view';   // leave lobby-select mode once a law is lobbied
+    // AMBASSADOR (AEB, white): "During lobby, may move a delegate into centrist
+    // instead of Decommission." A second, explicit choice, like the Rabble-Rouser.
+    if (!keepDelegate && playerHasPrivilege(meLob, 'AMBASSADOR')) {
+      confirmModal({
+        title: '🕊 Ambassador',
+        body: `Move your ${esc(name)} delegate to the Centrists instead of discarding it? It keeps its seat in the Assembly, and the vote tally runs.`,
+        yes: '🕊 Move to Centrist', no: 'Discard it',
+      }).then((amb) => {
+        submitOnlineOp({ kind: 'LOBBY', ideology: place, ...(amb ? { ambassador: true } : {}) });
+      });
+      return;
+    }
     if (!lobbyRouseReady(snapshot, place)) {
       submitOnlineOp({ kind: 'LOBBY', ideology: place });
       return;
@@ -7302,6 +7506,8 @@ function fundraiseProjectedWinners(snapshot) {
   bump(_fr.place, +1);
   bump(_fr.moveFrom, -1);
   bump(_fr.moveTo, +1);
+  // ARBITER: the holder's own tally may count their delegates twice.
+  if (_fr.arbiterDouble) return arbiterProjectedWinners(delegates, true);
   return assemblyVoteWinners({ delegates });
 }
 // After place + move settle, run the vote tally. The fundraiser ALWAYS gets the
@@ -7445,6 +7651,17 @@ function renderAssemblyFundraise(body, snapshot) {
         btns.append(mkBtn(`Keep star on ${curName} (skip)`, 'modal-btn primary', () => { _fr.star = cur; commitFundraise(); }));
       }
     }
+    // ARBITER (African Union, black): "Your vote tallies may treat your
+    // delegates as 2 delegates each." A toggle that re-runs the projected tally.
+    if (playerHasPrivilege(mySnapshotPlayer(), 'ARBITER')) {
+      const t = mkBtn(_fr.arbiterDouble ? '⚖ Arbiter: count my delegates once' : '⚖ Arbiter: count my delegates twice', 'modal-btn promo-arbiter-fr', () => {
+        _fr.arbiterDouble = !_fr.arbiterDouble;
+        _fr.star = null;
+        fundraiseAdvanceToStar(snapshot);
+      });
+      t.dataset.tip = 'Arbiter: your delegates may count as two each in this vote tally.';
+      btns.append(t);
+    }
   }
   // Martial Law (Authority in force OR lobbied): optionally discard one
   // opponent's delegate as part of this Fundraise. A side toggle that remembers
@@ -7553,6 +7770,7 @@ function commitFundraise() {
   if (_fr.freeDelegate) op.freeDelegate = _fr.freeDelegate;
   if (_fr.moveFrom && _fr.moveTo) { op.moveFrom = _fr.moveFrom; op.moveTo = _fr.moveTo; }
   if (_fr.star) op.star = _fr.star;
+  if (_fr.arbiterDouble) op.arbiterDouble = true;
   // Martial Law (Authority): discard an opponent's delegate. The server
   // re-validates the law + that the cube is still there, so a stale pick no-ops.
   if (_fr.discard) op.discard = { profileId: _fr.discard.profileId, place: _fr.discard.place };
@@ -8246,6 +8464,35 @@ function renderMpPlayer(p, isMe, isActive) {
     });
     headRow.append(tradeBtn);
   }
+  // POWERSAT beam (ESA): "During any player's Turn, may give +1 thrust to any
+  // Spacecraft that has a push icon. Negotiable." The holder trains a standing
+  // beam on a rival from that rival's row, any time (on or off turn, like a
+  // trade), and switches it off the same way. Hidden unless I hold the live
+  // privilege (Anarchy / the Module 2 lock hide it); the engine re-checks.
+  if (!isMe && !_spectator) {
+    const meP = mySnapshotPlayer();
+    if (meP && playerHasPrivilege(meP, 'POWERSAT')) {
+      const beaming = (Array.isArray(meP.powersatBeams) ? meP.powersatBeams : [])
+        .some((id) => String(id) === String(p.profileId));
+      const beamBtn = document.createElement('button');
+      beamBtn.type = 'button';
+      beamBtn.className = 'mp-player-trade mp-powersat-beam' + (beaming ? ' is-active' : '');
+      beamBtn.textContent = '🛰';
+      beamBtn.dataset.beam = beaming ? 'on' : 'off';
+      beamBtn.title = beaming
+        ? `Powersat: beaming @${p.name} (+1 thrust to their push-icon craft). Tap to switch the beam off.`
+        : `Powersat: beam @${p.name}'s push-icon craft for +1 thrust (negotiable - strike a deal first if you like).`;
+      beamBtn.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        if (!_online || _spectator || !_onlineGameId || !_onlineMe) return;
+        const r = await submitSeatOp(_onlineGameId,
+          { kind: 'POWERSAT_BEAM', targetId: p.profileId, on: !beaming }, _onlineMe.token).catch(() => null);
+        if (!r || !r.ok) { _onlineToast(humanizeOnlineOpError((r && r.error) || 'network', r && r.detail), 'error'); return; }
+        if (r.data && r.data.game) applySnapshot(r.data.game.state, r.data.game.seq);
+      });
+      headRow.append(beamBtn);
+    }
+  }
   if (isTradePartner) wrap.classList.add('mp-trade-with');
   // Crew-ability badges: this player's own faction power plus any borrowed
   // through a trade (timed grants show a turn counter, permanent ones a lock).
@@ -8450,10 +8697,18 @@ function renderAbilityBadges(p) {
   const showPowersat = playerHasPowersat(p)
     && own !== 'POWERSAT'
     && !borrowed.some((g) => g && g.ability === 'POWERSAT');
-  if (!own && !borrowed.length && !showPowersat) return null;
+  const beamer = playerPowersatBeamedBy(p);
+  if (!own && !borrowed.length && !showPowersat && !beamer) return null;
   const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
   const row = document.createElement('div');
   row.className = 'mp-ability-badges';
+  if (beamer) {
+    const b = document.createElement('span');
+    b.className = 'mp-ability powersat beamed';
+    b.textContent = '🛰 Beamed';
+    b.title = `@${beamer.name}'s Powersat gives this player's push-icon craft +1 thrust.`;
+    row.appendChild(b);
+  }
   if (showPowersat) {
     const b = document.createElement('span');
     b.className = 'mp-ability powersat';
@@ -9304,6 +9559,18 @@ function humanizeOnlineOpError(code, detail) {
     card_not_in_hand: 'That card is not in your hand.',
     not_a_tied_card: 'Pick one of the tied cards.',
     no_moves_left: 'No moves left this turn. End your turn.',
+    no_life_raft: 'Only Space Force (Life Raft / Lifeboat) can move a rocket as a Freighter.',
+    life_raft_needs_crew: 'The Space Force crew must be aboard the rocket to move it as a Freighter.',
+    life_raft_too_heavy: 'The stack is too heavy to move as a Freighter (Life Raft: wet mass under 5, Lifeboat: under 7).',
+    life_raft_glory_chit: 'A Life Raft cannot move as a Freighter while it carries a glory chit.',
+    no_weak_stability_boundary: 'Only Heliocentricity (Weak Stability Boundary) can coast as a second movement.',
+    wsb_needs_crew: 'The Heliocentricity crew must be aboard to coast along the Weak Stability Boundary.',
+    wsb_already_used: 'You already coasted along the Weak Stability Boundary this turn.',
+    wsb_move_first: 'Move the stack first; the Weak Stability Boundary coast is a second movement.',
+    wsb_must_coast: 'The Weak Stability Boundary movement is a coast: plot a route with no burns.',
+    no_blue_planet: 'Only Cerulean (Blue Planet) can pay the 1 aqua aerobrake FINAO.',
+    not_on_aerobrake: 'Your rocket is not parked on an aerobrake.',
+    no_hazard_to_pay: 'There is no aerobrake descent to pay for.',
     insufficient_water: 'Not enough water for that burn.',
     no_route: 'No route to that site.',
     unknown_site: 'Unknown site.',
@@ -9314,6 +9581,18 @@ function humanizeOnlineOpError(code, detail) {
     reveal_blocks_undo: 'Exomigration revealed a colonist off the queue - it can\'t be undone.',
     component_already_moved: 'A card in this stack already moved on another vehicle this turn. Each component moves only once per turn - it can move again next turn.',
     glory_carry_full: 'Every crew member already carries a glory chit. Surrender one first.',
+    no_ambassador: 'Only the Ambassador may move a lobbied delegate to the Centrists.',
+    no_emissaries: 'Only the Emissaries may treat a tied Ideology as the Active Law.',
+    no_tie: 'No Ideologies are tied for the most delegates right now.',
+    not_tied: 'That Ideology is not tied for the most delegates.',
+    already_active_law: 'That Ideology already holds the Active Law.',
+    no_arbiter: 'Only the Arbiter may count their delegates twice.',
+    crew_face_needs_module: 'That crew face needs a module this game does not have yet (Coming soon).',
+    no_powersat: 'Your Powersat is not working right now (suspended in Anarchy, or waiting on your Home Bernal).',
+    beam_self: 'Your Powersat already pushes your own craft.',
+    bad_target: 'That player is not at this table.',
+    already_tallied: 'You already called your Arbiter vote tally this turn.',
+    not_turn_start: 'The Arbiter tally may only be called at the start of your turn.',
     no_such_chit: 'You are not carrying that glory chit.',
     bad_zone: 'No such glory chit.',
     no_pending_star: 'There is no tied vote to resolve.',
@@ -9546,6 +9825,20 @@ function humanizeOnlineOpError(code, detail) {
     buggy_out_of_range: 'The buggy can only road to sites on the same connected body (Mars, the Moon, Io, Callisto, Ganymede, Europa).',
     not_a_radiator: 'That card is not a radiator.',
     already_light: 'That radiator is already on its light side.',
+    already_heavy: 'That radiator is already on its heavy side.',
+    no_thermal_labs: 'Only BRIN\'s Thermal Labs can open a radiator back out to heavy.',
+    thermal_labs_used: 'Thermal Labs has already opened a radiator this turn.',
+    not_at_colony_or_bernal: 'Thermal Labs works on a radiator at your Colony or Bernal.',
+    shuttles_used: 'Your shuttle has already flown this turn.',
+    no_operational_thruster: 'The shuttle needs an operational thruster aboard to dock with.',
+    no_trade_port: 'Only the Makers Guild\'s Trade Port can swap cards for a patent.',
+    trade_port_used: 'The Trade Port has already traded this turn.',
+    not_start_of_turn: 'The Trade Port only trades at the start of your turn.',
+    discard_two: 'The Trade Port takes exactly 2 cards.',
+    no_piggyback: 'Only Utopia, Inc.\'s Piggyback can ride an opponent\'s launch.',
+    no_piggyback_window: 'There is no launch to piggyback on right now.',
+    piggyback_over_mass: 'Those cards are heavier than the launch you are riding.',
+    wrong_spectral: 'That card is not this Factory\'s spectral type.',
     already_afterburned: 'Afterburn is already engaged this turn.',
     no_afterburn: 'The active thruster has no afterburn.',
     no_thruster: 'No active thruster to afterburn.',
@@ -10173,7 +10466,12 @@ function wireHandStrip() {
     // cost IS total mass - so the cheapest possible spend is every radiator on
     // its light side. If even that exceeds the bank, no side choice can afford it.
     const minCost = cards.reduce((s, c) => s + boostMassOf(c, c.type === 'radiator' ? 'light' : undefined), 0);
-    if (minCost > have) {
+    // ISO-SHUTTLES (Explorers Without Borders, black): with an isotope can in
+    // the bank (LEO Stack or Home Bernal) the turn's first boost costs 10 aqua
+    // less. Mirror of the engine rule, so the holder is not refused a launch the
+    // discount makes affordable.
+    const isoShuttle = isoShuttlesDiscount();
+    if (minCost - isoShuttle > have) {
       await confirmModal({
         title: '💸 Not enough Aqua',
         body: `Boosting ${n} card${n === 1 ? '' : 's'} costs at least <strong>${minCost}</strong> Aqua `
@@ -10206,7 +10504,9 @@ function wireHandStrip() {
         : continuedBoost
           ? 'You already boosted this turn, so this rides up free (no operation).'
           : 'The first boost spends your operation; keep boosting free for the rest of the turn.';
-    const res = await openBoostModal({ cards, have, opNote, boostTargets: anchoredBoostTargets() });
+    const res = await openBoostModal({ cards, have, discount: isoShuttle,
+      opNote,
+      boostTargets: anchoredBoostTargets() });
     if (!res.ok) return;
     const radSides = res.radSides || {};
     const cost = res.cost | 0;   // final spend reflects each radiator's chosen side
@@ -11373,8 +11673,73 @@ async function convertRadiatorToLight(stackId, cardId) {
   setStatus('♨ Folded the radiator down to its light side (hardier, less cooling).');
 }
 
+// THERMAL LABS (BRIN, black): "As a 1/turn free action, flip a radiator at
+// your Colony/Bernal to its heavy side." Mirror of the engine's
+// thermalLabsSite: the radiator is aboard one of your Bernals, or stands where
+// you have a Colony or a Bernal. Returns '' when the flip is open, else the
+// reason it is not (for the button tooltip), or null when the card does not
+// apply at all (no Thermal Labs, or the radiator is already heavy).
+function thermalLabsBlock(cardId) {
+  if (!_online) return null;
+  const me = mySnapshotPlayer();
+  if (!me || !playerHasPrivilege(me, 'THERMAL_LABS')) return null;
+  const stacks = [
+    { slots: me.leo || [], siteId: null, bernal: false },
+    { slots: (me.rocket && me.rocket.stack) || [], siteId: me.rocket ? me.rocket.siteId : null, bernal: false },
+    ...Object.values(me.outposts || {}).filter(Boolean).map((o) => ({ slots: o.cards || [], siteId: o.siteId, bernal: false })),
+    ...(me.freighter ? [{ slots: me.freighter.stack || [], siteId: me.freighter.siteId, bernal: false }] : []),
+    ...(me.bernals || []).filter(Boolean).map((bn) => ({ slots: bn.stack || [], siteId: bn.siteId, bernal: true })),
+  ];
+  for (const st of stacks) {
+    const slot = st.slots.find((x) => x && x.id === cardId);
+    if (!slot) continue;
+    if (slot.radSide !== 'light') return null;
+    if (me.thermalLabsUsed) return 'Thermal Labs is spent for this turn.';
+    if (st.bernal) return '';
+    const here = st.siteId ?? null;
+    const col = here != null && ((_onlineSnapshot && _onlineSnapshot.colonies) || {})[here];
+    if (col && String(col.ownerId) === String(me.profileId)) return '';
+    if ((me.bernals || []).some((bn) => bn && (bn.siteId ?? null) === here)) return '';
+    return 'Thermal Labs needs the radiator at your Colony or Bernal.';
+  }
+  return null;
+}
+// The button itself, shared by the stack inspector and the rocket modal.
+function thermalLabsButton(slot, className) {
+  const why = thermalLabsBlock(slot.id);
+  if (why == null) return null;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = `${className} rad-open-heavy`;
+  btn.textContent = '♨ Open to heavy (Thermal Labs)';
+  const locked = !isOnlineMyTurn();
+  btn.disabled = locked || !!why;
+  btn.title = locked ? 'Wait for your turn.'
+    : (why || 'Thermal Labs: open this radiator out to its heavy side (more cooling, less rad-hard). Free, once a turn.');
+  btn.addEventListener('click', async () => {
+    if (btn.disabled) return;
+    btn.disabled = true;
+    await submitOnlineOp({ kind: 'SET_RADIATOR_SIDE', cardId: slot.id, radSide: 'heavy' });
+  });
+  return btn;
+}
+
 function openLeoStackModal() {
   openUnifiedStackInspector('leo');
+}
+
+// ISO-SHUTTLES discount this boost would get (0 when it does not apply): the
+// holder, an isotope can of 1+ in the LEO Stack or Home Bernal, and no boost
+// yet this turn (the discount is once per boost operation).
+function isoShuttlesDiscount() {
+  if (!_online || !_onlineSnapshot) return 0;
+  const me = mySnapshotPlayer();
+  if (!me || !playerHasPrivilege(me, 'ISO-SHUTTLES')) return 0;
+  if ((_onlineSnapshot.turnActions || []).some((a) => a && a.kind === 'BOOST')) return 0;
+  const home = (me.bernals || []).find((bn) => bn && bn.anchored && isHomeBernalUnit(bn));
+  const hosts = [me.leo || [], ...(home ? [home.stack || []] : [])];
+  const banked = hosts.some((arr) => arr.some((x) => x && x.kind === 'fuel' && x.grade === 'isotope' && (Number(x.amount) || 0) >= 1));
+  return banked ? 10 : 0;
 }
 
 // The BLACK / installed face of a card. Secondary for most cards, but PRIMARY
@@ -13318,6 +13683,10 @@ function openUnifiedStackInspector(stackId) {
           });
           actions.appendChild(foldBtn);
         }
+        if (card.type === 'radiator') {
+          const tl = thermalLabsButton(slot, 'rocket-select');
+          if (tl) actions.appendChild(tl);
+        }
         // Free Market (I3b): sell a Black-Side good from the LEO Stack or an
         // anchored Home Bernal - both are boost / boarding stations (2A6), so a
         // product waiting in the colony sells like one waiting in Earth orbit.
@@ -14396,7 +14765,7 @@ function openCardModal(card, kind, slotIdx, { readOnly = false, face, radSide, n
     }
     for (const s of candidates) {
       const f = getFactory(s.id);
-      if (!f || !iCanUseFactory(f) || !spectralProducibleAt(cardSpectral, f.spectralType, { anyC: myHasColonistPower('etProduceCAnywhere') })) continue;
+      if (!f || !iCanUseFactory(f) || !spectralProducibleAt(cardSpectral, f.spectralType, { anyC: myEtProduceAnyC(s.id) })) continue;
       const outpostsHere = Object.values(getOutposts()).filter((o) => o.siteId === s.id);
       const rocketAtS = _online && getStackSiteId('rocket') === s.id;
       if (outpostsHere.length > 0 || exoFreeSlots.length > 0 || rocketAtS) {
@@ -14900,7 +15269,7 @@ function myFreighterOriginThrustBonus() {
   return bonus;
 }
 function myFreighterThrust() {
-  return freighterNetThrust(playerHasPowersat(mySnapshotPlayer())) + myFreighterOriginThrustBonus();
+  return freighterNetThrust(playerHasPowersat(mySnapshotPlayer()) || !!playerPowersatBeamedBy(mySnapshotPlayer())) + myFreighterOriginThrustBonus();
 }
 // Enter the manual route plotter. opts.unit selects the mover:
 //   'rocket'    (default) - budget = active thruster thrust, pivots = thruster
@@ -15467,7 +15836,7 @@ function ensureMapShell(host) {
       </div>
       <div class="map-search">
         <input id="map-search-input" type="text" autocomplete="off"
-          spellcheck="false" placeholder="Find site or node id…" />
+          spellcheck="false" placeholder="Find a site, node id or board text…" />
         <button id="map-search-go" title="Fly to site"
           aria-label="Fly to site">🔍</button>
         <button id="map-search-close" class="map-search-close"
@@ -15475,6 +15844,7 @@ function ensureMapShell(host) {
         <ul id="map-search-suggestions" class="hidden"></ul>
       </div>
       <div id="map-search-backdrop" class="map-search-backdrop hidden"></div>
+      <div id="map-pins" class="map-pins" hidden></div>
       <div class="map-route">
         <span id="route-status" class="muted">Tap a site to plan a route.</span>
         <button id="route-copy" title="Copy the plotted route's site list" aria-label="Copy route">📋 Copy route</button>
@@ -15646,8 +16016,10 @@ function ensureMapShell(host) {
     // parachute space (🪂) takes a descent hazard roll when the next turn opens -
     // roll a 1 and the whole stack burns up - unless a parachute generator is
     // aboard. Make sure the player knows what staying costs before committing.
+    let bluePlanet = false;
     try {
-      if (isAerobrakeSite(getRocketSite()) && !stackSafeAerobrake()) {
+      if (isAerobrakeSite(getRocketSite()) && !stackSafeAerobrake()) bluePlanet = await bluePlanetChoice();
+      if (isAerobrakeSite(getRocketSite()) && !stackSafeAerobrake() && !bluePlanet) {
         const stay = await confirmModal({
           title: '🪂 Parked on a parachute space',
           body: 'Your stack is still falling through the atmosphere. When your next turn opens it rolls a descent hazard - roll a 1 and the whole stack burns up. End your turn here anyway?',
@@ -15672,7 +16044,7 @@ function ensureMapShell(host) {
       }
       if (hasRocket && (getMovesRemaining() > 0 || getOpsRemaining() > 0)
         && !(await confirmEndTurn())) return;
-      await submitOnlineOp({ kind: 'END_TURN' });
+      await submitOnlineOp({ kind: 'END_TURN', ...(bluePlanet ? { bluePlanet: true } : {}) });
       // Turn just passed - refresh the "Next table" list now so the button can
       // offer a jump to another game that needs me without waiting for a poll.
       refreshNextTables(true);
@@ -16130,6 +16502,7 @@ function ensureMapShell(host) {
     if (_renderer) _renderer.setOption('debug', false);
   });
   wireSearch(host);
+  renderMapPins(host);
   // Toolbar height drives where the side panel starts (panel is
   // top: var(--toolbar-h) so it sits flush below the toolbar
   // regardless of whether the toolbar has wrapped to a second row
@@ -16525,6 +16898,138 @@ function siteGroupLinked(text) {
   return frag;
 }
 
+// ----- board text search + pinned result lists -----
+//
+// The printed board text (data/map-labels.js) is searchable from the map
+// search: a hazard caption ("rapid spin"), a cluster name ("Jovian Himalia
+// Moonlets"), a Lagrange name ("Sol-Saturn Lagrange"). A caption printed in
+// many places returns EVERY place it appears, as a list, and the player can
+// PIN that list to the map to look up again later (pins persist in this
+// browser, per viewer).
+const BOARD_VIEW_W = 1400, BOARD_VIEW_H = 900;   // loadPlannerMap's view
+const MAP_PINS_KEY = 'hf.mapPins';
+let _boardTextIndex = null;
+// Nearest named site to a world point, to say WHERE a caption sits.
+function nearestNamedSite(x, y) {
+  let best = null; let bd = Infinity;
+  for (const s of (_activeData && _activeData.sites) || []) {
+    if (s.isWaypoint || !s.name) continue;
+    const d = (s.x - x) ** 2 + (s.y - y) ** 2;
+    if (d < bd) { bd = d; best = s; }
+  }
+  return best;
+}
+function boardTextIndex() {
+  if (_boardTextIndex || !_activeData || !_activeData.sites) return _boardTextIndex || [];
+  const byId2 = new Map(_activeData.sites.map((s) => [s.id2, s]));
+  const out = [];
+  const seen = new Set();
+  // Node captions first: they sit ON a space, so the hit can ring it.
+  for (const [slug, text] of Object.entries(NODE_LABELS)) {
+    const node = byId2.get(slug);
+    if (!node) continue;
+    const near = nearestNamedSite(node.x, node.y);
+    out.push({ __board: true, text, x: node.x, y: node.y, nodeId: node.id, slug,
+      where: near ? near.name : '' });
+    seen.add(`${text.toLowerCase()}@${Math.round(node.x / 6)},${Math.round(node.y / 6)}`);
+  }
+  for (const l of MAP_LABELS) {
+    const x = l.nx * BOARD_VIEW_W; const y = l.ny * BOARD_VIEW_H;
+    // The same caption already indexed off its node (within a short reach).
+    const dup = out.some((o) => o.text.toLowerCase() === l.text.toLowerCase()
+      && Math.abs(o.x - x) < 30 && Math.abs(o.y - y) < 30);
+    if (dup) continue;
+    const near = nearestNamedSite(x, y);
+    out.push({ __board: true, text: l.text, x, y, nodeId: null, kind: l.kind,
+      where: near ? near.name : '' });
+  }
+  _boardTextIndex = out;
+  return out;
+}
+// Every board-text place matching the query (words in any order), sorted
+// by caption then by place.
+function searchBoardText(q) {
+  const words = String(q || '').toLowerCase().trim().split(/\s+/).filter(Boolean);
+  if (!words.length || words.join('').length < 3) return [];
+  return boardTextIndex()
+    .filter((h) => { const t = h.text.toLowerCase(); return words.every((w) => t.includes(w)); })
+    .sort((a, b) => a.text.localeCompare(b.text) || a.where.localeCompare(b.where));
+}
+function loadMapPins() {
+  try { const v = JSON.parse(localStorage.getItem(MAP_PINS_KEY) || '[]'); return Array.isArray(v) ? v : []; }
+  catch { return []; }
+}
+function saveMapPins(pins) {
+  try { localStorage.setItem(MAP_PINS_KEY, JSON.stringify(pins)); } catch { /* storage blocked: pins last this visit */ }
+}
+let _mapPinsMem = null;
+function mapPins() { if (!_mapPinsMem) _mapPinsMem = loadMapPins(); return _mapPinsMem; }
+function pinBoardResults(query, hits) {
+  const items = hits.map((h) => ({ text: h.text, where: h.where, x: h.x, y: h.y, nodeId: h.nodeId || null, slug: h.slug || null }));
+  const pins = mapPins().filter((p) => p.query.toLowerCase() !== query.toLowerCase());
+  pins.unshift({ query, items, open: true });
+  _mapPinsMem = pins.slice(0, 8);
+  saveMapPins(_mapPinsMem);
+  renderMapPins();
+}
+function flyToBoardHit(h) {
+  if (!_renderer) return;
+  _renderer.flyTo({ x: h.x, y: h.y }, locateZoom(SEARCH_FLY_ZOOM));
+  if (h.nodeId && typeof _renderer.setGroupHighlight === 'function') {
+    _renderer.setGroupHighlight([h.nodeId]);
+    if (_groupHighlightTimer) clearTimeout(_groupHighlightTimer);
+    _groupHighlightTimer = setTimeout(() => { _groupHighlightTimer = null; _renderer && _renderer.setGroupHighlight(null); }, 8000);
+  }
+}
+// The pinned lists, docked on the map. Each pin is a collapsible card:
+// its rows fly to the place, ✕ unpins it.
+let _mapPinsHost = null;
+function renderMapPins(root) {
+  if (root) _mapPinsHost = root.querySelector('#map-pins') || _mapPinsHost;
+  const host = (_mapPinsHost && _mapPinsHost.isConnected) ? _mapPinsHost
+    : (document.getElementById('map-pins') || _mapPinsHost);
+  if (!host) return;
+  const pins = mapPins();
+  host.innerHTML = '';
+  host.hidden = !pins.length;
+  pins.forEach((pin, pi) => {
+    const card = document.createElement('details');
+    card.className = 'map-pin';
+    card.open = pin.open !== false;
+    card.addEventListener('toggle', () => { pin.open = card.open; saveMapPins(pins); });
+    const sum = document.createElement('summary');
+    const title = document.createElement('span');
+    title.className = 'map-pin-title';
+    title.textContent = `📌 ${pin.query} (${pin.items.length})`;
+    const un = document.createElement('button');
+    un.type = 'button';
+    un.className = 'map-pin-unpin';
+    un.textContent = '✕';
+    un.title = 'Unpin this list';
+    un.setAttribute('aria-label', `Unpin ${pin.query}`);
+    un.addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      _mapPinsMem = pins.filter((_, i) => i !== pi);
+      saveMapPins(_mapPinsMem);
+      renderMapPins();
+    });
+    sum.append(title, un);
+    card.appendChild(sum);
+    const ul = document.createElement('ul');
+    for (const it of pin.items) {
+      const li = document.createElement('li');
+      const b = document.createElement('strong'); b.textContent = it.slug ? `${it.slug} (${it.text})` : it.text;
+      const w = document.createElement('em'); w.textContent = it.where ? `near ${it.where}` : '';
+      li.append(b, w);
+      li.title = 'Show on the map';
+      li.addEventListener('click', () => flyToBoardHit(it));
+      ul.appendChild(li);
+    }
+    card.appendChild(ul);
+    host.appendChild(card);
+  });
+}
+
 function wireSearch(host) {
   const input    = host.querySelector('#map-search-input');
   const goBtn    = host.querySelector('#map-search-go');
@@ -16579,7 +17084,13 @@ function wireSearch(host) {
     // A named group ("centaur", "greek", "trojan") leads the list: picking it
     // lights up every member at once.
     const groups = siteGroupsMatching(q).map((g) => ({ __group: g, name: `${g.name} (${siteGroupNodes(g).length})`, type: `group · ${g.blurb}` }));
-    return groups.concat(nameStarts, nameIncl, idStarts, idIncl).slice(0, 12);
+    // Printed board text: EVERY place the text appears, as one list, led by a
+    // row that pins the whole list to the map.
+    const board = searchBoardText(q);
+    const pinRow = board.length ? [{ __pin: { query: q.trim(), hits: board },
+      name: `📌 Pin these ${board.length} result${board.length === 1 ? '' : 's'}`, type: 'keep this list on the map' }] : [];
+    return groups.concat(nameStarts, nameIncl, idStarts, idIncl).slice(0, 12)
+      .concat(pinRow, board.map((h) => ({ ...h, name: h.slug ? `${h.slug} (${h.text})` : h.text, type: h.where ? `near ${h.where}` : '' })));
   }
 
   function renderList(items) {
@@ -16593,7 +17104,8 @@ function wireSearch(host) {
       const nodeId = s.id2 || s.id || '';
       // Named site -> name + type; a bare node -> its id + type.
       li.querySelector('strong').textContent = s.name || ('id: ' + nodeId);
-      li.querySelector('em').textContent = s.__group ? s.type : (s.name ? `${s.type} · ${nodeId}` : (s.type || 'node'));
+      li.querySelector('em').textContent = (s.__group || s.__pin || s.__board) ? s.type : (s.name ? `${s.type} · ${nodeId}` : (s.type || 'node'));
+      if (s.__pin) li.classList.add('map-search-pin-row');
       li.classList.toggle('active', i === activeIndex);
       li.addEventListener('mousedown', (e) => {
         // mousedown not click so the input doesn't blur before we
@@ -16614,6 +17126,20 @@ function wireSearch(host) {
 
   function pickItem(site) {
     if (!site || !_renderer) return;
+    if (site.__pin) {
+      pinBoardResults(site.__pin.query, site.__pin.hits);
+      list.classList.add('hidden');
+      closeSearchModal();
+      setStatus(`📌 Pinned "${site.__pin.query}" (${site.__pin.hits.length}) to the map.`);
+      return;
+    }
+    if (site.__board) {
+      flyToBoardHit(site);
+      input.value = site.text;
+      list.classList.add('hidden');
+      closeSearchModal();
+      return;
+    }
     if (site.__group) {
       highlightSiteGroup(site.__group);
       input.value = site.__group.name;
@@ -18281,6 +18807,10 @@ function openRocketStackModal() {
         });
         actions.appendChild(foldBtn);
       }
+      if (card.type === 'radiator') {
+        const tl = thermalLabsButton(slot, 'rocket-activate');
+        if (tl) actions.appendChild(tl);
+      }
 
       // Crew never returns to the hand - it can only move stack-to-stack (use
       // Select + Transfer below). A HUMAN colonist can't live in the hand either
@@ -18719,8 +19249,12 @@ function routeHazards(segments) {
 // share an arrival and split the route at the boundaries between them.
 // `liftoffAssist` / `landingAssist` are null or {site, glyph, label},
 // already gated by the caller (needsRoll, not colony-waived).
-function buildOrderedHazardItems({ turn1Segs, hz, curSite, safeAeroOnline, liftoffAssist, landingAssist, liftoffAssistActive }) {
+function buildOrderedHazardItems({ turn1Segs, hz, curSite, safeAeroOnline, liftoffAssist, landingAssist, liftoffAssistActive, chaosImmune = false, cavitationFree = false }) {
   const items = [];
+  // Promo crew waivers, mirrored so the pay / roll checklist lines up with the
+  // hazards that actually roll: POWER SERIES CHAOS MODEL passes every geyser /
+  // ring / spin / wind hazard, CAVITATION ENGINEERS the turn's first aerobrake.
+  let cavitationLeft = !!cavitationFree;
   if (liftoffAssist) items.push({ ...liftoffAssist, segIndex: 0 });
   // H6c Crash Hazard: a factory-assist liftoff ignores the hazard on the FIRST
   // space it moves into (turn1Segs[0].to). Mirror of the server; the assist's own
@@ -18732,6 +19266,8 @@ function buildOrderedHazardItems({ turn1Segs, hz, curSite, safeAeroOnline, lifto
   for (const h of hz) {
     if (h.site.type === 'radhaz') continue;
     if (safeAeroOnline && h.aero) continue;
+    if (chaosImmune && hazardFlavorOf(plannerIdToSlug(h.site.id))) continue;
+    if (cavitationLeft && h.aero && turn1Segs.some((sg) => sg.to === h.site.id)) { cavitationLeft = false; continue; }
     if (crashSpaceId && h.site.id === crashSpaceId && !isLanderBurnNodeClient(plannerIdToSlug(h.site.id))) continue;
     if (liftoffColonyWaives(curSite, h.site)) continue;
     const segIndex = turn1Segs.findIndex((s) => s.to === h.site.id);
@@ -20770,6 +21306,25 @@ function doIncomeOp() {
 // (see engine.js#applyEndTurn). Solo: credit it locally, then end the turn
 // through the existing toolbar handler (the op is spent by then, so the
 // button ends the turn instead of reopening the ops menu).
+// BLUE PLANET (Cerulean promo crew): "If ending turn on an aerobrake Hazard,
+// cost of FINAO = 1 Aqua, which gains 1 FT." Asked when the rocket is about to
+// end its turn parked on an aerobrake with no parachute generator aboard.
+// Resolves true when the player pays the 1 aqua FINAO (sent as END_TURN
+// bluePlanet: true), false to leave the descent to the die.
+async function bluePlanetChoice() {
+  if (!_online) return false;
+  const me = mySnapshotPlayer();
+  if (!me || !playerHasPrivilege(me, 'BLUE_PLANET')) return false;
+  if (!isAerobrakeSite(getRocketSite()) || stackSafeAerobrake()) return false;
+  if (me.rocket && me.rocket.bluePlanetFinao) return false;
+  if ((me.aqua | 0) < 1) return false;
+  return confirmModal({
+    title: '🌊 Blue Planet',
+    body: 'Your stack is parked on an aerobrake, so its next turn opens with a descent hazard. Pay FINAO now for just 1 aqua: no roll, and the scooped atmosphere adds 1 FT to your tank.',
+    yes: '🌊 Pay 1 aqua FINAO', no: 'Leave it to the die',
+  });
+}
+
 async function passTurn() {
   if (_online) {
     if (myBerthOpen()) {
@@ -20778,7 +21333,9 @@ async function passTurn() {
       if (me) openExomigrateModal(me);
       return;
     }
-    await submitOnlineOp({ kind: 'END_TURN' });
+    let bluePlanet = false;
+    try { bluePlanet = await bluePlanetChoice(); } catch { bluePlanet = false; }
+    await submitOnlineOp({ kind: 'END_TURN', ...(bluePlanet ? { bluePlanet: true } : {}) });
     return;
   }
   if (getOpsRemaining() > 0) {
@@ -20868,6 +21425,12 @@ function openOpsMenu() {
   addOp('⏭ Pass &amp; take income (+1 aqua)',
     'Take no other operation: bank +1 aqua and end your turn.',
     passTurn);
+  if (tradePortReady()) {
+    addOp('🏪 Trade Port (free)', 'Start of turn: discard 2 hand cards to take the top card of a patent deck. Free action.', doTradePort);
+  }
+  if (piggybackAllowance(_onlineSnapshot) > 0) {
+    addOp(`🚀 Piggyback (up to mass ${piggybackAllowance(_onlineSnapshot)}, free)`, 'Ride an opponent\'s launch: boost hand cards to LEO for free.', doPiggyback);
+  }
 
   // Site-op shortcuts: sites where a site-op is possible (your
   // factories - refuel / ET / colonize; claimed discs without a
@@ -21263,6 +21826,16 @@ function myActiveLaws() {
   return usable;
 }
 function iCanUseLaw(key) { return myActiveLaws().has(key); }
+// Is this Claim disc mine? Offline (no owners on the discs) every claim is.
+function claimIsMine(disc) {
+  if (!_online || !disc || disc.ownerId == null) return true;
+  return String(disc.ownerId) === String(myOwnerId());
+}
+// May I industrialize this Claim? My own always; an opponent's only as the New
+// Pilgrims' REFUGEE. Mirror of the server's not_claimed / Refugee check.
+function claimIndustrializableByMe(disc) {
+  return claimIsMine(disc) || playerHasPrivilege(mySnapshotPlayer(), 'REFUGEE');
+}
 // May this player USE the given factory for a NON-VICTORY op (Site Refuel, ET
 // Produce, Delivery)? Their own always; an opponent's only under Individuality
 // (Freedom to Roam). Mirror of the server's canUseFactoryNonVictory. Victory
@@ -21277,6 +21850,17 @@ function iCanUseFactory(factory) {
   // rejected for the same factory.
   if (factory.grants && factory.grants[String(myOwnerId())]) return true;
   return false;
+}
+// SITDOWN (LEO Workers' Union, black): "Factory hijack; works even if another
+// player's Humans are present." The holder may ET Produce at an opponent's
+// Factory with their own Human there (rocket or an outpost at the site),
+// Anarchy or not, and defenders don't stop it. Mirror of the server's Sitdown
+// branch in applyEtProduce. `siteId` is the map (planner) id of the factory site.
+function iMayHijackFactory(factory, siteId) {
+  if (!_online || !factory || factory.ownerId === myOwnerId()) return false;
+  if (!playerHasPrivilege(mySnapshotPlayer(), 'SITDOWN')) return false;
+  if (getStackSiteId('rocket') === siteId && stackHasHuman(getRocketStack())) return true;
+  return Object.values(getOutposts() || {}).some((o) => o && o.siteId === siteId && stackHasHuman(o.cards || []));
 }
 
 // Industrialize handler (rulebook I7). The caller has already
@@ -21802,6 +22386,156 @@ function pickMartianMover(movers, destName) {
   });
 }
 
+// Pick cards from the hand (and optionally a patent deck) in one small dialog.
+// Shared by the promo crew free actions that trade hand cards: Trade Port
+// (exactly 2, plus a deck) and Piggyback (any number up to a mass cap).
+// Resolves { cardIds, deckType } or null on cancel.
+function pickHandCardsModal({ title, body, cardIds, exact = 0, massCap = null, decks = null, yes = 'OK' }) {
+  return new Promise((resolve) => {
+    document.querySelector('.hand-pick-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'card-modal-overlay confirm-modal-overlay hand-pick-overlay';
+    const onKey = (e) => { if (e.key === 'Escape') done(null); };
+    const done = (val) => { overlay.remove(); document.removeEventListener('keydown', onKey); resolve(val); };
+    document.addEventListener('keydown', onKey);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) done(null); });
+    const panel = document.createElement('div');
+    panel.className = 'turn-confirm-panel hand-pick-panel';
+    panel.innerHTML = `<h3>${esc(title)}</h3><p>${body}</p>`;
+    const list = document.createElement('div');
+    list.className = 'hand-pick-list';
+    const picked = new Set();
+    const massOf = (id) => { const c = cardById(id); const f = c && c.faces && c.faces.primary; return (f && Number(f.mass)) || 0; };
+    const status = document.createElement('p');
+    status.className = 'muted hand-pick-status';
+    let deckSel = null;
+    const okBtn = document.createElement('button');
+    okBtn.type = 'button';
+    okBtn.className = 'popup-btn primary';
+    okBtn.textContent = yes;
+    const refresh = () => {
+      const mass = [...picked].reduce((m, id) => m + massOf(id), 0);
+      let ok = picked.size > 0;
+      if (exact) ok = picked.size === exact;
+      if (massCap != null && mass > massCap) ok = false;
+      if (decks && !(deckSel && deckSel.value)) ok = false;
+      okBtn.disabled = !ok;
+      status.textContent = massCap != null
+        ? `Picked mass ${mass} of ${massCap}.`
+        : (exact ? `Picked ${picked.size} of ${exact}.` : '');
+    };
+    (cardIds || []).forEach((id, i) => {
+      const c = cardById(id);
+      const row = document.createElement('label');
+      row.className = 'hand-pick-row';
+      row.style.display = 'block';
+      row.style.margin = '4px 0';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.dataset.idx = String(i);
+      cb.addEventListener('change', () => { if (cb.checked) picked.add(id); else picked.delete(id); refresh(); });
+      row.appendChild(cb);
+      row.appendChild(document.createTextNode(` ${(c && c.name) || id}${massCap != null ? ` (mass ${massOf(id)})` : ''}`));
+      list.appendChild(row);
+    });
+    panel.appendChild(list);
+    if (decks) {
+      deckSel = document.createElement('select');
+      deckSel.className = 'hand-pick-deck';
+      deckSel.style.margin = '8px 0';
+      deckSel.innerHTML = `<option value="">Take the top card of...</option>`
+        + decks.map((d) => `<option value="${esc(d)}">${esc((DRAFT_DECK_GLYPH[d] || '') + ' ' + d)}</option>`).join('');
+      deckSel.addEventListener('change', refresh);
+      panel.appendChild(deckSel);
+    }
+    panel.appendChild(status);
+    const acts = document.createElement('div');
+    acts.className = 'turn-confirm-actions';
+    const noBtn = document.createElement('button');
+    noBtn.type = 'button';
+    noBtn.className = 'popup-btn';
+    noBtn.textContent = 'Cancel';
+    okBtn.addEventListener('click', () => { if (!okBtn.disabled) done({ cardIds: [...picked], deckType: deckSel ? deckSel.value : null }); });
+    noBtn.addEventListener('click', () => done(null));
+    acts.append(okBtn, noBtn);
+    panel.appendChild(acts);
+    overlay.appendChild(panel);
+    refresh();
+    mountOverlay(overlay);
+  });
+}
+
+// TRADE PORT (Makers Guild, black): "At the start of your turn, you may
+// discard 2 cards to take the top card of a patent queue." Offered from the
+// operations menu while it is still the start of the turn (op and move both
+// unspent), and only to the holder.
+function tradePortReady() {
+  if (!_online || !isOnlineMyTurn()) return false;
+  const me = mySnapshotPlayer();
+  if (!me || !playerHasPrivilege(me, 'TRADE_PORT') || me.tradePortUsed) return false;
+  if ((me.opsRemaining | 0) < 1 || (me.movesRemaining | 0) < 1) return false;
+  return (me.hand || []).length >= 2;
+}
+async function doTradePort() {
+  const me = mySnapshotPlayer();
+  if (!me) return;
+  const pick = await pickHandCardsModal({
+    title: '🏪 Trade Port',
+    body: 'Discard 2 cards from your hand to the bottom of their decks, and take the top card of a patent deck. Free, at the start of your turn.',
+    cardIds: (me.hand || []).slice(), exact: 2, decks: draftDeckTypes(_onlineSnapshot), yes: '🏪 Trade',
+  });
+  if (!pick) return;
+  await submitOnlineOp({ kind: 'TRADE_PORT', cardIds: pick.cardIds, deckType: pick.deckType });
+}
+
+// PIGGYBACK (Utopia, Inc., black): "Whenever an opponent boosts cards, you may
+// immediately boost cards up to the mass of the cards boosted, for free." An
+// opponent's boost opens a window on the snapshot (snapshot.piggyback); the
+// holder is prompted once per new allowance and answers off turn, so the op
+// goes through submitGameOp, not the turn-gated submitOnlineOp.
+let _piggybackSeen = null;
+function piggybackAllowance(snapshot) {
+  const win = snapshot && snapshot.piggyback;
+  const me = mySnapshotPlayer();
+  if (!win || !me || _spectator) return 0;
+  if (String(win.boosterId) === String(me.profileId)) return 0;
+  return ((win.allow || {})[String(me.profileId)]) | 0;
+}
+function maybePromptPiggyback(snapshot) {
+  const allow = piggybackAllowance(snapshot);
+  if (allow <= 0) return;
+  const key = `${snapshot.piggyback.boosterId}:${snapshot.round}:${snapshot.turn}:${allow}`;
+  if (_piggybackSeen === key) return;
+  _piggybackSeen = key;
+  const booster = (snapshot.players || []).find((p) => String(p.profileId) === String(snapshot.piggyback.boosterId));
+  confirmModal({
+    title: '🚀 Piggyback',
+    body: `${esc((booster && booster.name) || 'An opponent')} just launched. Ride along: boost hand cards up to mass <strong>${allow}</strong> to your LEO Stack for free.`,
+    yes: '🚀 Pick cards', no: 'Not now',
+  }).then((ok) => { if (ok) doPiggyback(); });
+}
+async function doPiggyback() {
+  const allow = piggybackAllowance(_onlineSnapshot);
+  const me = mySnapshotPlayer();
+  if (allow <= 0 || !me) { _onlineToast('There is no launch to piggyback on right now.', 'error'); return; }
+  const ids = (me.hand || []).filter((id) => {
+    const c = cardById(id);
+    return c && !['gw-thruster', 'freighter', 'bernal', 'colonist'].includes(c.type);
+  });
+  const pick = await pickHandCardsModal({
+    title: '🚀 Piggyback',
+    body: 'Boost these cards to your LEO Stack for free, riding your opponent\'s launch.',
+    cardIds: ids, massCap: allow, yes: '🚀 Boost free',
+  });
+  if (!pick) return;
+  // Off turn, so not the turn-gated submitOnlineOp: the seat-stamped submit,
+  // then apply the board it returns.
+  if (!_online || _spectator || !_onlineGameId || !_onlineMe) return;
+  const r = await submitSeatOp(_onlineGameId, { kind: 'PIGGYBACK', cardIds: pick.cardIds }, _onlineMe.token).catch(() => null);
+  if (!r || !r.ok) { _onlineToast(humanizeOnlineOpError((r && r.error) || 'network', r && r.detail), 'error'); return; }
+  if (r.data && r.data.game) applySnapshot(r.data.game.state, r.data.game.seq);
+}
+
 function confirmModal({ title, body, yes = 'OK', no = 'Cancel' }) {
   return new Promise((resolve) => {
     document.querySelector('.confirm-modal-overlay')?.remove();
@@ -21927,7 +22661,7 @@ setRadBoostSideHook({
   set: (id, side) => { if (radiatorInMyHand(id)) _radBoostSide.set(id, side === 'heavy' ? 'heavy' : 'light'); },
 });
 
-function openBoostModal({ cards, have, opNote, boostTargets = [] }) {
+function openBoostModal({ cards, have, opNote, boostTargets = [], discount = 0 }) {
   return new Promise((resolve) => {
     document.querySelector('.confirm-modal-overlay')?.remove();
     const overlay = document.createElement('div');
@@ -21958,7 +22692,9 @@ function openBoostModal({ cards, have, opNote, boostTargets = [] }) {
     const totalCost = () => {
       const base = baseCost();
       const t = destTarget();
-      return t ? bernalBoostCostClient(base, t.bn, t.card) : base;
+      const priced = t ? bernalBoostCostClient(base, t.bn, t.card) : base;
+      // Iso-Shuttles takes a flat amount off the launch (min 0).
+      return Math.max(0, priced - (discount | 0));
     };
     const close = (ok) => {
       overlay.remove();
@@ -21999,8 +22735,9 @@ function openBoostModal({ cards, have, opNote, boostTargets = [] }) {
     const destName = (d) => (d === 'leo' ? 'the LEO Stack' : ((targets.find((t) => t.id === d) || {}).label || 'the LEO Stack'));
     const costNote = () => {
       const t = destTarget();
-      if (!t) return 'total mass';
-      return totalCost() === baseCost() ? 'total mass' : 'double mass';
+      const iso = discount ? `, ${discount} off for Iso-Shuttles` : '';
+      if (!t) return `total mass${iso}`;
+      return (t && bernalBoostCostClient(baseCost(), t.bn, t.card) === baseCost() ? 'total mass' : 'double mass') + iso;
     };
     const destRow = targets.length ? `
       <div class="boost-dest">
@@ -22863,6 +23600,23 @@ ${fuelTransferSectionMarkup({
       ? !!(_rsForDepot && String(_rsForDepot.id2) === String(_homeSlug))
       : isLeoSite(_rsForDepot))
     || !!(_homeForDepot && _rsForDepot && String(_rsForDepot.id2) === String(_homeForDepot.siteId));
+  // SHUTTLES (Explorers Without Borders, white): once a turn the bank reaches a
+  // ship with an operational thruster in ANY Home Orbit, not just LEO and your
+  // own Home Bernal. Only the aqua-to-water direction rides the shuttle.
+  const _shuttleMe = _online ? mySnapshotPlayer() : null;
+  const shuttleHere = !atLeo && !!(_shuttleMe && _rsForDepot && playerHasPrivilege(_shuttleMe, 'SHUTTLES')
+    && !_shuttleMe.shuttlesUsed && NODE_TAGS[String(_rsForDepot.id2)] && NODE_TAGS[String(_rsForDepot.id2)].homeBernal
+    && ((getActiveThrusterStats() || {}).thrust | 0) > 0);
+  if (shuttleHere && waterInOpen && aquaSection) {
+    aquaSection.hidden = false;
+    aquaSection.classList.add('is-shuttle');
+    const hd = aquaSection.querySelector('.aqua-row > span');
+    if (hd) hd.textContent = '🚀 Shuttles';
+    const help = aquaSection.querySelector('.aqua-help');
+    if (help) help.textContent = 'Shuttles: once a turn, your shuttle carries bank aqua up to this ship in a Home Orbit as water, 1:1. Water does not ride back down.';
+    const back = aquaSection.querySelector('.aqua-direction-reverse');
+    if (back) back.hidden = true;
+  }
   // Aqua <-> water is WATER-ONLY: dirt has no aqua value, and water can't be
   // poured onto a dirt tank (the grades can't mix). The bank panel shows
   // whenever the tank ISN'T already holding dirt, so a dirt-engine rocket with
@@ -22908,7 +23662,7 @@ ${fuelTransferSectionMarkup({
   };
   const fillFromAqua = async (amount, e) => {
     e?.stopPropagation();
-    if (!atLeo) return;
+    if (!atLeo && !shuttleHere) return;
     const cur = getTankWater();
     const room = Math.max(0, cap - cur);
     const want = Math.min(amount, room, getAqua());
@@ -24291,6 +25045,8 @@ function repaintBoostCommit() {
     const f = (c.faces && c.faces.primary) || c;
     cost += ((f.mass != null ? f.mass : c.mass) | 0);
   }
+  // Iso-Shuttles: the isotope in the bank takes 10 off the first launch.
+  if (n > 0) cost = Math.max(0, cost - isoShuttlesDiscount());
   btn.dataset.armed = n > 0 ? '1' : '0';
   btn.disabled = n === 0;
   const home = homeLabel();
@@ -25460,7 +26216,8 @@ function syncSandboxRocket() {
   setSolarZone(solarZone);
   // Powersat (ESA): my faction grants +1 thrust to a push-icon thruster.
   // Mirror the engine so the client's thrust/fuel math stays byte-identical.
-  setHasPowersat(myHasPowersat());
+  // A rival ESA's Powersat beam adds the push thrust too (not the assist).
+  setHasPowersat(myHasPowersat() || !!playerPowersatBeamedBy(mySnapshotPlayer()));
   // MASS BEAM Future: +2 Powersat push thrust. Mirror the engine
   // (hasFutureEffect(player, 'powersatPlus2')).
   setPowersatFutureBonus(myHasFutureEffect('powersatPlus2') ? 2 : 0);
@@ -26264,6 +27021,40 @@ function openFleetModal() {
   document.body.appendChild(back);
 }
 
+// LIFE RAFT / LIFEBOAT (Space Force promo crew): "May move as a Freighter
+// (1B4) if the stack Wet Mass is less than 5 & doesn't contain a glory chit"
+// (Lifeboat: less than 7). Mirror of the engine's lifeRaftFail: returns the
+// face name when this turn's rocket move may be flown as a Freighter, else null.
+function lifeRaftOffer() {
+  const me = mySnapshotPlayer();
+  if (!me) return null;
+  const boat = playerHasPrivilege(me, 'LIFEBOAT');
+  if (!boat && !playerHasPrivilege(me, 'LIFE_RAFT')) return null;
+  const stack = (me.rocket && me.rocket.stack) || [];
+  if (!stack.some((s) => s && s.id === 'crew_space_force')) return null;
+  const totals = getStackTotals();
+  const wet = rocketDryMass(totals.dryMass || 0) + getTankWater();
+  if (!(wet < (boat ? 7 : 5))) return null;
+  if (!boat) {
+    const ids = new Set(stack.map((s) => s && s.id));
+    const chits = (me.glory && me.glory.chits) || [];
+    if (chits.some((c) => c && (!c.crewId || ids.has(c.crewId)))) return null;
+  }
+  return boat ? 'Lifeboat' : 'Life Raft';
+}
+// WEAK STABILITY BOUNDARY (Heliocentricity promo crew): "After its Stack
+// moves, you may activate this thruster to coast as a second movement." Ready
+// when the rocket's move is spent, the crew is aboard, this turn's use is
+// unspent, and the plotted leg is a coast (no burns).
+function wsbCoastReady(turnBurns) {
+  const me = mySnapshotPlayer();
+  if (!me || !playerHasPrivilege(me, 'WEAK_STABILITY_BOUNDARY')) return false;
+  if (me.wsbCoastUsed) return false;
+  if ((me.movesRemaining | 0) > 0) return false;
+  if (!(((me.rocket && me.rocket.stack) || []).some((s) => s && s.id === 'crew_heliocentricity'))) return false;
+  return turnBurns === 0;
+}
+
 // Step the rocket through its planned route's "turn 1" segments
 // (one move per turn, capped at BURNS_PER_TURN burns of cumulative
 // dv). The remaining segments shift down a turn so the next move
@@ -26295,7 +27086,35 @@ async function moveRocket() {
   // The freighter + Bernals are self-contained movers (no rocket support chain),
   // so this rocket-only gate is skipped when the route owner isn't the rocket.
   const ownerIsBernal = typeof _plannedRouteUnit === 'string' && _plannedRouteUnit.startsWith('bernal');
-  if (_plannedRouteUnit !== 'freighter' && !ownerIsBernal) {
+  // Promo crew movement choices for the rocket's own route (online only - the
+  // abilities are faction privileges the game enforces). Asked before the
+  // support-chain gate, because a Freighter move needs no engine at all.
+  let asFreighter = false;
+  let wsbCoast = false;
+  if (_online && _plannedRouteUnit !== 'freighter' && !ownerIsBernal && _plannedRouteUnit !== 'factory') {
+    const t1Burns = (_plannedRoute || [])
+      .filter((s) => (Number(s.turn) || 1) === 1)
+      .reduce((n, s) => n + (Number(s.burns) || 0), 0);
+    if (wsbCoastReady(t1Burns)) {
+      const go = await confirmModal({
+        title: '🌀 Weak Stability Boundary',
+        body: 'Your stack has moved this turn. Activate the Sundiver and coast along this route as a second movement (no burns, once per turn)?',
+        yes: '🌀 Coast again', no: 'Cancel',
+      });
+      if (!go) { setStatus('Move cancelled.'); return false; }
+      wsbCoast = true;
+    } else {
+      const raft = lifeRaftOffer();
+      if (raft && getMovesRemaining() > 0) {
+        asFreighter = await confirmModal({
+          title: `🛟 ${raft}`,
+          body: `Move this stack as a Freighter: Net Thrust 1 (2 with Powersat), no fuel burned, and the Freighter's landing rules. Otherwise it flies on its own thruster as usual.`,
+          yes: '🛟 Move as a Freighter', no: 'Fly normally',
+        });
+      }
+    }
+  }
+  if (_plannedRouteUnit !== 'freighter' && !ownerIsBernal && !asFreighter) {
     const act = isRocketActive();
     // A dead engine (no active thruster, or a broken support chain) can still
     // COAST: a turn of the route that spends no burns flies, the same as on the
@@ -26438,9 +27257,12 @@ async function moveRocket() {
     // Ordered hazard checklist for the WHOLE planned turn-1 route: liftoff
     // assist, then route hazards in travel order, then landing assist -
     // matches the server's own rollItems order exactly.
+    const meHz = mySnapshotPlayer();
     const genericItems = buildOrderedHazardItems({
       turn1Segs, hz, curSite, safeAeroOnline, liftoffAssist: liftoffAssistItem, landingAssist: landingAssistItem,
       liftoffAssistActive: !!liftG.assist,
+      chaosImmune: playerHasPrivilege(meHz, 'POWER_SERIES_CHAOS_MODEL'),
+      cavitationFree: playerHasPrivilege(meHz, 'CAVITATION_ENGINEERS') && !(meHz && meHz.cavitationUsed),
     });
     let hazardPay = false;
     let hazardChoices = null;
@@ -26544,6 +27366,8 @@ async function moveRocket() {
       kind: 'MOVE', toSiteId: finalToSiteId, hazardPay, segments: finalSegments, pickupChit,
       ...(hazardChoices ? { hazardChoices } : {}),
       ...(acetyleneLiftoff ? { acetyleneLiftoff: true } : {}),
+      ...(asFreighter ? { asFreighter: true } : {}),
+      ...(wsbCoast ? { wsbCoast: true } : {}),
     });
     if (ok) {
       const glideOwnsLine = (_moveRouteConsume === null);   // the glide picked up the consume
@@ -28892,17 +29716,24 @@ function showSitePopupFor(site) {
       const stack = getRocketStack();
       const needDirt = hermesNeedsDirtRocket(site);
       const opts = findIndustrializeOptions(stack, true, myCrewReactorKinds(), { requireDirtRocket: needDirt });
-      const ok = opts.length > 0;
+      // Only your own Claim may be industrialized - unless you are the New
+      // Pilgrims' REFUGEE, who may build on an opponent's Claim (not a Felony)
+      // and share the Factory with them.
+      const claimOk = claimIndustrializableByMe(disc);
+      const refugee = claimOk && !claimIsMine(disc);
+      const ok = opts.length > 0 && claimOk;
       const reason = ok
         ? null
+        : !claimOk
+          ? "This is another player's Claim. Only its owner may industrialize it."
         : (needDirt
             ? 'A factory on Hermes also decommissions an operational dirt rocket (a grey thrust triangle). The stack needs an active refinery + active robonaut with their supports, AND a dirt rocket aboard.'
             : 'Industrialize needs an active refinery + active robonaut in the stack (with their supports satisfied).');
       actions.push({
-        label: '🏭 Industrialize',
+        label: refugee ? '🏭 Industrialize (Refugee)' : '🏭 Industrialize',
         variant: ok ? 'rocket' : 'secondary',
         disabled: !ok,
-        title: reason || undefined,
+        title: reason || (refugee ? "Refugee: build a Factory on this opponent's Claim (not a Felony). The Factory is yours, and its Claim owner may use it too." : undefined),
         tutTarget: 'industrialize',
         onClick: () => {
           if (!ok) return;
@@ -28926,9 +29757,9 @@ function showSitePopupFor(site) {
         if (!o || o.siteId !== site.id) continue;
         const stack = o.cards || [];
         const opts = findIndustrializeOptions(stack, true, myCrewReactorKinds(), { requireDirtRocket: hermesNeedsDirtRocket(site) });
-        if (!opts.length) continue;
+        if (!opts.length || !claimIndustrializableByMe(disc)) continue;
         actions.push({
-          label: `🏭 Industrialize (Outpost ${letter})`,
+          label: `🏭 Industrialize (Outpost ${letter})${claimIsMine(disc) ? '' : ' (Refugee)'}`,
           variant: 'rocket',
           tutTarget: 'industrialize',
           onClick: () => {
@@ -29109,9 +29940,11 @@ function showSitePopupFor(site) {
   // fresh outpost the player creates inline).
   {
     const factory = getFactory(site.id);
-    if (iCanUseFactory(factory)) {
+    // Sitdown: a Union hijack of an opponent's Factory rides the same button.
+    const sitdownHijack = !iCanUseFactory(factory) && iMayHijackFactory(factory, site.id);
+    if (iCanUseFactory(factory) || sitdownHijack) {
       const handIds = getHandSlots();
-      const etOptions = findEtProduceOptions(handIds, cardById, factory.spectralType, { anyC: myHasColonistPower('etProduceCAnywhere') });
+      const etOptions = findEtProduceOptions(handIds, cardById, factory.spectralType, { anyC: myEtProduceAnyC(site.id) });
       const outpostsAtSite = Object.values(getOutposts()).filter((o) => o.siteId === site.id);
       // ET Produce may also flip a WHITE-side card that is COLOCATED here (in
       // the rocket parked at this site, or a colocated outpost) into its
@@ -29122,7 +29955,7 @@ function showSitePopupFor(site) {
         const addColocated = (id, from) => {
           if (seen.has(id)) return;
           const card = cardById(id);
-          if (!card || !spectralProducibleAt(card.spectralType, factory.spectralType, { anyC: myHasColonistPower('etProduceCAnywhere') })) return;
+          if (!card || !spectralProducibleAt(card.spectralType, factory.spectralType, { anyC: myEtProduceAnyC(site.id) })) return;
           seen.add(id);
           etOptions.push({ id, card, name: card.name || id, from });
         };
@@ -29155,10 +29988,11 @@ function showSitePopupFor(site) {
           ? `No colocated outpost AND all 4 outpost slots are in use.`
           : null;
       actions.push({
-        label: `🏭 ET Produce (${factory.spectralType})`,
+        label: sitdownHijack ? `✊ Sitdown: ET Produce (${factory.spectralType})` : `🏭 ET Produce (${factory.spectralType})`,
         variant: ok ? 'rocket' : 'secondary',
         disabled: !ok,
         title: reason
+          || (sitdownHijack ? `Factory hijack (Sitdown): your workers take over this Factory and produce a spectral-${factory.spectralType} card Black-Side-up. Opposing Humans can't stop it. A Felony.` : null)
           || (rocketParkedHere
             ? `Produce a spectral-${factory.spectralType} card Black-Side-up, straight into your rocket or an outpost.`
             : `Produce a spectral-${factory.spectralType} card Black-Side-up into the colocated outpost.`),
@@ -31228,8 +32062,8 @@ function renderPatents() {
   // cards) right from the library, to test its render + abilities. Hidden for
   // everyone else, in multiplayer (a live faction swap outside the draft only
   // makes sense solo), and in a game missing m0/m1/m2 (promo crew need the
-  // full stack to function - promoCrewAllowed also checks admin).
-  if (_online && !_spectator && isSoloRoom(_onlineSnapshot) && promoCrewAllowed(_onlineSnapshot)) {
+  // full stack to function; the test drive itself stays admin-only).
+  if (_online && !_spectator && activeProfile()?.isAdmin && isSoloRoom(_onlineSnapshot) && promoCrewAllowed(_onlineSnapshot)) {
     const adminSwapRow = document.createElement('div');
     adminSwapRow.className = 'patent-admin-crew-swap';
     const adminSwapBtn = document.createElement('button');
@@ -32534,6 +33368,15 @@ function promptGloryPickup(siteName, zone, crewId = null) {
 // pickup the server would reject.
 function snapshotGloryCarriers(player) {
   if (!player) return 0;
+  // HEROIC (Galahad Group, white): "This character can carry any number of
+  // glory chits" - while the Galahad crew card is in play there is no limit.
+  if (player.faction && player.faction.cardId === 'crew_galahad_group' && playerHasPrivilege(player, 'HEROIC')) {
+    const has = (slots) => (slots || []).some((s) => s && s.id === 'crew_galahad_group');
+    if (has(player.leo) || has(player.rocket && player.rocket.stack)
+      || Object.values(player.outposts || {}).some((o) => o && has(o.cards))
+      || (player.freighter && has(player.freighter.stack))
+      || (player.bernals || []).some((bn) => bn && has(bn.stack))) return Infinity;
+  }
   let n = 0;
   const count = (slots) => { for (const s of (slots || [])) if (isCrewSlot(s) || isHumanColonistSlot(s)) n += 1; };
   count(player.leo);
@@ -33345,6 +34188,7 @@ const MP_LOG_ICONS = {
   DRAFT_BONUS_SELL: '💱', DRAFT_BONUS_DONE: '✅',
   UNDO: '↩', REDO: '↪',
   FUNDRAISE: '🗳', LOBBY: '📜',
+  EMISSARIES: '🤝', ARBITER_TALLY: '⚖', TRADE_PORT: '🏪', PIGGYBACK: '🚀', POWERSAT_BEAM: '🛰',
   ADMIN_REPAIR: '🔧', ADMIN_EDIT: '🔧',
 };
 
@@ -33997,7 +34841,7 @@ export function openCrewWizard(arg, maybeOnDone) {
     const byColour = [...filtered].sort((a, b) => PLAYER_COLORS.indexOf(a.color) - PLAYER_COLORS.indexOf(b.color));
     // Pickable sides first; taken and Coming-soon sides after a divider, so
     // what you can choose is never mixed in with what you can't.
-    const unpickable = (c) => takenSet.has(c.srcId) || !!c.requiresModule;
+    const unpickable = (c) => takenSet.has(c.srcId) || !!c.requiresModule || crewFaceMissingModules(c).length > 0;
     const faces = [...byColour.filter((c) => !unpickable(c)), ...byColour.filter(unpickable)];
     const firstUnpickable = faces.find(unpickable);
     for (const c of faces) {
@@ -34009,7 +34853,7 @@ export function openCrewWizard(arg, maybeOnDone) {
       // though the admin picker shows it (same "informational only" cards the
       // Library greys out, decorateForHand above). notRecommendedWithModule
       // is just a caution and stays fully selectable.
-      const locked = !!c.requiresModule;
+      const locked = !!c.requiresModule || crewFaceMissingModules(c).length > 0;
       const disabled = taken || locked;
       const tile = document.createElement('div');
       tile.className = 'crew-faction-card'
@@ -34022,7 +34866,9 @@ export function openCrewWizard(arg, maybeOnDone) {
       tile.dataset.face = c.face;
       if (locked) {
         tile.setAttribute('aria-disabled', 'true');
-        tile.title = `Coming soon: this side needs Module ${c.requiresModule.slice(1)}, which isn't available yet.`;
+        tile.title = c.requiresModule
+          ? `Coming soon: this side needs Module ${c.requiresModule.slice(1)}, which isn't available yet.`
+          : `This side needs ${crewFaceMissingModules(c).join(' + ')}, which this game is not using.`;
       } else if (taken) {
         tile.setAttribute('aria-disabled', 'true');
         tile.title = 'Another player has this crew.';

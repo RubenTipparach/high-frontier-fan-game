@@ -590,6 +590,65 @@
   z-index: 29;
 }
 .map-search-backdrop.hidden { display: none; }
+/* Pinned board-text search lists (📌), docked on the map's left edge. Each
+   pin is a collapsible card; its rows fly the map to the place. */
+.map-search ul li.map-search-pin-row {
+  color: #fde047;
+  font-weight: 600;
+  border-top: 1px solid var(--border);
+}
+.map-pins {
+  position: absolute;
+  top: 56px;
+  left: 10px;
+  z-index: 8;
+  width: min(250px, calc(var(--vwpx, 1vw) * 70));
+  max-height: calc(var(--vhpx, 1vh) * 55);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.map-pins[hidden] { display: none; }
+.map-pin {
+  background: rgba(15, 16, 35, 0.92);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+  color: var(--ink);
+}
+.map-pin summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6px 8px;
+  cursor: pointer;
+  list-style: none;
+}
+.map-pin summary::-webkit-details-marker { display: none; }
+.map-pin-title { font-weight: 700; color: #fde047; }
+.map-pin-unpin {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--ink-mute);
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 6px;
+  cursor: pointer;
+}
+.map-pin ul { list-style: none; margin: 0; padding: 0 0 4px; }
+.map-pin li {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+.map-pin li:hover { background: rgba(125, 211, 252, 0.18); }
+.map-pin li strong { font-weight: 600; font-style: italic; }
+.map-pin li em { font-style: normal; font-size: 10px; color: var(--ink-mute); }
 @media (max-width: 720px) {
   /* Pin the toolbar to the top of the map shell on phones so it
      stays visible while the map pans / zooms - prior behaviour
@@ -2872,6 +2931,15 @@
   color: var(--ink-mute);
   margin-bottom: 8px;
   text-transform: lowercase;
+}
+/* The caption the board prints beside a hazard / belt / aerobrake / lander
+   icon: set in the board's own italic white-on-map style. */
+.map-popup .t-board-caption {
+  font-style: italic;
+  font-weight: 600;
+  color: #e2e8f0;
+  text-transform: none;
+  margin-top: -4px;
 }
 .map-popup .t-id {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;

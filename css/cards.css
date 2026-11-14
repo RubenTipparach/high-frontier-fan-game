@@ -1085,6 +1085,16 @@
   color: #eff6ff;
   border: 1px solid #1e40af;
 }
+/* "Needs M1": a promo crew face whose ability uses an implemented module.
+   Teal while the room runs it; it turns into the locked blue ribbon
+   (.is-required) when the room does not, so it can't be picked there. */
+.card-module-badge.is-needs {
+  bottom: 118px;
+  letter-spacing: 0.5px;
+  background: linear-gradient(180deg, #14b8a6, #0f766e);
+  color: #f0fdfa;
+  border: 1px solid #115e59;
+}
 .card-module-badge.is-caution {
   background: linear-gradient(180deg, #f59e0b, #b45309);
   color: #fffbeb;

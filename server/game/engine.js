@@ -59,6 +59,7 @@ import { scorePlayer, freeMarketBlackSideValue } from '../../data/endgame-scorin
 // engine reads them so the liftoff/landing gate uses the FINAL net thrust,
 // not the printed base value.
 import { weightClassForMass, freighterNetThrust } from '../../data/net-thrust-track.js';
+import { hazardFlavorOf } from '../../data/hazard-flavors.js';
 import { SOLAR_ZONE_INFO, adjacentSites } from '../../data/sites.js';
 // Site location classes (astrobiology / submarine / atmospheric / elevator),
 // shared with the client (colony types + promotion colonies + futures).
@@ -740,7 +741,16 @@ function maybeAwardGlory(state, player, site, turn, stack = player.rocket.stack)
 // at most one chit. A chit follows its crew into any stack the player controls
 // (rocket, LEO, outposts, freighter, Bernals), so every one of those Humans is a
 // potential carrier, not just the ones aboard the rocket.
+// HEROIC (Galahad Group, white): "This character can carry any number of glory
+// chits." The Galahad crew card itself has no carry limit, so while it is in
+// play its holder's capacity is unbounded. Returns the card id or null.
+function heroicCarrierId(state, player) {
+  if (!player || !player.faction || player.faction.cardId !== 'crew_galahad_group') return null;
+  if (!hasPrivilege(state, player, 'HEROIC')) return null;
+  return humanCardInPlay(state, player, player.faction.cardId) ? player.faction.cardId : null;
+}
 function gloryCarriers(state, player) {
+  if (heroicCarrierId(state, player)) return Infinity;
   let n = 0;
   const count = (slots) => { for (const s of (slots || [])) if (isHumanSlot(state, s)) n += 1; };
   count(player.leo);
@@ -765,6 +775,9 @@ function pickGloryCarrier(state, player, stack = player.rocket && player.rocket.
   for (const s of (stack || [])) {
     if (isHumanSlot(state, s) && !taken.has(s.id)) return s.id;
   }
+  // Heroic: the Galahad crew may take another chit on top of the ones it holds.
+  const hero = heroicCarrierId(state, player);
+  if (hero && (stack || []).some((s) => s && s.id === hero)) return hero;
   return null;
 }
 
@@ -1569,6 +1582,38 @@ function finaoPerFor(state, player) {
   if (playerHasColonistPower(state, player, 'finaoHalved')) per = Math.floor(per / 2);
   return Math.max(1, per);
 }
+// Pay `cost` aqua of FINAO. Every place FINAO is charged goes through here so
+// POWER BROKERS (The Sea Peoples, black) settles on all of them: "After you pay
+// FINAO, gain 1 Aqua per Seniority Disk on the Assembly (max half FINAO paid,
+// round down)." The rebate is read after the payment, from the disks sitting on
+// the Assembly right now (a disk still on the Sunspot track is not on the
+// Assembly). Its note is queued on state.__opNotes and appended to this op's log
+// line by the dispatcher. Returns the rebate.
+function seniorityDisksOnAssembly(state) {
+  if (!state.m0 || !state.assembly) return 0;
+  return ASSEMBLY_PLACES.reduce((n, p) => n + seniorityInPlace(state.assembly, p), 0);
+}
+function payFinao(state, player, cost) {
+  const paid = Math.max(0, cost | 0);
+  if (paid <= 0) return 0;
+  player.aqua = (player.aqua | 0) - paid;
+  return finaoRebate(state, player, paid);
+}
+// The Power Brokers settlement on its own, for a caller that pays up front and
+// settles once the net payment is known (MOVE refunds FINAO for a hazard the
+// ship never reached, and only the FINAO actually kept is "paid").
+function finaoRebate(state, player, paidIn) {
+  const paid = Math.max(0, paidIn | 0);
+  if (paid <= 0) return 0;
+  if (!hasPrivilege(state, player, 'POWER_BROKERS')) return 0;
+  const rebate = Math.min(seniorityDisksOnAssembly(state), Math.floor(paid / 2));
+  if (rebate <= 0) return 0;
+  player.aqua += rebate;
+  const note = `${player.name} collected +${rebate} aqua back from the ${paid} FINAO paid (Power Brokers).`;
+  (state.__opNotes = state.__opNotes || []).push(note);
+  pushNews(state, '\u{1F4B0}', note);
+  return rebate;
+}
 
 // A colonist COLOCATED with an operation's site (2C1): at the site itself, OR on
 // an anchored Bernal that is Dirtside to a Factory at that site ("including on an
@@ -1814,6 +1859,48 @@ function hasPowersat(state, player) {
   return hasPrivilege(state, player, 'POWERSAT') || hasPushFactory(state, player)
     || hasPowersatBernal(state, player);
 }
+// POWERSAT reaching a RIVAL's craft (ESA, B6a): "During any player's Turn, may
+// give +1 thrust to any Spacecraft that has a push icon. Negotiable." The holder
+// keeps a public, standing list of rivals they beam (player.powersatBeams, set
+// with the off-turn POWERSAT_BEAM op, so a deal struck in a trade can be honoured
+// at once and withdrawn just as fast). A beamed craft gets the push THRUST only:
+// the Safe Factory-Assist half (rule e) stays with the holder's own craft,
+// because the card's text names the +1 thrust and nothing else. The beam is the
+// holder's privilege in use, so it goes through hasPrivilege: suspended by
+// Anarchy and locked under M2 until the HOLDER has a Home Bernal.
+function powersatBeamedTo(state, target) {
+  if (!target) return null;
+  for (const p of (state.players || [])) {
+    if (!p || p === target || String(p.profileId) === String(target.profileId)) continue;
+    const beams = Array.isArray(p.powersatBeams) ? p.powersatBeams : [];
+    if (!beams.some((id) => String(id) === String(target.profileId))) continue;
+    if (hasPrivilege(state, p, 'POWERSAT')) return p;
+  }
+  return null;
+}
+// +1 push thrust for this player's craft: their own Powersat, or a rival's beam.
+function powersatPushFor(state, player) {
+  return hasPowersat(state, player) || !!powersatBeamedTo(state, player);
+}
+// Off-turn op (dispatched against the CALLER, like SET_CARD_GROUPS): the
+// Powersat holder starts or stops beaming one rival. op = { targetId, on }.
+function applyPowersatBeam(state, op, player) {
+  if (!hasPrivilege(state, player, 'POWERSAT')) return fail('no_powersat');
+  const target = (state.players || []).find((p) => String(p.profileId) === String(op.targetId));
+  if (!target) return fail('bad_target');
+  if (target === player) return fail('beam_self');
+  const on = op.on !== false;
+  const beams = (Array.isArray(player.powersatBeams) ? player.powersatBeams : [])
+    .filter((id) => String(id) !== String(target.profileId));
+  if (on) beams.push(target.profileId);
+  player.powersatBeams = beams;
+  return {
+    ok: true, state,
+    log: on
+      ? `${player.name} trained their Powersat on ${target.name}: push-icon craft of ${target.name} get +1 thrust while the beam holds.`
+      : `${player.name} switched their Powersat beam off ${target.name}.`,
+  };
+}
 // May this player commit a Felony? Yes during Anarchy (everyone gains
 // Felonious, K2e), OR if they hold the Felonious privilege (Taikonauts) the
 // rest of the time. (Anarchy suspends privilegeOf, but state.anarchy covers
@@ -1832,6 +1919,91 @@ function creditPrivilegeIncome(state, key, label) {
     notes.push(`${p.name} collected +1 aqua (${label}).`);
   }
   return notes;
+}
+
+// ---- Promo crew: movement and hazard privileges (group A) ----
+// LIFE RAFT (Space Force, white): "May move as a Freighter (1B4) if the stack
+// Wet Mass is less than 5 & doesn't contain a glory chit." LIFEBOAT (black):
+// the same with Wet Mass less than 7 and no glory-chit clause. "The stack" is
+// the stack carrying this Crew, so the Space Force card must be aboard the
+// rocket. Returns null when the rocket may fly as a Freighter, else the error.
+// Read through hasPrivilege: Anarchy suspends it and the M2 lock holds it until
+// a Home Bernal is anchored, like every faction privilege.
+const SPACE_FORCE_CREW_ID = 'crew_space_force';
+function rocketCarriesGloryChit(player) {
+  const chits = (player.glory && player.glory.chits) || [];
+  if (!chits.length) return false;
+  const aboard = new Set(((player.rocket && player.rocket.stack) || []).map((s) => s.id));
+  // A chit with no carrier on record rides the rocket (the legacy count rule).
+  return chits.some((c) => c && (!c.crewId || aboard.has(c.crewId)));
+}
+function lifeRaftFail(state, player, wetMass) {
+  const raft = hasPrivilege(state, player, 'LIFE_RAFT');
+  const boat = hasPrivilege(state, player, 'LIFEBOAT');
+  if (!raft && !boat) return fail('no_life_raft');
+  if (!((player.rocket && player.rocket.stack) || []).some((s) => s.id === SPACE_FORCE_CREW_ID)) {
+    return fail('life_raft_needs_crew');
+  }
+  // A Lifeboat holder (7) never needs the stricter Life Raft limit (5).
+  const limit = boat ? 7 : 5;
+  if (!(wetMass < limit)) return fail('life_raft_too_heavy', { wetMass, limit });
+  if (!boat && rocketCarriesGloryChit(player)) return fail('life_raft_glory_chit');
+  return null;
+}
+// WEAK STABILITY BOUNDARY (Heliocentricity, white): "After its Stack moves, you
+// may activate this thruster to coast as a second movement." The thruster is
+// the Sundiver printed on the Heliocentricity card, so the card must be aboard
+// the rocket that already moved this turn; the second movement is a COAST (no
+// burns), once per turn.
+const HELIOCENTRICITY_CREW_ID = 'crew_heliocentricity';
+// POWER SERIES CHAOS MODEL (Heliocentricity, black): "Immune to Hazards
+// mentioning geysers, rings, spin, and winds." The hazard's printed flavour
+// lives in data/hazard-flavors.js.
+function chaosModelImmune(state, player, slug) {
+  return !!hazardFlavorOf(slug) && hasPrivilege(state, player, 'POWER_SERIES_CHAOS_MODEL');
+}
+// CAVITATION ENGINEERS (VerisAI, black): "[Ignore Aerobrake] once per turn."
+// The first aerobrake hazard the player's rocket meets in a turn is ignored (no
+// roll, no FINAO), the same waiver a parachute generator gives, and the
+// once-per-turn ledger (player.cavitationUsed) lifts as their next turn opens.
+// Returns true and spends the use when it applies.
+function cavitationIgnores(state, player) {
+  if (player.cavitationUsed) return false;
+  if (!hasPrivilege(state, player, 'CAVITATION_ENGINEERS')) return false;
+  player.cavitationUsed = true;
+  return true;
+}
+// BLUE PLANET (Cerulean, white): "If ending turn on an aerobrake Hazard, cost
+// of FINAO = 1 Aqua, which gains 1 FT." Staying on an aerobrake is a Diver Orbit
+// (each turn you remain counts as a Hazard needing a roll or FINAO), and that
+// hazard comes due as the parked ship's next turn opens (aerobrakeParkingHazard).
+// The holder settles it at END_TURN instead: 1 aqua, and the scooped atmosphere
+// walks the tank up one refuel step (1 FT). Opt-in (END_TURN bluePlanet: true).
+// The FINAO is stamped on the rocket and spent by the next parking check.
+// Returns a note for the log, or a fail.
+function applyBluePlanetFinao(state, player) {
+  if (!hasPrivilege(state, player, 'BLUE_PLANET')) return fail('no_blue_planet');
+  const r = player.rocket;
+  if (!r || !(r.stack || []).length || !isAerobrakeNode(r.siteId)) return fail('not_on_aerobrake');
+  if (stackSafeAerobrake(r) || r.bluePlanetFinao) return fail('no_hazard_to_pay');
+  if ((player.aqua | 0) < 1) return fail('insufficient_aqua');
+  player.aqua -= 1;
+  r.bluePlanetFinao = true;
+  const tank = Number(r.tank) || 0;
+  const dry = rocketDryMass(r.stack.reduce((m, s) => m + slotMass(s), 0));
+  const grade = mixedFuelGrade(tank, tankGradeOf(r), 'water');
+  let gained = false;
+  if (!rocketMixRefusal(r, tank, grade) && redStepsBetween(dry + tank) > 0) {
+    const res = loadFuelUpLadder(dry, tank, 1);
+    r.tank = res.tank;
+    setRocketGrade(r, grade);
+    gained = res.steps > 0;
+  }
+  const where = (siteById(r.siteId) || {}).name || 'the aerobrake';
+  return {
+    ok: true,
+    note: ` Blue Planet: paid 1 aqua FINAO for the next descent at ${where}${gained ? ` and scooped 1 FT into the tank (tank ${round6(r.tank)})` : ' (the tank had no room for the scooped FT)'}.`,
+  };
 }
 
 
@@ -3999,7 +4171,7 @@ function applyMoveFreighter(state, op, player) {
   let originThrustBonus = 0;
   if (frPw0 && frPw0.beltOriginThrust && hazardKind(here) === 'rad') originThrustBonus += frPw0.beltOriginThrust;
   if (frPw0 && frPw0.factoryOriginThrust && state.factories[here]) originThrustBonus += frPw0.factoryOriginThrust;
-  const frThrust = freighterNetThrust(powersat) + originThrustBonus;
+  const frThrust = freighterNetThrust(powersatPushFor(state, player)) + originThrustBonus;
   // Acetylene Rocketplane Liftoff (H6c). The published text names the craft
   // outright - "A Spacecraft (Rocket, Freighter or Mobile Factory) may use
   // factory-assist to exit (but not enter) an Atmospheric Site to allow movement
@@ -4135,6 +4307,7 @@ function applyMoveFreighter(state, op, player) {
   const frCrashIgnored = [];
   const frColonyWaived = [];
   for (const slug of generic) {
+    if (chaosModelImmune(state, player, slug)) { frColonyWaived.push(slug); continue; }
     if (frCrashSpace && slug === frCrashSpace && !isLanderBurnNode(slug)) { frCrashIgnored.push(slug); continue; }
     if (liftoffColonyWaives(state, from, slug)) { frColonyWaived.push(slug); continue; }
     rollItems.push({ slug, kind: hazardKind(slug) });
@@ -4166,7 +4339,7 @@ function applyMoveFreighter(state, op, player) {
   const finaoPer = finaoPerFor(state, player);
   const finaoCost = wantPay ? rollItems.length * finaoPer : 0;
   if (finaoCost > 0 && finaoCost > (player.aqua | 0)) return fail('insufficient_aqua');
-  if (finaoCost > 0) player.aqua -= finaoCost;
+  if (finaoCost > 0) payFinao(state, player, finaoCost);
 
   const gen = makeRng(state.seed, state.rng.cursor);
   const rolls = [];
@@ -4504,7 +4677,7 @@ function applyMoveBernal(state, op, player) {
   const finaoPer = finaoPerFor(state, player);
   const finaoCost = wantPay ? rollItems.length * finaoPer : 0;
   if (finaoCost > 0 && finaoCost > (player.aqua | 0)) return fail('insufficient_aqua');
-  if (finaoCost > 0) player.aqua -= finaoCost;
+  if (finaoCost > 0) payFinao(state, player, finaoCost);
 
   const gen = makeRng(state.seed, state.rng.cursor);
   const rolls = [];
@@ -4928,7 +5101,7 @@ function applyMoveFactory(state, op, player) {
   const finaoPer = finaoPerFor(state, player);
   const finaoCost = wantPay ? rollItems.length * finaoPer : 0;
   if (finaoCost > 0 && finaoCost > (player.aqua | 0)) return fail('insufficient_aqua');
-  if (finaoCost > 0) player.aqua -= finaoCost;
+  if (finaoCost > 0) payFinao(state, player, finaoCost);
   // Acetylene: the boosters burn the site's stored water, never the cube.
   if (cubeAcet && cubeAcetCost > 0) {
     let owed = cubeAcetCost;
@@ -5060,14 +5233,24 @@ function applyMove(state, op, player) {
   // first, you may still take your one move afterward. (A move taken before a
   // prospect also can't be undone once the prospect rolls - that's the roll
   // barrier in applyUndo, not a move-after-prospect gate.)
-  if (!op.debug && player.movesRemaining <= 0) return fail('no_moves_left');
+  // WEAK STABILITY BOUNDARY: a second movement AFTER the stack already moved
+  // this turn. It is the only way past the one-move budget and the I4b stamp,
+  // and it is checked fully once the burn count is known (it must coast).
+  const wsb = !!op.wsbCoast;
+  if (wsb) {
+    if (!hasPrivilege(state, player, 'WEAK_STABILITY_BOUNDARY')) return fail('no_weak_stability_boundary');
+    if (!(player.rocket.stack || []).some((s) => s.id === HELIOCENTRICITY_CREW_ID)) return fail('wsb_needs_crew');
+    if (player.wsbCoastUsed) return fail('wsb_already_used');
+    if (!op.debug && (player.movesRemaining | 0) > 0) return fail('wsb_move_first');
+  }
+  if (!op.debug && !wsb && player.movesRemaining <= 0) return fail('no_moves_left');
   // An empty rocket has no thruster and can't burn, so it can't leave
   // LEO. Enforcing this keeps the "empty rocket == at LEO" invariant
   // true: the only way off LEO is to build/board a thruster first.
   if (player.rocket.stack.length === 0) return fail('empty_rocket');
   // I4b No Double Moves: a card that already moved this turn (on the freighter
   // or a Bernal, then transferred aboard) can't ride the rocket's move too.
-  if (!op.debug) {
+  if (!op.debug && !wsb) {
     const dm = firstMovedComponent(player.rocket.stack);
     if (dm) return fail('component_already_moved', { cardId: dm.id });
   }
@@ -5128,6 +5311,20 @@ function applyMove(state, op, player) {
     arrivals = path.path.slice(1);
   }
   if (dest === from) return fail('already_here');
+  // WEAK STABILITY BOUNDARY: the second movement is a coast - not one burn.
+  if (wsb && thisTurnBurns > 0) return fail('wsb_must_coast', { burns: thisTurnBurns });
+  // LIFE RAFT / LIFEBOAT: the rocket may fly as a Freighter (1B4) - Net Thrust 1
+  // (+1 Powersat), no fuel spent, burns capped at that thrust, and the
+  // Freighter's landing rules. Opt-in (the card says "may").
+  const asFreighter = !!op.asFreighter && !wsb;
+  if (asFreighter) {
+    const sumMass = player.rocket.stack.reduce((mm, s) => mm + slotMass(s), 0);
+    const raftWet = rocketDryMass(sumMass) + (Number(player.rocket.tank) || 0);
+    const raftFail = lifeRaftFail(state, player, raftWet);
+    if (raftFail) return raftFail;
+    const raftThrust = freighterNetThrust(powersatPushFor(state, player));
+    if (thisTurnBurns > raftThrust) return fail('freighter_over_thrust', { thrust: raftThrust, burns: thisTurnBurns });
+  }
   // A thruster whose support chain is broken cannot BURN. Coasting is a
   // different thing: a 0-burn move spends no thrust at all, so it needs no
   // working engine - a ship whose sail was decommissioned by an aerobrake still
@@ -5135,7 +5332,7 @@ function applyMove(state, op, player) {
   // That is why this sits AFTER the burn count is known rather than beside the
   // other early guards. Skipped for op.debug so the route Simulate can still
   // price a move the player is building toward.
-  if (!op.debug && thisTurnBurns > 0) {
+  if (!op.debug && thisTurnBurns > 0 && !asFreighter) {
     // NO thruster at all is the same answer as a broken chain: you cannot burn.
     // rocketSupportStatus answers "is the ACTIVE thruster's chain satisfied", and
     // with no active thruster it has nothing to complain about - so a ship whose
@@ -5193,6 +5390,8 @@ function applyMove(state, op, player) {
   // before hitting dry mass. The water it costs is the non-linear mass drop
   // (applied when the burn commits, below), which can leave a sub-1 remainder.
   const powersat = hasPowersat(state, player);   // +1 push thrust + Safe Factory-Assist
+  // Push thrust also arrives from a rival ESA's beam (thrust only, no assist).
+  const powersatPush = powersatPushFor(state, player);
   const solarBonus = solarCellThrustBonus(player.bernals);   // anchored Solar Cell Bernal: +1/+2 to solar craft
   const powersatFutureBonus = hasFutureEffect(player, 'powersatPlus2') ? 2 : 0;   // MASS BEAM Future
   const perBurn = thrusterFuelPerBurn(player.rocket, playerCrewReactorKinds(player));            // fuel steps per burn
@@ -5311,13 +5510,14 @@ function applyMove(state, op, player) {
   const acetWaivesLanding = acetLanderIdx >= 0
     && !segs.slice(acetLanderIdx + 1).some((sg) => isLanderBurnNode(sg.to));
   const paidBurns = Math.max(0, thisTurnBurns - serverBeltCredit - arcjetCredit - acetyleneCredit);
-  const stepsNeeded = Math.ceil(perBurn * paidBurns);
+  // A Life Raft / Lifeboat flies as a Freighter: no fuel steps at all.
+  const stepsNeeded = asFreighter ? 0 : Math.ceil(perBurn * paidBurns);
   const stepsAvail = blackStepsBetween(dryMass, wetMass);
   // Full burn-math breakdown - returned on a reject (detail) AND on the debug
   // dry-run (result.calc) so the client can show every intermediate value
   // instead of just tank before/after.
   const moveCalc = {
-    finalThrust: activeNetThrust(player.rocket, powersat, solarBonus, powersatFutureBonus, playerCrewReactorKinds(player)),
+    finalThrust: activeNetThrust(player.rocket, powersatPush, solarBonus, powersatFutureBonus, playerCrewReactorKinds(player)),
     fuelStepsPerBurn: perBurn,
     dryMass,
     wetMass,
@@ -5380,17 +5580,22 @@ function applyMove(state, op, player) {
   // could land unassisted on any site smaller than it (raised 2026-10-03). A
   // replay keeps the old reading, so a move that was legal when it was made
   // still reconstructs for undo.
+  // WEAK STABILITY BOUNDARY activates the Sundiver for the coast, so the
+  // second movement reads its thrust.
+  if (wsb) player.rocket.activeThrusterId = HELIOCENTRICITY_CREW_ID;
   const engineLive = !!op._replay || (!!player.rocket.activeThrusterId
     && rocketSupportStatus(player.rocket, player).operational);
-  const thrust = engineLive
-    ? activeNetThrust(player.rocket, powersat, solarBonus, powersatFutureBonus, playerCrewReactorKinds(player))
-    : 0;
+  const thrust = asFreighter
+    ? freighterNetThrust(powersatPush)
+    : (engineLive
+      ? activeNetThrust(player.rocket, powersatPush, solarBonus, powersatFutureBonus, playerCrewReactorKinds(player))
+      : 0);
   // Factory-assist liftoff / landing gate. A maneuver where net thrust
   // <= site size is only legal if a factory carries it (assist), which
   // is a hazard roll unless a colony waives it. No factory => hard block.
   // Liftoff gates the origin (skipped at LEO, siteId null); landing gates
   // the destination.
-  const liftG = from ? maneuverGate(state, from, thrust, { powersat, acetylene, replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) }) : { ok: true, needsRoll: false };
+  const liftG = from ? maneuverGate(state, from, thrust, { powersat, acetylene, isFreighter: asFreighter, replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) }) : { ok: true, needsRoll: false };
   if (!liftG.ok) return fail('cannot_liftoff', { thrust, siteSize: liftG.size, site: from, landerBurn: !!liftG.landerBurn });
   // Aerobrake landing: a destination that sits next to an aerobrake corridor
   // (the 🪂 symbol) can be reached by parachute - no thrust-to-land
@@ -5429,7 +5634,7 @@ function applyMove(state, op, player) {
     : flewTheCorridor;
   const landG = (aeroWaivesLanding || acetWaivesLanding)
     ? { ok: true, assist: false, needsRoll: false }
-    : maneuverGate(state, dest, thrust, { powersat, replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) });
+    : maneuverGate(state, dest, thrust, { powersat, isFreighter: asFreighter, replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) });
   if (!landG.ok) return fail('cannot_land', { thrust, siteSize: landG.size, site: dest, landerBurn: !!landG.landerBurn });
   // Did the parachute do the work? A size-10 Mars site is unreachable by thrust
   // - nothing in the deck exceeds 6 - so an aerobrake descent is the ONLY way
@@ -5455,6 +5660,8 @@ function applyMove(state, op, player) {
   const safeAeroSlugs = [];     // aero hazards the parachute waived (for playback)
   const colonyWaivedSlugs = []; // liftoff hazards a colony pad waived (for playback)
   const crashIgnoredSlugs = []; // H6c: first-space hazard ignored on a factory-assist liftoff
+  const chaosSlugs = [];        // POWER SERIES CHAOS MODEL: geyser / ring / spin / wind hazards
+  const cavitationSlugs = [];   // CAVITATION ENGINEERS: the turn's one ignored aerobrake
   // H6c Crash Hazard: the FIRST space moved into with a factory-assist liftoff
   // has its hazard IGNORED. Only the immediate liftoff-leg node (arrivals[0]),
   // and only when the liftoff actually uses factory-assist (liftG.assist). The
@@ -5467,6 +5674,8 @@ function applyMove(state, op, player) {
     // A safe-aerobrake card (parachute generator) carries the stack through
     // aerobrake hazards with no roll; skull hazards still roll.
     if (k === 'aero' && safeAero) { safeAeroSlugs.push(slug); continue; }
+    if (chaosModelImmune(state, player, slug)) { chaosSlugs.push(slug); continue; }
+    if (k === 'aero' && cavitationIgnores(state, player)) { cavitationSlugs.push(slug); continue; }
     // Factory-assist liftoff ignores the hazard on the first space entered
     // (H6c) - but NEVER when that space is a lander burn (or half-lander burn).
     // Factory-assist can't carry a maneuver into a lander burn (the H5e/H6c
@@ -5509,6 +5718,7 @@ function applyMove(state, op, player) {
   // Spend the fuel: walk the wet chit down `stepsNeeded` black connections;
   // the new tank water is whatever mass is left above dry (often fractional).
   player.rocket.tank = round6(walkBlackDown(wetMass, stepsNeeded) - dryMass);
+  // Paid now; the Power Brokers settlement waits for the refund below.
   if (finaoCost > 0) player.aqua -= finaoCost;
   // Acetylene liftoff: burn the site's stored water (the player's outpost
   // tank(s) here), oldest outpost first. Whole units; validated above.
@@ -5531,6 +5741,8 @@ function applyMove(state, op, player) {
   // Aerobrakes the parachute waived: recorded as safely passed (no roll) so
   // the client plays them back as a clean pass rather than a missing node.
   for (const slug of safeAeroSlugs) rolls.push({ slug, kind: 'aero', safe: true });
+  for (const slug of chaosSlugs) rolls.push({ slug, kind: hazardKind(slug), safe: true, chaosModel: true });
+  for (const slug of cavitationSlugs) rolls.push({ slug, kind: 'aero', safe: true, cavitation: true });
   for (const slug of colonyWaivedSlugs) rolls.push({ slug, kind: hazardKind(slug), safe: true });
   for (const slug of crashIgnoredSlugs) rolls.push({ slug, kind: hazardKind(slug), safe: true });
   for (const slug of radWaived) rolls.push({ slug, kind: 'rad', bypassed: true, tourismCycler: true });
@@ -5691,7 +5903,7 @@ function applyMove(state, op, player) {
     // radiation belt roll - the rolls play, but the ship rides through
     // unscathed. (User 2026-07-10.)
     if (radVal > 0 && !state.tutorial) beltDamage(radVal);
-    if (engineLostAt < 0 && engineLive
+    if (engineLostAt < 0 && engineLive && !asFreighter
         && !(player.rocket.activeThrusterId && rocketSupportStatus(player.rocket, player).operational)) {
       engineLostAt = ev.at;
       coastLimit = coastEnd(ev.at);
@@ -5720,9 +5932,13 @@ function applyMove(state, op, player) {
   // FINAO paid for a hazard the ship never entered comes back.
   const finaoRefund = skippedPaid * finaoPer;
   if (finaoRefund > 0) player.aqua += finaoRefund;
+  if (finaoCost > 0) finaoRebate(state, player, finaoCost - finaoRefund);
   const enteredArrivals = haltedShort ? arrivals.slice(0, coastLimit + 1) : arrivals;
   state.rng.cursor = gen.cursor;
-  player.movesRemaining -= 1;
+  // The Weak Stability Boundary coast is the second movement: it spends its own
+  // once-per-turn use, not the (already spent) move.
+  if (wsb) player.wsbCoastUsed = true;
+  else player.movesRemaining -= 1;
 
   // Sail aerobrake decommission: a sail (Photon Heliogyro / Electric Sail /
   // Photon Kite Sail / Mag Sail) burns off if the stack passes ANY aerobrake
@@ -5879,7 +6095,13 @@ function applyMove(state, op, player) {
   // single burn - there was no way to see the count the cost was derived from
   // (user 2026-08-07, on a route with burn-r1gov AND burn-3ylxe in it).
   const burnWord = `${burnsFlown} burn${burnsFlown === 1 ? '' : 's'}`;
-  let log = `${player.name} burned ${stepsSpent} fuel steps over ${burnWord} from ${originName} to ${destName}.`;
+  let log = asFreighter
+    ? `${player.name}'s ${hasPrivilege(state, player, 'LIFEBOAT') ? 'Lifeboat' : 'Life Raft'} moved as a Freighter over ${burnWord} from ${originName} to ${destName}, burning no fuel.`
+    : (wsb
+      ? `${player.name} activated the Sundiver and coasted along the Weak Stability Boundary from ${originName} to ${destName} as a second movement.`
+      : `${player.name} burned ${stepsSpent} fuel steps over ${burnWord} from ${originName} to ${destName}.`);
+  if (chaosSlugs.length) log += ` Power Series Chaos Model: ${chaosSlugs.length} geyser / ring / spin / wind hazard${chaosSlugs.length === 1 ? '' : 's'} passed with no roll.`;
+  if (cavitationSlugs.length) log += ' Cavitation Engineers: the aerobrake was ignored (once per turn).';
   if (haltedShort) {
     const planned = (siteById(plannedDest) || {}).name || plannedDest;
     log += ` A radiation belt knocked out the thruster, so the ship `
@@ -6109,7 +6331,23 @@ function applyBoost(state, op, player) {
     }
     if (atticaTax) cost *= 2;
   }
+  // ISO-SHUTTLES (Explorers Without Borders, black): "If you have an isotope in
+  // your Bank or isovault, pay 10 less Aqua/1 less isotope when boosting (min
+  // 0)." The isotope only has to be THERE (an isotope can in the LEO Stack or
+  // the anchored Home Bernal, the bank stations); it is not spent. Isovaults and
+  // paying a boost in isotope are Module 4, so only the aqua half applies. Once
+  // per boost OPERATION: the discount lands on the turn's first boost, not on
+  // each free continued boost after it.
+  let isoShuttle = false;
+  if (cost > 0 && !hasBoostedThisTurn(state) && hasPrivilege(state, player, 'ISO-SHUTTLES') && playerBanksIsotope(player)) {
+    cost = Math.max(0, cost - ISO_SHUTTLES_DISCOUNT);
+    isoShuttle = true;
+  }
   if (cost > player.aqua) return fail('insufficient_aqua');
+  // PIGGYBACK window: the boosted mass, priced the way the boost was (light /
+  // heavy side), before any re-pricing.
+  let piggyMass = 0;
+  for (const id of ids) piggyMass += boostMass(id, radSides[id] === 'heavy' ? 'heavy' : 'light');
   // Move them hand -> LEO (or, for a Bernal, hand -> a new colony stack). A
   // radiator locks its deployed light/heavy side here (op.radSides[id]); default
   // light (lighter, cheapest to boost). Only radiation damage flips it afterward.
@@ -6168,10 +6406,95 @@ function applyBoost(state, op, player) {
   } else {
     log = `${player.name} boosted ${countedCards(ids)} to ${homeName} for ${cost} aqua${tail}.`;
   }
-  // Launch Fees: a boost pays every Launch Fees holder +1 aqua from the pool.
-  const fees = creditPrivilegeIncome(state, 'LAUNCH_FEES', 'Launch Fees');
+  if (isoShuttle) log += ` Iso-Shuttles took ${ISO_SHUTTLES_DISCOUNT} aqua off the launch.`;
+  // Launch Fees: "+1 Aqua after any player performs a boost OPERATION". A turn's
+  // boosting is ONE operation (the first boost spends it, later ones ride free
+  // as part of it), so pay only on the turn's first boost - not on every BOOST
+  // op (audit bug LAUNCH-FEES-PER-OP: three one-card boosts paid NASA 3).
+  // turnActions does not hold this boost yet, so hasBoostedThisTurn reads the
+  // turn BEFORE it. A solitaire Launch Contracts boost (a free action by law)
+  // still counts as the turn's boost operation.
+  const fees = hasBoostedThisTurn(state) ? [] : creditPrivilegeIncome(state, 'LAUNCH_FEES', 'Launch Fees');
   if (fees.length) log += ' ' + fees.join(' ');
+  const piggy = openPiggybackWindow(state, player, piggyMass);
+  if (piggy.length) log += ' ' + piggy.join(' ');
   return { ok: true, state, log };
+}
+
+// ISO-SHUTTLES: the flat aqua taken off a boost operation.
+const ISO_SHUTTLES_DISCOUNT = 10;
+// Does the player have an isotope in their Bank: an isotope can of 1+ units in
+// the LEO Stack or their anchored Home Bernal (the bank stations, the same
+// places a station sale reads)?
+function playerBanksIsotope(player) {
+  const homeBn = (player.bernals || []).find(isHomeBernal);
+  const hosts = [player.leo || [], ...(homeBn ? [homeBn.stack || []] : [])];
+  return hosts.some((arr) => arr.some((s) => isFuelCardSlot(s) && s.grade === 'isotope' && (Number(s.amount) || 0) >= 1));
+}
+
+// PIGGYBACK (Utopia, Inc., black): "Whenever an opponent boosts cards, you may
+// immediately boost cards up to the mass of the cards boosted, for free."
+//
+// The reaction window: an opponent's BOOST credits every Piggyback holder with
+// the boosted mass in state.piggyback.allow[holderId]. The window belongs to
+// the booster's turn - it opens on their boost and closes when their turn
+// ends (openTurnFor clears it) - and several boosts in the same turn add up.
+// The holder answers OFF turn with the PIGGYBACK op (dispatched ahead of the
+// turn guard, like an off-turn route), boosting hand cards to their own LEO
+// for free, up to the allowance. Privilege is read through hasPrivilege at both
+// ends, so Anarchy and the M2 lock apply.
+function openPiggybackWindow(state, booster, mass) {
+  if (!(mass > 0)) return [];
+  const notes = [];
+  for (const p of state.players) {
+    if (p.profileId === booster.profileId) continue;
+    if (!hasPrivilege(state, p, 'PIGGYBACK')) continue;
+    if (!state.piggyback || state.piggyback.boosterId !== booster.profileId) {
+      state.piggyback = { boosterId: booster.profileId, allow: {} };
+    }
+    const k = String(p.profileId);
+    state.piggyback.allow[k] = (state.piggyback.allow[k] | 0) + mass;
+    notes.push(`${p.name} may piggyback up to ${state.piggyback.allow[k]} mass of cards for free.`);
+  }
+  return notes;
+}
+function applyPiggyback(state, op, player) {
+  const win = state.piggyback;
+  if (!win || win.boosterId === player.profileId) return fail('no_piggyback_window');
+  if (!hasPrivilege(state, player, 'PIGGYBACK')) return fail('no_piggyback');
+  const allow = (win.allow || {})[String(player.profileId)] | 0;
+  if (allow <= 0) return fail('no_piggyback_window');
+  const ids = Array.isArray(op.cardIds) ? op.cardIds.map(String) : [];
+  if (!ids.length) return fail('nothing_to_boost');
+  const hand = (player.hand || []).slice();
+  for (const id of ids) {
+    const i = hand.indexOf(id);
+    if (i < 0) return fail('not_in_hand');
+    hand.splice(i, 1);
+    const c = PATENTS_BY_ID[id];
+    if (!c) return fail('unknown_card');
+    if (c.type === 'gw-thruster' || c.type === 'freighter') return fail('not_boostable');
+    // A Bernal establishes a whole colony when boosted; a free ride-along to the
+    // LEO Stack is not that, so the piggyback takes ordinary cards only.
+    if (c.type === 'bernal' || c.type === 'colonist') return fail('not_boostable');
+  }
+  const radSides = (op.radSides && typeof op.radSides === 'object') ? op.radSides : {};
+  let mass = 0;
+  for (const id of ids) mass += boostMass(id, radSides[id] === 'heavy' ? 'heavy' : 'light');
+  if (mass > allow) return fail('piggyback_over_mass', { mass, allow });
+  player.leo = player.leo || [];
+  for (const id of ids) {
+    player.hand.splice(player.hand.indexOf(id), 1);
+    const slot = { id, kind: 'patent' };
+    if (PATENTS_BY_ID[id].type === 'radiator') slot.radSide = radSides[id] === 'heavy' ? 'heavy' : 'light';
+    player.leo.push(slot);
+  }
+  win.allow[String(player.profileId)] = allow - mass;
+  const booster = state.players.find((p) => p.profileId === win.boosterId);
+  return {
+    ok: true, state,
+    log: `${player.name} piggybacked ${countedCards(ids)} to ${homeLabelForSpecies(player.species)} for free on ${booster ? booster.name + "'s" : 'the'} launch (Piggyback).`,
+  };
 }
 
 // Free Market sell (rulebook I3): drop a HAND card to the bottom of
@@ -6455,7 +6778,20 @@ function applyRefuel(state, op, player) {
     bn.tankGrade = bgrade;
     return { ok: true, state, log: `${player.name} converted ${bres.steps} aqua to water in the Bernal (tank ${round6(bn.tank)}${bgrade === 'dirt' ? ', mixed down to dirt' : ''}).` };
   }
-  if (!rocketAtRefuelDepot(state, player)) return fail('rocket_not_at_leo');
+  // SHUTTLES (Explorers Without Borders, white): "1/turn you may cargo transfer
+  // Aqua from your Bank to an operational thruster in a Home Orbit or LEO." The
+  // bank already reaches LEO and the player's own Home Bernal for everyone, so
+  // the card's reach is the OTHER Home Orbits: any Home Orbit space, once a
+  // turn, and only into a ship whose thruster can fire (an operational
+  // thruster). hasPrivilege, so Anarchy and the M2 lock both apply.
+  let shuttle = false;
+  if (!rocketAtRefuelDepot(state, player)) {
+    const here = player.rocket && player.rocket.siteId;
+    if (!(here != null && isHomeBernalSite(here) && hasPrivilege(state, player, 'SHUTTLES'))) return fail('rocket_not_at_leo');
+    if (player.shuttlesUsed && !op._replay) return fail('shuttles_used');
+    if (!(activeNetThrust(player.rocket) > 0)) return fail('no_operational_thruster');
+    shuttle = true;
+  }
   const want = Math.floor(Number(op.amount));
   if (!Number.isFinite(want) || want <= 0) return fail('bad_amount');
   const tank = Number(player.rocket.tank) || 0;
@@ -6478,6 +6814,11 @@ function applyRefuel(state, op, player) {
   player.aqua -= res.steps;
   player.rocket.tank = res.tank;
   setRocketGrade(player.rocket, rgrade);
+  if (shuttle) {
+    player.shuttlesUsed = true;
+    const where = (siteById(player.rocket.siteId) || {}).name || 'the Home Orbit';
+    return { ok: true, state, log: `${player.name}'s shuttle carried ${res.steps} aqua up to the ship at ${where} as water (tank ${round6(player.rocket.tank)}, Shuttles).` };
+  }
   return { ok: true, state, log: `${player.name} converted ${res.steps} aqua to water (tank ${round6(player.rocket.tank)}${rgrade !== 'water' ? `, mixed down to ${rgrade}` : ''}).` };
 }
 
@@ -7899,6 +8240,30 @@ function exomigrateOne(state, player, opts = {}) {
     bn.stack = bn.stack || [];
     const bnCard = PATENTS_BY_ID[bn.cardId];
     dest = { arr: bn.stack, where: `the ${(bnCard && bnCard.name) || 'Bernal'}` };
+  } else if (to && to.startsWith('colony:')) {
+    // QUEST (Galahad Group, black): "During exomigration, your Human Colonist
+    // may appear at any Colony in a zone for which you hold a glory chit." Any
+    // Colony on the board (the card says any, not yours), in a heliocentric zone
+    // whose chit the player carries or has already banked. The colonist lands in
+    // the player's Outpost at that site, set up on the spot when there is none
+    // yet (an Outpost can stand at another player's Factory, as a hijacked
+    // product does).
+    if (!hasPrivilege(state, player, 'QUEST')) return { ok: false, error: 'no_quest' };
+    const slug = to.slice('colony:'.length);
+    if (!state.colonies || !state.colonies[slug]) return { ok: false, error: 'no_colony_there' };
+    const zone = (siteById(slug) || {}).solarZone;
+    if (!zone || !questZones(player).has(zone)) return { ok: false, error: 'no_glory_chit_for_zone' };
+    player.outposts = player.outposts || {};
+    let o = Object.values(player.outposts).find((x) => x && x.siteId === slug);
+    if (!o) {
+      const taken = new Set(Object.keys(player.outposts));
+      const letter = OUTPOST_LETTERS.find((l) => !taken.has(l));
+      if (!letter) return { ok: false, error: 'no_outpost_slot' };
+      o = player.outposts[letter] = { letter, siteId: slug, cards: [], tank: 0 };
+    }
+    o.cards = o.cards || [];
+    const colonyName = (siteById(slug) || {}).name || slug;
+    dest = { arr: o.cards, where: `the Colony at ${colonyName} (Quest)` };
   } else if (to) {
     return { ok: false, error: 'bad_transfer' };
   } else {
@@ -7927,6 +8292,28 @@ function exomigrateOne(state, player, opts = {}) {
     }
     return { ok: false, error: 'colonist_queue_empty' };
   }
+  // IMMIGRANT (New Pilgrims, black): "When exomigrating, may first name a
+  // specialty to search the chosen queue for the 1st Human with that specialty
+  // (if any), then shuffle." The Human found (if any) is set on top and the
+  // rest of the queue is shuffled beneath it, so the draw below takes that
+  // Human. No match still shuffles the whole queue: the search happened, it
+  // just came up empty.
+  let immigrantNote = '';
+  if (opts.specialty != null && opts.specialty !== '') {
+    const want = String(opts.specialty);
+    if (!hasPrivilege(state, player, 'IMMIGRANT')) return { ok: false, error: 'no_immigrant' };
+    if (!COLONIST_SPECIALTIES.includes(want)) return { ok: false, error: 'bad_specialty' };
+    const isHuman = (c) => c.colonistKind === 'Human' || (c.colonistKind === 'Robot' && state.robotsEmancipated);
+    const hit = queue.findIndex((id) => { const c = PATENTS_BY_ID[id] || {}; return isHuman(c) && c.specialty === want; });
+    const found = hit >= 0 ? queue.splice(hit, 1)[0] : null;
+    const gen = makeRng(state.seed, state.rng.cursor);
+    const rest = shuffle(gen, queue.slice());
+    state.rng.cursor = gen.cursor;
+    queue.splice(0, queue.length, ...(found != null ? [found] : []), ...rest);
+    immigrantNote = found != null
+      ? `searched the queue for a ${want} (Immigrant) and shuffled it; `
+      : `searched the queue for a ${want} (Immigrant), found none, and shuffled it; `;
+  }
   // Handy (2C2a): a HUMAN goes into space at the chosen station, but a ROBOT
   // goes into the HAND (it enters play later via ET production) and the
   // exomigration immediately draws again, until a colonist lands in space or
@@ -7949,9 +8336,9 @@ function exomigrateOne(state, player, opts = {}) {
     cardId = id; card = c;
     break;
   }
-  const robotNote = robotsDrawn.length
+  const robotNote = immigrantNote + (robotsDrawn.length
     ? `${robotsDrawn.join(' and ')} (Robot${robotsDrawn.length === 1 ? '' : 's'}) joined the hand; `
-    : '';
+    : '');
   if (!cardId) {
     // The queue drained mid-draw (Handy skimmed the rest to hand). This is the
     // empty-queue exomigration, so Robot Emancipation fires: one freed Robot
@@ -7969,6 +8356,17 @@ function exomigrateOne(state, player, opts = {}) {
   }
   return placeExomigrant(state, player, cardId, card, dest,
     `${robotNote}${card.name || cardId} exomigrated to ${dest.where}`, opts);
+}
+
+// The four colonist specialties (2C1) an Immigrant may name.
+const COLONIST_SPECIALTIES = ['Miner', 'Prospector', 'Engineer', 'Industrialist'];
+// Heliocentric zones a player holds a glory chit for, carried or already
+// banked. QUEST reads this ("a zone for which you hold a glory chit").
+function questZones(player) {
+  const g = (player && player.glory) || {};
+  const zones = new Set();
+  for (const c of [...(g.chits || []), ...(g.claimed || [])]) if (c && c.zone) zones.add(c.zone);
+  return zones;
 }
 
 // Push the exomigrated colonist onto its destination stack and seat its delegate
@@ -7993,7 +8391,8 @@ function placeExomigrant(state, player, cardId, card, dest, baseLog, opts) {
       // pre-resolved the way a Fundraise is, so an interactive exomigration
       // (allowTiePick) records a pendingLawStar the player resolves with
       // SET_LAW_STAR; automatic exomigrations leave the star put (quiet tally).
-      const winners = voteWinners(asm);
+      // An Arbiter's own exomigration counts their delegates twice.
+      const winners = tallyWinnersFor(state, player);
       if (winners.length === 1 && winners[0] !== state.activeLawStar) {
         state.activeLawStar = winners[0];
         const starName = (IDEOLOGY_BY_KEY[winners[0]] || {}).name || winners[0];
@@ -8049,6 +8448,7 @@ function applyExomigrate(state, op, player) {
   const res = exomigrateOne(state, player, {
     to: op.to,
     placeDelegate: op.placeDelegate !== false,
+    specialty: op.specialty,
     // Player-invoked exomigration CAN pause for a tie pick (unlike the automatic
     // mid-op exomigrations, which resolve ties quietly): a tied vote after the
     // arriving delegate seats leaves the active-law star for the player to set
@@ -8478,7 +8878,7 @@ function applyAnchorBernal(state, op, player) {
     else player.opsRemaining -= 1;
     opSpent = true;
     if (wantPay) {
-      player.aqua -= finaoPer;
+      payFinao(state, player, finaoPer);
       hazardNote = ` (paid ${finaoPer} FINAO to skip the Epic Hazard)`;
     } else {
       const gen = makeRng(state.seed, state.rng.cursor);
@@ -9306,10 +9706,43 @@ function applySirenTradeFlip(state, op, player) {
   };
 }
 
+// THERMAL LABS (BRIN, black): "As a 1/turn free action, flip a radiator at
+// your Colony/Bernal to its heavy side." The light fold below is one-way for
+// everyone; this is the one road back up. "At your Colony/Bernal" reads as the
+// radiator standing where the player has a Colony dome (their own Colony at that
+// site) or one of their Bernals (aboard it, or in a stack sharing its space).
+// Rides SET_RADIATOR_SIDE with radSide 'heavy'. Read through hasPrivilege, so
+// Anarchy suspends it and the M2 Home-Bernal lock applies like any privilege.
+function thermalLabsSite(state, player, cardId) {
+  for (const st of playerStacks(player)) {
+    const slot = (st.slots || []).find((s) => s && s.id === cardId);
+    if (!slot) continue;
+    if (st.from.startsWith('bernal')) return { slot, ok: true };
+    const here = st.siteId ?? null;
+    const col = here != null && (state.colonies || {})[here];
+    if (col && col.ownerId === player.profileId) return { slot, ok: true };
+    if ((player.bernals || []).some((bn) => bn && (bn.siteId ?? null) === here)) return { slot, ok: true };
+    return { slot, ok: false };
+  }
+  return null;
+}
+function applyThermalLabsFlip(state, op, player, card) {
+  if (!hasPrivilege(state, player, 'THERMAL_LABS')) return fail('no_thermal_labs');
+  if (player.thermalLabsUsed && !op._replay) return fail('thermal_labs_used');
+  const at = thermalLabsSite(state, player, card.id);
+  if (!at) return fail('not_in_stack');
+  if (!at.ok) return fail('not_at_colony_or_bernal');
+  if (at.slot.radSide !== 'light') return fail('already_heavy');
+  at.slot.radSide = 'heavy';
+  player.thermalLabsUsed = true;
+  return { ok: true, state, log: `${player.name} opened ${card.name} out to its heavy side at their station (Thermal Labs).` };
+}
+
 function applySetRadiatorSide(state, op, player) {
   const cardId = String(op.cardId || '');
   const card = PATENTS_BY_ID[cardId];
   if (!card || card.type !== 'radiator') return fail('not_a_radiator');
+  if (op.radSide === 'heavy') return applyThermalLabsFlip(state, op, player, card);
   let slot = (player.rocket.stack || []).find((s) => s.id === cardId)
     || (player.leo || []).find((s) => s.id === cardId);
   if (!slot && player.outposts) {
@@ -9768,7 +10201,13 @@ function applyIndustrialize(state, op, player) {
   if (!srcStack) return fail('no_outpost');
   if (srcSiteId !== siteId) return fail('not_at_site');
   const disc = state.discs[siteId];
-  if (!disc || disc.outcome !== 'success' || disc.ownerId !== player.profileId) return fail('not_claimed');
+  // REFUGEE (New Pilgrims, white): "May industrialize an opponent's Claim (not
+  // a Felony); both may use the Factory (even if this card is flipped)." The
+  // Factory is the Refugee's (their cube, their VP); the Claim's owner keeps a
+  // standing right to use it, recorded below.
+  const refugeeOf = (disc && disc.outcome === 'success' && disc.ownerId != null
+    && disc.ownerId !== player.profileId && hasPrivilege(state, player, 'REFUGEE')) ? disc.ownerId : null;
+  if (!disc || disc.outcome !== 'success' || (disc.ownerId !== player.profileId && refugeeOf == null)) return fail('not_claimed');
   if (state.factories[siteId]) return fail('already_industrialized');
   // Cube supply: factories + assembly delegates share the 7 cubes. If the pool
   // is full you may FREE one by removing a delegate from the politics map
@@ -9893,12 +10332,25 @@ function applyIndustrialize(state, op, player) {
   }
   const spectral = site.spectralType || 'C';
   state.factories[siteId] = { ownerId: player.profileId, spectralType: spectral };
+  // REFUGEE: the Claim's owner may use this Factory too. It rides the ordinary
+  // owner grant (canUseFactoryNonVictory reads fac.grants), and refugeeShare
+  // pins it: the right comes from how the Factory was built, so it holds "even
+  // if this card is flipped" (and through Anarchy or the Module 2 lock), and the
+  // owner cannot revoke it.
+  if (refugeeOf != null) {
+    state.factories[siteId].grants = { [String(refugeeOf)]: true };
+    state.factories[siteId].refugeeShare = refugeeOf;
+  }
   // M1: name the cube for the Mobile Factory fleet (1B6); harmless field that
   // only the M1 mobile-factory UI reads (gated so an M1-off game is unchanged).
   if (state.m1) state.factories[siteId].tag = nextFactoryTag(state, player.profileId);
   if (!freeAction) player.opsRemaining -= 1;
   else if (freeViaColonist) spendColonistFreeOp(player, 'Industrialist');
   let log = `${player.name} industrialized ${site.name} (spectral ${spectral}); decommissioned ${decommissioned ? `${cardNames(builtIds)} to hand` : 'nothing'}.`;
+  if (refugeeOf != null) {
+    const claimer = state.players.find((p) => p.profileId === refugeeOf);
+    log += ` (Refugee: built on ${claimer ? claimer.name : 'an opponent'}'s Claim, who may use this Factory too.)`;
+  }
   if (arcology && sparedRobonautId) {
     const rc = PATENTS_BY_ID[sparedRobonautId];
     log += ` (Arcology: the ${(rc && rc.name) || 'robonaut'} was not needed and stays aboard.)`;
@@ -9967,6 +10419,17 @@ function applyMineRevival(state, op, player) {
 // so the rocket need NOT be parked here (owning the factory is the presence).
 // The card leaves the hand and lands face='secondary' in the outpost at the
 // site (created there if new). Costs an op.
+// TAILINGS REMINING: the privilege, AND The Martian Way crew card standing at
+// the Factory's site in one of the player's stacks ("if this Crew is
+// colocated").
+function tailingsRemining(state, player, siteId) {
+  if (!hasPrivilege(state, player, 'TAILINGS_REMINING')) return false;
+  for (const st of playerStacks(player)) {
+    if ((st.siteId ?? null) !== (siteId ?? null)) continue;
+    if ((st.slots || []).some((s) => s && s.id === 'crew_the_martian_way')) return true;
+  }
+  return false;
+}
 function applyEtProduce(state, op, player) {
   const siteId = String(op.siteId || '');
   const site = siteById(siteId);
@@ -9980,9 +10443,15 @@ function applyEtProduce(state, op, player) {
     // Factory Hijack (Felony, N6a): ET-produce at an opponent's Factory during
     // Anarchy, with your own Human colocated, unless an opposing Human or
     // colony defends it. The product still lands in YOUR outpost here.
-    if (!mayCommitFelony(state, player)) return fail('not_your_factory');
+    // SITDOWN (LEO Workers' Union, black): "Factory hijack; works even if
+    // another player's Humans are present." Read like Collective Bargaining's
+    // "may commit Murder/Suicide": the card grants THIS one felony (no Anarchy
+    // needed) and the hijack cannot be defended by opposing Humans. Your own
+    // Human must still be there - a sitdown needs workers on the floor.
+    const sitdown = hasPrivilege(state, player, 'SITDOWN');
+    if (!sitdown && !mayCommitFelony(state, player)) return fail('not_your_factory');
     if (!actorCrewAtSite(state, siteId, player.profileId)) return fail('felony_needs_human');
-    if (opposingHumanAtSite(state, siteId, player.profileId)) return fail('factory_defended');
+    if (!sitdown && opposingHumanAtSite(state, siteId, player.profileId)) return fail('factory_defended');
   }
   // Engineer colonist (2C1d): one EXTRA product per engineer colocated with
   // this factory - repeats of the operation ride free this turn, up to that
@@ -9995,6 +10464,19 @@ function applyEtProduce(state, op, player) {
   const cardId = String(op.cardId || '');
   const hIdx = player.hand.indexOf(cardId);
   const prodCard = PATENTS_BY_ID[cardId];
+  // Spectral match (I7): a product comes out of a Factory of its own spectral
+  // type ('any' fits every Factory). TAILINGS REMINING (The Martian Way,
+  // black): "If this Crew is colocated, can produce ET products of Spectral
+  // Type C at any Factory." The Blue Goo Sybonts colonist power is the same
+  // rule. A legacy Factory with no spectral on record is not checked.
+  if (prodCard && fac.spectralType && !op._replay) {
+    const spec = prodCard.spectralType;
+    const anyC = tailingsRemining(state, player, siteId)
+      || playerHasColonistPower(state, player, 'etProduceCAnywhere');
+    if (spec && String(spec).toLowerCase() !== 'any' && spec !== fac.spectralType && !(anyC && spec === 'C')) {
+      return fail('wrong_spectral', { product: spec, factory: fac.spectralType });
+    }
+  }
   // M1 Freighter: producing a freighter card spawns the player's Freighter
   // UNIT (the big cube) at this Factory's site, NOT a card in an outpost. One
   // freighter per player (1A4). Gated on M1 (zero bleed-through when off). A
@@ -10253,9 +10735,19 @@ function grantDelegate(state, player, ideo) {
 // choice on a tie - mid-op rule triggers can't pause for a pick). This is the
 // "quiet" half of the vote tally (O3a); the full Fundraise-style tally that
 // resolves ties via the fundraiser's own choice lives in applyFundraise.
-function quietVoteTally(state) {
+// ARBITER (African Union, black): "Your vote tallies may treat your delegates
+// as 2 delegates each." A tally the Arbiter's OWN action triggers (Exomigration,
+// a Colony delegate, a Lobby) counts their delegates twice. These tallies run
+// mid-op and cannot pause for a choice, so the "may" is resolved as always
+// doubling (recorded as a ruling in docs/crew-ability-audit.md); the explicit
+// start-of-turn tally and Fundraise keep the opt-out.
+function tallyWinnersFor(state, tallier) {
   const asm = assemblyOf(state);
-  const winners = voteWinners(asm);
+  if (tallier && hasPrivilege(state, tallier, 'ARBITER')) return arbiterWinners(asm, tallier.profileId, true);
+  return voteWinners(asm);
+}
+function quietVoteTally(state, tallier = null) {
+  const winners = tallyWinnersFor(state, tallier);
   if (winners.length === 1 && winners[0] !== state.activeLawStar) {
     state.activeLawStar = winners[0];
     return (IDEOLOGY_BY_KEY[winners[0]] || {}).name || winners[0];
@@ -10275,7 +10767,21 @@ function lawInForce(state, key) {
 // law the player Lobbied this turn (O4: pay 1 aqua + discard a delegate there).
 function playerCanUseLaw(state, player, key) {
   if (lawInForce(state, key)) return true;
-  return Array.isArray(player.lobbiedLaws) && player.lobbiedLaws.includes(key);
+  if (Array.isArray(player.lobbiedLaws) && player.lobbiedLaws.includes(key)) return true;
+  return emissaryLawActive(state, player, key);
+}
+// EMISSARIES (African Union, white): "On your turn, you may treat any or all
+// Ideologies tied for the most delegates as the Active Law." The player names
+// the tied Ideologies with the EMISSARIES free action; each counts for them only
+// while it is still tied for the most delegates, only on their own turn, and
+// only while the privilege holds (Anarchy suspends it, the M2 lock holds it).
+function emissaryLawActive(state, player, key) {
+  if (!state.m0 || !player || !Array.isArray(player.emissaryLaws) || !player.emissaryLaws.includes(key)) return false;
+  const cur = currentPlayer(state);
+  if (!cur || cur.profileId !== player.profileId) return false;
+  if (!hasPrivilege(state, player, 'EMISSARIES')) return false;
+  const winners = voteWinners(assemblyOf(state));
+  return winners.length >= 2 && winners.includes(key);
 }
 // May `player` operate at this factory for a NON-VICTORY purpose (site refuel,
 // ET production, delivery)? Their own always; an opponent's only when
@@ -10390,7 +10896,10 @@ function applyFundraise(state, op, player) {
   // Vote tally (the final step): move the active-law star onto the winner. One
   // winner -> auto; a tie -> the fundraiser's pick (op.star ∈ the tied winners);
   // no delegates anywhere -> the Centrist center.
-  const winners = voteWinners(asm);
+  // ARBITER (African Union, black): "Your vote tallies may treat your delegates
+  // as 2 delegates each" - opt-in on the Fundraise's own tally (op.arbiterDouble).
+  if (op.arbiterDouble && !hasPrivilege(state, player, 'ARBITER')) return fail('no_arbiter');
+  const winners = op.arbiterDouble ? arbiterWinners(asm, pid, true) : voteWinners(asm);
   let newStar;
   if (winners.length === 0) newStar = 'centrist';
   else if (winners.length === 1) [newStar] = winners;
@@ -10429,7 +10938,7 @@ function applyFundraise(state, op, player) {
     : '';
   return {
     ok: true, state,
-    log: `${player.name} fundraised - ${did}, +${gain} aqua${honor ? ' (Honor: per glory chit)' : ''}.${starNote}${martial}`,
+    log: `${player.name} fundraised - ${did}, +${gain} aqua${honor ? ' (Honor: per glory chit)' : ''}.${op.arbiterDouble ? ' As Arbiter, their delegates counted twice in the vote tally.' : ''}${starNote}${martial}`,
   };
 }
 
@@ -10471,6 +10980,10 @@ function applyLobby(state, op, player) {
   // opt-in flag on the Lobby instead of firing on its own. Checked here, BEFORE
   // the aqua and the delegate are spent, so a refused rouse never costs a Lobby.
   const rouse = !!op.rabbleRouser;
+  // AMBASSADOR (AEB, white): "During lobby, may move a delegate into centrist
+  // instead of Decommission." Opt-in, refused before anything is spent.
+  const ambassador = !!op.ambassador;
+  if (ambassador && !hasPrivilege(state, player, 'AMBASSADOR')) return fail('no_ambassador');
   if (rouse) {
     if (!mayRabbleRouse(state, player)) return fail('no_rabble_rouser');
     if (key !== 'authority') return fail('rouse_needs_authority');
@@ -10481,8 +10994,21 @@ function applyLobby(state, op, player) {
   if (!freeLobby && (player.aqua | 0) < 1) return fail('insufficient_aqua');
   if (!freeLobby) player.aqua -= 1;
   // Supreme Cult Future: lobby without removing the delegate used.
-  const keepDelegate = hasFutureEffect(player, 'lobbyKeepDelegate');
+  // HEROIC (Galahad Group, white): "You may lobby honor without losing a
+  // delegate." Pure benefit, so it applies without asking.
+  const heroicKeep = key === 'honor' && hasPrivilege(state, player, 'HEROIC');
+  const keepDelegate = hasFutureEffect(player, 'lobbyKeepDelegate') || heroicKeep;
+  // Ambassador only matters when the delegate would otherwise leave.
+  const toCentrist = ambassador && !keepDelegate;
   if (!keepDelegate) setPlaceCount(asm, key, player.profileId, placeCount(asm, key, player.profileId) - 1);
+  let ambassadorTail = '';
+  if (toCentrist) {
+    setPlaceCount(asm, 'centrist', player.profileId, placeCount(asm, 'centrist', player.profileId) + 1);
+    ambassadorTail = ' Ambassador: the delegate crossed the floor to the Centrists instead of leaving the Assembly.';
+    // A delegate moved, so the vote tally runs (O3a). A tie leaves the star put.
+    const moved = quietVoteTally(state, player);
+    if (moved) ambassadorTail += ` The vote tally moves the active-law star to ${moved}.`;
+  }
   player.lobbiedLaws = Array.isArray(player.lobbiedLaws) ? player.lobbiedLaws : [];
   if (!player.lobbiedLaws.includes(key)) player.lobbiedLaws.push(key);
   player.lobbiedThisTurn = true;
@@ -10507,7 +11033,90 @@ function applyLobby(state, op, player) {
   }
   return {
     ok: true, state,
-    log: `${player.name} lobbied ${key} - ${freeLobby ? 'free (Sol Unification)' : 'paid 1 aqua'} and ${keepDelegate ? 'kept the delegate (Supreme Cult)' : 'discarded a delegate'} to use its Law this turn.${rouseTail}`,
+    log: `${player.name} lobbied ${key} - ${freeLobby ? 'free (Sol Unification)' : 'paid 1 aqua'} and ${heroicKeep ? 'kept the delegate (Heroic)' : keepDelegate ? 'kept the delegate (Supreme Cult)' : toCentrist ? 'moved a delegate to the Centrists' : 'discarded a delegate'} to use its Law this turn.${ambassadorTail}${rouseTail}`,
+  };
+}
+
+// EMISSARIES (African Union, white): free action on your own turn. op =
+// { ideologies: [...] }, each one of the places tied for the most delegates.
+// They count as the Active Law for this player for the rest of the turn (see
+// emissaryLawActive, read by playerCanUseLaw). Delegates are counted plainly
+// here: the Arbiter's doubling belongs to a vote tally, not to this tie.
+function applyEmissaries(state, op, player) {
+  if (!state.m0) return fail('not_m0');
+  if (!hasPrivilege(state, player, 'EMISSARIES')) return fail('no_emissaries');
+  const want = Array.isArray(op.ideologies) ? [...new Set(op.ideologies.map(String))] : [];
+  if (!want.length) return fail('no_ideologies');
+  const winners = voteWinners(assemblyOf(state));
+  if (winners.length < 2) return fail('no_tie');
+  if (want.some((k) => !winners.includes(k))) return fail('not_tied', { winners });
+  const fresh = want.filter((k) => k !== state.activeLawStar);
+  if (!fresh.length) return fail('already_active_law');
+  player.emissaryLaws = [...new Set([...(player.emissaryLaws || []), ...fresh])];
+  const names = fresh.map((k) => (k === 'centrist' ? 'Centrist' : ((IDEOLOGY_BY_KEY[k] || {}).name || k)));
+  return {
+    ok: true, state,
+    log: `${player.name}'s Emissaries treat ${names.join(' and ')} as the Active Law this turn (tied for the most delegates).`,
+  };
+}
+
+// placeholder separator for merge hygiene
+
+
+
+
+
+
+
+
+
+
+
+
+// ARBITER (African Union, black): "At the start of your turn you may perform a
+// vote tally. Your vote tallies may treat your delegates as 2 delegates each."
+// Free action, only before anything else this turn and once a turn. op =
+// { double?: false to count your delegates once, star?: a tied winner }. The
+// tally follows O3a: the star moves onto the place with the most delegates; on
+// a tie the Arbiter picks (op.star) or the star may stay where it is if it sits
+// on one of the tied places; no delegates at all sends it to the center.
+function arbiterWinners(asm, profileId, double) {
+  const totals = {};
+  let max = 0;
+  for (const k of ASSEMBLY_PLACES) {
+    const m = (asm.delegates && asm.delegates[k]) || {};
+    let n = 0;
+    for (const [pid, c] of Object.entries(m)) n += (c | 0) * ((double && String(pid) === String(profileId)) ? 2 : 1);
+    totals[k] = n;
+    if (n > max) max = n;
+  }
+  if (max <= 0) return [];
+  return ASSEMBLY_PLACES.filter((k) => totals[k] === max);
+}
+function applyArbiterTally(state, op, player) {
+  if (!state.m0) return fail('not_m0');
+  if (!hasPrivilege(state, player, 'ARBITER')) return fail('no_arbiter');
+  if (player.arbiterTallied) return fail('already_tallied');
+  if ((state.turnActions || []).length > 0) return fail('not_turn_start');
+  const double = op.double !== false;
+  const asm = assemblyOf(state);
+  const winners = arbiterWinners(asm, player.profileId, double);
+  let star;
+  if (!winners.length) star = 'centrist';
+  else if (winners.length === 1) [star] = winners;
+  else if (op.star != null) {
+    star = String(op.star);
+    if (!winners.includes(star)) return fail('star_choice_required', { winners });
+  } else if (winners.includes(state.activeLawStar)) star = state.activeLawStar;
+  else return fail('star_choice_required', { winners });
+  const moved = star !== state.activeLawStar;
+  state.activeLawStar = star;
+  player.arbiterTallied = true;
+  const starName = star === 'centrist' ? 'the center' : ((IDEOLOGY_BY_KEY[star] || {}).name || star);
+  return {
+    ok: true, state,
+    log: `${player.name} called a vote tally as Arbiter${double ? ', counting each of their delegates twice' : ''}: `
+      + (moved ? `the active-law star moves to ${starName}.` : `the active-law star stays on ${starName}.`),
   };
 }
 
@@ -11102,7 +11711,7 @@ function applyBuildColony(state, op, player) {
       // that actually moved. grantDelegate returns false when the player has no
       // cube left to seat (the I7f reserve limit), and a colony that seated
       // nobody has not changed the assembly.
-      const starMoved = gotColonyDelegate ? quietVoteTally(state) : null;
+      const starMoved = gotColonyDelegate ? quietVoteTally(state, player) : null;
       const bits = [];
       if (gotColonyDelegate) bits.push(`a delegate joins ${(IDEOLOGY_BY_KEY[home] || {}).name || home} for the Colony`);
       if (starMoved) bits.push(`the active-law star moves to ${starMoved}`);
@@ -11491,7 +12100,7 @@ function applyAirEaterRefuel(state, op, player) {
   if (safeAero) {
     // Parachute generator: the dive is safe, no Diver Orbit roll.
   } else if (wantPay) {
-    player.aqua -= finaoPer;
+    payFinao(state, player, finaoPer);
   } else {
     const d6 = gen.d6();
     rolls.push({ slug: here, kind: 'aero', phase: 'diver', d6, crit: d6 === 1 });
@@ -11887,7 +12496,7 @@ function applyBuildElevator(state, op, player) {
 
   let rolled = false, d6 = null, failed = false;
   if (wantPay) {
-    player.aqua -= finaoPer;
+    payFinao(state, player, finaoPer);
   } else {
     const gen = makeRng(state.seed, state.rng.cursor);
     d6 = gen.d6();
@@ -12230,7 +12839,7 @@ function applyEpicHazard(state, op, player) {
   if (wantPay && finaoPer > (player.aqua | 0) - aquaCost) return fail('insufficient_aqua');
   let rolled = false, d6 = null, failed = false;
   if (wantPay) {
-    player.aqua -= finaoPer;
+    payFinao(state, player, finaoPer);
   } else {
     const gen = makeRng(state.seed, state.rng.cursor);
     d6 = gen.d6();
@@ -12420,11 +13029,23 @@ const FUNCTIONAL = {
   UNANCHOR_BERNAL: applyUnanchorBernal,
   SET_BERNAL_FIGURE: applySetBernalFigure,
   BUILD_BERNAL_ONTO_HOME: applyBuildBernalOntoHome,
+  // Promo crew ops.
+  EMISSARIES: applyEmissaries,
+  ARBITER_TALLY: applyArbiterTally,
+  TRADE_PORT: applyTradePort,
+  // PIGGYBACK is dispatched off turn in applyOperation; it sits here only so an
+  // UNDO/REDO replay of the booster's turn can re-apply it (by holderId).
+  PIGGYBACK: applyPiggybackReplay,
 };
+function applyPiggybackReplay(state, op) {
+  const holder = state.players.find((p) => String(p.profileId) === String(op.holderId));
+  if (!holder) return fail('not_a_player');
+  return applyPiggyback(state, op, holder);
+}
 
 function pickPayload(op) {
   switch (op.kind) {
-    case 'MOVE': return { toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, ...(Array.isArray(op.hazardChoices) ? { hazardChoices: op.hazardChoices.slice() } : {}), segments: op.segments, pickupChit: op.pickupChit !== false, ...(op.acetyleneLiftoff ? { acetyleneLiftoff: true } : {}), ...(op.unit ? { unit: op.unit } : {}) };
+    case 'MOVE': return { toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, ...(Array.isArray(op.hazardChoices) ? { hazardChoices: op.hazardChoices.slice() } : {}), segments: op.segments, pickupChit: op.pickupChit !== false, ...(op.acetyleneLiftoff ? { acetyleneLiftoff: true } : {}), ...(op.unit ? { unit: op.unit } : {}), ...(op.asFreighter ? { asFreighter: true } : {}), ...(op.wsbCoast ? { wsbCoast: true } : {}) };
     case 'MOVE_FACTORY': return { fromSiteId: op.fromSiteId, toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, segments: op.segments, ...(op.cubeId != null ? { cubeId: op.cubeId } : {}), ...(op.acetyleneLiftoff ? { acetyleneLiftoff: true } : {}) };
     case 'MOVE_FLEET': return { moves: op.moves };
     case 'AIR_EATER_REFUEL': return { hazardPay: !!op.hazardPay };
@@ -12432,7 +13053,7 @@ function pickPayload(op) {
     case 'HOMESTEAD': return { siteId: op.siteId, productCardId: op.productCardId, colonistCardId: op.colonistCardId };
     case 'FREE_INSPIRATION': return {};
     case 'NANOFACTURE': return { cardId: op.cardId, cardIds: op.cardIds, ...(op.freeDelegate ? { freeDelegate: op.freeDelegate } : {}) };
-    case 'EXOMIGRATE': return { ...(op.to != null ? { to: op.to } : {}), ...(op.placeDelegate === false ? { placeDelegate: false } : {}) };
+    case 'EXOMIGRATE': return { ...(op.to != null ? { to: op.to } : {}), ...(op.placeDelegate === false ? { placeDelegate: false } : {}), ...(op.specialty ? { specialty: op.specialty } : {}) };
     case 'SET_LAW_STAR': return { star: op.star };
     case 'SWAP_BIG_CUBE': return { factorySiteId: op.factorySiteId };
     case 'BUILD_ELEVATOR': return { pairKey: op.pairKey, hazardPay: !!op.hazardPay };
@@ -12480,16 +13101,21 @@ function pickPayload(op) {
     case 'LOAD_FUEL': return { cardId: op.cardId, holder: op.holder };
     case 'DUMP_FUEL_CARD': return { cardId: op.cardId, holder: op.holder };
     case 'FREE_MARKET': return { cardId: op.cardId, cardIds: op.cardIds, leoCardId: op.leoCardId, leoCardIds: op.leoCardIds };
-    case 'FUNDRAISE': return { place: op.place, moveFrom: op.moveFrom, moveTo: op.moveTo, freeDelegate: op.freeDelegate, discard: op.discard, star: op.star };
+    case 'FUNDRAISE': return { place: op.place, moveFrom: op.moveFrom, moveTo: op.moveTo, freeDelegate: op.freeDelegate, discard: op.discard, star: op.star, ...(op.arbiterDouble ? { arbiterDouble: true } : {}) };
     // rabbleRouser MUST ride along: without it an UNDO/REDO replay would re-run
     // the Lobby with the rouse dropped and quietly lose the Anarchy flip.
-    case 'LOBBY': return { ideology: op.ideology, ...(op.rabbleRouser ? { rabbleRouser: true } : {}) };
+    case 'LOBBY': return { ideology: op.ideology, ...(op.rabbleRouser ? { rabbleRouser: true } : {}), ...(op.ambassador ? { ambassador: true } : {}) };
+    // Promo crew ops (EMISSARIES / ARBITER, TRADE PORT).
+    case 'EMISSARIES': return { ideologies: Array.isArray(op.ideologies) ? op.ideologies.slice() : [] };
+    case 'ARBITER_TALLY': return { ...(op.double === false ? { double: false } : {}), ...(op.star != null ? { star: op.star } : {}) };
+    case 'TRADE_PORT': return { cardIds: Array.isArray(op.cardIds) ? op.cardIds.slice() : [], deckType: op.deckType };
+    case 'PIGGYBACK': return { holderId: op.holderId, cardIds: Array.isArray(op.cardIds) ? op.cardIds.slice() : [], ...(op.radSides ? { radSides: op.radSides } : {}) };
     case 'DISCARD': return { cardId: op.cardId };
     // stackId or the replay re-applies a Bernal / Freighter / Outpost's own
     // reconfiguration to the ROCKET, which is a different stack entirely.
     case 'SET_ACTIVE_THRUSTER': return { cardId: op.cardId, ...(op.stackId ? { stackId: op.stackId } : {}) };
     case 'SET_ACTIVE_PROSPECTOR': return { cardId: op.cardId, ...(op.stackId ? { stackId: op.stackId } : {}) };
-    case 'SET_RADIATOR_SIDE': return { cardId: op.cardId, ...(op.stackId ? { stackId: op.stackId } : {}) };
+    case 'SET_RADIATOR_SIDE': return { cardId: op.cardId, ...(op.stackId ? { stackId: op.stackId } : {}), ...(op.radSide ? { radSide: op.radSide } : {}) };
     case 'AFTERBURN': return {};
     case 'PROSPECT': return { siteId: op.siteId, turn: op.turn, round: op.round, relocateFrom: op.relocateFrom, ...(op.stackId ? { stackId: op.stackId } : {}), ...(op.prospectorId ? { prospectorId: op.prospectorId } : {}) };
     case 'PROSPECT_REROLL': return { siteId: op.siteId };
@@ -12584,6 +13210,7 @@ function rebuildFromBase(baseState, actions, report = null) {
       return note({ at: i, of: actions.length, kind: a.kind, error: res.error || 'replay_rejected', detail: res.detail || null });
     }
     s = res.state;
+    if (s.__opNotes) delete s.__opNotes;
     // Re-record each replayed action onto the turn history AS we go, exactly
     // like the dispatcher does, so handlers that read turnActions during the
     // replay see the same prior actions they saw the first time. This is what
@@ -12621,6 +13248,20 @@ function openTurnFor(state, player) {
   // once-a-turn use with it.
   player.dirtTanksThisTurn = 0;
   player.mooncableUsedThisTurn = false;
+  // Promo crew once-per-turn ledgers (each face's flag lifts as its holder's
+  // next turn opens): Thermal Labs' heavy flip, Shuttles' bank-to-tank
+  // transfer, Cavitation Engineers' ignored aerobrake, Weak Stability
+  // Boundary's second coast, the Arbiter's start-of-turn tally, Emissaries'
+  // tied laws, Trade Port's start-of-turn swap.
+  player.thermalLabsUsed = false;
+  player.shuttlesUsed = false;
+  player.cavitationUsed = false;
+  player.wsbCoastUsed = false;
+  player.arbiterTallied = false;
+  player.emissaryLaws = [];
+  player.tradePortUsed = false;
+  // A Piggyback window lives for the booster's turn only.
+  state.piggyback = null;
   // Afterburn lasts one turn: clear it as the player's next turn opens.
   if (player.rocket) player.rocket.afterburnEngaged = false;
   // Solar-sail thrust is LOCKED at the START of the turn (user decision): record
@@ -12714,6 +13355,12 @@ function aerobrakeParkingHazard(state, player) {
   if (r && (r.stack || []).length && isAerobrakeNode(r.siteId)) {
     if (stackSafeAerobrake(r)) {
       pushNews(state, '\u{1FA82}', `${player.name}'s parked stack rode out the aerobrake (parachute generator, no roll).`);
+    } else if (r.bluePlanetFinao) {
+      pushNews(state, '\u{1FA82}', `${player.name}'s parked stack rode out the aerobrake (Blue Planet FINAO paid, no roll).`);
+    } else if (chaosModelImmune(state, player, r.siteId)) {
+      pushNews(state, '\u{1FA82}', `${player.name}'s parked stack rode out the winds (Power Series Chaos Model, no roll).`);
+    } else if (cavitationIgnores(state, player)) {
+      pushNews(state, '\u{1FA82}', `${player.name}'s parked stack ignored the aerobrake (Cavitation Engineers, no roll).`);
     } else {
       const d6 = roll();
       if (d6 === 1) {
@@ -12726,11 +13373,16 @@ function aerobrakeParkingHazard(state, player) {
     }
   }
 
+  // A Blue Planet FINAO covers exactly one parked descent.
+  if (r) delete r.bluePlanetFinao;
+
   // The FREIGHTER. It carries a hold, so a parachute generator riding in it
   // waives the roll exactly as it does for the rocket.
   const fr = player.freighter;
   if (fr && isAerobrakeNode(fr.siteId)) {
-    if (stackSafeAerobrake(fr)) {
+    if (chaosModelImmune(state, player, fr.siteId)) {
+      pushNews(state, '\u{1FA82}', `${player.name}'s parked Freighter rode out the winds (Power Series Chaos Model, no roll).`);
+    } else if (stackSafeAerobrake(fr)) {
       pushNews(state, '\u{1FA82}', `${player.name}'s parked Freighter rode out the aerobrake (parachute generator, no roll).`);
     } else {
       const d6 = roll();
@@ -12957,6 +13609,13 @@ function noteSirenUranianLanding(state, player) {
 
 function applyEndTurn(state, _op, player) {
   if (mustExomigrate(state, player)) return fail('must_exomigrate');
+  // BLUE PLANET: settle the coming aerobrake hazard now, before the turn passes.
+  let bluePlanetNote = '';
+  if (_op && _op.bluePlanet) {
+    const bp = applyBluePlanetFinao(state, player);
+    if (!bp.ok) return bp;
+    bluePlanetNote = bp.note;
+  }
   // V5 Hermes Fall: the mission is settled at the END of the turn that completed
   // it, not the instant the second factory lands - a player who industrializes
   // mid-turn still gets the rest of their turn (user 2026-08-03). Checked before
@@ -12994,6 +13653,7 @@ function applyEndTurn(state, _op, player) {
     player.opsRemaining -= 1;
     log = `${player.name} passed and took income (+${INCOME_AQUA} aqua; bank ${player.aqua}).`;
   }
+  log += bluePlanetNote;
 
   // V9 Sirens: First Contact / Heroism / Technology Trade all resolve here,
   // because all three trigger on ENDING the turn colocated with the other
@@ -13198,10 +13858,21 @@ function resolveRoundClose(state, log) {
       log += ` Nobody else has a cube free for the first-player marker - ${chooser.name} leads again.`;
       return { ok: true, state, log };
     }
-    state.pendingFirstPlayer = { chooserId: chooser.profileId };
+    // SITDOWN (LEO Workers' Union, black): "You choose 1st Player." The holder
+    // names the next first player in place of the outgoing leader. The marker
+    // still has to move off the outgoing leader (the base rule), but the holder
+    // may name themselves. Climate Control and Martial Law, above, still win:
+    // they settle the marker before anyone gets to choose.
+    const sitdownHolder = state.players.find((p) => hasPrivilege(state, p, 'SITDOWN'));
+    if (sitdownHolder && sitdownHolder !== chooser) {
+      state.pendingFirstPlayer = { chooserId: sitdownHolder.profileId, outgoingId: chooser.profileId, sitdown: true };
+      log += ` ${sitdownHolder.name} names the next first player (Sitdown).`;
+    } else {
+      state.pendingFirstPlayer = { chooserId: chooser.profileId };
+      log += ` ${chooser.name} names the next first player.`;
+    }
     state.turnActions = [];
     state.turnRedo = [];
-    log += ` ${chooser.name} names the next first player.`;
     return { ok: true, state, log };
   }
 
@@ -13960,6 +14631,8 @@ function carryOffTurnRoutes(rebuilt, live) {
     if (lp && lp.rocket && rebuilt.players[i] && rebuilt.players[i].rocket && lp.rocket.groups) {
       rebuilt.players[i].rocket.groups = lp.rocket.groups;
     }
+    // A Powersat beam is set off the undo stack too (any turn), so carry it.
+    if (lp && rebuilt.players[i] && lp.powersatBeams) rebuilt.players[i].powersatBeams = lp.powersatBeams;
   }
   for (let i = 0; i < rebuilt.players.length; i++) {
     if (i === activeIdx) continue;
@@ -14314,6 +14987,60 @@ function highestOtherBid(state, profileId) {
   return hi;
 }
 
+// TRADE PORT (Makers Guild, black): "At the start of your turn, you may
+// discard 2 cards to take the top card of a patent queue."
+//
+// "Start of your turn": before the player has spent the operation or the move
+// and before any other action this turn (planning a route or wiring is not an
+// action). The two discards go to the bottoms of their decks exactly as a
+// plain discard does, then the top card of the chosen patent deck goes to the
+// hand. It is a free action (no operation) and once a turn. Drawing the top
+// card reveals it, so the swap cannot be undone. hasPrivilege: Anarchy and the
+// M2 lock apply.
+const TRADE_PORT_PREP_OPS = new Set(['SET_ROUTE', 'CLEAR_ROUTE', 'SET_WIRING', 'SET_CARD_GROUPS', 'ARBITER_TALLY', 'EMISSARIES']);
+function atStartOfTurn(state, player) {
+  if ((player.opsRemaining | 0) < OPS_PER_TURN) return false;
+  if ((player.movesRemaining | 0) < MOVES_PER_TURN) return false;
+  return (state.turnActions || []).every((a) => a && TRADE_PORT_PREP_OPS.has(a.kind));
+}
+function applyTradePort(state, op, player) {
+  if (!hasPrivilege(state, player, 'TRADE_PORT')) return fail('no_trade_port');
+  if (!op._replay) {
+    if (player.tradePortUsed) return fail('trade_port_used');
+    if (!atStartOfTurn(state, player)) return fail('not_start_of_turn');
+  }
+  const ids = Array.isArray(op.cardIds) ? op.cardIds.map(String) : [];
+  if (ids.length !== 2) return fail('discard_two');
+  const hand = (player.hand || []).slice();
+  for (const id of ids) {
+    const i = hand.indexOf(id);
+    if (i < 0) return fail('not_in_hand');
+    hand.splice(i, 1);
+  }
+  const deckType = String(op.deckType || '');
+  const patentDecks = [...DECK_TYPES, ...(state.m1 ? M1_DECK_TYPES : []), ...(state.m2 ? M2_DECK_TYPES : [])];
+  if (!patentDecks.includes(deckType)) return fail('bad_deck');
+  const deck = decksFor(state, player)[deckType];
+  if (!deck || !deck.length) return fail('deck_empty');
+  if (atOwnershipCap(player, deckType)) return fail(ownershipCapError(deckType));
+  // Take the top card BEFORE the discards land, so a card discarded into the
+  // same deck goes under it and can never come straight back.
+  const taken = deck.shift();
+  const names = [];
+  for (const id of ids) {
+    const r = applyDiscard(state, { cardId: id }, player);
+    if (!r.ok) return r;
+    names.push((PATENTS_BY_ID[id] || {}).name || id);
+  }
+  player.hand.push(taken);
+  player.tradePortUsed = true;
+  const tc = PATENTS_BY_ID[taken];
+  return {
+    ok: true, state, noUndo: true,
+    log: `${player.name} traded ${names.join(' and ')} away at the Trade Port and took ${tc ? tc.name : taken} from the top of the ${deckType} deck.`,
+  };
+}
+
 function applyAuctionStart(state, op, ctx) {
   if (state.auction) return fail('auction_in_progress');
   const player = currentPlayer(state);
@@ -14642,7 +15369,9 @@ function applyAuctionSell(state, op, ctx) {
     // authoritatively at close, which is where the privilege was being ignored.)
     const mktPid = Object.keys(a.bids).find((pid) =>
       a.bids[pid] === high && hasPrivilege(state, state.players.find((p) => String(p.profileId) === String(pid)), 'MARKETEER'));
-    if (mktPid != null && Number(mktPid) !== buyerId) return fail('marketeer_wins_tie');
+    // String compare: bids key by the raw profileId, which may be non-numeric
+    // (tutorial bot seats) - Number('beta') is NaN (audit bug MARKETEER-STRID).
+    if (mktPid != null && String(mktPid) !== String(buyerId)) return fail('marketeer_wins_tie');
     winner = playerByProfile(state, buyerId);
     if (!winner) return fail('winner_gone');
     price = high;
@@ -15201,6 +15930,9 @@ function applyRevokeFactoryUse(state, op, ctx) {
   const { caller, fac, siteId, site } = r;
   if (fac.ownerId !== caller.profileId) return fail('not_your_factory');
   const key = String(op.granteeId == null ? '' : op.granteeId);
+  // REFUGEE: the Claim owner's share of a Factory built on their Claim is not
+  // the Factory owner's to take back.
+  if (fac.refugeeShare != null && String(fac.refugeeShare) === key) return fail('refugee_share');
   if (fac.grants) delete fac.grants[key];
   const grantee = state.players.find((p) => String(p.profileId) === key);
   return { ok: true, state, log: `${caller.name} revoked ${grantee ? grantee.name : 'a player'}'s access to the Factory at ${(site && site.name) || siteId}.` };
@@ -15310,19 +16042,22 @@ function applyPickCrew(state, op, ctx) {
   const face = op.face === 'secondary' ? 'secondary' : 'primary';
   const card = CREW_BY_ID[cardId];
   if (!card) return fail('unknown_crew');
-  // Promo crew (data/crew.js#PROMO_CREW) is a Library-only reference set, not
-  // a real starting faction - the client wizard already excludes it from a
-  // normal pick, but never trust the client: reject here too unless the
-  // caller is an admin's explicit test pick (ctx.allowPromoCrew, set by the
-  // route layer from profileIsAdmin - see server/index.js) AND the game runs
-  // the full m0+m1+m2 module stack the promo abilities depend on. Below that
-  // bar the privilege can't fire, so the pick is refused.
-  if (PROMO_CREW_IDS.has(cardId)) {
-    if (!ctx.allowPromoCrew) return fail('promo_crew_admin_only');
-    if (!(state.m0 && state.m1 && state.m2)) return fail('promo_crew_needs_modules');
-  }
+  // Promo crew (data/crew.js#PROMO_CREW) - RELEASED to every player
+  // (user 2026-11-14; it used to need ctx.allowPromoCrew, an admin).
+  // ctx.allowPromoCrew (admin) now only keeps its test-drive power: swapping a
+  // promo card in AFTER the draft closed (the phase check above).
   const faceData = card.faces && card.faces[face];
   if (!faceData) return fail('unknown_crew_face');
+  // Each face needs only the modules its OWN text uses (data/crew.js
+  // needsModules: e.g. Life Raft moves as a Freighter, so M1; Arbiter tallies
+  // the Assembly, so M0). Judged per face, so a card's other side may still
+  // be picked. The old blanket m0+m1+m2 gate is gone (user 2026-11-14).
+  const missing = (faceData.needsModules || []).filter((m) => !state[String(m).toLowerCase()]);
+  if (missing.length) return fail('crew_face_needs_modules', { missing });
+  // A face that needs a module this game does not implement (M4 / M5, the
+  // Library's "Coming soon") has no rule behind it, so it cannot be a
+  // faction. Judged per face: the card's other face may still be picked.
+  if (faceData.requiresModule) return fail('crew_face_needs_module', { module: faceData.requiresModule });
   // Any crew card is a legal pick as long as no OTHER player has already
   // claimed it: each physical crew card is one player's faction, so a card
   // taken by someone else is off the board. Both faces of an unclaimed card
@@ -15420,7 +16155,13 @@ function applyPickCrew(state, op, ctx) {
     // Collective Bargaining (LEO Workers' Union promo crew, data/crew.js):
     // "Receive 2 Aqua at game start." Unlike Secretary General the printed
     // text carries no Module 2 deferral clause, so this pays out unconditionally.
-    for (const cb of playersWithPrivilege(state, 'COLLECTIVE_BARGAINING')) {
+    // It reads the PRINTED face (playerOwnsAbility), not privilegeOf: a promo
+    // card is only pickable under m0+m1+m2, and the M2 privilege lock (2B3b)
+    // nulls privilegeOf until a Home Bernal anchors, which nobody has when the
+    // draft closes - so the lock silently ate the "+2 at game start" in every
+    // legal promo game (audit bug CB-M2LOCK). Anarchy can't be running at the
+    // draft close, but the guard keeps the K2e suspension honest.
+    for (const cb of state.players.filter((p) => !state.anarchy && playerOwnsAbility(p, 'COLLECTIVE_BARGAINING'))) {
       cb.aqua = (cb.aqua | 0) + 2;
     }
     // The faction bank (C5, B6a, data/altruism.js). Taxes, Secretary General and
@@ -15565,7 +16306,9 @@ function applySetFirstPlayer(state, op, ctx) {
   const targetIdx = state.players.findIndex((p) => sameId(p.profileId, op.profileId));
   if (targetIdx < 0) return fail('unknown_player');
   // "another player": the first-player token must move off the chooser.
-  if (sameId(state.players[targetIdx].profileId, pending.chooserId)) {
+  // When Sitdown handed the choice to someone else, it is the OUTGOING leader
+  // the marker must move off; the Sitdown holder may name themselves.
+  if (sameId(state.players[targetIdx].profileId, pending.outgoingId != null ? pending.outgoingId : pending.chooserId)) {
     return fail('must_choose_another');
   }
   const chooser = playerByProfile(state, pending.chooserId);
@@ -15884,11 +16627,43 @@ export function applyOperation(prevState, op, ctx) {
     return FUNCTIONAL[op.kind](st, op, caller);
   }
 
+  // PIGGYBACK (Utopia, Inc.) is a reaction to an opponent's boost, so it is
+  // taken OFF turn, against the CALLER (the holder), never the active player.
+  // It is recorded onto the BOOSTER's per-turn history as a barrier entry
+  // (noUndo), carrying the holder's id: the booster cannot undo the boost a
+  // rival already rode on (the boost is the last thing before it on the stack),
+  // and an undo of anything the booster does LATER replays the piggyback with
+  // the rest of the turn, so the holder's cards are never lost to a rebuild.
+  if (op.kind === 'PIGGYBACK' && !op.debug) {
+    if (prevState.auction) return fail('auction_in_progress');
+    const st = clonePrev();
+    const caller = playerByProfile(st, ctx.profileId);
+    if (!caller) return fail('not_a_player');
+    const res = applyPiggyback(st, op, caller);
+    if (!res.ok) return res;
+    const payload = { holderId: caller.profileId, cardIds: (op.cardIds || []).map(String),
+      ...(op.radSides && typeof op.radSides === 'object' ? { radSides: { ...op.radSides } } : {}) };
+    res.state.turnActions = [...(res.state.turnActions || []), { kind: 'PIGGYBACK', payload, rolled: false, noUndo: true }];
+    res.state.turnRedo = [];
+    return noted(res);
+  }
+
   // SET_CARD_GROUPS is a purely COSMETIC per-player organizer for the rocket-
   // stack view: it changes no rule and no shared state, so it ALWAYS runs against
   // the caller regardless of whose turn it is (a waiting player may relabel any
   // time) and it never rides the per-turn undo stack. The active player's own
   // groups are carried across an undo by carryOffTurnRoutes, like a route.
+  // POWERSAT_BEAM: the ESA player's standing beam on a rival's craft. "During
+  // any player's Turn", so like SET_CARD_GROUPS it runs against the CALLER on or
+  // off turn and never rides the undo stack (carryOffTurnRoutes carries it
+  // across an undo). Public, so it returns a real log line. An open auction
+  // does not block it - it touches no auction state.
+  if (op.kind === 'POWERSAT_BEAM' && !op.debug) {
+    const st = clonePrev();
+    const caller = playerByProfile(st, ctx.profileId);
+    if (!caller) return fail('not_a_player');
+    return applyPowersatBeam(st, op, caller);
+  }
   if (op.kind === 'SET_CARD_GROUPS' && !op.debug) {
     const st = clonePrev();
     const caller = playerByProfile(st, ctx.profileId);
@@ -15927,6 +16702,11 @@ export function applyOperation(prevState, op, ctx) {
     const cursorBefore = state.rng.cursor;
     const res = FUNCTIONAL[op.kind](state, op, player);
     if (!res.ok) return res;
+    // Settlement notes a handler queued mid-op (Power Brokers' FINAO rebate).
+    if (res.state && res.state.__opNotes) {
+      if (res.state.__opNotes.length) res.log = (res.log ? res.log + ' ' : '') + res.state.__opNotes.join(' ');
+      delete res.state.__opNotes;
+    }
     // Glitch trigger: if this op is a trigger and the stack is glitched, roll
     // 1d6 and decommission every colocated card whose rad-hardness matches.
     // Done BEFORE autoFixGlitches so a human arriving on this same op doesn't
@@ -16116,8 +16896,8 @@ export const SUPPORTED_OPS = [
   ...Object.keys(FUNCTIONAL), ...Object.keys(META), ...Object.keys(AUCTION),
   ...Object.keys(TRADE), ...Object.keys(FACTORY_ACCESS), ...Object.keys(LUNA_ACCESS),
   ...Object.keys(CREW), ...Object.keys(LIFECYCLE), 'DRAFT_PICK', 'DRAFT_CYCLE',
-  'DRAFT_BONUS_SELL', 'DRAFT_BONUS_DONE', 'EVENT_CHOICE',
-];
+  'DRAFT_BONUS_SELL', 'DRAFT_BONUS_DONE', 'EVENT_CHOICE', 'POWERSAT_BEAM',
+].filter((k, i, a) => a.indexOf(k) === i);
 // Ops that require the caller to supply ctx.turnBaseState.
 export const NEEDS_TURN_BASE = new Set(['UNDO', 'REDO']);
 
