@@ -989,6 +989,199 @@ check('DOWSERS: suspended by Anarchy; locked under m0+m1+m2 until a Home Bernal'
 // ================================================================ promo group A
 // movement and hazards: LIFE RAFT, LIFEBOAT, WEAK STABILITY BOUNDARY, CAVITATION ENGINEERS, POWER SERIES CHAOS MODEL, BLUE PLANET
 // (group A checks go here)
+//
+// Each fixture seats the holder on seat 0 with the card's crew aboard the
+// rocket. `game` defaults to a core game; PROMO + `home` exercises the M2 lock.
+const AERO_VENUS = 'lag-c3cha';      // Venus aerobrake corridor
+const GEYSER_SKULL = 'lag-qeogw';    // Enceladus "electric geysers" hazard
+const PLAIN_SKULL = 'lag-ibzms';     // Hathor hazard: no geyser / ring / spin / wind
+function promoSeat(cardId, face, { game = {}, anarchy = false, home = false, crewAboard = true } = {}) {
+  const st = playing(2, game);
+  const me = only(st, 0, cardId, face);
+  if (anarchy) st.anarchy = true;
+  if (home) anchorHome(me);
+  me.rocket.siteId = null;
+  me.rocket.stack = crewAboard ? [{ id: cardId, kind: 'crew', face }] : [{ id: SOLAR_PUSH, kind: 'patent', face: 'primary' }];
+  me.rocket.activeThrusterId = crewAboard ? cardId : SOLAR_PUSH;
+  me.rocket.tank = 0;
+  me.aqua = 20;
+  return { st, me };
+}
+const rollsOf = (r) => (r.state.players[0].rocket.lastMove || {}).rolls || [];
+
+// ---- LIFE RAFT / LIFEBOAT (Space Force) ----
+// "May move as a Freighter (1B4) if the stack Wet Mass is less than 5 & doesn't
+// contain a glory chit." / "... if the stack Wet Mass is less than 7."
+function raft(face, opts = {}) {
+  const { st, me } = promoSeat('crew_space_force', face, opts);
+  if (opts.tank != null) me.rocket.tank = opts.tank;
+  if (opts.chit) me.glory.chits = [{ zone: 'Earth', crewId: 'crew_space_force' }];
+  return op(st, 0, { kind: 'MOVE', asFreighter: true, hazardPay: true,
+    segments: [{ from: null, to: 'burn-gz7tn', burns: opts.burns || 1, turn: 1 }] });
+}
+check('LIFE RAFT: an empty-tank Space Force rocket flies as a Freighter, burning no fuel', () => {
+  const r = raft('primary');
+  assert(r.ok, `Life Raft move refused: ${r.error}`);
+  eq(r.state.players[0].rocket.siteId, 'burn-gz7tn', 'Life Raft destination');
+  eq(r.state.players[0].rocket.tank, 0, 'tank after a Freighter move');
+  assert(/Life Raft moved as a Freighter/.test(r.log), `log: ${r.log}`);
+  // The same move flown normally needs fuel the tank does not have.
+  const { st } = promoSeat('crew_space_force', 'primary');
+  const plain = op(st, 0, { kind: 'MOVE', hazardPay: true, segments: [{ from: null, to: 'burn-gz7tn', burns: 1, turn: 1 }] });
+  eq(plain.ok ? 'moved' : plain.error, 'insufficient_water', 'the same move without the Life Raft');
+});
+check('LIFE RAFT: refused over Net Thrust 1, at wet mass 5+, or carrying a glory chit; Lifeboat takes 5-6 and the chit', () => {
+  eq(raft('primary', { burns: 2 }).error, 'freighter_over_thrust', 'two burns');
+  eq(raft('primary', { tank: 5 }).error, 'life_raft_too_heavy', 'Life Raft at wet mass 6');
+  eq(raft('primary', { chit: true }).error, 'life_raft_glory_chit', 'Life Raft with a chit');
+  assert(raft('secondary', { tank: 5 }).ok, 'Lifeboat at wet mass 6 refused');
+  assert(raft('secondary', { chit: true }).ok, 'Lifeboat with a chit refused');
+  eq(raft('secondary', { tank: 6 }).error, 'life_raft_too_heavy', 'Lifeboat at wet mass 7');
+});
+check('LIFE RAFT: another seat and a stack without the crew cannot; Anarchy suspends; M2 locks until a Home Bernal', () => {
+  const st = playing(2);
+  only(st, 1, 'crew_space_force', 'primary');
+  st.players[0].rocket.stack = [{ id: 'crew_space_force', kind: 'crew', face: 'primary' }];
+  st.players[0].rocket.siteId = null;
+  eq(op(st, 0, { kind: 'MOVE', asFreighter: true, segments: [{ from: null, to: 'burn-gz7tn', burns: 1, turn: 1 }] }).error,
+    'no_life_raft', 'a seat without the privilege');
+  eq(raft('primary', { crewAboard: false }).error, 'life_raft_needs_crew', 'crew not aboard');
+  eq(raft('primary', { anarchy: true }).error, 'no_life_raft', 'Anarchy');
+  eq(raft('secondary', { game: PROMO }).error, 'no_life_raft', 'promo game, no Home Bernal');
+  assert(raft('secondary', { game: PROMO, home: true }).ok, 'promo game, Home Bernal anchored');
+});
+
+// ---- WEAK STABILITY BOUNDARY (Heliocentricity, white) ----
+// "After its Stack moves, you may activate this thruster to coast as a second movement."
+function wsbCoast(face, opts = {}) {
+  const { st, me } = promoSeat('crew_heliocentricity', face, opts);
+  if (opts.notMoved !== true) me.movesRemaining = 0;   // the stack already moved this turn
+  if (opts.active) me.rocket.activeThrusterId = opts.active;
+  return op(st, 0, { kind: 'MOVE', wsbCoast: !opts.plain, hazardPay: true,
+    segments: [{ from: null, to: 'burn-gz7tn', burns: opts.burns || 0, turn: 1 }] });
+}
+check('WEAK STABILITY BOUNDARY: a second, coasting movement after the stack moved; the Sundiver goes active', () => {
+  const r = wsbCoast('primary');
+  assert(r.ok, `WSB coast refused: ${r.error}`);
+  const me = r.state.players[0];
+  eq(me.rocket.siteId, 'burn-gz7tn', 'WSB destination');
+  eq(me.wsbCoastUsed, true, 'once-per-turn ledger');
+  eq(me.rocket.activeThrusterId, 'crew_heliocentricity', 'active thruster after the coast');
+  eq(wsbCoast('primary', { plain: true }).error, 'no_moves_left', 'a plain second move');
+});
+check('WEAK STABILITY BOUNDARY: coast only, after a move, once a turn; the other face and Anarchy refuse; M2 locks', () => {
+  eq(wsbCoast('primary', { burns: 1 }).error, 'wsb_must_coast', 'a burning second move');
+  eq(wsbCoast('primary', { notMoved: true }).error, 'wsb_move_first', 'before the first move');
+  const once = wsbCoast('primary');
+  once.state.players[0].rocket.siteId = null;
+  const twice = op(once.state, 0, { kind: 'MOVE', wsbCoast: true, segments: [{ from: null, to: 'burn-gz7tn', burns: 0, turn: 1 }] });
+  eq(twice.error, 'wsb_already_used', 'a third movement');
+  eq(wsbCoast('secondary').error, 'no_weak_stability_boundary', 'Power Series face');
+  eq(wsbCoast('primary', { anarchy: true }).error, 'no_weak_stability_boundary', 'Anarchy');
+  eq(wsbCoast('primary', { game: PROMO }).error, 'no_weak_stability_boundary', 'promo game, no Home Bernal');
+  assert(wsbCoast('primary', { game: PROMO, home: true }).ok, 'promo game, Home Bernal anchored');
+});
+
+// ---- CAVITATION ENGINEERS (VerisAI, black) ----
+// "[Ignore Aerobrake] once per turn."
+function cavitate(face, opts = {}) {
+  const { st } = promoSeat('crew_verisai', face, opts);
+  st.rng.cursor = opts.cursor || 0;
+  return op(st, 0, { kind: 'MOVE', segments: [{ from: null, to: AERO_VENUS, burns: 0, turn: 1 }] });
+}
+// A cursor where the first d6 is not a 1, so the control's aero roll never kills it.
+function safeCursor(face) {
+  for (let c = 0; c < 200; c++) {
+    const r = cavitate(face, { cursor: c });
+    if (r.ok && rollsOf(r).some((x) => x.slug === AERO_VENUS && x.d6 != null && !x.crit)) return c;
+  }
+  throw new Error('no safe cursor for the control');
+}
+check('CAVITATION ENGINEERS: the first aerobrake of the turn is ignored; the Incubator face rolls it', () => {
+  const c = safeCursor('primary');
+  const hold = cavitate('secondary', { cursor: c });
+  assert(hold.ok, `move: ${hold.error}`);
+  const hr = rollsOf(hold).find((x) => x.slug === AERO_VENUS);
+  assert(hr && hr.cavitation && hr.d6 == null, `holder aero roll: ${JSON.stringify(hr)}`);
+  eq(hold.state.players[0].cavitationUsed, true, 'ledger spent');
+  const ctl = rollsOf(cavitate('primary', { cursor: c })).find((x) => x.slug === AERO_VENUS);
+  assert(ctl && ctl.d6 != null, `control aero roll: ${JSON.stringify(ctl)}`);
+});
+check('CAVITATION ENGINEERS: once per turn - a spent ledger rolls; Anarchy suspends; M2 locks', () => {
+  const spent = (() => { const { st } = promoSeat('crew_verisai', 'secondary'); st.players[0].cavitationUsed = true;
+    return op(st, 0, { kind: 'MOVE', segments: [{ from: null, to: AERO_VENUS, burns: 0, turn: 1 }] }); })();
+  assert(!rollsOf(spent).some((x) => x.cavitation), 'ignored a second aerobrake in one turn');
+  assert(!rollsOf(cavitate('secondary', { anarchy: true })).some((x) => x.cavitation), 'Anarchy');
+  assert(!rollsOf(cavitate('secondary', { game: PROMO })).some((x) => x.cavitation), 'promo game, no Home Bernal');
+  assert(rollsOf(cavitate('secondary', { game: PROMO, home: true })).some((x) => x.cavitation), 'promo game, Home Bernal');
+});
+check('CAVITATION ENGINEERS: a rocket parked on an aerobrake skips the turn-start descent roll', () => {
+  const park = (face) => {
+    const { st } = promoSeat('crew_verisai', face);
+    st.players[0].rocket.siteId = AERO_VENUS;
+    st.activeIndex = 1;
+    const r = op(st, 1, { kind: 'END_TURN' });
+    assert(r.ok, r.error);
+    return r.state;
+  };
+  const h = park('secondary');
+  assert((h.news || []).some((n) => /Cavitation Engineers/.test(n.text)), 'no Cavitation news at turn open');
+  eq(h.players[0].cavitationUsed, true, 'parked descent spent the turn\'s use');
+  assert(!(park('primary').news || []).some((n) => /Cavitation Engineers/.test(n.text)), 'Incubator face skipped the roll');
+});
+
+// ---- POWER SERIES CHAOS MODEL (Heliocentricity, black) ----
+// "Immune to Hazards mentioning geysers, rings, spin, and winds."
+function chaos(face, to, opts = {}) {
+  const { st } = promoSeat('crew_heliocentricity', face, opts);
+  return op(st, 0, { kind: 'MOVE', hazardPay: true, segments: [{ from: null, to, burns: 0, turn: 1 }] });
+}
+check('POWER SERIES CHAOS MODEL: a geyser hazard needs no roll or FINAO; WSB face pays for it', () => {
+  const h = chaos('secondary', GEYSER_SKULL);
+  assert(h.ok, h.error);
+  assert(rollsOf(h).some((x) => x.slug === GEYSER_SKULL && x.chaosModel), 'no chaos-model pass');
+  eq(h.state.players[0].aqua, 20, 'FINAO charged to the immune holder');
+  const c = chaos('primary', GEYSER_SKULL);
+  assert(c.ok, c.error);
+  assert(c.state.players[0].aqua < 20, 'control paid no FINAO for the geysers');
+});
+check('POWER SERIES CHAOS MODEL: a plain hazard still costs FINAO; Anarchy suspends; M2 locks', () => {
+  assert(chaos('secondary', PLAIN_SKULL).state.players[0].aqua < 20, 'immune to a hazard with no geysers / rings / spin / winds');
+  assert(chaos('secondary', GEYSER_SKULL, { anarchy: true }).state.players[0].aqua < 20, 'Anarchy');
+  assert(chaos('secondary', GEYSER_SKULL, { game: PROMO }).state.players[0].aqua < 20, 'promo game, no Home Bernal');
+  eq(chaos('secondary', GEYSER_SKULL, { game: PROMO, home: true }).state.players[0].aqua, 20, 'promo game, Home Bernal');
+});
+
+// ---- BLUE PLANET (Cerulean, white) ----
+// "If ending turn on an aerobrake Hazard, cost of FINAO = 1 Aqua, which gains 1 FT."
+function bluePlanet(face, opts = {}) {
+  const { st } = promoSeat('crew_cerulean', face, opts);
+  st.players[0].rocket.siteId = opts.at === undefined ? AERO_VENUS : opts.at;
+  // An anchored Home Bernal opens a colonist berth that must be filled before
+  // the turn ends; empty the queue so END_TURN is not held by exomigration.
+  st.colonistQueue = [];
+  return op(st, 0, { kind: 'END_TURN', bluePlanet: true });
+}
+check('BLUE PLANET: 1 aqua at END_TURN on an aerobrake gains 1 FT and the next descent needs no roll', () => {
+  const r = bluePlanet('primary');
+  assert(r.ok, `Blue Planet refused: ${r.error}`);
+  const me = r.state.players[0];
+  // END_TURN with the operation unspent also takes income (+1), so net 0.
+  eq(me.aqua, 20, 'bank after 1 aqua FINAO + passing income');
+  assert(me.rocket.tank > 0, 'no FT scooped');
+  assert(/Blue Planet/.test(r.log), `log: ${r.log}`);
+  const next = op(r.state, 1, { kind: 'END_TURN' });
+  assert(next.ok, next.error);
+  assert((next.state.news || []).some((n) => /Blue Planet FINAO paid/.test(n.text)), 'descent rolled anyway');
+  assert(!next.state.players[0].rocket.bluePlanetFinao, 'FINAO stamp outlived its descent');
+});
+check('BLUE PLANET: Dowsers face refused; off an aerobrake refused; Anarchy suspends; M2 locks', () => {
+  eq(bluePlanet('secondary').error, 'no_blue_planet', 'Dowsers face');
+  eq(bluePlanet('primary', { at: null }).error, 'not_on_aerobrake', 'at LEO');
+  eq(bluePlanet('primary', { anarchy: true }).error, 'no_blue_planet', 'Anarchy');
+  eq(bluePlanet('primary', { game: PROMO }).error, 'no_blue_planet', 'promo game, no Home Bernal');
+  { const bp = bluePlanet('primary', { game: PROMO, home: true }); assert(bp.ok, `promo game, Home Bernal: ${bp.error}`); }
+});
 
 
 

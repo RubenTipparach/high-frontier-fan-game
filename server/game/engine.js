@@ -59,6 +59,7 @@ import { scorePlayer, freeMarketBlackSideValue } from '../../data/endgame-scorin
 // engine reads them so the liftoff/landing gate uses the FINAL net thrust,
 // not the printed base value.
 import { weightClassForMass, freighterNetThrust } from '../../data/net-thrust-track.js';
+import { hazardFlavorOf } from '../../data/hazard-flavors.js';
 import { SOLAR_ZONE_INFO, adjacentSites } from '../../data/sites.js';
 // Site location classes (astrobiology / submarine / atmospheric / elevator),
 // shared with the client (colony types + promotion colonies + futures).
@@ -1832,6 +1833,91 @@ function creditPrivilegeIncome(state, key, label) {
     notes.push(`${p.name} collected +1 aqua (${label}).`);
   }
   return notes;
+}
+
+// ---- Promo crew: movement and hazard privileges (group A) ----
+// LIFE RAFT (Space Force, white): "May move as a Freighter (1B4) if the stack
+// Wet Mass is less than 5 & doesn't contain a glory chit." LIFEBOAT (black):
+// the same with Wet Mass less than 7 and no glory-chit clause. "The stack" is
+// the stack carrying this Crew, so the Space Force card must be aboard the
+// rocket. Returns null when the rocket may fly as a Freighter, else the error.
+// Read through hasPrivilege: Anarchy suspends it and the M2 lock holds it until
+// a Home Bernal is anchored, like every faction privilege.
+const SPACE_FORCE_CREW_ID = 'crew_space_force';
+function rocketCarriesGloryChit(player) {
+  const chits = (player.glory && player.glory.chits) || [];
+  if (!chits.length) return false;
+  const aboard = new Set(((player.rocket && player.rocket.stack) || []).map((s) => s.id));
+  // A chit with no carrier on record rides the rocket (the legacy count rule).
+  return chits.some((c) => c && (!c.crewId || aboard.has(c.crewId)));
+}
+function lifeRaftFail(state, player, wetMass) {
+  const raft = hasPrivilege(state, player, 'LIFE_RAFT');
+  const boat = hasPrivilege(state, player, 'LIFEBOAT');
+  if (!raft && !boat) return fail('no_life_raft');
+  if (!((player.rocket && player.rocket.stack) || []).some((s) => s.id === SPACE_FORCE_CREW_ID)) {
+    return fail('life_raft_needs_crew');
+  }
+  // A Lifeboat holder (7) never needs the stricter Life Raft limit (5).
+  const limit = boat ? 7 : 5;
+  if (!(wetMass < limit)) return fail('life_raft_too_heavy', { wetMass, limit });
+  if (!boat && rocketCarriesGloryChit(player)) return fail('life_raft_glory_chit');
+  return null;
+}
+// WEAK STABILITY BOUNDARY (Heliocentricity, white): "After its Stack moves, you
+// may activate this thruster to coast as a second movement." The thruster is
+// the Sundiver printed on the Heliocentricity card, so the card must be aboard
+// the rocket that already moved this turn; the second movement is a COAST (no
+// burns), once per turn.
+const HELIOCENTRICITY_CREW_ID = 'crew_heliocentricity';
+// POWER SERIES CHAOS MODEL (Heliocentricity, black): "Immune to Hazards
+// mentioning geysers, rings, spin, and winds." The hazard's printed flavour
+// lives in data/hazard-flavors.js.
+function chaosModelImmune(state, player, slug) {
+  return !!hazardFlavorOf(slug) && hasPrivilege(state, player, 'POWER_SERIES_CHAOS_MODEL');
+}
+// CAVITATION ENGINEERS (VerisAI, black): "[Ignore Aerobrake] once per turn."
+// The first aerobrake hazard the player's rocket meets in a turn is ignored (no
+// roll, no FINAO), the same waiver a parachute generator gives, and the
+// once-per-turn ledger (player.cavitationUsed) lifts as their next turn opens.
+// Returns true and spends the use when it applies.
+function cavitationIgnores(state, player) {
+  if (player.cavitationUsed) return false;
+  if (!hasPrivilege(state, player, 'CAVITATION_ENGINEERS')) return false;
+  player.cavitationUsed = true;
+  return true;
+}
+// BLUE PLANET (Cerulean, white): "If ending turn on an aerobrake Hazard, cost
+// of FINAO = 1 Aqua, which gains 1 FT." Staying on an aerobrake is a Diver Orbit
+// (each turn you remain counts as a Hazard needing a roll or FINAO), and that
+// hazard comes due as the parked ship's next turn opens (aerobrakeParkingHazard).
+// The holder settles it at END_TURN instead: 1 aqua, and the scooped atmosphere
+// walks the tank up one refuel step (1 FT). Opt-in (END_TURN bluePlanet: true).
+// The FINAO is stamped on the rocket and spent by the next parking check.
+// Returns a note for the log, or a fail.
+function applyBluePlanetFinao(state, player) {
+  if (!hasPrivilege(state, player, 'BLUE_PLANET')) return fail('no_blue_planet');
+  const r = player.rocket;
+  if (!r || !(r.stack || []).length || !isAerobrakeNode(r.siteId)) return fail('not_on_aerobrake');
+  if (stackSafeAerobrake(r) || r.bluePlanetFinao) return fail('no_hazard_to_pay');
+  if ((player.aqua | 0) < 1) return fail('insufficient_aqua');
+  player.aqua -= 1;
+  r.bluePlanetFinao = true;
+  const tank = Number(r.tank) || 0;
+  const dry = rocketDryMass(r.stack.reduce((m, s) => m + slotMass(s), 0));
+  const grade = mixedFuelGrade(tank, tankGradeOf(r), 'water');
+  let gained = false;
+  if (!rocketMixRefusal(r, tank, grade) && redStepsBetween(dry + tank) > 0) {
+    const res = loadFuelUpLadder(dry, tank, 1);
+    r.tank = res.tank;
+    setRocketGrade(r, grade);
+    gained = res.steps > 0;
+  }
+  const where = (siteById(r.siteId) || {}).name || 'the aerobrake';
+  return {
+    ok: true,
+    note: ` Blue Planet: paid 1 aqua FINAO for the next descent at ${where}${gained ? ` and scooped 1 FT into the tank (tank ${round6(r.tank)})` : ' (the tank had no room for the scooped FT)'}.`,
+  };
 }
 
 
@@ -4135,6 +4221,7 @@ function applyMoveFreighter(state, op, player) {
   const frCrashIgnored = [];
   const frColonyWaived = [];
   for (const slug of generic) {
+    if (chaosModelImmune(state, player, slug)) { frColonyWaived.push(slug); continue; }
     if (frCrashSpace && slug === frCrashSpace && !isLanderBurnNode(slug)) { frCrashIgnored.push(slug); continue; }
     if (liftoffColonyWaives(state, from, slug)) { frColonyWaived.push(slug); continue; }
     rollItems.push({ slug, kind: hazardKind(slug) });
@@ -5060,14 +5147,24 @@ function applyMove(state, op, player) {
   // first, you may still take your one move afterward. (A move taken before a
   // prospect also can't be undone once the prospect rolls - that's the roll
   // barrier in applyUndo, not a move-after-prospect gate.)
-  if (!op.debug && player.movesRemaining <= 0) return fail('no_moves_left');
+  // WEAK STABILITY BOUNDARY: a second movement AFTER the stack already moved
+  // this turn. It is the only way past the one-move budget and the I4b stamp,
+  // and it is checked fully once the burn count is known (it must coast).
+  const wsb = !!op.wsbCoast;
+  if (wsb) {
+    if (!hasPrivilege(state, player, 'WEAK_STABILITY_BOUNDARY')) return fail('no_weak_stability_boundary');
+    if (!(player.rocket.stack || []).some((s) => s.id === HELIOCENTRICITY_CREW_ID)) return fail('wsb_needs_crew');
+    if (player.wsbCoastUsed) return fail('wsb_already_used');
+    if (!op.debug && (player.movesRemaining | 0) > 0) return fail('wsb_move_first');
+  }
+  if (!op.debug && !wsb && player.movesRemaining <= 0) return fail('no_moves_left');
   // An empty rocket has no thruster and can't burn, so it can't leave
   // LEO. Enforcing this keeps the "empty rocket == at LEO" invariant
   // true: the only way off LEO is to build/board a thruster first.
   if (player.rocket.stack.length === 0) return fail('empty_rocket');
   // I4b No Double Moves: a card that already moved this turn (on the freighter
   // or a Bernal, then transferred aboard) can't ride the rocket's move too.
-  if (!op.debug) {
+  if (!op.debug && !wsb) {
     const dm = firstMovedComponent(player.rocket.stack);
     if (dm) return fail('component_already_moved', { cardId: dm.id });
   }
@@ -5128,6 +5225,20 @@ function applyMove(state, op, player) {
     arrivals = path.path.slice(1);
   }
   if (dest === from) return fail('already_here');
+  // WEAK STABILITY BOUNDARY: the second movement is a coast - not one burn.
+  if (wsb && thisTurnBurns > 0) return fail('wsb_must_coast', { burns: thisTurnBurns });
+  // LIFE RAFT / LIFEBOAT: the rocket may fly as a Freighter (1B4) - Net Thrust 1
+  // (+1 Powersat), no fuel spent, burns capped at that thrust, and the
+  // Freighter's landing rules. Opt-in (the card says "may").
+  const asFreighter = !!op.asFreighter && !wsb;
+  if (asFreighter) {
+    const sumMass = player.rocket.stack.reduce((mm, s) => mm + slotMass(s), 0);
+    const raftWet = rocketDryMass(sumMass) + (Number(player.rocket.tank) || 0);
+    const raftFail = lifeRaftFail(state, player, raftWet);
+    if (raftFail) return raftFail;
+    const raftThrust = freighterNetThrust(hasPowersat(state, player));
+    if (thisTurnBurns > raftThrust) return fail('freighter_over_thrust', { thrust: raftThrust, burns: thisTurnBurns });
+  }
   // A thruster whose support chain is broken cannot BURN. Coasting is a
   // different thing: a 0-burn move spends no thrust at all, so it needs no
   // working engine - a ship whose sail was decommissioned by an aerobrake still
@@ -5135,7 +5246,7 @@ function applyMove(state, op, player) {
   // That is why this sits AFTER the burn count is known rather than beside the
   // other early guards. Skipped for op.debug so the route Simulate can still
   // price a move the player is building toward.
-  if (!op.debug && thisTurnBurns > 0) {
+  if (!op.debug && thisTurnBurns > 0 && !asFreighter) {
     // NO thruster at all is the same answer as a broken chain: you cannot burn.
     // rocketSupportStatus answers "is the ACTIVE thruster's chain satisfied", and
     // with no active thruster it has nothing to complain about - so a ship whose
@@ -5311,7 +5422,8 @@ function applyMove(state, op, player) {
   const acetWaivesLanding = acetLanderIdx >= 0
     && !segs.slice(acetLanderIdx + 1).some((sg) => isLanderBurnNode(sg.to));
   const paidBurns = Math.max(0, thisTurnBurns - serverBeltCredit - arcjetCredit - acetyleneCredit);
-  const stepsNeeded = Math.ceil(perBurn * paidBurns);
+  // A Life Raft / Lifeboat flies as a Freighter: no fuel steps at all.
+  const stepsNeeded = asFreighter ? 0 : Math.ceil(perBurn * paidBurns);
   const stepsAvail = blackStepsBetween(dryMass, wetMass);
   // Full burn-math breakdown - returned on a reject (detail) AND on the debug
   // dry-run (result.calc) so the client can show every intermediate value
@@ -5380,17 +5492,22 @@ function applyMove(state, op, player) {
   // could land unassisted on any site smaller than it (raised 2026-10-03). A
   // replay keeps the old reading, so a move that was legal when it was made
   // still reconstructs for undo.
+  // WEAK STABILITY BOUNDARY activates the Sundiver for the coast, so the
+  // second movement reads its thrust.
+  if (wsb) player.rocket.activeThrusterId = HELIOCENTRICITY_CREW_ID;
   const engineLive = !!op._replay || (!!player.rocket.activeThrusterId
     && rocketSupportStatus(player.rocket, player).operational);
-  const thrust = engineLive
-    ? activeNetThrust(player.rocket, powersat, solarBonus, powersatFutureBonus, playerCrewReactorKinds(player))
-    : 0;
+  const thrust = asFreighter
+    ? freighterNetThrust(powersat)
+    : (engineLive
+      ? activeNetThrust(player.rocket, powersat, solarBonus, powersatFutureBonus, playerCrewReactorKinds(player))
+      : 0);
   // Factory-assist liftoff / landing gate. A maneuver where net thrust
   // <= site size is only legal if a factory carries it (assist), which
   // is a hazard roll unless a colony waives it. No factory => hard block.
   // Liftoff gates the origin (skipped at LEO, siteId null); landing gates
   // the destination.
-  const liftG = from ? maneuverGate(state, from, thrust, { powersat, acetylene, replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) }) : { ok: true, needsRoll: false };
+  const liftG = from ? maneuverGate(state, from, thrust, { powersat, acetylene, isFreighter: asFreighter, replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) }) : { ok: true, needsRoll: false };
   if (!liftG.ok) return fail('cannot_liftoff', { thrust, siteSize: liftG.size, site: from, landerBurn: !!liftG.landerBurn });
   // Aerobrake landing: a destination that sits next to an aerobrake corridor
   // (the 🪂 symbol) can be reached by parachute - no thrust-to-land
@@ -5429,7 +5546,7 @@ function applyMove(state, op, player) {
     : flewTheCorridor;
   const landG = (aeroWaivesLanding || acetWaivesLanding)
     ? { ok: true, assist: false, needsRoll: false }
-    : maneuverGate(state, dest, thrust, { powersat, replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) });
+    : maneuverGate(state, dest, thrust, { powersat, isFreighter: asFreighter, replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) });
   if (!landG.ok) return fail('cannot_land', { thrust, siteSize: landG.size, site: dest, landerBurn: !!landG.landerBurn });
   // Did the parachute do the work? A size-10 Mars site is unreachable by thrust
   // - nothing in the deck exceeds 6 - so an aerobrake descent is the ONLY way
@@ -5455,6 +5572,8 @@ function applyMove(state, op, player) {
   const safeAeroSlugs = [];     // aero hazards the parachute waived (for playback)
   const colonyWaivedSlugs = []; // liftoff hazards a colony pad waived (for playback)
   const crashIgnoredSlugs = []; // H6c: first-space hazard ignored on a factory-assist liftoff
+  const chaosSlugs = [];        // POWER SERIES CHAOS MODEL: geyser / ring / spin / wind hazards
+  const cavitationSlugs = [];   // CAVITATION ENGINEERS: the turn's one ignored aerobrake
   // H6c Crash Hazard: the FIRST space moved into with a factory-assist liftoff
   // has its hazard IGNORED. Only the immediate liftoff-leg node (arrivals[0]),
   // and only when the liftoff actually uses factory-assist (liftG.assist). The
@@ -5467,6 +5586,8 @@ function applyMove(state, op, player) {
     // A safe-aerobrake card (parachute generator) carries the stack through
     // aerobrake hazards with no roll; skull hazards still roll.
     if (k === 'aero' && safeAero) { safeAeroSlugs.push(slug); continue; }
+    if (chaosModelImmune(state, player, slug)) { chaosSlugs.push(slug); continue; }
+    if (k === 'aero' && cavitationIgnores(state, player)) { cavitationSlugs.push(slug); continue; }
     // Factory-assist liftoff ignores the hazard on the first space entered
     // (H6c) - but NEVER when that space is a lander burn (or half-lander burn).
     // Factory-assist can't carry a maneuver into a lander burn (the H5e/H6c
@@ -5531,6 +5652,8 @@ function applyMove(state, op, player) {
   // Aerobrakes the parachute waived: recorded as safely passed (no roll) so
   // the client plays them back as a clean pass rather than a missing node.
   for (const slug of safeAeroSlugs) rolls.push({ slug, kind: 'aero', safe: true });
+  for (const slug of chaosSlugs) rolls.push({ slug, kind: hazardKind(slug), safe: true, chaosModel: true });
+  for (const slug of cavitationSlugs) rolls.push({ slug, kind: 'aero', safe: true, cavitation: true });
   for (const slug of colonyWaivedSlugs) rolls.push({ slug, kind: hazardKind(slug), safe: true });
   for (const slug of crashIgnoredSlugs) rolls.push({ slug, kind: hazardKind(slug), safe: true });
   for (const slug of radWaived) rolls.push({ slug, kind: 'rad', bypassed: true, tourismCycler: true });
@@ -5691,7 +5814,7 @@ function applyMove(state, op, player) {
     // radiation belt roll - the rolls play, but the ship rides through
     // unscathed. (User 2026-07-10.)
     if (radVal > 0 && !state.tutorial) beltDamage(radVal);
-    if (engineLostAt < 0 && engineLive
+    if (engineLostAt < 0 && engineLive && !asFreighter
         && !(player.rocket.activeThrusterId && rocketSupportStatus(player.rocket, player).operational)) {
       engineLostAt = ev.at;
       coastLimit = coastEnd(ev.at);
@@ -5722,7 +5845,10 @@ function applyMove(state, op, player) {
   if (finaoRefund > 0) player.aqua += finaoRefund;
   const enteredArrivals = haltedShort ? arrivals.slice(0, coastLimit + 1) : arrivals;
   state.rng.cursor = gen.cursor;
-  player.movesRemaining -= 1;
+  // The Weak Stability Boundary coast is the second movement: it spends its own
+  // once-per-turn use, not the (already spent) move.
+  if (wsb) player.wsbCoastUsed = true;
+  else player.movesRemaining -= 1;
 
   // Sail aerobrake decommission: a sail (Photon Heliogyro / Electric Sail /
   // Photon Kite Sail / Mag Sail) burns off if the stack passes ANY aerobrake
@@ -5879,7 +6005,13 @@ function applyMove(state, op, player) {
   // single burn - there was no way to see the count the cost was derived from
   // (user 2026-08-07, on a route with burn-r1gov AND burn-3ylxe in it).
   const burnWord = `${burnsFlown} burn${burnsFlown === 1 ? '' : 's'}`;
-  let log = `${player.name} burned ${stepsSpent} fuel steps over ${burnWord} from ${originName} to ${destName}.`;
+  let log = asFreighter
+    ? `${player.name}'s ${hasPrivilege(state, player, 'LIFEBOAT') ? 'Lifeboat' : 'Life Raft'} moved as a Freighter over ${burnWord} from ${originName} to ${destName}, burning no fuel.`
+    : (wsb
+      ? `${player.name} activated the Sundiver and coasted along the Weak Stability Boundary from ${originName} to ${destName} as a second movement.`
+      : `${player.name} burned ${stepsSpent} fuel steps over ${burnWord} from ${originName} to ${destName}.`);
+  if (chaosSlugs.length) log += ` Power Series Chaos Model: ${chaosSlugs.length} geyser / ring / spin / wind hazard${chaosSlugs.length === 1 ? '' : 's'} passed with no roll.`;
+  if (cavitationSlugs.length) log += ' Cavitation Engineers: the aerobrake was ignored (once per turn).';
   if (haltedShort) {
     const planned = (siteById(plannedDest) || {}).name || plannedDest;
     log += ` A radiation belt knocked out the thruster, so the ship `
@@ -12757,6 +12889,12 @@ function aerobrakeParkingHazard(state, player) {
   if (r && (r.stack || []).length && isAerobrakeNode(r.siteId)) {
     if (stackSafeAerobrake(r)) {
       pushNews(state, '\u{1FA82}', `${player.name}'s parked stack rode out the aerobrake (parachute generator, no roll).`);
+    } else if (r.bluePlanetFinao) {
+      pushNews(state, '\u{1FA82}', `${player.name}'s parked stack rode out the aerobrake (Blue Planet FINAO paid, no roll).`);
+    } else if (chaosModelImmune(state, player, r.siteId)) {
+      pushNews(state, '\u{1FA82}', `${player.name}'s parked stack rode out the winds (Power Series Chaos Model, no roll).`);
+    } else if (cavitationIgnores(state, player)) {
+      pushNews(state, '\u{1FA82}', `${player.name}'s parked stack ignored the aerobrake (Cavitation Engineers, no roll).`);
     } else {
       const d6 = roll();
       if (d6 === 1) {
@@ -12769,11 +12907,16 @@ function aerobrakeParkingHazard(state, player) {
     }
   }
 
+  // A Blue Planet FINAO covers exactly one parked descent.
+  if (r) delete r.bluePlanetFinao;
+
   // The FREIGHTER. It carries a hold, so a parachute generator riding in it
   // waives the roll exactly as it does for the rocket.
   const fr = player.freighter;
   if (fr && isAerobrakeNode(fr.siteId)) {
-    if (stackSafeAerobrake(fr)) {
+    if (chaosModelImmune(state, player, fr.siteId)) {
+      pushNews(state, '\u{1FA82}', `${player.name}'s parked Freighter rode out the winds (Power Series Chaos Model, no roll).`);
+    } else if (stackSafeAerobrake(fr)) {
       pushNews(state, '\u{1FA82}', `${player.name}'s parked Freighter rode out the aerobrake (parachute generator, no roll).`);
     } else {
       const d6 = roll();
@@ -13000,6 +13143,13 @@ function noteSirenUranianLanding(state, player) {
 
 function applyEndTurn(state, _op, player) {
   if (mustExomigrate(state, player)) return fail('must_exomigrate');
+  // BLUE PLANET: settle the coming aerobrake hazard now, before the turn passes.
+  let bluePlanetNote = '';
+  if (_op && _op.bluePlanet) {
+    const bp = applyBluePlanetFinao(state, player);
+    if (!bp.ok) return bp;
+    bluePlanetNote = bp.note;
+  }
   // V5 Hermes Fall: the mission is settled at the END of the turn that completed
   // it, not the instant the second factory lands - a player who industrializes
   // mid-turn still gets the rest of their turn (user 2026-08-03). Checked before
@@ -13037,6 +13187,7 @@ function applyEndTurn(state, _op, player) {
     player.opsRemaining -= 1;
     log = `${player.name} passed and took income (+${INCOME_AQUA} aqua; bank ${player.aqua}).`;
   }
+  log += bluePlanetNote;
 
   // V9 Sirens: First Contact / Heroism / Technology Trade all resolve here,
   // because all three trigger on ENDING the turn colocated with the other
