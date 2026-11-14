@@ -27,6 +27,7 @@ Every rule is grounded in a measurement of the real Sol board
 | Curves | every decorative node has exactly 2 edges (517 of 517) |
 | Dead ends | 5 non-site nodes with a single edge in 1514 (map exits / specials only) |
 | Asteroids | 139 of 188 sites are asteroids, in every zone: main belt (Ceres zone) 43, Jupiter zone 26 (Trojans), Neptune zone 20 (Kuiper belt), Saturn 17, Mars 12, Earth 10, Uranus 10; plus 14 comets |
+| Comets | 12 comet sites: 7 in the main-belt (Ceres) zone, then one or two each in the Jupiter, Saturn, Uranus and Neptune zones. Each hangs off a Hohmann pivot by its own route: 0 to 3 escape burns (more further out: Encke 1, Halley 2, McNaught 3), then 1 to 2 Lagrange points, then the site. Water-rich (hydration 4). Drawn as icy hexes with a tail streaming away from the Sun |
 | Jupiter's moons | the +4 flyby node sits on the transfer layer: free to reach from the Hohmann pivots through radiation belts, a crossroads of 6 routes. No moon route passes through it: Ganymede and Callisto come down a shared burn ladder off Jupiter's pivot (Callisto leaves it one burn earlier), Io and Europa down their own ladders through the radiation belts (`node docs/ad-astra/analyze-moon-branch.mjs`) |
 
 ## SM-1. Helio zones
@@ -117,6 +118,15 @@ for any other reason:
   Each group is a cluster: a ring pivot, one escape burn, a Lagrange point,
   then 1 to 3 asteroid sites straight off it (no landing, SM-5c).
 
+- **SM-5g. Comets.** A board has 1 to 3 comets, never in the star's zone:
+  one in the main-belt zone and the rest in the outer zones. A comet is one
+  water-rich site (size 1 to 3, hydration 3 to 5) on its own route: its ring
+  pivot -> escape burns (1 in the inner half of the zones, 2 beyond, 3 in the
+  outermost zone) -> a Lagrange orbit point -> a second Lagrange point (its
+  far orbit) -> the site. Its tail points away from its own star. Comets are
+  not counted in the gravity-well check (SM-4a): their burns buy an orbit,
+  not a climb out of a well.
+
 ## SM-6. Hazards
 
 - **SM-6a. Radiation.** Radiation nodes go in each star's innermost zone
@@ -178,3 +188,5 @@ for any other reason:
 8. No moon route touches a flyby point; every moon branches off its giant's
    escape ladder (SM-7a, 7b).
 9. At least 40% of sites are asteroids (SM-5f).
+10. Every comet sits outside its star's innermost zone, on its own route with
+    two Lagrange points (SM-5g).

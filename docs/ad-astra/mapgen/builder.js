@@ -45,6 +45,8 @@ const PRESETS = {
     { kind: 'dwarf', name: 'Vesper', zone: 3, angle: 245, size: 6 },
     { kind: 'giant', name: 'Epsilon b', zone: 4, angle: 118, size: 11, trojans: 2, moons: GIANT4('b') },
     { kind: 'belt', name: 'Kuiper', zone: 5, angle: 84, count: 5 },
+    { kind: 'comet', name: 'Comet Vey', zone: 3, size: 2 },
+    { kind: 'comet', name: 'Comet Ilse', zone: 5, size: 1 },
   ] },
   'Alpha Centauri (binary + Proxima)': { name: 'Alpha Centauri', stars: [{ name: 'Alpha Centauri A', type: 'yellow', zones: 4 }, { name: 'Alpha Centauri B', type: 'yellow', zones: 3, role: 'binary' }, { name: 'Proxima', type: 'red', zones: 2, role: 'distant' }], bodies: [
     { kind: 'planet', name: 'A I', zone: 0, size: 5, sites: 2 },
@@ -55,12 +57,14 @@ const PRESETS = {
     { kind: 'belt', name: 'B belt', star: 1, zone: 2, count: 4 },
     { kind: 'planet', name: 'Proxima b', star: 2, zone: 1, size: 7, sites: 2, atmosphere: true, cls: 'Marginal' },
     { kind: 'belt', name: 'Proxima rocks', star: 2, zone: 1, count: 2 },
+    { kind: 'comet', name: 'Comet Ardo', zone: 3, size: 2 },
   ] },
   "Red dwarf (Barnard's Star)": { name: "Barnard's Star", stars: [{ name: "Barnard's Star", type: 'red', zones: 4 }], bodies: [
     { kind: 'planet', name: 'Barnard b', zone: 0, size: 6, sites: 2 },
     { kind: 'planet', name: 'Barnard c', zone: 1, size: 4, sites: 1 },
     { kind: 'belt', name: 'Belt', zone: 2, count: 6 },
     { kind: 'belt', name: 'Outer rocks', zone: 3, count: 3 },
+    { kind: 'comet', name: 'Comet Barn', zone: 2, size: 2 },
   ] },
   'Sol-like (9 zones)': { name: 'Sol-like', stars: [{ name: 'Sol-like', type: 'yellow', zones: 9 }], bodies: [
     { kind: 'planet', name: 'Hot rock', zone: 0, size: 10, sites: 2 },
@@ -73,14 +77,18 @@ const PRESETS = {
     { kind: 'giant', name: 'Ringed', zone: 6, angle: 293, size: 10, moons: [{ name: 'R-I', size: 7, sites: 1 }, { name: 'R-II', size: 5, sites: 1 }] },
     { kind: 'giant', name: 'Ice giant', zone: 7, angle: 92, size: 10, moons: [{ name: 'I-I', size: 6, sites: 1 }] },
     { kind: 'belt', name: 'Kuiper', zone: 8, angle: 39, count: 6 }, { kind: 'dwarf', name: 'Far dwarf', zone: 8, angle: 136, size: 7 },
+    { kind: 'comet', name: 'Comet Encka', zone: 4, size: 2 }, { kind: 'comet', name: 'Comet Hal', zone: 7, size: 2 }, { kind: 'comet', name: 'Comet Mac', zone: 8, size: 1 },
   ] },
 };
 const FIRST = 'Epsilon Indi (yellow sun, gas giant)';
+// bump when the presets or the rules change, so a saved map from an older
+// builder doesn't hide them (the old one simply isn't loaded)
+const SPEC_KEY = 'aa-mapgen-spec-v3';
 // older saved specs had one star at the top level
 const upgrade = (s) => (s.stars ? s : { name: s.name, stars: [{ name: s.name || 'Star', type: s.starType || 'yellow', zones: s.zones || 6 }], bodies: s.bodies || [] });
-let SPEC = (() => { try { const s = JSON.parse(localStorage.getItem('aa-mapgen-spec')); if (s && s.bodies) return upgrade(s); } catch (e) { /* none */ } return structuredClone(PRESETS[FIRST]); })();
+let SPEC = (() => { try { const s = JSON.parse(localStorage.getItem(SPEC_KEY)); if (s && s.bodies) return upgrade(s); } catch (e) { /* none */ } return structuredClone(PRESETS[FIRST]); })();
 let MAP = null, RENDERER = null, PLANNER = null;
-const save = () => { try { localStorage.setItem('aa-mapgen-spec', JSON.stringify(SPEC)); } catch (e) { /* storage off */ } };
+const save = () => { try { localStorage.setItem(SPEC_KEY, JSON.stringify(SPEC)); } catch (e) { /* storage off */ } };
 const starOf = (bd) => SPEC.stars[Math.min(bd.star | 0, SPEC.stars.length - 1)];
 
 // ---------- map -> the original planner-map shape
@@ -102,8 +110,8 @@ function toPlanner(map) {
       sites.push({ ...base, type: 'sun', isWaypoint: false, name: n.label || 'Star', sunR: r }); continue;
     }
     if (n.kind === 'site') {
-      const type = n.bodyKind === 'planet' ? 'inner-planet' : n.bodyKind === 'moon' ? 'moon' : n.bodyKind === 'dwarf' ? 'dwarf' : 'asteroid';
-      const s = { ...base, isWaypoint: false, type, name: short(n), bodyKey: n.body, siteSize: `${n.size}`, hydration: n.ocean ? 4 : n.bodyKind === 'asteroid' ? 1 : n.size >= 7 ? 2 : 1, submarine: !!n.ocean,
+      const type = n.bodyKind === 'planet' ? 'inner-planet' : n.bodyKind === 'moon' ? 'moon' : n.bodyKind === 'dwarf' ? 'dwarf' : n.bodyKind === 'comet' ? 'comet' : 'asteroid';
+      const s = { ...base, isWaypoint: false, type, name: short(n), bodyKey: n.body, siteSize: `${n.size}`, hydration: n.ocean || n.bodyKind === 'comet' ? 4 : n.bodyKind === 'asteroid' ? 1 : n.size >= 7 ? 2 : 1, submarine: !!n.ocean,
         atmospheric: n.bodyKind === 'planet' && (SPEC.bodies.find((b) => b.name === n.body) || {}).atmosphere, astrobiology: ['Garden', 'Habitable'].includes(n.cls) };
       if (n.bodyKind === 'planet') s._palette = n.cls === 'Habitable' || n.cls === 'Garden' ? ART.earth : n.cls === 'Marginal' ? ART.mars : n.size >= 11 ? ART.venus : ART.mercury;
       if (n.bodyKind === 'moon') { if (!(n.body in moonArt)) moonArt[n.body] = Object.keys(moonArt).length; s._palette = n.ocean ? ART.europa : ART[MOON_ART[moonArt[n.body] % MOON_ART.length]]; }
@@ -152,7 +160,7 @@ function popup(id) {
   const acts = [];
   if (n && n.kind === 'site') {
     acts.push(info(`${n.bodyKind} · size ${n.size}${n.belt ? ` · ${n.belt}` : ''}`));
-    acts.push(info(n.bodyKind === 'moon' ? `Off ${n.moonOf}'s escape ladder (SM-7b)` : n.belt ? 'Asteroid group: one burn out (SM-5f)' : `${wellBurns(n.size)} escape, ${landingOf(n.size) === 'none' ? 'no' : landingOf(n.size)} lander (SM-4a)`));
+    acts.push(info(n.bodyKind === 'moon' ? `Off ${n.moonOf}'s escape ladder (SM-7b)` : n.bodyKind === 'comet' ? 'Comet: a water-rich far orbit (SM-5g)' : n.belt ? 'Asteroid group: one burn out (SM-5f)' : `${wellBurns(n.size)} escape, ${landingOf(n.size) === 'none' ? 'no' : landingOf(n.size)} lander (SM-4a)`));
   } else if (n) {
     const why = { transition: 'Zone transition (SM-3a)', escape: n.rung ? `${n.body} escape ladder, burn ${n.rung} (SM-7b)` : `${n.body} escape burn (SM-3b)`, landing: `${n.land === 'half' ? 'Half' : 'Full'} lander burn (SM-5c)`, orbit: `${n.body} orbit (SM-4a)`, flyby: `${n.body} slingshot: no moons from here (SM-7a)` }[n.purpose];
     acts.push(info(why || { hohmann: 'Hohmann pivot: free, slow (SM-2a)', radhaz: 'Radiation (SM-6a)', orbit: 'System edge arrival (SM-9a)', star: 'A star' }[n.kind] || n.kind));
@@ -163,7 +171,7 @@ function popup(id) {
 }
 
 // ---------- the editor panel
-const KINDS = { planet: 'Planet', giant: 'Gas giant', dwarf: 'Dwarf', asteroid: 'Asteroid', belt: 'Asteroid belt' };
+const KINDS = { planet: 'Planet', giant: 'Gas giant', dwarf: 'Dwarf', asteroid: 'Asteroid', belt: 'Asteroid belt', comet: 'Comet' };
 function bodyRow(bd, i) {
   const upd = (k, v) => { bd[k] = v; rebuild(); };
   const num = (k, lo, hi, label) => h('label', { class: 'mg-f' }, label, h('input', { type: 'number', min: lo, max: hi, value: bd[k] ?? '', onchange: (e) => upd(k, Math.max(lo, Math.min(hi, +e.target.value || lo))) }));
@@ -177,7 +185,7 @@ function bodyRow(bd, i) {
     h('div', { class: 'mg-fields' },
       SPEC.stars.length > 1 ? h('label', { class: 'mg-f' }, 'Star', h('select', { onchange: (e) => { bd.star = +e.target.value; bd.zone = Math.min(bd.zone | 0, starOf(bd).zones - 1); rebuild(); } }, SPEC.stars.map((x, k) => h('option', { value: k, selected: (bd.star | 0) === k }, ['A', 'B', 'C'][k])))) : null,
       h('label', { class: 'mg-f' }, 'Zone', h('select', { onchange: (e) => upd('zone', +e.target.value) }, Array.from({ length: st.zones }, (_, k) => h('option', { value: k, selected: (bd.zone | 0) === k }, k + 1)))),
-      bd.kind === 'belt' ? num('count', 1, 12, 'Rocks') : num('size', 1, 11, 'Size'),
+      bd.kind === 'belt' ? num('count', 1, 12, 'Rocks') : num('size', 1, bd.kind === 'comet' ? 3 : 11, 'Size'),
       h('label', { class: 'mg-f wide' }, `Angle ${bd.angle ?? 'auto'}`, h('input', { type: 'range', min: 0, max: 359, value: bd.angle ?? 0, oninput: (e) => { bd.angle = +e.target.value; e.target.previousSibling.textContent = `Angle ${bd.angle}`; }, onchange: () => rebuild() })),
       bd.kind === 'planet' ? num('sites', 1, 3, 'Sites') : null,
       bd.kind === 'planet' ? h('label', { class: 'mg-f' }, 'Air', h('input', { type: 'checkbox', checked: !!bd.atmosphere, onchange: (e) => upd('atmosphere', e.target.checked) })) : null,
@@ -205,7 +213,7 @@ function starRow(st, k) {
 function renderPanel() {
   const p = $('#mg-panel');
   const S0 = SPEC.stars[0];
-  const add = (kind, extra) => () => { SPEC.bodies.push({ kind, name: `${{ planet: 'Planet', giant: 'Giant', dwarf: 'Dwarf', asteroid: 'Rock', belt: 'Belt' }[kind]} ${SPEC.bodies.length + 1}`, zone: Math.min(S0.zones - 1, kind === 'giant' ? S0.zones - 2 : kind === 'belt' || kind === 'asteroid' ? Math.floor(S0.zones / 2) : 1), ...extra }); rebuild(); };
+  const add = (kind, extra) => () => { SPEC.bodies.push({ kind, name: `${{ planet: 'Planet', giant: 'Giant', dwarf: 'Dwarf', asteroid: 'Rock', belt: 'Belt', comet: 'Comet' }[kind]} ${SPEC.bodies.length + 1}`, zone: Math.min(S0.zones - 1, kind === 'giant' || kind === 'comet' ? S0.zones - 2 : kind === 'belt' || kind === 'asteroid' ? Math.floor(S0.zones / 2) : 1), ...extra }); rebuild(); };
   const hasRole = (r) => SPEC.stars.some((x) => x.role === r);
   const addStar = (role) => () => { SPEC.stars.push(role === 'binary' ? { name: `${S0.name} B`, type: 'yellow', zones: 3, role } : { name: `${S0.name} C`, type: 'red', zones: 2, role }); rebuild(); };
   const pass = MAP.report.filter((r) => r.ok).length;
@@ -223,7 +231,8 @@ function renderPanel() {
       h('button', { onclick: add('giant', { size: 11, trojans: 2, moons: [{ name: 'I', size: 8, sites: 2 }, { name: 'II', size: 6, sites: 1 }] }) }, '+ Gas giant'),
       h('button', { onclick: add('belt', { count: 6 }) }, '+ Asteroid belt'),
       h('button', { onclick: add('dwarf', { size: 6 }) }, '+ Dwarf'),
-      h('button', { onclick: add('asteroid', { size: 2 }) }, '+ Asteroid')),
+      h('button', { onclick: add('asteroid', { size: 2 }) }, '+ Asteroid'),
+      h('button', { onclick: add('comet', { size: 2 }) }, '+ Comet')),
     h('div', { class: 'mg-bodies' }, SPEC.bodies.map(bodyRow)),
     h('h3', {}, `Rule checks: ${pass}/${MAP.report.length}`),
     h('ul', { class: 'mg-report' }, MAP.report.map((r) => h('li', { class: r.ok ? 'ok' : 'no' }, r.ok ? '✓ ' : '✗ ', h('b', {}, r.rule), h('small', {}, r.detail)))),

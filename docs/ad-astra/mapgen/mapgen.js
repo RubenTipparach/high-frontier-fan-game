@@ -8,7 +8,7 @@
 // Spec:
 //   { name, starType, zones,                       (one star; or:)
 //     stars: [{ name, type: 'yellow'|'red'|'brown'|'white', zones, role: 'primary'|'binary'|'distant' }],
-//     bodies: [{ kind: 'planet'|'giant'|'dwarf'|'asteroid'|'belt', name, star (index, default 0),
+//     bodies: [{ kind: 'planet'|'giant'|'dwarf'|'asteroid'|'belt'|'comet', name, star (index, default 0),
 //                zone (0 = innermost), angle (deg, optional), size 1..11, sites 1..3,
 //                atmosphere, cls,
 //                moons: [{ name, size, sites, ocean }], trojans: n per side   (giants)
@@ -128,7 +128,7 @@ export function buildMap(spec) {
   const items = [];
   (spec.bodies || []).forEach((bd0, idx) => {
     const st = S[clamp(bd0.star | 0, 0, S.length - 1)];
-    const bd = { ...bd0, idx, st, zone: clamp(bd0.zone | 0, 0, st.N - 1) };
+    const bd = { ...bd0, idx, st, zone: clamp(bd0.zone | 0, bd0.kind === 'comet' ? 1 : 0, st.N - 1) }; // SM-5g: no comet in the star's zone
     if (bd.kind === 'belt') {
       const count = clamp(bd.count | 0 || 6, 1, 12); const nc = Math.ceil(count / 3);
       const sizes = bd.sizes && bd.sizes.length ? bd.sizes : [2, 3, 1, 4, 2, 3];
@@ -297,6 +297,15 @@ export function buildMap(spec) {
       });
       continue;
     }
+    if (it.kind === 'comet') { // SM-5g: pivot -> escape burns -> orbit -> far orbit -> the comet
+      const esc = k === st.N - 1 ? 3 : k >= st.N / 2 ? 2 : 1;
+      const lag1 = add('lagrange', P(L, a, st.mid(k) + 0.22 * w), { purpose: 'orbit', body: it.name, comet: true });
+      route(dep.id, lag1, Array.from({ length: esc }, (_, i) => ({ kind: 'burn', t: (i + 1) / (esc + 1), extra: { purpose: 'escape', body: it.name } })), 0.18, 16);
+      const lag2 = add('lagrange', P(L, a + 5, st.mid(k) + 0.36 * w), { purpose: 'orbit', body: it.name, comet: true });
+      route(lag1, lag2, [], 0.25, 14);
+      link(lag2, addSite(P(L, a + 9, st.mid(k) + 0.46 * w), { body: it.name, bodyKind: 'comet', size: clamp(it.size | 0 || 2, 1, 3), region: 0, starAt: { x: L.cx, y: L.cy } }));
+      continue;
+    }
     // planets, dwarfs, lone asteroids: pivot -> escape burns -> orbit -> landing -> sites
     const centre = P(L, a, st.mid(k) + 0.36 * w);
     const lag = add('lagrange', P(L, a, st.mid(k) + 0.24 * w), { purpose: 'orbit', body: it.name, fly: flybyOf(size) || null });
@@ -363,6 +372,7 @@ export function validateMap(map) {
   const wells = {}; const moonBad = []; let moonCount = 0;
   for (const s of nodes.filter((n) => n.kind === 'site')) {
     const d = wellDepth(s.id);
+    if (s.bodyKind === 'comet') continue; // SM-5g: a comet's burns buy an orbit, not a climb out of a well
     if (s.bodyKind === 'moon') { if (s.size <= 2) continue; moonCount++; if (d == null || d < 4) moonBad.push(s.body); continue; } // ladder 2+ and at least 1 of its own + landing
     (wells[s.size] = wells[s.size] || []).push(d);
   }
@@ -396,5 +406,9 @@ export function validateMap(map) {
   // 9. asteroids are most of the sites
   const rocks = ss.filter((n) => n.bodyKind === 'asteroid').length;
   check(`SM-5f asteroids at least ${Math.round(ASTEROID_SHARE * 100)}% of sites`, !ss.length || rocks / ss.length >= ASTEROID_SHARE, `${rocks} of ${ss.length} sites (${ss.length ? Math.round((100 * rocks) / ss.length) : 0}%)`);
+  // 10. comets: outside the star's zone, two Lagrange points on their route
+  const comets = ss.filter((n) => n.bodyKind === 'comet');
+  const badComet = comets.filter((c) => c.zone === 0 || nodes.filter((n) => n.comet && n.body === c.body && n.kind === 'lagrange').length !== 2);
+  check('SM-5g comets on their own far orbits', badComet.length === 0, badComet.length ? `${badComet.length} comets misplaced` : `${comets.length} comets`);
   return out;
 }

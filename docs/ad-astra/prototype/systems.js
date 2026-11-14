@@ -11,7 +11,7 @@
 // body angles.
 import { buildMap, zoneLayer } from '../mapgen/mapgen.js';
 
-export const SYSTEM_LAYOUT = 6; // 6 = SM rules with belts, slingshots, binaries
+export const SYSTEM_LAYOUT = 7; // 7 = SM rules with belts, comets, slingshots, binaries
 export { zoneLayer };
 const SPEC = ['C', 'S', 'M', 'V'];
 const CLASS_HYD = { Garden: [6, 9], Habitable: [4, 7], Marginal: [2, 5], Hostile: [0, 3] };
@@ -48,17 +48,20 @@ function specFor({ star, chits, rint, worldName, short }) {
   }
   // the main belt: a dwarf planet and a field of rocks, all mines (SM-5f)
   add({ kind: 'dwarf', name: `${short} dwarf`, zone: L.belt, size: rint(5, 7) }, { mine: true, big: true });
-  belt(`${short} belt`, 0, L.belt, rint(5, 8));
+  belt(`${short} belt`, 0, L.belt, rint(6, 9));
   // giants inside the system: a slingshot point and an escape ladder its moons branch off (SM-7)
   chits.comps.forEach((cmp, ci) => {
     const giant = cmp.kind === 'gas' ? `${short} ${String.fromCharCode(98 + ci)}` : `${short} ${cmp.kind === 'brown' ? 'brown' : 'white'} dwarf`;
     const nBig = cmp.kind === 'gas' ? 4 : cmp.kind === 'brown' ? 2 : 1;
     const moons = Array.from({ length: nBig }, (_, j) => ({ name: `${giant}-${ROMAN[j]}`, size: rint(6, 9), sites: 2, ocean: cmp.chit === 'Ocean' && j === Math.min(1, nBig - 1) }));
     moons.push({ name: `${giant} moonlet`, size: 2 });
-    add({ kind: 'giant', name: giant, giantKind: cmp.kind, zone: L.giants[ci] ?? L.zones - 1, size: cmp.kind === 'white' ? 10 : 11, moons, trojans: cmp.kind === 'gas' ? rint(1, 2) : 0 }, { giant: cmp.kind });
+    add({ kind: 'giant', name: giant, giantKind: cmp.kind, zone: L.giants[ci] ?? L.zones - 1, size: cmp.kind === 'white' ? 10 : 11, moons, trojans: cmp.kind === 'gas' ? 2 : 0 }, { giant: cmp.kind });
   });
   // the outer (Kuiper) belt in the outermost zone
   if (L.zones - 1 > L.belt) belt(`${short} outer belt`, 0, L.zones - 1, rint(3, 5));
+  // comets (SM-5g): one in the main-belt zone, 0-2 further out
+  const cometZones = [L.belt, ...Array.from({ length: rint(0, 2) }, () => rint(L.belt + 1, L.zones - 1))].filter((z) => z < L.zones);
+  cometZones.forEach((z, i) => add({ kind: 'comet', name: `Comet ${short} ${String.fromCharCode(65 + i)}`, zone: z, size: rint(1, 3) }, { comet: true }));
   // stellar companions: a binary partner beside it, or a distant star at the edge (SM-1e)
   comps.forEach((c) => {
     const si = stars.length;
@@ -82,7 +85,7 @@ export function buildSystem({ star, chits, rint, worldName, keep }) {
   const { spec, meta } = specFor({ star, chits, rint, worldName, short });
   // SM-10: rebuild with fresh angles until every check passes
   let map = buildMap(spec);
-  for (let tries = 0; tries < 30 && !map.report.every((r) => r.ok); tries++) {
+  for (let tries = 0; tries < 40 && !map.report.every((r) => r.ok); tries++) {
     for (const bd of spec.bodies) bd.angle = rint(0, 359);
     map = buildMap(spec);
   }
@@ -117,6 +120,10 @@ export function buildSystem({ star, chits, rint, worldName, keep }) {
       site({ ...base, kind: n.ocean ? 'ocean' : 'moon', name: `${n.body}: ${region}`, label: `${n.body.replace(`${short} `, '')} ${SHORT[region]}`, cls: 'Hostile', hyd: n.ocean ? rint(7, 9) : rint(0, 4), spec: n.ocean ? 'C' : base.spec, terra: false, moonOf: n.moonOf });
     } else {
       const lbl = n.body.replace(`${short} `, '').replace(/^belt/, 'Belt').replace(/^near rocks/, 'Rock').replace(/^outer belt/, 'Outer');
+      if (n.bodyKind === 'comet') { // SM-5g: a water-rich far orbit, mined like any small body
+        site({ ...base, kind: 'mine', comet: true, name: n.body, label: n.body.replace(`${short} `, ''), cls: null, hyd: rint(3, 5), spec: 'C', primary: true });
+        continue;
+      }
       site({ ...base, kind: 'mine', big: !!m.big, name: n.body, label: lbl.charAt(0).toUpperCase() + lbl.slice(1), cls: null, hyd: rint(0, n.bodyKind === 'asteroid' ? 2 : 4), primary: true });
     }
   }

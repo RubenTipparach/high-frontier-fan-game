@@ -127,9 +127,10 @@ come from the star's chits:
 | Inner rocky world | zone 1 | zone 1 | size 4-6, two regions, Hostile |
 | Near-star rocks | zone 2 | zone 1 | 1-2 asteroids |
 | Habitable-zone world (if its chit is not "No world") | zone 3 | zone 2 | size 6-9, three regions sharing the chit's class (H10); an atmosphere unless Hostile |
-| Main belt | zone 4 | zone 3 | a dwarf planet (size 5-7) and 5-8 asteroids (size 1-4) |
-| Giants | zones 5 and 6 | zone 4 | a gas giant has 4 large moons and 1-2 Trojan asteroids at each Lagrange point on its orbit; a brown dwarf 2 moons, a white dwarf 1; each also a moonlet. A buried-ocean chit makes the second large moon (the only one, for a white dwarf) an ocean world |
+| Main belt | zone 4 | zone 3 | a dwarf planet (size 5-7) and 6-9 asteroids (size 1-4) |
+| Giants | zones 5 and 6 | zone 4 | a gas giant has 4 large moons and 2 Trojan asteroids at each Lagrange point on its orbit; a brown dwarf 2 moons, a white dwarf 1; each also a moonlet. A buried-ocean chit makes the second large moon (the only one, for a white dwarf) an ocean world |
 | Outer belt | zone 6 | (none) | 3-5 asteroids |
+| Comets | zone 4, then 0-2 more in zones 5-6 | zone 3, then 0-2 in zone 4 | water-rich mines (hydration 3-5) on far orbits: 1 to 3 escape burns, then two Lagrange points (SM-5g) |
 
 **Giants (SM-7).** A giant's flyby point is a **slingshot** on the transfer
 layer: free to reach through a radiation belt, back out to the ring or (one
@@ -670,7 +671,8 @@ itself is still to be drawn [OPEN Z8]. Data from public catalogues as of Nov
 - **v0.8 (2026-11-14):** Giants (B7a, SM-7): the flyby point is a slingshot on
   the transfer layer, and moons branch off the escape ladder, never the
   slingshot. Asteroids are most of a system's sites: near-star rocks, a main
-  belt, Trojans, an outer belt (SM-5f). Binary and distant companion stars
+  belt, Trojans, an outer belt (SM-5f), plus 1 to 3 comets (SM-5g). Binary
+  and distant companion stars
   get their own systems on the same board (SM-1e): Alpha Centauri is A and B
   with Proxima far out.
 - **v0.7 (2026-11-14):** System boards follow the system map rules

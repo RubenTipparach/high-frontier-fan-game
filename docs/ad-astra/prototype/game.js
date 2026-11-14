@@ -1075,7 +1075,7 @@ function systemMapData(starId) { // AA-B7a, drawn exactly as the Sol board draws
     const st = siteBy[n.id];
     if (st) {
       const cls = st.cls;
-      const type = st.kind === 'world' ? 'inner-planet' : st.kind === 'moon' || st.kind === 'ocean' ? 'moon' : st.big ? 'dwarf' : 'asteroid';
+      const type = st.kind === 'world' ? 'inner-planet' : st.kind === 'moon' || st.kind === 'ocean' ? 'moon' : st.big ? 'dwarf' : st.comet ? 'comet' : 'asteroid';
       const x = baseSite({ id: n.id, id2: `aa-${starId}-${n.id}`, name: st.label || st.name, type, x: n.x, y: n.y, siteSize: `${st.size}${st.spec}`, hydration: st.hyd, bodyKey: st.body,
         submarine: st.kind === 'ocean', astrobiology: st.kind === 'world' && (cls === 'Garden' || cls === 'Habitable'), atmospheric: st.role === 'hz' && cls !== 'Hostile' });
       x._palette = st.kind === 'world' ? (st.role === 'rock' ? BODY_ART.mercury : cls === 'Marginal' ? BODY_ART.mars : cls === 'Hostile' ? BODY_ART.mercury : BODY_ART.earth)
@@ -1268,7 +1268,7 @@ function systemActions(starId, id) {
   const colonyHere = sysOf(starId).sites.some((x) => x.pop > 0);
   if (site) {
     if (site.label && site.label !== site.name) out.push(info(site.name));
-    out.push(info(site.kind === 'mine' ? 'Mine' : site.kind === 'ocean' ? 'Buried ocean, Hostile surface' : site.kind === 'moon' ? 'Moon, Hostile surface' : `${site.cls} world`));
+    out.push(info(site.kind === 'mine' ? (site.comet ? 'Comet, a water-rich mine' : 'Mine') : site.kind === 'ocean' ? 'Buried ocean, Hostile surface' : site.kind === 'moon' ? 'Moon, Hostile surface' : `${site.cls} world`));
     out.push(info(`Size ${site.size} · Hydration ${site.hyd} · Spectral ${site.spec}`));
     const status = [site.goo ? 'Consumed by grey goo' : site.claimed ? 'Claimed' : 'Unclaimed', site.cubes ? `${site.cubes} cubes (cap ${site.size})` : '', site.pop ? `Colony ${site.pop}${isOpen(site) ? ' (open)' : ' (domed)'}` : '', site.kind === 'world' && site.terra ? `Terraform ${site.step}/4` : ''].filter(Boolean).join(' · ');
     out.push(info(status));

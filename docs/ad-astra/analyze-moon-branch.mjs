@@ -31,3 +31,21 @@ for (const moon of ['Io', 'Europa', 'Ganymede', 'Callisto', 'Amalthea', 'Himalia
   const j = p[p.length - 1];
   console.log(`${moon}: joins the ladder at ${label(j)}, ${burnsFromPivot(j)} burns in from the pivot; ${ladder.indexOf(j) === 0 ? 'AT the flyby node' : 'below the flyby node'}`);
 }
+
+// Comets: how each comet site joins the board (real nodes out to the first
+// Hohmann pivot), and how many helio zones its route spans.
+import { makeRefId } from '../../data/planner-ids.js';
+import { NODE_TAGS } from '../../data/node-tags.js';
+const ZONE = JSON.parse(readFileSync('data/zone-assignments.json', 'utf8'));
+const id2 = {}; const seen2 = {};
+for (const k of ids) { let r = makeRefId(P[k], P[k].type); seen2[r] = (seen2[r] || 0) + 1; if (seen2[r] > 1) r = `${r}-${seen2[r]}`; id2[k] = r; }
+const realN = (k) => { const o = []; for (const f of adj[k]) { let p = k, c = f, g = 0; while (P[c].type === 'decorative' && g++ < 300) { const nx = adj[c].find((m) => m !== p); if (!nx) break; p = c; c = nx; } o.push(c); } return o; };
+console.log('\nComets');
+for (const k of ids.filter((x) => P[x].type === 'site' && /^comet/i.test(P[x].siteName || ''))) {
+  const prev = { [k]: null }; const q = [k]; let end = null;
+  while (q.length) { const n = q.shift(); if (P[n].type === 'hohmann') { end = n; break; } for (const m of realN(n)) if (!(m in prev)) { prev[m] = n; q.push(m); } }
+  const path = []; for (let c = end; c != null; c = prev[c]) path.unshift(c);
+  const zones = [...new Set(path.map((n) => ZONE[id2[n]]).filter(Boolean))];
+  const tags = NODE_TAGS[id2[k]] || {};
+  console.log(`${P[k].siteName}: ${path.reverse().map((n) => P[n].type).join(' > ')} | zones ${zones.join('/')}${tags.season ? ` | season ${tags.season}` : ''}`);
+}

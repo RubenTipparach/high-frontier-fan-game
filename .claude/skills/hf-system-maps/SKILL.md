@@ -110,6 +110,12 @@ Run `node docs/ad-astra/analyze-sol-map.mjs` to re-measure. The numbers:
    `trojans: n` expand into clusters: ring pivot -> one escape burn ->
    Lagrange -> up to 3 asteroid sites, fanned 22 px out. At least 40% of
    sites must be asteroids; the game's systems run 50%+.
+9. **Comets (SM-5g).** `kind: 'comet'` (never zone 0): ring pivot -> 1 / 2 / 3
+   escape burns (inner half / outer half / outermost zone) -> Lagrange -> a
+   second Lagrange -> the comet site (`bodyKind: 'comet'`, size 1-3). Name it
+   "Comet ..." and the renderer's comet palette applies. Comets skip the
+   well-depth check. The game puts one in the main-belt zone and 0-2 further
+   out (Sol: 12 comets, 7 in the belt zone).
 
 ## The spec
 
@@ -238,6 +244,10 @@ conversion to the planner-map shape `MapRenderer` already draws:
 - **Splicing the generator by a substring anchor** that also matched a new
   line deleted half of `buildMap`. Anchor on something unique, or rewrite the
   file whole, then run the node check.
+- **"Where are the asteroids?"** The builder stores the spec in the
+  viewer's browser. After a rules change an old saved map hid the new presets
+  (no belts). Bump `SPEC_KEY` in builder.js whenever presets or rules change.
+- **No comets.** Sol has 12; boards had none until SM-5g.
 - **Moons in the well-depth check against planets.** A size 9 moon is deeper
   than a size 10 planet by design (SM-4b). Worlds and moons are checked apart.
 - **Sol decor on other maps.** `solDecor = false` hides Sol's orbit guides,
