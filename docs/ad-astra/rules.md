@@ -1,6 +1,6 @@
 # High Frontier: Ad Astra - Rulebook
 
-**Draft v0.6 (2026-11-14).** A fan variant of High Frontier 4: All that
+**Draft v0.7 (2026-11-14).** A fan variant of High Frontier 4: All that
 takes the game past the edge of the Sol map. Not affiliated with Sierra Madre
 Games. Original rules; it borrows only the hooks HF4 already prints (TW
 thrusters, the three Ad Astra exits, the Ad Astra and Sunlens Futures).
@@ -114,22 +114,25 @@ when the star is first explored (G12) and stay face up for the game.
   moon of a gas giant, or a dark world circling a brown or white dwarf. A
   buried ocean is always Hostile on the surface but rich in water.
 
-**B7a. System board.** Every explored star gets a system board built from
-the Sol board itself: its bodies are clusters of the real Sol map, at Sol's
-scale, so a system reads exactly like Sol (burn ladders, Lagrange points,
-Hohmann transfers, radiation belts, curved routes, bodies with several sites):
-- a **gas giant** (or brown / white dwarf) companion is Jupiter's cluster:
-  you come into the giant's own well first, then branch out to its moons
-  (four large moons with two sites each, plus small moonlets). A buried-ocean
-  chit makes its second moon an ocean world;
-- the **habitable-zone world** is Mars's cluster: three surface regions of
-  one world plus two small moons;
-- the **inner rocky world** is Mercury's cluster (two regions);
-- the **asteroid belt** is the Ceres neighbourhood.
-Sol-style transfer chains join them into one gravity well: you arrive at the
-system's **edge** (G4) and each band further in costs more burns. A world's
-regions share its class and terraform track (H10); small moons and moonlets
-are mines; large moons are Hostile surfaces that take domed Colonies.
+**B7a. System board.** Every explored star gets a system board built by
+the **system map rules** (`system-map-rules.md`, SM-0 to SM-10), which are
+measured off the HF Sol board so a system reads like Sol: nested helio zones,
+a ring of Hohmann pivots per zone, one burn per zone crossing, a gravity well
+per body (more burns, bigger well), lander burns, radiation at the star and in
+the giants' belts. The board's bodies come from the star's chits:
+
+| Body | Yellow sun (6 zones) | Red / brown dwarf (4 zones) | What it is |
+|---|---|---|---|
+| Inner rocky world | zone 1 | zone 1 | size 4-6, two regions, Hostile |
+| Habitable-zone world (if its chit is not "No world") | zone 3 | zone 2 | size 6-9, three regions sharing the chit's class (H10); an atmosphere unless Hostile |
+| Asteroid belt | zone 4 | zone 3 | a dwarf planet (size 5-7) and 1-2 rocks (size 2-4), all mines |
+| Companions | zones 5 and 6 | zone 4 | a giant hub: a gas giant has 4 large moons, a brown dwarf 2, a white dwarf 1, plus a moonlet; a buried-ocean chit makes the second large moon (the only one, for a white dwarf) an ocean world |
+
+You arrive at the system's **edge** (G4), outside the outer zone. A moon is
+reached only through its giant's hub, so moons sit deep in the giant's well.
+Large moons are Hostile surfaces that take domed Colonies; moonlets, belt
+rocks and dwarf planets are mines. A gas giant's central Lagrange point is
+its skim point (G13).
 
 **B7b. In-system moves (free action).** As on the Sol map, entering a magenta
 burn pad (or landing burn) costs 1 burn; parking orbits, Hohmann dots and
@@ -646,6 +649,10 @@ itself is still to be drawn [OPEN Z8]. Data from public catalogues as of Nov
   Replicator cube). Each gets a rendered preview for sign-off before use.
 
 ### Changelog
+- **v0.7 (2026-11-14):** System boards follow the system map rules
+  (`system-map-rules.md`): helio zones, Hohmann rings, burns only for zone
+  crossings, escape and landing, wells by size, moons through their giant
+  (B7a). Replaces the boards cut out of the Sol map, whose routes went nowhere.
 - **v0.6 (2026-11-14):** System boards are built from the Sol board's own
   clusters (B7a): gas giants are hubs whose moons branch off their well;
   habitable worlds are Mars-like multi-region bodies; radiation belts (B7c);

@@ -1,5 +1,6 @@
 /* Map builder: the map fills the stage, the editor sits in a left panel.
    Colours come from the app's :root tokens (css/style.css). */
+:root { color-scheme: dark; } /* a deliberately single-dark page, like the game */
 html, body { margin: 0; height: 100%; background: var(--bg, #07060f); color: var(--ink, #e6e9ff); font: 13px/1.4 ui-sans-serif, system-ui, sans-serif; }
 #mg-app { display: grid; grid-template-columns: minmax(300px, 360px) minmax(0, 1fr); height: 100%; }
 @media (max-width: 760px) { #mg-app { grid-template-columns: minmax(0, 1fr); grid-template-rows: 62vh auto; height: auto; } #mg-stage { order: 1; } #mg-panel { order: 2; border-right: 0; } }

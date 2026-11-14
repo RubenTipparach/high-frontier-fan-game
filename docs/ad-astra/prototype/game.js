@@ -8,7 +8,8 @@
 import { renderCard } from '../../../js/game/card-ui.js';
 import { MapRenderer, LEO_ANCHOR } from '../../../js/game/render.js';
 import { loadPlannerMap, buildChains } from '../../../js/game/planner-map.js';
-import { buildSystem, SYSTEM_LAYOUT } from './systems.js';
+import { buildSystem, SYSTEM_LAYOUT, zoneLayer } from './systems.js';
+import { NODE_TAGS } from '../../../data/node-tags.js';
 import {
   TUNE, SOURCES, HOLDINGS, CLASSES, PROP_PER_MASS, FAMILY_GLYPH, CARD_BY_ID, DECKS, DECK_LABEL,
   SPINOFFS, TERRAFORM, EVENTS, STARS, STAR_BY_ID, ANCHORS, SEGMENTS, SPECIAL,
@@ -238,7 +239,7 @@ function explore(starId, how) { // AA-G12
   log(`Explored ${star.name} by ${how}: ${found.length ? found.join(', ') : 'no worlds of note'}. +1 VP (AA-G12).`, 'good');
   return true;
 }
-function genSystem(starId, keep = null) { // AA-B7a: built from the Sol board (systems.js)
+function genSystem(starId, keep = null) { // AA-B7a: built by the system map rules (systems.js -> mapgen)
   const st = S.stars[starId];
   const oldHz = keep && keep.find((x) => (x.role === 'hz') || x.id === 'hz');
   const keptName = oldHz ? String(oldHz.body || oldHz.name).split(':')[0] : null;
@@ -250,7 +251,7 @@ function migrateSystems() {
   for (const [starId, sys] of Object.entries(S.systems || {})) {
     if (sys.layout === SYSTEM_LAYOUT) continue;
     const fresh = genSystem(starId, sys.sites);
-    Object.assign(sys, { nodes: fresh.nodes, edges: fresh.edges, sites: fresh.sites, display: fresh.display, layout: SYSTEM_LAYOUT });
+    Object.assign(sys, { nodes: fresh.nodes, edges: fresh.edges, sites: fresh.sites, display: fresh.display, zones: fresh.zones, layout: SYSTEM_LAYOUT });
     if (S.ship.orbit === starId && !sys.nodes.some((n) => n.id === S.ship.sysNode)) S.ship.sysNode = 'high';
     delete _sysData[starId]; delete _adjCache[starId];
   }
@@ -1024,6 +1025,7 @@ const BODY_ART = {
   jupiter: { base: '#c8a373', light: '#f3dab0', dark: '#5a3e22' },
   brownDwarf: { base: '#7c3f1d', light: '#c27a45', dark: '#2a1208', atmosphere: 'rgba(190, 90, 40, 0.35)' },
   whiteDwarf: { base: '#e8f1ff', light: '#ffffff', dark: '#8aa0c0', atmosphere: 'rgba(220, 235, 255, 0.6)' },
+  ceres: { base: '#9c9387', light: '#d4cbbd', dark: '#2f2b25' },
 };
 let _starData = null;
 function starMapData() { // AA-B6, drawn in HF node idioms
@@ -1056,22 +1058,27 @@ function systemMapData(starId) { // AA-B7a, drawn exactly as the Sol board draws
   if (_sysData[starId]) return _sysData[starId];
   const sys = sysOf(starId); const star = STAR_BY_ID[starId];
   const siteBy = Object.fromEntries(sys.sites.map((x) => [x.id, x]));
-  const MOON_ART = { io: 'io', europa: 'europa', ganymede: 'ganymede', callisto: 'callisto' };
-  const sites = [baseSite({ id: 'star', name: star.name, type: star.type === 'brown' ? 'dwarf' : 'sun', x: 700, y: 450 })];
+  const MOON_ART = ['io', 'ganymede', 'callisto'];
+  const moonIdx = {};
+  const sites = [baseSite({ id: 'star', name: star.name, type: 'sun', x: 700, y: 450, sunR: star.type === 'yellow' ? 24 : star.type === 'red' ? 18 : 14 })];
   for (const n of sys.nodes) {
     const st = siteBy[n.id];
     if (st) {
       const cls = st.cls;
       const type = st.kind === 'world' ? 'inner-planet' : st.kind === 'moon' || st.kind === 'ocean' ? 'moon' : st.big ? 'dwarf' : 'asteroid';
-      const x = baseSite({ id: n.id, name: st.name, type, x: n.x, y: n.y, siteSize: `${st.size}${st.spec}`, hydration: st.hyd, bodyKey: st.body,
+      const x = baseSite({ id: n.id, id2: `aa-${starId}-${n.id}`, name: st.label || st.name, type, x: n.x, y: n.y, siteSize: `${st.size}${st.spec}`, hydration: st.hyd, bodyKey: st.body,
         submarine: st.kind === 'ocean', astrobiology: st.kind === 'world' && (cls === 'Garden' || cls === 'Habitable'), atmospheric: st.role === 'hz' && cls !== 'Hostile' });
       x._palette = st.kind === 'world' ? (st.role === 'rock' ? BODY_ART.mercury : cls === 'Marginal' ? BODY_ART.mars : cls === 'Hostile' ? BODY_ART.mercury : BODY_ART.earth)
-        : (st.kind === 'moon' || st.kind === 'ocean') ? BODY_ART[MOON_ART[st.solBody] || 'callisto'] : undefined;
+        : st.kind === 'ocean' ? BODY_ART.europa
+        : st.kind === 'moon' ? BODY_ART[MOON_ART[(moonIdx[st.body] ??= Object.keys(moonIdx).length) % MOON_ART.length]]
+        : st.big ? BODY_ART.ceres : undefined;
       if (st.role === 'hz') x.haloR = 20; // the habitable world reads bigger, like Earth
       sites.push(x);
     } else {
       const isDeco = n.kind === 'decorative';
-      sites.push(baseSite({ id: n.id, name: n.label || '', type: isDeco ? 'decorative' : n.kind, isDecorative: isDeco, x: n.x, y: n.y, landing: n.land || null, hazard: n.kind === 'radhaz' }));
+      const id2 = `aa-${starId}-${n.id}`;
+      if (n.tags && Object.keys(n.tags).length) NODE_TAGS[id2] = { ...n.tags }; // lander / half / hazard / aerobrake glyphs (SM-5c, 6c)
+      sites.push(baseSite({ id: n.id, id2, name: n.label || '', type: isDeco ? 'decorative' : n.kind, isDecorative: isDeco, x: n.x, y: n.y, landing: n.land ? (n.land === 'half' ? 0.5 : 1) : null, hazard: n.kind === 'radhaz' || !!(n.tags && n.tags.hazard), flybyBoost: n.fly || null }));
     }
   }
   for (const b of sys.display || []) { // the giants themselves, as the Sol board draws Jupiter
@@ -1095,7 +1102,7 @@ function rendererFor(key) {
   const data = key === 'stars' ? starMapData() : key === 'sol' ? SOL_DATA : systemMapData(key);
   // the renderer hands onSelect the clicked node OBJECT, not its id
   const renderer = new MapRenderer(host, { data, onSelect: (hit) => openPopup(key, hit && typeof hit === 'object' ? hit.id : hit) });
-  renderer.options.initialZoom = key === 'system' ? 1.5 : 1;
+  renderer.options.initialZoom = 1;
   // open on the whole map (the star neighbourhood, or the whole system), not
   // zoomed onto the rocket the way the Sol board opens
   renderer._initialViewDone = true;
@@ -1106,6 +1113,11 @@ function rendererFor(key) {
   // (system maps are as dense as Sol now, so they keep Sol's fade: names
   // appear as you zoom in; only the star map shows its names zoomed out)
   if (key === 'stars') { renderer.options.labelFadeMin = 0.4; renderer.options.labelFadeMax = 0.7; }
+  if (key !== 'stars' && key !== 'sol' && sysOf(key)) { // a system board: tint its helio zones as Sol's are (SM-1c)
+    Object.assign(renderer.options, { visualizeZones: true, zoneFill: true, zoneOpacity: 0.14 });
+    const z = zoneLayer(sysOf(key).zones || 6);
+    renderer.setCanonicalZones({ polys: z.polys, colors: z.colors, order: z.order });
+  }
   try { renderer.setAmbientRocketCount(0); } catch (e) { /* optional */ }
   RENDERERS[key] = { renderer, host, data, fresh: true };
   return RENDERERS[key];
@@ -1121,7 +1133,11 @@ function syncMaps() {
   const R = cur.renderer; const sh = S.ship;
   // insets: the hand strip and the open sidepanel cover part of the stage
   const hand = $('#aa-hand'); const side = $('#aa-side');
-  try { R.setInsets({ bottom: hand ? hand.offsetHeight : 0, right: side && PANE ? side.offsetWidth : 48 }); } catch (e) { /* older renderer */ }
+  // the map stops at the hand strip, so the whole board fits above it at fit
+  // zoom (the renderer cannot zoom out past 1); the panel still overlays it
+  const bottom = `${hand ? hand.offsetHeight : 0}px`;
+  if (cur.host.style.bottom !== bottom) { cur.host.style.bottom = bottom; try { R._resize(); } catch (e) { /* sizing */ } }
+  try { R.setInsets({ bottom: 0, right: side && PANE ? side.offsetWidth : 48 }); } catch (e) { /* older renderer */ }
   if (cur.fresh) {
     cur.fresh = false;
     // open framed on the whole map, inside the area the hand and panel leave free
@@ -1238,8 +1254,10 @@ function systemActions(starId, id) {
   const fops = S.ops.frontier < 1 || !!S.over;
   const colonyHere = sysOf(starId).sites.some((x) => x.pop > 0);
   if (site) {
-    out.push(info(`${site.kind === 'mine' ? 'Mine' : site.kind === 'ocean' ? 'Buried ocean, Hostile surface' : site.kind === 'moon' ? 'Moon, Hostile surface' : site.cls} . Size ${site.size} . Hydration ${site.hyd} . Spectral ${site.spec}`));
-    const status = [site.goo ? 'Consumed by grey goo' : site.claimed ? 'Claimed' : 'Unclaimed', site.cubes ? `${site.cubes} cubes (cap ${site.size})` : '', site.pop ? `Colony ${site.pop}${isOpen(site) ? ' (open)' : ' (domed)'}` : '', site.kind === 'world' && site.terra ? `Terraform ${site.step}/4` : ''].filter(Boolean).join(' . ');
+    if (site.label && site.label !== site.name) out.push(info(site.name));
+    out.push(info(site.kind === 'mine' ? 'Mine' : site.kind === 'ocean' ? 'Buried ocean, Hostile surface' : site.kind === 'moon' ? 'Moon, Hostile surface' : `${site.cls} world`));
+    out.push(info(`Size ${site.size} · Hydration ${site.hyd} · Spectral ${site.spec}`));
+    const status = [site.goo ? 'Consumed by grey goo' : site.claimed ? 'Claimed' : 'Unclaimed', site.cubes ? `${site.cubes} cubes (cap ${site.size})` : '', site.pop ? `Colony ${site.pop}${isOpen(site) ? ' (open)' : ' (domed)'}` : '', site.kind === 'world' && site.terra ? `Terraform ${site.step}/4` : ''].filter(Boolean).join(' · ');
     out.push(info(status));
     if (!site.goo) {
       const pc = prospectorCard();
@@ -1261,8 +1279,9 @@ function systemActions(starId, id) {
     out.push(info('A giant at the centre of its own gravity well. Come in through its Lagrange points, then branch out to its moons. Skim fuel at its central Lagrange point.'));
   } else {
     const n = sysOf(starId).nodes.find((q) => q.id === id);
-    if (n) out.push(info(n.kind === 'burn' ? (n.land ? 'Landing burn: entering it costs 1 burn' : 'Burn pad: entering it costs 1 burn') : n.kind === 'orbit' ? 'The system edge: where ships arrive' : n.kind === 'lagrange' ? (n.label || 'Lagrange point: free to enter') : n.kind === 'hohmann' ? 'Hohmann transfer: free to enter' : n.kind === 'radhaz' ? 'Radiation belt: free, but roll for damage (AA-B7c)' : (n.label || '')));
-    if (here && n && n.body === 'gas') out.push({ label: '⛽ Skim gas giant', disabled: fops || sh.sysNode !== id, onClick: act(opSkim) });
+    const burnWhy = (x) => (x.land ? `${x.land === 'half' ? 'Half landing' : 'Landing'} burn${x.body ? ` onto ${x.body}` : ''}` : x.purpose === 'transition' ? 'Zone transition burn' : x.purpose === 'escape' ? `Escape burn, ${x.body}'s well` : 'Burn pad');
+    if (n) out.push(info(n.kind === 'burn' ? `${burnWhy(n)}: entering it costs 1 burn` : n.kind === 'orbit' ? 'The system edge: where ships arrive' : n.kind === 'lagrange' ? (n.label || 'Lagrange point: free to enter') : n.kind === 'hohmann' ? 'Hohmann transfer: free to enter' : n.kind === 'radhaz' ? 'Radiation belt: free, but roll for damage (AA-B7c)' : (n.label || '')));
+    if (here && n && n.skim) out.push({ label: '⛽ Skim gas giant', disabled: fops || sh.sysNode !== id, onClick: act(opSkim) });
   }
   if (here && sh.sysNode !== id && (site || sysOf(starId).nodes.some((q) => q.id === id))) {
     const c = canSysMove(starId, id);

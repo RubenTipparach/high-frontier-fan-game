@@ -81,7 +81,8 @@ Run `node docs/ad-astra/analyze-sol-map.mjs` to re-measure. The numbers:
    Lagrange. `landingOf(size)`: 7+ full lander burn, 4-6 half lander burn,
    1-3 none (straight from orbit). An atmosphere planet gets an aerobrake +
    hazard on one landing (SM-6c). Sites fan out on the far side of the body,
-   at least 28 world px apart INCLUDING sites on the same body (SM-5e).
+   at least `SITE_GAP` (32) world px apart INCLUDING sites on the same body
+   (SM-5e). Moons fan round the far side of the hub, alternating near / far.
 7. **Giants (SM-7).** A giant is a hub you cannot land on: departure pivot ->
    3 escape burns -> giant Lagrange (+4 / +2 flyby). Moons branch FROM THE HUB
    ONLY: hub -> radiation belt node -> `moonEscape(size)` burns -> moon
@@ -195,7 +196,10 @@ conversion to the planner-map shape `MapRenderer` already draws:
 - **Burn chains that don't mean anything** (a row of burns along a route).
   Every burn has a `purpose`; SM-10 check 3 fails otherwise.
 - **The spacing check skipped same-body sites**, so a moon's two hexes sat
-  on each other while the check said "clear". It now checks every pair.
+  on each other while the check said "clear". It now checks every pair. At
+  28 px, neighbouring moons of a 4-moon giant still touched in about 8% of
+  rolls, and long labels (`Epsilon b-I Far`) ran together: 32 px and short
+  labels fixed both. Stress test every change across many seeds, not one.
 - **Moons in the well-depth check against planets.** A size 9 moon is deeper
   than a size 10 planet by design (SM-4b). Worlds and moons are checked apart.
 - **Sol decor on other maps.** `solDecor = false` hides Sol's orbit guides,

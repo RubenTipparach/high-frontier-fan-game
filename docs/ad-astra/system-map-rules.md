@@ -94,9 +94,10 @@ for any other reason:
   bodies are reached straight from orbit).
 - **SM-5d.** A body's sites sit around the body, close enough to share one
   sphere (one body = one sphere, however many sites).
-- **SM-5e.** Sites keep short labels (the body name plus a short region word),
-  and sit at least 28 world px apart, sites on the same body included, so hexes
-  and labels never stack.
+- **SM-5e.** Sites keep short labels (the body name plus a short region word;
+  a moon or belt rock drops the star's name: `b-I Near`, `Belt C`), and sit at
+  least 32 world px apart, sites on the same body included, so hexes and labels
+  never stack.
 
 ## SM-6. Hazards
 
@@ -142,4 +143,4 @@ for any other reason:
    sites sit at least 4 burns deep, under their giant's well (SM-4b).
 5. Every site has one edge and is reachable from arrival (SM-5b, 8c).
 6. Radiation only in the star's zone and giant belts (SM-6a).
-7. Sites at least 28 world px apart (SM-5e).
+7. Sites at least 32 world px apart (SM-5e).

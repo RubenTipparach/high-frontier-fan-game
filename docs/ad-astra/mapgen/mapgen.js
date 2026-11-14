@@ -20,6 +20,7 @@ export const landingOf = (size) => (size >= 7 ? 'full' : size >= 4 ? 'half' : 'n
 export const flybyOf = (size) => (size >= 11 ? 4 : size >= 10 ? 2 : size >= 8 ? 1 : 0);
 export const moonEscape = (size) => Math.max(1, wellBurns(size) - 1); // SM-4b: the giant's well comes first
 
+export const SITE_GAP = 32; // SM-5e: world px between any two sites
 const deg = (a) => (a * Math.PI) / 180;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const round1 = (v) => Math.round(v * 10) / 10;
@@ -31,6 +32,19 @@ export function zoneBounds(n) { // SM-1a: b[0]=0 (star) .. b[n]=outer edge
 }
 const P = (a, r) => ({ x: round1(WORLD.cx + Math.cos(deg(a)) * r * WORLD.kx), y: round1(WORLD.cy + Math.sin(deg(a)) * r * WORLD.ky) });
 export function radiusOf(x, y) { return Math.hypot((x - WORLD.cx) / WORLD.kx, (y - WORLD.cy) / WORLD.ky); }
+
+// SM-1c: the zone bands as the renderer draws them (setCanonicalZones), with
+// the Sol palette sampled inner to outer. Depends only on the zone count, so a
+// saved system can keep just the count and redraw its bands.
+export function zoneLayer(N) {
+  const b = zoneBounds(N);
+  return {
+    order: Array.from({ length: N }, (_, k) => `Z${k + 1}`),
+    colors: Object.fromEntries(Array.from({ length: N }, (_, k) => [`Z${k + 1}`, SOL_ZONE_PALETTE[Math.round((k * 8) / Math.max(1, N - 1))]])),
+    polys: Object.fromEntries(Array.from({ length: N }, (_, k) => [`Z${k + 1}`, [Array.from({ length: 48 }, (_, i) => P((i * 360) / 48, b[k + 1]))]])),
+    bounds: b,
+  };
+}
 
 export function buildMap(spec) {
   const N = clamp(spec.zones | 0 || 6, 4, 9);
@@ -120,7 +134,7 @@ export function buildMap(spec) {
   const placeSites = (bodyName, kind, centre, count, around, dist, size, landing, atmos, extra = {}, spreadDeg = 62) => {
     const ids = [];
     for (let i = 0; i < count; i++) {
-      const ang = around + (count === 1 ? 0 : (i - (count - 1) / 2) * spreadDeg); // SM-5e: 28 px apart
+      const ang = around + (count === 1 ? 0 : (i - (count - 1) / 2) * spreadDeg); // SM-5e: SITE_GAP apart
       const pos = { x: round1(centre.x + Math.cos(deg(ang)) * dist), y: round1(centre.y + Math.sin(deg(ang)) * dist) };
       const sid = add('site', pos, { body: bodyName, bodyKind: kind, size, region: i, ...extra });
       sites.push(byId[sid]); ids.push({ sid, pos });
@@ -151,8 +165,11 @@ export function buildMap(spec) {
       bodies.push({ id: `${lag}-body`, name: bd.name, kind: bd.giantKind || 'gas', x: centre.x, y: centre.y, size });
       const moons = bd.moons || [];
       moons.forEach((m, i) => { // SM-7b: hub -> radiation belt -> moon well -> moon orbit -> landing -> sites
-        const spread = moons.length === 1 ? 0 : (i - (moons.length - 1) / 2) * (150 / Math.max(1, moons.length - 1));
-        const ma = outAng + spread; const md = 62 + (i % 2) * 18;
+        // fan the moons round the far side of the hub, alternating near / far so
+        // neighbouring moons' sites stay SITE_GAP apart (SM-5e)
+        const fan = Math.min(200, 56 * (moons.length - 1));
+        const spread = moons.length === 1 ? 0 : (i - (moons.length - 1) / 2) * (fan / Math.max(1, moons.length - 1));
+        const ma = outAng + spread; const md = 62 + (i % 2) * 26;
         const mc = { x: round1(centre.x + Math.cos(deg(ma)) * md), y: round1(centre.y + Math.sin(deg(ma)) * md * 0.85) };
         const msize = clamp(m.size | 0 || 6, 1, 9);
         if (msize <= 2) { // SM-7c moonlet: one burn, one site
@@ -163,23 +180,18 @@ export function buildMap(spec) {
         const mlag = add('lagrange', { x: round1(centre.x + Math.cos(deg(ma)) * (md - 16)), y: round1(centre.y + Math.sin(deg(ma)) * (md - 16) * 0.85) }, { purpose: 'orbit', body: m.name });
         const me = moonEscape(msize);
         route(lag, mlag, [{ kind: 'radhaz', t: 0.3 }, ...Array.from({ length: me }, (_, j) => ({ kind: 'burn', t: 0.45 + (0.45 * (j + 1)) / (me + 1), extra: { purpose: 'escape', body: m.name } }))], 0.12, 14);
-        const ss = placeSites(m.name, 'moon', mc, clamp(m.sites | 0 || 1, 1, 2), ma, 21, msize, landingOf(msize), false, { moonOf: bd.name, ocean: !!m.ocean }, 90);
+        const ss = placeSites(m.name, 'moon', mc, clamp(m.sites | 0 || 1, 1, 2), ma, 24, msize, landingOf(msize), false, { moonOf: bd.name, ocean: !!m.ocean }, 84);
         ss.forEach((s, j) => landTo(mlag, s.sid, landingOf(msize), j === 0 && msize >= 8, false));
       });
     } else {
       const count = bd.kind === 'planet' ? clamp(bd.sites | 0 || 1, 1, 3) : 1; // SM-5a
       const landing = landingOf(size);
-      const dist = bd.kind === 'planet' ? 30 : 14;
+      const dist = bd.kind === 'planet' ? 33 : 14;
       const ss = placeSites(bd.name, bd.kind, centre, count, outAng, dist, size, landing, !!bd.atmosphere, { cls: bd.cls || null });
       ss.forEach((s, j) => landTo(lag, s.sid, landing, false, !!bd.atmosphere && j === 0)); // SM-6c aerobrake on one landing
     }
   }
-  const zones = {
-    order: Array.from({ length: N }, (_, k) => `Z${k + 1}`),
-    colors: Object.fromEntries(Array.from({ length: N }, (_, k) => [`Z${k + 1}`, SOL_ZONE_PALETTE[Math.round((k * 8) / Math.max(1, N - 1))]])),
-    polys: Object.fromEntries(Array.from({ length: N }, (_, k) => [`Z${k + 1}`, [Array.from({ length: 48 }, (_, i) => P((i * 360) / 48, b[k + 1]))]])),
-    bounds: b,
-  };
+  const zones = zoneLayer(N);
   const map = { spec, nodes, edges, sites, bodies, zones };
   map.report = validateMap(map);
   return map;
@@ -248,7 +260,7 @@ export function validateMap(map) {
   check('SM-6a radiation only near the star or a giant', stray.length === 0, stray.length ? `${stray.length} stray radiation nodes` : `${nodes.filter((n) => n.kind === 'radhaz').length} radiation nodes`);
   // 7. site spacing
   const ss = nodes.filter((n) => n.kind === 'site'); let close = 0;
-  for (let i = 0; i < ss.length; i++) for (let j = i + 1; j < ss.length; j++) if (Math.hypot(ss[i].x - ss[j].x, ss[i].y - ss[j].y) < 28) close++; // same body too: hexes must not stack
-  check('SM-5e sites at least 28 px apart', close === 0, close ? `${close} pairs too close` : 'labels clear');
+  for (let i = 0; i < ss.length; i++) for (let j = i + 1; j < ss.length; j++) if (Math.hypot(ss[i].x - ss[j].x, ss[i].y - ss[j].y) < SITE_GAP) close++; // same body too: hexes must not stack
+  check(`SM-5e sites at least ${SITE_GAP} px apart`, close === 0, close ? `${close} pairs too close` : 'labels clear');
   return out;
 }
