@@ -270,6 +270,21 @@ const PALETTE_DEFAULTS = {
 // Pick the palette for a site by matching a known body name keyword
 // first, then falling back to the type default. Cheap substring
 // check on lowercased name; precompute once on first paint.
+// The painted, turning sphere (planet-texture.js) each HF body palette reads
+// as; a site may name its own `planetStyle` instead (the Ad Astra maps do).
+const PLANET_STYLE_BY_PALETTE = new Map(Object.entries({
+  mercury: 'rock', venus: 'venus', earth: 'earth', luna: 'rock', mars: 'mars', jupiter: 'gas', io: 'volcanic',
+  europa: 'ice', ganymede: 'rock', callisto: 'rock', saturn: 'gas', titan: 'venus', enceladus: 'ice', iapetus: 'rock',
+  uranus: 'ice-giant', neptune: 'ice-giant', pluto: 'rock', charon: 'rock', ceres: 'rock', vesta: 'rock',
+}).map(([k, v]) => [BODY_PALETTES[k], v]));
+const mq = (q) => { let m = null; return () => { try { m = m || window.matchMedia(q); return m.matches; } catch { return false; } }; };
+const REDUCED_MOTION = mq('(prefers-reduced-motion: reduce)'); // turning planets hold still
+const COARSE_POINTER = mq('(pointer: coarse)'); // a phone or tablet: fewer turning steps
+function planetStyleFor(site, pal) {
+  if (site.planetStyle) return site.planetStyle;
+  return PLANET_STYLE_BY_PALETTE.get(pal) || (pal === PALETTE_DEFAULTS.asteroid || pal === BODY_PALETTES.comet ? null : 'rock');
+}
+
 function paletteFor(site) {
   if (site._palette) return site._palette;
   const n = (site.name || '').toLowerCase();
@@ -1044,10 +1059,9 @@ export class MapRenderer {
       // asteroid belt. Maps of other places (e.g. the Ad Astra star map and
       // its star systems) turn this off; Sol keeps it.
       solDecor: true,
-      // Painted, turning body spheres (planet-texture.js) for sites that name a
-      // `planetStyle`. Off by default: only the Ad Astra mockups turn it on;
-      // every other site keeps the classic shaded sphere.
-      texturedBodies: false,
+      // Painted, turning body spheres (planet-texture.js), lit from the Sun. On
+      // for every map; battery-save mode keeps them painted but still.
+      texturedBodies: true,
     };
     this._planetSpheres = new Map(); // texturedBodies: one painted sphere per body
     // Canonical zone polygons (the frozen source-of-truth data),
@@ -3652,33 +3666,40 @@ export class MapRenderer {
     // body waits on its classic sphere until its turn; under 5 px on screen,
     // or in battery-save mode, it holds still.
     const textured = !!this.options.texturedBodies;
-    const now = performance.now() / 1000; let paintBudget = 12; let animating = false; let pending = false;
+    // turning advances on a step clock (phones 3 steps a second, desktops 8): the
+    // map redraws far more often than that, and a sphere repaints only on a step
+    const stepHz = COARSE_POINTER() ? 3 : 8;
+    const now = Math.floor((performance.now() / 1000) * stepHz) / stepHz; let paintBudget = 12; let animating = false; let pending = false;
     const suns = textured ? this._realSites.filter((s) => (TYPE_VIS[s.type] || {}).kind === 'sun') : [];
     const mkCanvas = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
     const seedOf = (str) => { let h = 2166136261; for (const ch of String(str)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); } return Math.abs(h) % 100000; };
-    const drawTextured = (site, wx, wy, haloR, pal) => {
+    const drawTextured = (site, wx, wy, haloR, pal, rings = null) => {
+      const style = planetStyleFor(site, pal); if (!style) return false;
       const sr = Math.min(haloR * eff, cap); if (sr < 0.5) return true;
-      const sx = this.pan.x + wx * eff, sy = this.pan.y + wy * eff; const m = sr * 1.6 + 40;
+      const sx = this.pan.x + wx * eff, sy = this.pan.y + wy * eff; const m = sr * (rings ? 2.4 : 1.6) + 40;
       if (sx < -m || sx > hostW + m || sy < -m || sy > hostH + m) return true;
-      const id = `${site.id2 || site.id}|${site.planetStyle}`;
-      const R = Math.max(2, Math.round(sr * this.dpr)); const texW = R > 40 ? 192 : 96;
+      const id = `${site.id2 || site.id}|${style}`;
+      // painted at most 128 device px across the radius (a phone's budget); larger draws scale it up
+      const R = Math.max(2, Math.min(128, Math.round(sr * this.dpr))); const texW = R > 40 ? 192 : R > 14 ? 96 : 48;
       let ent = this._planetSpheres.get(id);
       if (!ent || ent.texW < texW) {
         if (paintBudget <= 0) { pending = true; return false; } // its turn comes next frame
         const t0 = performance.now(); const seed = site.planetSeed ?? seedOf(site.bodyKey || site.name || site.id);
-        const sphere = new PlanetSphere(makePlanetTexture(site.planetStyle, pal, seed, texW, texW / 2), { tilt: 0.1 + (seed % 7) * 0.06, atmosphere: pal.atmosphere || null });
-        ent = { sphere, texW, key: '', speed: (site.planetStyle === 'gas' || site.planetStyle === 'ice-giant' || site.planetStyle === 'brown' ? 0.32 : 0.16) * (0.8 + (seed % 5) * 0.1), phase: (seed % 628) / 100 };
+        const sphere = new PlanetSphere(makePlanetTexture(style, pal, seed, texW, texW / 2), { tilt: rings ? 0 : 0.1 + (seed % 7) * 0.06, atmosphere: pal.atmosphere || null });
+        ent = { sphere, texW, key: '', speed: (style === 'gas' || style === 'ice-giant' || style === 'brown' ? 0.32 : 0.16) * (0.8 + (seed % 5) * 0.1), phase: (seed % 628) / 100 };
         this._planetSpheres.set(id, ent); paintBudget -= performance.now() - t0;
       }
       let sun = null, best = Infinity; for (const s of suns) { const d = (s.x - wx) ** 2 + (s.y - wy) ** 2; if (d < best) { best = d; sun = s; } }
       const light = sun && best > 1 ? { x: sun.x - wx, y: sun.y - wy } : { x: -1, y: -1 };
-      const moving = sr >= 5 && !isBatterySave(); if (moving) animating = true;
+      const moving = sr >= 5 && !isBatterySave() && !REDUCED_MOTION(); if (moving) animating = true;
       const spin = moving ? ent.phase + now * ent.speed : ent.phase;
-      const key = `${R}|${Math.round(spin * 60)}|${Math.round(Math.atan2(light.y, light.x) * 20)}`;
+      const key = `${R}|${spin.toFixed(4)}|${Math.round(Math.atan2(light.y, light.x) * 20)}`;
       if (ent.key !== key) { ent.sphere.render(R, spin, light, mkCanvas); ent.key = key; }
       if (pal.atmosphere) { const g = ctx.createRadialGradient(sx, sy, sr * 0.85, sx, sy, sr * 1.45); g.addColorStop(0, pal.atmosphere); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(sx, sy, sr * 1.45, 0, Math.PI * 2); ctx.fill(); }
-      const cv = ent.sphere.canvas; const half = cv.width / this.dpr / 2;
+      if (rings) drawPlanetRings(ctx, sx, sy, sr, rings, 'back');
+      const cv = ent.sphere.canvas; const half = ((ent.sphere.R + 1) * sr) / ent.sphere.R; // the sphere is R device px; draw it at sr
       ctx.drawImage(cv, sx - half, sy - half, half * 2, half * 2);
+      if (rings) drawPlanetRings(ctx, sx, sy, sr, rings, 'front');
       if (site.hazard) { ctx.lineWidth = 1.1; ctx.strokeStyle = '#f87171'; ctx.beginPath(); ctx.arc(sx, sy, sr, 0, Math.PI * 2); ctx.stroke(); }
       return true;
     };
@@ -3702,7 +3723,7 @@ export class MapRenderer {
       const haloR = vis.haloR || 20;
       const pal = paletteFor(g.exemplar);
       const rings = ringDefFor(g.exemplar);
-      if (textured && g.exemplar.planetStyle && !rings && drawTextured(g.exemplar, g.cx, g.cy, haloR, pal)) continue;
+      if (textured && drawTextured(g.exemplar, g.cx, g.cy, haloR, pal, rings)) continue;
       // Ring-bearing groups key per-group (rings differ per planet);
       // ring-free groups dedupe on palette so similar bodies share a
       // sprite.
@@ -3732,12 +3753,13 @@ export class MapRenderer {
         continue;
       }
       const rings = ringDefFor(site);
-      if (textured && site.planetStyle && !rings && drawTextured(site, site.x, site.y, haloR, pal)) continue;
+      if (textured && drawTextured(site, site.x, site.y, haloR, pal, rings)) continue;
       const key = rings ? `ring|${site.id}` : `sph|${palSig(pal)}|${site.hazard ? 'h' : '-'}`;
       blit(key, site.x, site.y, haloR, sphereExtent(pal, rings), paintSphere(pal, rings, site.hazard));
     }
     // turning bodies redraw about 10 times a second; unpainted ones next frame
-    if ((animating || pending) && !this._spinTimer) this._spinTimer = setTimeout(() => { this._spinTimer = null; this._scheduleDraw(); }, pending ? 16 : 100);
+    // (each step redraws the whole map, so phones step 3 times a second, desktops 8)
+    if ((animating || pending) && !this._spinTimer) this._spinTimer = setTimeout(() => { this._spinTimer = null; this._scheduleDraw(); }, pending ? 16 : 1000 / stepHz);
   }
 
   // The Sun + comets, drawn live in WORLD space. Their coronas / tails
