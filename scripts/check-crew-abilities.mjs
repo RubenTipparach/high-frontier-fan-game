@@ -557,7 +557,7 @@ check('MARKETEER: suspended by Anarchy', () => {
   r = op(r.state, 0, { kind: 'AUCTION_BID', amount: 2 });
   eq(r.state.auction.highBidderId, r.state.players[0].profileId, 'leader on a tie under Anarchy');
 });
-bug('MARKETEER-STRID', 'MARKETEER: a Marketeer buyer with a non-numeric profileId can be sold the tied lot', () => {
+check('MARKETEER: a Marketeer buyer with a non-numeric profileId can be sold the tied lot', () => {
   // applyAuctionSell compares Number(mktPid) !== buyerId; for a string id
   // (tutorial bot seats) Number('x') is NaN, so selling to the Marketeer
   // themself is refused as marketeer_wins_tie.
@@ -774,7 +774,7 @@ function promoDraft(cardId, face, opts = PROMO) {
 
 // ---- COLLECTIVE BARGAINING (LEO Workers' Union, white) ----
 // "Receive 2 Aqua at game start. You may commit Murder/Suicide."
-bug('CB-M2LOCK', 'COLLECTIVE BARGAINING: +2 aqua at game start in a real promo game (m0+m1+m2)', () => {
+check('COLLECTIVE BARGAINING: +2 aqua at game start in a real promo game (m0+m1+m2)', () => {
   // The payout goes through playersWithPrivilege -> privilegeOf, which the M2
   // lock nulls at draft close (nobody has a Home Bernal yet). Promo picks are
   // only legal under M2, so the printed "+2 at game start" is never paid in

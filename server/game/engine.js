@@ -14690,7 +14690,9 @@ function applyAuctionSell(state, op, ctx) {
     // authoritatively at close, which is where the privilege was being ignored.)
     const mktPid = Object.keys(a.bids).find((pid) =>
       a.bids[pid] === high && hasPrivilege(state, state.players.find((p) => String(p.profileId) === String(pid)), 'MARKETEER'));
-    if (mktPid != null && Number(mktPid) !== buyerId) return fail('marketeer_wins_tie');
+    // String compare: bids key by the raw profileId, which may be non-numeric
+    // (tutorial bot seats) - Number('beta') is NaN (audit bug MARKETEER-STRID).
+    if (mktPid != null && String(mktPid) !== String(buyerId)) return fail('marketeer_wins_tie');
     winner = playerByProfile(state, buyerId);
     if (!winner) return fail('winner_gone');
     price = high;
@@ -15468,7 +15470,13 @@ function applyPickCrew(state, op, ctx) {
     // Collective Bargaining (LEO Workers' Union promo crew, data/crew.js):
     // "Receive 2 Aqua at game start." Unlike Secretary General the printed
     // text carries no Module 2 deferral clause, so this pays out unconditionally.
-    for (const cb of playersWithPrivilege(state, 'COLLECTIVE_BARGAINING')) {
+    // It reads the PRINTED face (playerOwnsAbility), not privilegeOf: a promo
+    // card is only pickable under m0+m1+m2, and the M2 privilege lock (2B3b)
+    // nulls privilegeOf until a Home Bernal anchors, which nobody has when the
+    // draft closes - so the lock silently ate the "+2 at game start" in every
+    // legal promo game (audit bug CB-M2LOCK). Anarchy can't be running at the
+    // draft close, but the guard keeps the K2e suspension honest.
+    for (const cb of state.players.filter((p) => !state.anarchy && playerOwnsAbility(p, 'COLLECTIVE_BARGAINING'))) {
       cb.aqua = (cb.aqua | 0) + 2;
     }
     // The faction bank (C5, B6a, data/altruism.js). Taxes, Secretary General and
