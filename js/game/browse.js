@@ -33345,6 +33345,7 @@ const MP_LOG_ICONS = {
   DRAFT_BONUS_SELL: '💱', DRAFT_BONUS_DONE: '✅',
   UNDO: '↩', REDO: '↪',
   FUNDRAISE: '🗳', LOBBY: '📜',
+  EMISSARIES: '🤝', ARBITER_TALLY: '⚖', TRADE_PORT: '🏪', PIGGYBACK: '🚀',
   ADMIN_REPAIR: '🔧', ADMIN_EDIT: '🔧',
 };
 

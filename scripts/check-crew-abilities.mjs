@@ -986,6 +986,94 @@ check('DOWSERS: suspended by Anarchy; locked under m0+m1+m2 until a Home Bernal'
   assert(dowse({ game: PROMO, home: true }).ok, 'promo game, Home Bernal anchored');
 });
 
+// ================================================================ promo group A
+// movement and hazards: LIFE RAFT, LIFEBOAT, WEAK STABILITY BOUNDARY, CAVITATION ENGINEERS, POWER SERIES CHAOS MODEL, BLUE PLANET
+// (group A checks go here)
+
+
+
+
+
+
+
+
+
+
+// ---------------------------------------------------------------- end promo group A
+
+
+
+
+
+
+
+
+// ================================================================ promo group B
+// politics: AMBASSADOR, EMISSARIES, ARBITER, POWER BROKERS, HEROIC
+// (group B checks go here)
+
+
+
+
+
+
+
+
+
+
+// ---------------------------------------------------------------- end promo group B
+
+
+
+
+
+
+
+
+// ================================================================ promo group C
+// economy and cards: SHUTTLES, ISO-SHUTTLES, TRADE PORT, PIGGYBACK, THERMAL LABS, TAILINGS REMINING
+// (group C checks go here)
+
+
+
+
+
+
+
+
+
+
+// ---------------------------------------------------------------- end promo group C
+
+
+
+
+
+
+
+
+// ================================================================ promo group D
+// colonists and factories: REFUGEE, IMMIGRANT, QUEST, SITDOWN
+// (group D checks go here)
+
+
+
+
+
+
+
+
+
+
+// ---------------------------------------------------------------- end promo group D
+
+
+
+
+
+
+
+
 // ---- inventory: in-scope faces with no engine rule ----
 // Not a behaviour test: lists every in-scope face whose privilege key appears
 // nowhere in the engine, so the audit doc's "not implemented" column can be

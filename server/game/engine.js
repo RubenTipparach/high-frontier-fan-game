@@ -10511,6 +10511,29 @@ function applyLobby(state, op, player) {
   };
 }
 
+// EMISSARIES (African Union, white). STUB - filled in by the politics pass.
+function applyEmissaries(_state, _op, _player) {
+  return fail('not_implemented');
+}
+
+// placeholder separator for merge hygiene
+
+
+
+
+
+
+
+
+
+
+
+
+// ARBITER (African Union, black). STUB - filled in by the politics pass.
+function applyArbiterTally(_state, _op, _player) {
+  return fail('not_implemented');
+}
+
 // Does the player currently OWN a GW/TW thruster of this spectral type anywhere
 // in play (it need NOT be aboard the rocket)? Gates isotope-CARD production: you
 // can only refine a spectral you have an engine for. GW thrusters promote to a
@@ -12420,11 +12443,15 @@ const FUNCTIONAL = {
   UNANCHOR_BERNAL: applyUnanchorBernal,
   SET_BERNAL_FIGURE: applySetBernalFigure,
   BUILD_BERNAL_ONTO_HOME: applyBuildBernalOntoHome,
+  // Promo crew ops.
+  EMISSARIES: applyEmissaries,
+  ARBITER_TALLY: applyArbiterTally,
+  TRADE_PORT: applyTradePort,
 };
 
 function pickPayload(op) {
   switch (op.kind) {
-    case 'MOVE': return { toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, ...(Array.isArray(op.hazardChoices) ? { hazardChoices: op.hazardChoices.slice() } : {}), segments: op.segments, pickupChit: op.pickupChit !== false, ...(op.acetyleneLiftoff ? { acetyleneLiftoff: true } : {}), ...(op.unit ? { unit: op.unit } : {}) };
+    case 'MOVE': return { toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, ...(Array.isArray(op.hazardChoices) ? { hazardChoices: op.hazardChoices.slice() } : {}), segments: op.segments, pickupChit: op.pickupChit !== false, ...(op.acetyleneLiftoff ? { acetyleneLiftoff: true } : {}), ...(op.unit ? { unit: op.unit } : {}), ...(op.asFreighter ? { asFreighter: true } : {}), ...(op.wsbCoast ? { wsbCoast: true } : {}) };
     case 'MOVE_FACTORY': return { fromSiteId: op.fromSiteId, toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, segments: op.segments, ...(op.cubeId != null ? { cubeId: op.cubeId } : {}), ...(op.acetyleneLiftoff ? { acetyleneLiftoff: true } : {}) };
     case 'MOVE_FLEET': return { moves: op.moves };
     case 'AIR_EATER_REFUEL': return { hazardPay: !!op.hazardPay };
@@ -12432,7 +12459,7 @@ function pickPayload(op) {
     case 'HOMESTEAD': return { siteId: op.siteId, productCardId: op.productCardId, colonistCardId: op.colonistCardId };
     case 'FREE_INSPIRATION': return {};
     case 'NANOFACTURE': return { cardId: op.cardId, cardIds: op.cardIds, ...(op.freeDelegate ? { freeDelegate: op.freeDelegate } : {}) };
-    case 'EXOMIGRATE': return { ...(op.to != null ? { to: op.to } : {}), ...(op.placeDelegate === false ? { placeDelegate: false } : {}) };
+    case 'EXOMIGRATE': return { ...(op.to != null ? { to: op.to } : {}), ...(op.placeDelegate === false ? { placeDelegate: false } : {}), ...(op.specialty ? { specialty: op.specialty } : {}) };
     case 'SET_LAW_STAR': return { star: op.star };
     case 'SWAP_BIG_CUBE': return { factorySiteId: op.factorySiteId };
     case 'BUILD_ELEVATOR': return { pairKey: op.pairKey, hazardPay: !!op.hazardPay };
@@ -12483,13 +12510,17 @@ function pickPayload(op) {
     case 'FUNDRAISE': return { place: op.place, moveFrom: op.moveFrom, moveTo: op.moveTo, freeDelegate: op.freeDelegate, discard: op.discard, star: op.star };
     // rabbleRouser MUST ride along: without it an UNDO/REDO replay would re-run
     // the Lobby with the rouse dropped and quietly lose the Anarchy flip.
-    case 'LOBBY': return { ideology: op.ideology, ...(op.rabbleRouser ? { rabbleRouser: true } : {}) };
+    case 'LOBBY': return { ideology: op.ideology, ...(op.rabbleRouser ? { rabbleRouser: true } : {}), ...(op.ambassador ? { ambassador: true } : {}) };
+    // Promo crew ops (EMISSARIES / ARBITER, TRADE PORT).
+    case 'EMISSARIES': return { ideologies: Array.isArray(op.ideologies) ? op.ideologies.slice() : [] };
+    case 'ARBITER_TALLY': return { ...(op.double === false ? { double: false } : {}) };
+    case 'TRADE_PORT': return { cardIds: Array.isArray(op.cardIds) ? op.cardIds.slice() : [], deckType: op.deckType };
     case 'DISCARD': return { cardId: op.cardId };
     // stackId or the replay re-applies a Bernal / Freighter / Outpost's own
     // reconfiguration to the ROCKET, which is a different stack entirely.
     case 'SET_ACTIVE_THRUSTER': return { cardId: op.cardId, ...(op.stackId ? { stackId: op.stackId } : {}) };
     case 'SET_ACTIVE_PROSPECTOR': return { cardId: op.cardId, ...(op.stackId ? { stackId: op.stackId } : {}) };
-    case 'SET_RADIATOR_SIDE': return { cardId: op.cardId, ...(op.stackId ? { stackId: op.stackId } : {}) };
+    case 'SET_RADIATOR_SIDE': return { cardId: op.cardId, ...(op.stackId ? { stackId: op.stackId } : {}), ...(op.radSide ? { radSide: op.radSide } : {}) };
     case 'AFTERBURN': return {};
     case 'PROSPECT': return { siteId: op.siteId, turn: op.turn, round: op.round, relocateFrom: op.relocateFrom, ...(op.stackId ? { stackId: op.stackId } : {}), ...(op.prospectorId ? { prospectorId: op.prospectorId } : {}) };
     case 'PROSPECT_REROLL': return { siteId: op.siteId };
@@ -12621,6 +12652,18 @@ function openTurnFor(state, player) {
   // once-a-turn use with it.
   player.dirtTanksThisTurn = 0;
   player.mooncableUsedThisTurn = false;
+  // Promo crew once-per-turn ledgers (each face's flag lifts as its holder's
+  // next turn opens): Thermal Labs' heavy flip, Shuttles' bank-to-tank
+  // transfer, Cavitation Engineers' ignored aerobrake, Weak Stability
+  // Boundary's second coast, the Arbiter's start-of-turn tally, Emissaries'
+  // tied laws, Trade Port's start-of-turn swap.
+  player.thermalLabsUsed = false;
+  player.shuttlesUsed = false;
+  player.cavitationUsed = false;
+  player.wsbCoastUsed = false;
+  player.arbiterTallied = false;
+  player.emissaryLaws = [];
+  player.tradePortUsed = false;
   // Afterburn lasts one turn: clear it as the player's next turn opens.
   if (player.rocket) player.rocket.afterburnEngaged = false;
   // Solar-sail thrust is LOCKED at the START of the turn (user decision): record
@@ -14312,6 +14355,11 @@ function highestOtherBid(state, profileId) {
     if (String(pid) !== String(profileId)) hi = Math.max(hi, amt | 0);
   }
   return hi;
+}
+
+// TRADE PORT (Makers Guild, black). STUB - filled in by the economy pass.
+function applyTradePort(_state, _op, _player) {
+  return fail('not_implemented');
 }
 
 function applyAuctionStart(state, op, ctx) {
