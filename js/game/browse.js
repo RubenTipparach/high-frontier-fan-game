@@ -68,6 +68,37 @@ import { CREW, CREW_BY_ID, CREW_FACES, PLAYER_COLORS } from '../../data/crew.js'
 // promo faction as an ordinary patent. (Reported 2026-08-06: Space Force
 // missing from the rocket stack.)
 const BASE_CREW_IDS = new Set(CREW.map((c) => c.id));
+// The module badge on a promo crew face, with a hover / tap tooltip that says
+// what it means. A requiresModule face is not pickable ("Coming soon"); a
+// notRecommendedWithModule face is pickable, just cautioned against.
+function crewModuleBadge(face) {
+  const badge = document.createElement('div');
+  if (face.requiresModule) {
+    const n = face.requiresModule.slice(1);
+    badge.className = 'card-module-badge is-required';
+    badge.textContent = `Coming soon · ${face.requiresModule}`;
+    badge.setAttribute('data-tip', `Coming soon: this side needs Module ${n}, which isn't available yet, so it can't be picked.`);
+  } else if (face.notRecommendedWithModule) {
+    const n = face.notRecommendedWithModule.slice(1);
+    badge.className = 'card-module-badge is-caution';
+    badge.textContent = `⚠ ${face.notRecommendedWithModule}`;
+    badge.setAttribute('data-tip', `Playable, but not recommended with Module ${n}: this ability moves Aqua, and Module ${n} changes how Aqua flows, so it would be too strong there.`);
+  } else return null;
+  // attachTipsTo binds every [data-tip] UNDER a root, so bind through a
+  // throwaway wrapper; the listeners stay on the badge once it is moved.
+  const wrap = document.createElement('div');
+  wrap.appendChild(badge);
+  attachTipsTo(wrap);
+  return badge;
+}
+// A full-width divider between the pickable crew and the ones that aren't.
+function crewSectionHeading(text, tip) {
+  const h = document.createElement('div');
+  h.className = 'crew-section-heading';
+  h.textContent = text;
+  if (tip) h.setAttribute('title', tip);
+  return h;
+}
 import { COLONISTS, COLONISTS_BY_ID } from '../../data/colonists.js';
 import { BERNALS, BERNALS_BY_ID, solarCellThrustBonus, bernalPrivilegeGrant } from '../../data/bernals.js';
 // The pure support-chain resolver (rules 1+2 modifier path), used to fold a
@@ -31362,20 +31393,9 @@ function renderPatents() {
       // expansion-locked card) since it can't actually be played in any
       // mode this codebase ships today; notRecommendedWithModule stays
       // full-colour (it's fully playable, just cautioned against in M5).
-      if (card.requiresModule) {
-        el.classList.add('is-module-locked');
-        const badge = document.createElement('div');
-        badge.className = 'card-module-badge is-required';
-        badge.textContent = `Coming soon · ${card.requiresModule}`;
-        badge.title = `Coming soon: needs Module ${card.requiresModule.slice(1)}.`;
-        el.appendChild(badge);
-      } else if (card.notRecommendedWithModule) {
-        const badge = document.createElement('div');
-        badge.className = 'card-module-badge is-caution';
-        badge.textContent = `⚠ ${card.notRecommendedWithModule}`;
-        badge.title = `Not recommended with Module ${card.notRecommendedWithModule.slice(1)} (changes the Aqua balance)`;
-        el.appendChild(badge);
-      }
+      if (card.requiresModule) el.classList.add('is-module-locked');
+      const modBadge = crewModuleBadge(card);
+      if (modBadge) el.appendChild(modBadge);
       el.addEventListener('click', (ev) => {
         if (ev.target.closest('.card-flip, .card-rotate')) return;
         openDeckTapModal(card, asKind, { inspectOnly: true });
@@ -31467,7 +31487,13 @@ function renderPatents() {
     }
     if (filter === 'crew') {
       // All 12 faction faces, each a flip-less single-face card.
-      for (const c of CREW_FACES) grid.appendChild(decorateForHand(c, 'crew'));
+      // Pickable sides first; the Coming-soon (M4 / M5) sides after a divider.
+      for (const c of CREW_FACES) if (!c.requiresModule) grid.appendChild(decorateForHand(c, 'crew'));
+      const soon = CREW_FACES.filter((c) => c.requiresModule);
+      if (soon.length) {
+        grid.appendChild(crewSectionHeading('Coming soon: not available to pick yet'));
+        for (const c of soon) grid.appendChild(decorateForHand(c, 'crew'));
+      }
       return;
     }
     if (filter === 'colonist') {
@@ -33848,7 +33874,7 @@ function bankNoteFor(face, factionBank) {
 //     and the wizard skips all local side effects, handing the
 //     selection off so the caller can dispatch PICK_CREW. onDone
 //     still fires for both modes.
-function openCrewWizard(arg, maybeOnDone) {
+export function openCrewWizard(arg, maybeOnDone) {
   // Back-compat: openCrewWizard(onDoneFn) keeps working.
   const opts = typeof arg === 'function' ? { onDone: arg } : (arg || {});
   if (maybeOnDone) opts.onDone = maybeOnDone;
@@ -33968,8 +33994,14 @@ function openCrewWizard(arg, maybeOnDone) {
     // that seat colour when an admin's picker mixes them in - sit together.
     // Array.sort is stable, so ties (same colour) keep their original
     // CREW_FACES order.
-    const faces = [...filtered].sort((a, b) => PLAYER_COLORS.indexOf(a.color) - PLAYER_COLORS.indexOf(b.color));
+    const byColour = [...filtered].sort((a, b) => PLAYER_COLORS.indexOf(a.color) - PLAYER_COLORS.indexOf(b.color));
+    // Pickable sides first; taken and Coming-soon sides after a divider, so
+    // what you can choose is never mixed in with what you can't.
+    const unpickable = (c) => takenSet.has(c.srcId) || !!c.requiresModule;
+    const faces = [...byColour.filter((c) => !unpickable(c)), ...byColour.filter(unpickable)];
+    const firstUnpickable = faces.find(unpickable);
     for (const c of faces) {
+      if (c === firstUnpickable) grid.appendChild(crewSectionHeading('Not available to pick'));
       const isSel = selected && selected.cardId === c.srcId && selected.face === c.face;
       const taken = takenSet.has(c.srcId);
       // A requiresModule promo card (M4/M5) can't actually be played - those
@@ -33990,7 +34022,7 @@ function openCrewWizard(arg, maybeOnDone) {
       tile.dataset.face = c.face;
       if (locked) {
         tile.setAttribute('aria-disabled', 'true');
-        tile.title = `Coming soon: needs Module ${c.requiresModule.slice(1)}.`;
+        tile.title = `Coming soon: this side needs Module ${c.requiresModule.slice(1)}, which isn't available yet.`;
       } else if (taken) {
         tile.setAttribute('aria-disabled', 'true');
         tile.title = 'Another player has this crew.';
@@ -34002,17 +34034,8 @@ function openCrewWizard(arg, maybeOnDone) {
       // leaves the card looking fully selectable.
       if (locked) cardEl.classList.add('is-module-locked');
       tile.appendChild(cardEl);
-      if (locked) {
-        const badge = document.createElement('div');
-        badge.className = 'card-module-badge is-required';
-        badge.textContent = `Coming soon · ${c.requiresModule}`;
-        tile.appendChild(badge);
-      } else if (c.notRecommendedWithModule) {
-        const badge = document.createElement('div');
-        badge.className = 'card-module-badge is-caution';
-        badge.textContent = `⚠ ${c.notRecommendedWithModule}`;
-        tile.appendChild(badge);
-      }
+      const modBadge = crewModuleBadge(c);
+      if (modBadge) tile.appendChild(modBadge);
       // Faction bank (C5). Taxes, Secretary General and Felonious only pay out by
       // reading the REST of the table, so where there is nobody to read they open
       // with extra Aqua instead. Marketeer is blunted the same way (no auctions

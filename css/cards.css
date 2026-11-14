@@ -1047,7 +1047,6 @@
   border-radius: 4px;
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
   z-index: 11;
-  pointer-events: none;
 }
 
 /* Promo crew module-gate badge (placeholder - M4/M5 aren't implemented
@@ -1060,6 +1059,9 @@
    instead. Crew tiles never carry both badges, so nothing stacks. */
 .card-module-badge {
   position: absolute;
+  /* Hoverable so its tooltip (data-tip) shows; a click still bubbles to
+     the tile underneath. */
+  cursor: help;
   /* Clear of the bottom-centred thruster name too, so the ribbon sits
      beside the thrust triangle rather than clipping the engine's label. */
   bottom: 42px;
@@ -1073,7 +1075,6 @@
   border-radius: 4px;
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
   z-index: 11;
-  pointer-events: none;
 }
 .card-module-badge.is-required {
   /* "Coming soon · M4" is longer than the old "M4 only", so the ribbon
@@ -1782,4 +1783,18 @@
   color: #bae6fd;
   border: 1px solid #38bdf8;
   box-shadow: 0 3px 8px rgba(0, 0, 0, 0.45);
+}
+
+/* Divider between the crew you can pick and the ones you can't (Library
+   crew tab and the starting-crew picker). Spans the whole grid row. */
+.crew-section-heading {
+  grid-column: 1 / -1;
+  margin: 14px 0 2px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #a7a2c0;
 }
