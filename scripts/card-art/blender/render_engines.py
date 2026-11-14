@@ -31,9 +31,94 @@ sys.path.insert(0, os.path.join(HERE, '..', '..', 'blender'))
 import render_bernal_megastructures as K  # noqa: E402  (reset at 600x576)
 from render_thruster_art import (  # noqa: E402
     TAU, POSE, asteroid, bell_profile, box, capsule_tank, copper, cyl, group,
-    is_glow, lathe, mat_glow, mat_metal, rod, sphere, steel, sun, torus,
+    is_glow, lathe, mat_metal, rod, sphere, steel, sun, torus,
     tube, area, truss)
 from render_thruster_art import ship as _ship  # noqa: E402
+from render_thruster_art import mat_glow as _mat_glow  # noqa: E402
+
+
+def mat_glow(name, color, strength, alpha=1.0):
+    """The kit glow with its top end tamed: flashes asked for at 30-40 blew
+    out to white discs that hid the hardware (user 2026-11-14: less glare)."""
+    if strength > 8:
+        strength = 8 + (strength - 8) * 0.15
+    return _mat_glow(name, color, strength, alpha)
+
+
+def mat_plume(name, color, strength, alpha, z_hot, z_cold):
+    """Exhaust that fades to nothing: emission x a falloff ALONG the cone
+    (object-space z, 1 at the nozzle `z_hot`, 0 at the tail `z_cold`, eased)
+    x a falloff toward its EDGES (1 - facing), mixed over transparency, the
+    core whitening near the nozzle. No flat end cap or rim can show, which is
+    what the old constant-alpha cones did at the card edge (user 2026-11-14)."""
+    if strength > 8:
+        strength = 8 + (strength - 8) * 0.3
+    mt = bpy.data.materials.new(name)
+    mt.use_nodes = True
+    nt = mt.node_tree
+    nt.nodes.clear()
+    out = nt.nodes.new('ShaderNodeOutputMaterial')
+    tc = nt.nodes.new('ShaderNodeTexCoord')
+    sep = nt.nodes.new('ShaderNodeSeparateXYZ')
+    nt.links.new(tc.outputs['Object'], sep.inputs[0])
+    mr = nt.nodes.new('ShaderNodeMapRange')
+    mr.inputs['From Min'].default_value = z_cold
+    mr.inputs['From Max'].default_value = z_hot
+    mr.clamp = True
+    nt.links.new(sep.outputs['Z'], mr.inputs['Value'])
+    along = nt.nodes.new('ShaderNodeMath')
+    along.operation = 'POWER'
+    along.inputs[1].default_value = 2.2
+    nt.links.new(mr.outputs['Result'], along.inputs[0])
+    lw = nt.nodes.new('ShaderNodeLayerWeight')
+    lw.inputs['Blend'].default_value = 0.3
+    inv = nt.nodes.new('ShaderNodeMath')
+    inv.operation = 'SUBTRACT'
+    inv.inputs[0].default_value = 1.0
+    nt.links.new(lw.outputs['Facing'], inv.inputs[1])
+    edge = nt.nodes.new('ShaderNodeMath')
+    edge.operation = 'POWER'
+    edge.inputs[1].default_value = 2.4
+    nt.links.new(inv.outputs[0], edge.inputs[0])
+    # a short fade-IN at the nozzle too, so the cone's open lip never shows as
+    # a hard bright ring where it leaves the bell
+    lip = nt.nodes.new('ShaderNodeMapRange')
+    lip.inputs['From Min'].default_value = z_hot
+    lip.inputs['From Max'].default_value = z_hot + (z_cold - z_hot) * 0.07
+    lip.clamp = True
+    nt.links.new(sep.outputs['Z'], lip.inputs['Value'])
+    along2 = nt.nodes.new('ShaderNodeMath')
+    along2.operation = 'MULTIPLY'
+    nt.links.new(along.outputs[0], along2.inputs[0])
+    nt.links.new(lip.outputs['Result'], along2.inputs[1])
+    mul = nt.nodes.new('ShaderNodeMath')
+    mul.operation = 'MULTIPLY'
+    nt.links.new(along2.outputs[0], mul.inputs[0])
+    nt.links.new(edge.outputs[0], mul.inputs[1])
+    fac = nt.nodes.new('ShaderNodeMath')
+    fac.operation = 'MULTIPLY'
+    fac.use_clamp = True
+    fac.inputs[1].default_value = min(1.0, alpha * 1.6)
+    nt.links.new(mul.outputs[0], fac.inputs[0])
+    col = nt.nodes.new('ShaderNodeMix')
+    col.data_type = 'RGBA'
+    col.inputs['A'].default_value = (*color, 1)
+    col.inputs['B'].default_value = (1.0, 1.0, 1.0, 1)
+    hot = nt.nodes.new('ShaderNodeMath')
+    hot.operation = 'POWER'
+    hot.inputs[1].default_value = 6.0
+    nt.links.new(mr.outputs['Result'], hot.inputs[0])
+    nt.links.new(hot.outputs[0], col.inputs['Factor'])
+    em = nt.nodes.new('ShaderNodeEmission')
+    em.inputs['Strength'].default_value = strength
+    nt.links.new(col.outputs['Result'], em.inputs['Color'])
+    tr = nt.nodes.new('ShaderNodeBsdfTransparent')
+    mix = nt.nodes.new('ShaderNodeMixShader')
+    nt.links.new(fac.outputs[0], mix.inputs['Fac'])
+    nt.links.new(tr.outputs[0], mix.inputs[1])
+    nt.links.new(em.outputs[0], mix.inputs[2])
+    nt.links.new(mix.outputs[0], out.inputs[0])
+    return mt
 
 
 def ship(kind, base=(0, 0, 0), s=1.0, **kw):
@@ -44,6 +129,10 @@ def ship(kind, base=(0, 0, 0), s=1.0, **kw):
 def place(at, fill=1.0, azim=-90.0, elev=8.0, lens=40, skip=()):
     """Aim at the hardware (glows excluded) and slide the film so its centre
     lands at `at` (x right, y down, fractions of the frame)."""
+    if at == FR_AT and CURRENT_BACK:
+        # a purple freighter back carries more text (the Future block), so its
+        # engine sits a little lower to stay clear of it
+        at = (at[0], 0.72)
     bpy.context.view_layer.update()
     pts = []
     for ob in bpy.context.scene.objects:
@@ -61,12 +150,29 @@ def place(at, fill=1.0, azim=-90.0, elev=8.0, lens=40, skip=()):
 
 
 def rig():
-    sun((0.5, -0.8, 0.6), 4.0)
-    area('rim', (-6, 5, 3), 500, 4, (0.6, 0.75, 1.0))
+    """Key, rim and fill: a crisp warm key from upper front-right, a cool rim
+    from behind that outlines the silhouette against the dark backdrop, and a
+    low fill so the shadow side keeps its shape instead of going black."""
+    key = sun((0.55, -0.75, 0.55), 3.6, (1.0, 0.95, 0.88))
+    key.data.angle = math.radians(0.6)
+    rim = sun((-0.55, 0.8, 0.35), 2.6, (0.6, 0.78, 1.0))
+    rim.data.angle = math.radians(2)
+    area('fill', (-5, -7, -2), 260, 6, (0.75, 0.82, 1.0))
+    w = bpy.context.scene.world.node_tree.nodes['Background']
+    w.inputs['Color'].default_value = (0.03, 0.035, 0.05, 1)
 
 
 def plume(name, top, bottom, r0, r1, color, strength=3.0, alpha=0.55):
-    return lathe(name, [(0.0, top), (r0, top), (r1, bottom), (0.0, bottom)], mat_glow(name, color, strength, alpha))
+    """An exhaust cone from the nozzle (`top`) to its tail (`bottom`), fading
+    out along its length and toward its edges (mat_plume). PLUME_LEN shortens
+    every cone per deck so the fade reaches zero INSIDE the card instead of
+    being cut off bright at its edge (the freighters sit low, near the edge)."""
+    bottom = top + (bottom - top) * PLUME_LEN
+    r1 = r0 + (r1 - r0) * (0.5 + 0.5 * PLUME_LEN)
+    mid = [(r0 + (r1 - r0) * t, top + (bottom - top) * t) for t in (0.25, 0.5, 0.75)]
+    # open at both ends: a flat cap would show as a hard disc at the nozzle
+    return lathe(name, [(r0, top), *mid, (r1, bottom)],
+                 mat_plume(name, color, strength, alpha, top, bottom))
 
 
 def coil_stack(name, n, z0, dz, r0, dr, rr=0.08):
@@ -89,6 +195,12 @@ def disc(name, r, mat, loc=(0, 0, 0), rot=(0, 0, 0), depth=0.04, verts=96):
 
 
 GW_AT, FR_AT = (0.45, 0.3), (0.48, 0.64)
+PLUME_LEN = 1.0   # set per deck in main()
+CURRENT_BACK = False   # set per face in main()
+# Freighters lie along the card: hull LEFT, exhaust RIGHT (the vector deck's
+# layout). The thruster POSE stood them diagonally, which put the ship up in
+# the text boxes on a freighter card (user 2026-11-14).
+FR_POSE = (math.radians(0), math.radians(-80), math.radians(-22))
 
 
 # ---- GW / TW ----------------------------------------------------------------
@@ -110,7 +222,7 @@ def gw_amat_front():
     parts.append(plume('plume', -0.2, -4.5, 1.2, 2.2, mag, 2.5))
     parts.append(ship('tug', (0, 0, 2.2), 0.9))
     group('ENGINE', parts, rot=POSE)
-    place(GW_AT, 1.15)
+    place(GW_AT, 1.36)
     rig()
 
 
@@ -125,7 +237,7 @@ def gw_amat_back():
     parts.append(plume('plume', 0.0, -4.0, 0.6, 1.8, (1.0, 0.5, 0.85), 2.5))
     parts.append(ship('crew', (0, 0, 1.8), 0.85))
     group('ENGINE', parts, rot=POSE)
-    place(GW_AT, 1.15)
+    place(GW_AT, 1.36)
     rig()
 
 
@@ -145,7 +257,7 @@ def gw_dpf_front():
     parts.append(plume('jet', 0.1, -4.5, 0.15, 0.7, (0.5, 0.85, 1.0), 4))
     parts.append(ship('tug', (0, 0, 2.65), 0.85))
     group('ENGINE', parts, rot=POSE)
-    place(GW_AT, 1.15)
+    place(GW_AT, 1.36)
     rig()
 
 
@@ -169,7 +281,7 @@ def gw_crossfire_back():
     parts.append(plume('plume', -0.4, -4.0, 0.4, 1.4, (1.0, 0.65, 0.25), 3))
     parts.append(ship('crew', (0, 0, 1.95), 0.8))
     group('ENGINE', parts, rot=POSE)
-    place(GW_AT, 1.15)
+    place(GW_AT, 1.36)
     rig()
 
 
@@ -187,7 +299,7 @@ def gw_ldx_front():
     parts.append(plume('plume', -1.4, -5.0, 0.3, 1.4, (0.75, 0.5, 1.0), 2.5))
     parts.append(ship('tug', (0, 0, 1.4), 0.85))
     group('ENGINE', parts, rot=POSE)
-    place(GW_AT, 1.15)
+    place(GW_AT, 1.36)
     rig()
 
 
@@ -207,7 +319,7 @@ def gw_dusty_back():
     parts.append(plume('plume', -0.9, -4.5, 0.3, 1.2, (1.0, 0.7, 0.4), 3))
     parts.append(ship('crew', (0, 0, 1.25), 0.85))
     group('ENGINE', parts, rot=POSE)
-    place(GW_AT, 1.1)
+    place(GW_AT, 1.3)
     rig()
 
 
@@ -225,7 +337,7 @@ def gw_minimag_front():
     parts.append(plume('plume', -0.6, -5.0, 1.0, 2.4, (1.0, 0.45, 0.7), 2))
     parts.append(ship('tug', (0, 0, 3.0), 0.85))
     group('ENGINE', parts, rot=POSE)
-    place(GW_AT, 1.15)
+    place(GW_AT, 1.36)
     rig()
 
 
@@ -241,10 +353,10 @@ def gw_medusa_back():
         parts.append(rod(f'teth{k}', (6.1 * math.cos(a), 6.1 * math.sin(a), 5.0), (0, 0, 2.9), 0.012, teth))
     parts.append(cyl('winch', 0.3, 0.3, steel('w', (0.4, 0.42, 0.46)), (0, 0, 2.85)))
     parts.append(sphere('blast', 0.6, mat_glow('blast', (1.0, 0.85, 0.5), 25), (0, 0, 5.2), 24))
-    parts.append(lathe('blastglow', [(0.0, 7.6), (3.6, 6.2), (0.8, 4.4), (0.0, 4.4)], mat_glow('bg', (1.0, 0.6, 0.25), 2, 0.4)))
+    parts.append(lathe('blastglow', [(0.0, 7.6), (3.6, 6.2), (0.8, 4.4), (0.0, 4.4)], mat_plume('bg', (1.0, 0.6, 0.25), 2.5, 0.5, 4.6, 7.8)))
     parts.append(ship('crew', (0, 0, 0.0), 0.9))
     group('ENGINE', parts, rot=POSE)
-    place(GW_AT, 1.05)
+    place(GW_AT, 1.24)
     rig()
 
 
@@ -258,11 +370,11 @@ def gw_saltwater_front():
         parts.append(rod(f'cap{k}', (0.86 * math.cos(a), 0.86 * math.sin(a), 1.1), (0.86 * math.cos(a), 0.86 * math.sin(a), 2.4), 0.03, b4c))
     parts.append(cyl('chamber', 0.22, 1.8, steel('ch', (0.6, 0.62, 0.66)), (0, 0, 0.0)))
     parts.append(lathe('bell', [(0.22, -0.9), (0.4, -1.2), (0.6, -1.6), (0.55, -1.6), (0.36, -1.22), (0.2, -0.95)], steel()))
-    parts.append(plume('plume', -1.5, -11.0, 0.6, 2.6, (0.75, 0.9, 1.0), 6, 0.7))
-    parts.append(plume('core', -1.4, -8.0, 0.25, 0.6, (1.0, 1.0, 1.0), 25, 1.0))
+    parts.append(plume('plume', -1.3, -9.0, 0.45, 2.4, (0.75, 0.9, 1.0), 5, 0.45))
+    parts.append(plume('core', -1.3, -6.5, 0.22, 0.5, (0.9, 0.95, 1.0), 10, 0.7))
     parts.append(ship('tug', (0, 0, 2.6), 0.8))
     group('ENGINE', parts, rot=POSE)
-    place(GW_AT, 1.2)
+    place(GW_AT, 1.42)
     rig()
 
 
@@ -279,7 +391,7 @@ def gw_gdm_back():
     parts.append(plume('jet', -1.5, -6.0, 0.12, 0.45, (0.6, 0.85, 1.0), 6))
     parts.append(ship('crew', (0, 0, 2.7), 0.8))
     group('ENGINE', parts, rot=POSE)
-    place(GW_AT, 1.15)
+    place(GW_AT, 1.36)
     rig()
 
 
@@ -295,7 +407,7 @@ def gw_spheromak_front():
     parts.append(plume('plume', 0.0, -4.5, 0.5, 1.8, (0.55, 0.85, 1.0), 2.5))
     parts.append(ship('tug', (0, 0, 1.45), 0.85))
     group('ENGINE', parts, rot=POSE)
-    place(GW_AT, 1.15)
+    place(GW_AT, 1.36)
     rig()
 
 
@@ -318,7 +430,7 @@ def gw_frc_back():
     parts.append(plume('jet', -0.9, -5.0, 0.25, 1.0, (0.5, 0.9, 1.0), 3))
     parts.append(ship('crew', (0, 0, 2.75), 0.8))
     group('ENGINE', parts, rot=POSE)
-    place(GW_AT, 1.15)
+    place(GW_AT, 1.36)
     rig()
 
 
@@ -333,7 +445,7 @@ def gw_vista_front():
     pl = plume('plume', -0.5, -5.0, 0.4, 1.8, (1.0, 0.75, 0.35), 3)
     s = ship('crew', (0, 0, 0.6), 0.75)
     group('ENGINE', [cone, *ribs, mag, flash, pl, s], rot=POSE)
-    place(GW_AT, 1.1)
+    place(GW_AT, 1.3)
     rig()
 
 
@@ -362,7 +474,7 @@ def gw_daedalus_back():
     parts.append(plume('plume', -1.4, -6.0, 1.8, 2.6, (1.0, 0.7, 0.4), 1.5, 0.4))
     parts.append(ship('probe', (0, 0, 4.4), 0.6))
     group('ENGINE', parts, rot=POSE)
-    place(GW_AT, 1.1)
+    place(GW_AT, 1.3)
     rig()
 
 
@@ -379,7 +491,7 @@ def fr_steam_front():
              lathe('bell', bell_profile(0.5, 0.25, 0.8, 0.35, 1.3, 0.04), steel())]
     parts.append(plume('steam', -0.5, -4.5, 0.75, 2.2, (0.95, 0.97, 1.0), 1.4, 0.5))
     parts.append(ship('tanker', (0, 0, 3.8), 0.85))
-    group('ENGINE', parts, rot=POSE)
+    group('ENGINE', parts, rot=FR_POSE)
     place(FR_AT, 1.45)
     rig()
 
@@ -394,7 +506,7 @@ def fr_gcr_back():
              torus('coilF', 0.8, 0.12, copper(), (0, 0, 0.95)), torus('coilR', 0.45, 0.1, copper(), (0, 0, -1.0))]
     parts.append(plume('jet', -1.0, -5.0, 0.25, 0.9, (0.7, 0.85, 1.0), 6))
     parts.append(ship('tanker', (0, 0, 1.1), 0.85))
-    group('ENGINE', parts, rot=POSE)
+    group('ENGINE', parts, rot=FR_POSE)
     place(FR_AT, 1.45)
     rig()
 
@@ -420,7 +532,7 @@ def fr_fragment_front():
         a, r = rnd.uniform(0, TAU), 4.8 * math.sqrt(rnd.random())
         parts.append(sphere(f'dust{i}', 0.04, dust, (r * math.cos(a), r * math.sin(a), -0.03), 6))
     sail_ship(parts, 5.0, 0.0, -3.0)
-    group('ENGINE', parts, rot=POSE)
+    group('ENGINE', parts, rot=FR_POSE)
     place(FR_AT, 1.35)
     rig()
 
@@ -437,7 +549,7 @@ def fr_antiproton_back():
         a = k * 1.7
         parts.append(sphere(f'spark{k}', 0.08, mat_glow(f'sp{k}', (1.0, 0.4, 0.95), 30), (3.5 * math.cos(a), 3.5 * math.sin(a), -0.05), 8))
     sail_ship(parts, 5.0, 0.0, -3.2)
-    group('ENGINE', parts, rot=POSE)
+    group('ENGINE', parts, rot=FR_POSE)
     place(FR_AT, 1.35)
     rig()
 
@@ -455,7 +567,7 @@ def fr_hiiper_front():
     parts.append(wiresphere('iec', 0.5, steel(), (0, 0, 0.35)))
     parts.append(plume('ions', 0.0, -4.0, 0.2, 0.9, (0.7, 0.5, 1.0), 3, 0.45))
     parts.append(ship('tanker', (0, 0, 2.7), 0.75))
-    group('ENGINE', parts, rot=POSE)
+    group('ENGINE', parts, rot=FR_POSE)
     place(FR_AT, 1.4)
     rig()
 
@@ -477,7 +589,7 @@ def fr_mirror_back():
         a, d = rnd.uniform(0, TAU), rnd.uniform(1.0, 4.0)
         parts.append(sphere(f'pout{i}', 0.06, pel, (d * 0.5 * math.cos(a), d * 0.5 * math.sin(a), -0.6 - d), 8))
     parts.append(ship('tanker', (0, 0, 2.0), 0.8))
-    group('ENGINE', parts, rot=POSE)
+    group('ENGINE', parts, rot=FR_POSE)
     place(FR_AT, 1.35)
     rig()
 
@@ -489,14 +601,14 @@ def fr_inflatable_front():
     lens = sphere('lens', 2.4, mat_metal('lens', (0.9, 0.92, 0.95), 0.12, 0.9), (2.4, 0, 1.0), 64)
     lens.scale = (0.25, 1, 1)
     parts = [lens, rod('mount', (0, 0, 1.0), (2.0, 0, 1.0), 0.06, steel())]
-    parts.append(lathe('cone', [(0.0, 0.0), (2.2, 2.4)], mat_glow('sunbeam', (1.0, 0.9, 0.55), 1.2, 0.25), segs=48))
+    parts.append(lathe('cone', [(0.0, 0.0), (2.2, 2.4)], mat_plume('sunbeam', (1.0, 0.9, 0.55), 1.5, 0.35, 0.0, 2.8), segs=48))
     parts[-1].rotation_euler = (0, math.radians(-90), 0)
     parts[-1].location = (2.3, 0, 1.0)
     parts.append(sphere('absorber', 0.2, mat_glow('abs', (1.0, 0.98, 0.9), 40), (0.05, 0, 1.0), 16))
     parts.append(lathe('nozzle', [(0.1, 0.8), (0.25, 0.4), (0.45, -0.1), (0.4, -0.1), (0.2, 0.42), (0.06, 0.8)], steel()))
     parts.append(plume('plume', -0.1, -3.2, 0.35, 1.0, (0.85, 0.9, 1.0), 1.5, 0.4))
     parts.append(ship('tanker', (0, 0, 1.3), 0.8))
-    group('ENGINE', parts, rot=POSE)
+    group('ENGINE', parts, rot=FR_POSE)
     place(FR_AT, 1.35)
     rig()
 
@@ -521,7 +633,7 @@ def fr_archimedes_back():
     parts.append(lathe('nozzle', [(0.1, 0.4), (0.25, 0.1), (0.4, -0.3), (0.35, -0.3), (0.2, 0.12), (0.06, 0.4)], steel()))
     parts.append(plume('plume', -0.3, -3.0, 0.3, 0.9, (1.0, 0.7, 0.4), 2, 0.45))
     parts.append(ship('tanker', (0, 0, 0.85), 0.8))
-    group('ENGINE', parts, rot=POSE)
+    group('ENGINE', parts, rot=FR_POSE)
     place(FR_AT, 1.35, skip=('tile', 'ray', 'palmer'))
     rig()
 
@@ -537,32 +649,37 @@ def fr_poodle_front():
     parts.append(lathe('nozzle', [(0.12, 0.12), (0.2, -0.2), (0.32, -0.6), (0.28, -0.6), (0.16, -0.2), (0.08, 0.12)], steel()))
     parts.append(plume('wisp', -0.6, -3.0, 0.2, 0.7, (0.95, 0.97, 1.0), 1.2, 0.4))
     parts.append(ship('tanker', (0, 0, 2.0), 0.7))
-    group('ENGINE', parts, rot=POSE)
+    group('ENGINE', parts, rot=FR_POSE)
     place(FR_AT, 1.4)
     rig()
 
 
 def fr_dnanotube_back():
-    """D-Nanotube Dirt Launcher: a hairline carbon-nanotube loop shaped like a
-    capital D, a cable car running it, dirt flying off tangent to the curve."""
+    """D-Nanotube Dirt Launcher: a hairline carbon-nanotube cable forming a
+    capital D (a straight spine plus a semicircular arc) with a faint glow so it
+    reads on purple, a small cable car riding the arc, brown dirt pellets
+    flying off tangent to the curve, and the freighter hanging off the spine
+    (the vector face's composition)."""
     R = 2.6
-    d = [(0.0, 0.0, z) for z in [R, -R]]
-    arc = [(R * math.sin(t), 0.0, R * math.cos(t)) for t in [math.pi - i * math.pi / 40 for i in range(41)]]
-    pts = [d[0], d[1]] + arc[::-1] + [d[0]]
-    pts = [(0.0, 0.0, R)] + [(R * math.sin(t), 0.0, R * math.cos(t)) for t in [i * math.pi / 40 for i in range(41)]] + [(0.0, 0.0, -R), (0.0, 0.0, R)]
-    parts = [tube('loop', pts, 0.02, mat_metal('cnt', (0.15, 0.15, 0.18), 0.3, 0.6))]
-    t0 = 0.6
-    parts.append(box('car', (0.3, 0.25, 0.22), mat_metal('car', (0.95, 0.75, 0.2), 0.3, 0.6), (R * math.sin(t0), 0, R * math.cos(t0))))
+    cable = mat_glow('cnt', (0.65, 0.9, 1.0), 3.0)
+    arc = [(R * math.sin(t), 0.0, R * math.cos(t)) for t in [i * math.pi / 60 for i in range(61)]]
+    tube('arc', arc, 0.03, cable)
+    tube('spine', [(0.0, 0.0, R), (0.0, 0.0, -R)], 0.035, cable)
+    for zz in (R, -R):
+        sphere(f'anchor{zz}', 0.09, steel(), (0, 0, zz), 12)
+    t0 = 1.15
+    car = box('car', (0.5, 0.4, 0.34), mat_metal('car', (0.95, 0.72, 0.2), 0.3, 0.6), (R * math.sin(t0), -0.05, R * math.cos(t0)), (0, t0, 0))
     rnd = random.Random(4)
-    dirt = mat_metal('dirt', (0.45, 0.33, 0.2), 0.9, 0.0)
-    tr = 2.0
+    dirt = mat_metal('dirt', (0.5, 0.33, 0.18), 0.85, 0.0)
+    tr = 2.4
     p0 = Vector((R * math.sin(tr), 0, R * math.cos(tr)))
     tan = Vector((math.cos(tr), 0, -math.sin(tr)))
-    for i in range(14):
-        parts.append(sphere(f'dirt{i}', rnd.uniform(0.04, 0.09), dirt, tuple(p0 + tan * (0.3 + i * 0.32) + Vector((0, rnd.uniform(-0.1, 0.1), rnd.uniform(-0.1, 0.1)))), 8))
-    parts.append(ship('tanker', (0, 0, R), 0.7))
-    group('ENGINE', parts, rot=(math.radians(-10), math.radians(-35), math.radians(-15)))
-    place(FR_AT, 1.35)
+    for i in range(16):
+        d = 0.25 + i * 0.3
+        sphere(f'dirt{i}', rnd.uniform(0.09, 0.15), dirt, tuple(p0 + tan * d + Vector((0, rnd.uniform(-0.05, 0.05), rnd.uniform(-0.06, 0.06) * (1 + i * 0.2)))), 8)
+    # the freighter on the spine, hull running LEFT
+    _ship('tanker', (-0.05, 0.0, 0.0), 0.75, rot=(0, math.radians(-90), 0))
+    place(FR_AT, 1.25, azim=-90, elev=6, skip=('dirt',))
     rig()
 
 
@@ -588,7 +705,7 @@ def fr_rotary_front():
         for i in range(8):
             parts.append(sphere(f'pel{j}{i}', rnd.uniform(0.04, 0.08), dirt, tuple(tip + tdir * (0.3 + i * 0.35)), 8))
     parts.append(ship('tanker', (0, 0, 1.7), 0.75))
-    group('ENGINE', parts, rot=POSE)
+    group('ENGINE', parts, rot=FR_POSE)
     place(FR_AT, 1.35)
     rig()
 
@@ -635,7 +752,7 @@ def fr_zpinch_front():
     parts.append(sphere('pulse', 0.35, mat_glow('pulse', (1.0, 0.75, 0.9), 35), (0, 0, 0.2), 24))
     parts.append(plume('plume', -0.4, -4.5, 1.1, 2.2, (1.0, 0.5, 0.8), 2, 0.45))
     parts.append(ship('tanker', (0, 0, 2.5), 0.85))
-    group('ENGINE', parts, rot=POSE)
+    group('ENGINE', parts, rot=FR_POSE)
     place(FR_AT, 1.4)
     rig()
 
@@ -652,7 +769,7 @@ def fr_target_back():
     parts += coil_stack('mn', 3, -0.1, 0.45, 0.6, 0.3, 0.08)
     parts.append(plume('plume', -0.2, -4.5, 0.6, 1.6, (0.55, 0.75, 1.0), 3, 0.5))
     parts.append(ship('tanker', (0, 0, 1.9), 0.85))
-    group('ENGINE', parts, rot=POSE)
+    group('ENGINE', parts, rot=FR_POSE)
     place(FR_AT, 1.4)
     rig()
 
@@ -703,7 +820,11 @@ def main():
     a = ap.parse_args(argv)
     os.makedirs(a.out, exist_ok=True)
     scenes = SCENES[a.deck]
+    global PLUME_LEN
+    PLUME_LEN = {'gw': 0.8, 'freighter': 0.55}[a.deck]
+    global CURRENT_BACK
     for k in [k for k in scenes if not a.only or k in a.only.split(',')]:
+        CURRENT_BACK = k.endswith('-back')
         sc = K.reset(a.samples)
         scenes[k]()
         sc.render.filepath = os.path.join(a.out, f'{k}.png')
