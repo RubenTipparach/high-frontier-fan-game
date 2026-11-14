@@ -298,7 +298,7 @@ export const MAP_LABELS = [
   { text: "winds", nx: 0.1861, ny: 0.3012, angle: 105, size: 0.0015, kind: "hazard" },
   { text: "outburst", nx: 0.2281, ny: 0.3330, angle: 120, size: 0.0015, kind: "hazard" },
   { text: "Red Centaur", nx: 0.1772, ny: 0.4545, angle: 105, size: 0.0022, kind: "cluster" },
-  { text: "Sungrazer: size rolls auto-succeed, but at the end\nof each season yellow, all tokens on it are\ndecommissioned as it makes a solar close pass.", nx: 0.2235, ny: 0.4938, angle: 120, size: 0.0019, kind: "note" },
+  { text: "Sungrazer: size rolls auto-succeed, but at the end\nof each season yellow, all tokens on it are\ndecommissioned as it makes a solar close pass.", nx: 0.2173, ny: 0.5307, angle: 120, size: 0.0019, kind: "note" },
   { text: "Sol-Jupiter Lagrange", nx: 0.2833, ny: 0.4200, angle: 120, size: 0.0019, kind: "lagrange" },
   { text: "Europa flyby", nx: 0.3263, ny: 0.4532, angle: 120, size: 0.0015, kind: "flyby" },
   { text: "suborbital hop", nx: 0.3663, ny: 0.2553, angle: -60, size: 0.0015, kind: "lander" },
