@@ -1483,7 +1483,221 @@ check('HEROIC glory: suspended by Anarchy; locked under m0+m1+m2 until a Home Be
 
 // ================================================================ promo group D
 // colonists and factories: REFUGEE, IMMIGRANT, QUEST, SITDOWN
-// (group D checks go here)
+
+// ---- REFUGEE (New Pilgrims, white) ----
+// "May industrialize an opponent's Claim (not a Felony); both may use the
+// Factory (even if this card is flipped)."
+function refugee({ face = 'primary', anarchy = false, game = {}, home = false, claimBy = 1 } = {}) {
+  const REFINERY = 'ref_atomic_layer_deposition';
+  const ROBONAUT = 'rob_phase_locked_diode_laser';
+  const st = playing(2, game);
+  const me = only(st, 0, 'crew_new_pilgrims', face);
+  if (anarchy) st.anarchy = true;
+  if (home) anchorHome(me);
+  me.rocket.siteId = 'mathilde';
+  const ids = [REFINERY, ROBONAUT];
+  me.rocket.stack = ids.map((id) => ({ id, kind: 'patent', face: 'primary' }));
+  const owner = st.players[claimBy];
+  st.discs.mathilde = { outcome: 'success', ownerId: owner.profileId, by: owner.name };
+  return op(st, 0, { kind: 'INDUSTRIALIZE', siteId: 'mathilde', cardIds: ids });
+}
+check('REFUGEE: industrializes an opponent\'s Claim; the Factory is shared with the Claim owner', () => {
+  const r = refugee();
+  assert(r.ok, `Refugee industrialize refused: ${r.error}`);
+  const f = r.state.factories.mathilde;
+  eq(f.ownerId, r.state.players[0].profileId, 'Factory owner');
+  assert(f.grants && f.grants[String(r.state.players[1].profileId)], 'Claim owner was not given use of the Factory');
+  assert(/Refugee/.test(r.log), 'log does not name Refugee');
+  eq(r.state.players[0].felonies | 0, 0, 'Refugee build counted as a felony');
+  return r.log;
+});
+check('REFUGEE: Immigrant face (other face) and a core faction may not build on an opponent\'s Claim', () => {
+  eq(refugee({ face: 'secondary' }).error, 'not_claimed', 'Immigrant face');
+  const st = refugee({ claimBy: 0 });
+  assert(st.ok, `Refugee on its own Claim: ${st.error}`);
+  assert(!st.state.factories.mathilde.refugeeShare, 'own-claim build marked as shared');
+});
+check('REFUGEE: suspended by Anarchy; m0+m1+m2 locked until a Home Bernal', () => {
+  eq(refugee({ anarchy: true }).error, 'not_claimed', 'Anarchy');
+  eq(refugee({ game: PROMO }).error, 'not_claimed', 'promo game, no Home Bernal');
+  assert(refugee({ game: PROMO, home: true }).ok, 'promo game, Home Bernal anchored');
+});
+check('REFUGEE: the shared use survives a flip and cannot be revoked', () => {
+  const r = refugee();
+  const st = r.state;
+  st.players[0].faction = { cardId: 'crew_new_pilgrims', face: 'secondary' };   // flipped
+  const claimer = st.players[1];
+  const rev = applyOperation(st, { kind: 'REVOKE_FACTORY_USE', siteId: 'mathilde', granteeId: claimer.profileId }, { profileId: st.players[0].profileId });
+  eq(rev.ok ? 'accepted' : rev.error, 'refugee_share', 'revoking the Claim owner\'s share');
+  // The Claim owner uses the Factory (Factory Refuel) on their own turn.
+  st.activeIndex = 1;
+  claimer.opsRemaining = 4;
+  st.turnActions = [];
+  claimer.rocket.siteId = 'mathilde';
+  claimer.rocket.stack = [{ id: SOLAR_PUSH, kind: 'patent', face: 'primary' }];
+  claimer.rocket.activeThrusterId = SOLAR_PUSH;
+  claimer.rocket.tank = 0;
+  const use = op(st, 1, { kind: 'SITE_REFUEL', siteId: 'mathilde', mode: 'factory' });
+  assert(use.ok, `Claim owner could not use the shared Factory: ${use.error}`);
+  assert(use.state.players[1].rocket.tank > 0, 'no water went in');
+  // A plain opponent's Factory is still refused to a non-grantee.
+  const plain = refugee({ claimBy: 0 }).state;
+  plain.activeIndex = 1; plain.players[1].opsRemaining = 4; plain.turnActions = [];
+  Object.assign(plain.players[1].rocket, { siteId: 'mathilde', stack: [{ id: SOLAR_PUSH, kind: 'patent', face: 'primary' }], activeThrusterId: SOLAR_PUSH, tank: 0 });
+  assert(!op(plain, 1, { kind: 'SITE_REFUEL', siteId: 'mathilde', mode: 'factory' }).ok, 'a non-grantee used an opponent\'s Factory');
+});
+
+// ---- IMMIGRANT (New Pilgrims, black) ----
+// "When exomigrating, may first name a specialty to search the chosen queue for
+// the 1st Human with that specialty (if any), then shuffle."
+const humanOf = (spec) => Object.values(COLONISTS_BY_ID).filter((c) => c.colonistKind === 'Human' && c.specialty === spec);
+function exomigrant({ cardId = 'crew_new_pilgrims', face = 'secondary', anarchy = false, home = true, specialty = 'Engineer', to = undefined, setup = null } = {}) {
+  const st = playing(2, PROMO);
+  const me = only(st, 0, cardId, face);
+  if (anarchy) st.anarchy = true;
+  if (home) anchorHome(me);
+  else me.bernals = [{ cardId: 'ber_tourism_cycler', anchored: true, siteId: 'ceres', face: 'primary', stack: [] }];
+  // A queue with the only Engineer buried at the bottom.
+  st.colonistQueue = [...humanOf('Miner'), ...humanOf('Prospector'), humanOf('Engineer')[0]].map((c) => c.id);
+  if (setup) setup(st, me);
+  const body = { kind: 'EXOMIGRATE', placeDelegate: false };
+  if (specialty) body.specialty = specialty;
+  if (to) body.to = to;
+  const r = op(st, 0, body);
+  if (!r.ok) return r;
+  const landed = [...(r.state.players[0].leo || []), ...r.state.players[0].bernals.flatMap((b) => b.stack || []),
+    ...Object.values(r.state.players[0].outposts || {}).flatMap((o) => o.cards || [])].find((s) => s.kind === 'colonist');
+  return { ...r, landed: landed && COLONISTS_BY_ID[landed.id] };
+}
+check('IMMIGRANT: names Engineer and the buried Engineer exomigrates; the queue is shuffled', () => {
+  const r = exomigrant();
+  assert(r.ok, `Immigrant exomigration refused: ${r.error}`);
+  eq(r.landed && r.landed.specialty, 'Engineer', 'specialty of the arriving colonist');
+  assert(/Immigrant/.test(r.log), 'log does not name Immigrant');
+  const plain = exomigrant({ specialty: null });
+  assert(plain.ok && plain.landed.specialty === 'Miner', 'a plain exomigration did not take the top card');
+  const none = exomigrant({ setup: (st) => { st.colonistQueue = humanOf('Miner').map((c) => c.id); } });
+  assert(none.ok && /found none/.test(none.log), `no-match search: ${none.error || none.log}`);
+  return `${r.landed.name} arrived`;
+});
+check('IMMIGRANT: Refugee face (other face) and a core faction cannot search the queue', () => {
+  eq(exomigrant({ face: 'primary' }).error, 'no_immigrant', 'Refugee face');
+  eq(exomigrant({ cardId: 'crew_un_b612', face: 'primary' }).error, 'no_immigrant', 'UN Cosmonauts');
+});
+check('IMMIGRANT: suspended by Anarchy; locked without a Home Bernal', () => {
+  eq(exomigrant({ anarchy: true }).error, 'no_immigrant', 'Anarchy');
+  eq(exomigrant({ home: false }).error, 'no_immigrant', 'anchored Bernal that is not a Home Bernal');
+});
+
+// ---- QUEST (Galahad Group, black) ----
+// "During exomigration, your Human Colonist may appear at any Colony in a zone
+// for which you hold a glory chit."
+const QUEST_COLONY = 'ceres';
+function quest({ face = 'secondary', anarchy = false, home = true, chitZone = 'auto', to = `colony:${QUEST_COLONY}` } = {}) {
+  return exomigrant({ cardId: 'crew_galahad_group', face, anarchy, home, specialty: null, to,
+    setup: (st, me) => {
+      st.colonies[QUEST_COLONY] = { ownerId: st.players[1].profileId, type: 'other' };
+      const zone = chitZone === 'auto' ? siteBySlug(QUEST_COLONY).solarZone : chitZone;
+      me.glory.claimed = zone ? [{ zone, side: 'front', vp: 1, turn: 1, crewId: null }] : [];
+    } });
+}
+check('QUEST: the Human appears at an opponent\'s Colony in a zone the player holds a chit for', () => {
+  const r = quest();
+  assert(r.ok, `Quest exomigration refused: ${r.error}`);
+  const o = Object.values(r.state.players[0].outposts || {}).find((x) => x && x.siteId === QUEST_COLONY);
+  assert(o && o.cards.some((s) => s.kind === 'colonist'), 'the colonist is not at the Colony');
+  assert(/Quest/.test(r.log), 'log does not name Quest');
+  return r.log;
+});
+check('QUEST: no chit for that zone, Heroic face (other face), or no Colony there: refused', () => {
+  eq(quest({ chitZone: null }).error, 'no_glory_chit_for_zone', 'no chit');
+  eq(quest({ face: 'primary' }).error, 'no_quest', 'Heroic face');
+  eq(quest({ to: 'colony:vesta' }).error, 'no_colony_there', 'no Colony there');
+});
+check('QUEST: suspended by Anarchy; locked without a Home Bernal', () => {
+  eq(quest({ anarchy: true }).error, 'no_quest', 'Anarchy');
+  eq(quest({ home: false }).error, 'no_quest', 'not a Home Bernal');
+});
+
+// ---- SITDOWN (LEO Workers' Union, black) ----
+// "Factory hijack; works even if another player's Humans are present. You
+// choose 1st Player."
+function sitdown({ face = 'secondary', anarchy = false, game = {}, home = false, myHuman = true, felonious = false } = {}) {
+  const SITE = 'mathilde';
+  const card = PATENTS.find((c) => c.type === 'thruster' && c.spectralType);
+  const st = playing(2, game);
+  const me = only(st, 0, 'crew_leo_workers_union', face);
+  if (felonious) give(st, 0, 'crew_roscosmos_taikonauts', 'secondary');
+  if (anarchy) st.anarchy = true;
+  if (home) anchorHome(me);
+  const rival = st.players[1];
+  st.factories[SITE] = { ownerId: rival.profileId, spectralType: card.spectralType };
+  // The defender: a Human crew card on the rival's rocket at the Factory.
+  rival.rocket.siteId = SITE;
+  rival.rocket.stack = [{ id: 'crew_spacex_norse', kind: 'crew', face: 'primary' }];
+  me.rocket.siteId = SITE;
+  me.rocket.stack = myHuman ? [{ id: me.faction.cardId, kind: 'crew', face: me.faction.face }] : [{ id: SOLAR_PUSH, kind: 'patent', face: 'primary' }];
+  me.hand = [card.id];
+  return op(st, 0, { kind: 'ET_PRODUCE', siteId: SITE, cardId: card.id, letter: 'A', isNewOutpost: true });
+}
+check('SITDOWN: hijacks a defended opponent Factory with no Anarchy; Collective Bargaining cannot', () => {
+  const r = sitdown();
+  assert(r.ok, `Sitdown hijack refused: ${r.error}`);
+  eq(sitdown({ face: 'primary' }).error, 'not_your_factory', 'Collective Bargaining face');
+  eq(sitdown({ myHuman: false }).error, 'felony_needs_human', 'Sitdown without its own Human');
+});
+check('SITDOWN: a Felonious hijacker is still stopped by defenders', () => {
+  eq(sitdown({ felonious: true, anarchy: true }).error, 'factory_defended', 'Taikonauts hijack in Anarchy, defended');
+});
+check('SITDOWN: suspended by Anarchy; m0+m1+m2 locked until a Home Bernal', () => {
+  eq(sitdown({ anarchy: true }).error, 'factory_defended', 'Anarchy (felony open to all, but defended)');
+  eq(sitdown({ game: PROMO }).error, 'not_your_factory', 'promo game, no Home Bernal');
+  assert(sitdown({ game: PROMO, home: true }).ok, 'promo game, Home Bernal anchored');
+});
+// Close a round in a 3-seat rotation game with seat `holderAt` (counted from
+// the leader) holding the Union face under test.
+function sitdownRound(face, holderAt = 1, anarchyAtClose = false) {
+  let st = playing(3, { m0: true });
+  st.firstPlayerRotation = true;
+  const lead = st.firstPlayerIndex || 0;
+  const seatAt = (n) => (lead + n) % 3;
+  only(st, seatAt(holderAt), 'crew_leo_workers_union', face);
+  st.activeIndex = lead;
+  const startRound = st.round;
+  for (let guard = 0; guard < 80; guard++) {
+    // A Sunspot Anarchy rolled during the round is noise here: pin it.
+    st.anarchy = !!anarchyAtClose;
+    const sen = st.pendingSeniority;
+    const ev = st.pendingEvent && (st.pendingEvent.waiting || [])[0];
+    let r;
+    if (sen) r = applyOperation(st, { kind: 'PLACE_SENIORITY', place: 'unity' }, { profileId: sen.chooserId });
+    else if (ev != null) r = applyOperation(st, { kind: 'EVENT_CHOICE' }, { profileId: ev });
+    else r = applyOperation(st, { kind: 'END_TURN' }, { profileId: st.players[st.activeIndex].profileId });
+    assert(r.ok, `round close: ${r.error}`);
+    st = r.state;
+    if (st.round !== startRound && !st.pendingSeniority) break;
+  }
+  return { st, leadId: st.players[seatAt(0)].profileId, holderId: st.players[seatAt(holderAt)].profileId, otherId: st.players[seatAt(2)].profileId };
+}
+check('SITDOWN: the Union holder names the next first player and may name themselves', () => {
+  const g = sitdownRound('secondary');
+  const pend = g.st.pendingFirstPlayer;
+  assert(pend, 'no first-player choice opened');
+  eq(String(pend.chooserId), String(g.holderId), 'chooser');
+  const back = applyOperation(g.st, { kind: 'SET_FIRST_PLAYER', profileId: g.leadId }, { profileId: g.holderId });
+  eq(back.ok ? 'accepted' : back.error, 'must_choose_another', 'naming the outgoing leader');
+  const lead = applyOperation(g.st, { kind: 'SET_FIRST_PLAYER', profileId: g.leadId }, { profileId: g.leadId });
+  eq(lead.ok ? 'accepted' : lead.error, 'not_first_player_chooser', 'the outgoing leader picking');
+  const self = applyOperation(g.st, { kind: 'SET_FIRST_PLAYER', profileId: g.holderId }, { profileId: g.holderId });
+  assert(self.ok, `Sitdown naming themselves refused: ${self.error}`);
+  eq(String(self.state.players[self.state.firstPlayerIndex].profileId), String(g.holderId), 'new first player');
+});
+check('SITDOWN: Collective Bargaining face leaves the choice with the outgoing leader; Anarchy suspends it', () => {
+  const g = sitdownRound('primary');
+  eq(String(g.st.pendingFirstPlayer && g.st.pendingFirstPlayer.chooserId), String(g.leadId), 'chooser (other face)');
+  const a = sitdownRound('secondary', 1, true);
+  eq(String(a.st.pendingFirstPlayer && a.st.pendingFirstPlayer.chooserId), String(a.leadId), 'chooser under Anarchy');
+});
 
 
 

@@ -3517,9 +3517,14 @@ function renderFirstPlayerChooser(pending) {
   choices.innerHTML = '';
 
   if (amChooser) {
-    sub.textContent = 'A new round begins. Name the next first player.';
+    // Sitdown (LEO Workers' Union) hands the pick to its holder: the marker
+    // must still leave the outgoing leader, but the holder may name themselves.
+    const outgoing = pending.outgoingId != null ? pending.outgoingId : myId;
+    sub.textContent = pending.sitdown
+      ? 'A new round begins. Sitdown: you choose the next first player (anyone but the outgoing leader).'
+      : 'A new round begins. Name the next first player.';
     for (const p of players) {
-      if (p.profileId === myId) continue;          // "another player" only
+      if (p.profileId === outgoing) continue;      // "another player" only
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'mp-first-player-pick player-name';
@@ -6331,6 +6336,21 @@ function buildColonySection(me) {
   return wrap;
 }
 
+// QUEST (Galahad Group, black) destinations: every Colony on the board in a
+// zone this player holds a glory chit for (carried or banked). Each entry's
+// `to` is the wire form the server reads ('colony:<server slug>').
+function exomigrateQuestColonies(me) {
+  if (!me || !playerHasPrivilege(me, 'QUEST')) return [];
+  const g = me.glory || {};
+  const zones = new Set([...(g.chits || []), ...(g.claimed || [])].map((c) => c && c.zone).filter(Boolean));
+  const out = [];
+  for (const slug of Object.keys((_onlineSnapshot && _onlineSnapshot.colonies) || {})) {
+    const site = SITES_BY_ID[slug];
+    if (site && zones.has(site.solarZone)) out.push({ to: `colony:${slug}`, name: site.name || slug, zone: site.solarZone });
+  }
+  return out;
+}
+
 // Exomigration confirm (free action): the topmost queue colonist boards a
 // station of your choice - an anchored Bernal, or the LEO Stack - and you
 // decide whether its delegate takes a seat in the Assembly (the colonist
@@ -6368,17 +6388,21 @@ function openExomigrateModal(me) {
   // Default to the Home Bernal when one exists (the colony is the crew's home),
   // but let the player send them to LEO instead.
   let chosenTo = homeBernalTo || 'leo';
+  // QUEST (Galahad Group): the Human may instead appear at any Colony in a zone
+  // you hold a glory chit for. Mirror of the server's colony destination.
+  const questDest = exomigrateQuestColonies(me);
   const destWrap = document.createElement('div');
   destWrap.style.margin = '0 0 10px';
   const destLabel = document.createElement('div');
   destLabel.className = 'mp-detail-label';
-  destLabel.textContent = homeBernalTo ? 'Boards (choose)' : 'Boards';
+  destLabel.textContent = (homeBernalTo || questDest.length) ? 'Boards (choose)' : 'Boards';
   destWrap.appendChild(destLabel);
-  if (homeBernalTo) {
-    // Two radio options: the Home Bernal or the LEO Stack.
+  if (homeBernalTo || questDest.length) {
+    // Radio options: the Home Bernal, the LEO Stack, and any Quest colonies.
     const opts = [
-      { to: homeBernalTo, glyph: '🛰', label: homeBernalName },
+      ...(homeBernalTo ? [{ to: homeBernalTo, glyph: '🛰', label: homeBernalName }] : []),
       { to: 'leo', glyph: '🌍', label: `the ${homeLabel()} Stack` },
+      ...questDest.map((q) => ({ to: q.to, glyph: '🏰', label: `the Colony at ${q.name} (Quest, ${q.zone} chit)` })),
     ];
     for (const o of opts) {
       const row = document.createElement('label');
@@ -6419,6 +6443,25 @@ function openExomigrateModal(me) {
     modal.appendChild(delegateRow);
   }
 
+  // IMMIGRANT (New Pilgrims): optionally name a specialty first; the queue is
+  // searched for the first Human with it (if any), then shuffled.
+  let specialtySel = null;
+  if (playerHasPrivilege(me, 'IMMIGRANT')) {
+    const row = document.createElement('label');
+    row.style.cssText = 'display:flex;gap:6px;align-items:center;margin:0 0 10px';
+    row.appendChild(document.createTextNode('🧳 Immigrant: search the queue for '));
+    specialtySel = document.createElement('select');
+    specialtySel.className = 'exo-immigrant-specialty';
+    for (const [v, t] of [['', 'nobody (draw the top)'], ['Miner', 'a Miner'], ['Prospector', 'a Prospector'], ['Engineer', 'an Engineer'], ['Industrialist', 'an Industrialist']]) {
+      const o = document.createElement('option');
+      o.value = v; o.textContent = t;
+      specialtySel.appendChild(o);
+    }
+    row.appendChild(specialtySel);
+    row.dataset.tip = 'Name a specialty: the first Human with it comes to the top of the queue, then the rest is shuffled. Nobody with it? The queue is still shuffled.';
+    modal.appendChild(row);
+  }
+
   const btns = document.createElement('div');
   btns.className = 'mp-trade-btns';
   const go = document.createElement('button');
@@ -6432,6 +6475,7 @@ function openExomigrateModal(me) {
     close();
     const op = { kind: 'EXOMIGRATE', to: chosenTo };
     if (delegateRow && !delegateRow._cb.checked) op.placeDelegate = false;
+    if (specialtySel && specialtySel.value) op.specialty = specialtySel.value;
     const ok = await submitOnlineOp(op);
     if (ok) {
       const after = mySnapshotPlayer();
@@ -21433,6 +21477,16 @@ function myActiveLaws() {
   return usable;
 }
 function iCanUseLaw(key) { return myActiveLaws().has(key); }
+// Is this Claim disc mine? Offline (no owners on the discs) every claim is.
+function claimIsMine(disc) {
+  if (!_online || !disc || disc.ownerId == null) return true;
+  return String(disc.ownerId) === String(myOwnerId());
+}
+// May I industrialize this Claim? My own always; an opponent's only as the New
+// Pilgrims' REFUGEE. Mirror of the server's not_claimed / Refugee check.
+function claimIndustrializableByMe(disc) {
+  return claimIsMine(disc) || playerHasPrivilege(mySnapshotPlayer(), 'REFUGEE');
+}
 // May this player USE the given factory for a NON-VICTORY op (Site Refuel, ET
 // Produce, Delivery)? Their own always; an opponent's only under Individuality
 // (Freedom to Roam). Mirror of the server's canUseFactoryNonVictory. Victory
@@ -21447,6 +21501,17 @@ function iCanUseFactory(factory) {
   // rejected for the same factory.
   if (factory.grants && factory.grants[String(myOwnerId())]) return true;
   return false;
+}
+// SITDOWN (LEO Workers' Union, black): "Factory hijack; works even if another
+// player's Humans are present." The holder may ET Produce at an opponent's
+// Factory with their own Human there (rocket or an outpost at the site),
+// Anarchy or not, and defenders don't stop it. Mirror of the server's Sitdown
+// branch in applyEtProduce. `siteId` is the map (planner) id of the factory site.
+function iMayHijackFactory(factory, siteId) {
+  if (!_online || !factory || factory.ownerId === myOwnerId()) return false;
+  if (!playerHasPrivilege(mySnapshotPlayer(), 'SITDOWN')) return false;
+  if (getStackSiteId('rocket') === siteId && stackHasHuman(getRocketStack())) return true;
+  return Object.values(getOutposts() || {}).some((o) => o && o.siteId === siteId && stackHasHuman(o.cards || []));
 }
 
 // Industrialize handler (rulebook I7). The caller has already
@@ -29129,17 +29194,24 @@ function showSitePopupFor(site) {
       const stack = getRocketStack();
       const needDirt = hermesNeedsDirtRocket(site);
       const opts = findIndustrializeOptions(stack, true, myCrewReactorKinds(), { requireDirtRocket: needDirt });
-      const ok = opts.length > 0;
+      // Only your own Claim may be industrialized - unless you are the New
+      // Pilgrims' REFUGEE, who may build on an opponent's Claim (not a Felony)
+      // and share the Factory with them.
+      const claimOk = claimIndustrializableByMe(disc);
+      const refugee = claimOk && !claimIsMine(disc);
+      const ok = opts.length > 0 && claimOk;
       const reason = ok
         ? null
+        : !claimOk
+          ? "This is another player's Claim. Only its owner may industrialize it."
         : (needDirt
             ? 'A factory on Hermes also decommissions an operational dirt rocket (a grey thrust triangle). The stack needs an active refinery + active robonaut with their supports, AND a dirt rocket aboard.'
             : 'Industrialize needs an active refinery + active robonaut in the stack (with their supports satisfied).');
       actions.push({
-        label: '🏭 Industrialize',
+        label: refugee ? '🏭 Industrialize (Refugee)' : '🏭 Industrialize',
         variant: ok ? 'rocket' : 'secondary',
         disabled: !ok,
-        title: reason || undefined,
+        title: reason || (refugee ? "Refugee: build a Factory on this opponent's Claim (not a Felony). The Factory is yours, and its Claim owner may use it too." : undefined),
         tutTarget: 'industrialize',
         onClick: () => {
           if (!ok) return;
@@ -29163,9 +29235,9 @@ function showSitePopupFor(site) {
         if (!o || o.siteId !== site.id) continue;
         const stack = o.cards || [];
         const opts = findIndustrializeOptions(stack, true, myCrewReactorKinds(), { requireDirtRocket: hermesNeedsDirtRocket(site) });
-        if (!opts.length) continue;
+        if (!opts.length || !claimIndustrializableByMe(disc)) continue;
         actions.push({
-          label: `🏭 Industrialize (Outpost ${letter})`,
+          label: `🏭 Industrialize (Outpost ${letter})${claimIsMine(disc) ? '' : ' (Refugee)'}`,
           variant: 'rocket',
           tutTarget: 'industrialize',
           onClick: () => {
@@ -29346,7 +29418,9 @@ function showSitePopupFor(site) {
   // fresh outpost the player creates inline).
   {
     const factory = getFactory(site.id);
-    if (iCanUseFactory(factory)) {
+    // Sitdown: a Union hijack of an opponent's Factory rides the same button.
+    const sitdownHijack = !iCanUseFactory(factory) && iMayHijackFactory(factory, site.id);
+    if (iCanUseFactory(factory) || sitdownHijack) {
       const handIds = getHandSlots();
       const etOptions = findEtProduceOptions(handIds, cardById, factory.spectralType, { anyC: myHasColonistPower('etProduceCAnywhere') });
       const outpostsAtSite = Object.values(getOutposts()).filter((o) => o.siteId === site.id);
@@ -29392,10 +29466,11 @@ function showSitePopupFor(site) {
           ? `No colocated outpost AND all 4 outpost slots are in use.`
           : null;
       actions.push({
-        label: `🏭 ET Produce (${factory.spectralType})`,
+        label: sitdownHijack ? `✊ Sitdown: ET Produce (${factory.spectralType})` : `🏭 ET Produce (${factory.spectralType})`,
         variant: ok ? 'rocket' : 'secondary',
         disabled: !ok,
         title: reason
+          || (sitdownHijack ? `Factory hijack (Sitdown): your workers take over this Factory and produce a spectral-${factory.spectralType} card Black-Side-up. Opposing Humans can't stop it. A Felony.` : null)
           || (rocketParkedHere
             ? `Produce a spectral-${factory.spectralType} card Black-Side-up, straight into your rocket or an outpost.`
             : `Produce a spectral-${factory.spectralType} card Black-Side-up into the colocated outpost.`),

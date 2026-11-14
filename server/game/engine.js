@@ -8077,6 +8077,30 @@ function exomigrateOne(state, player, opts = {}) {
     bn.stack = bn.stack || [];
     const bnCard = PATENTS_BY_ID[bn.cardId];
     dest = { arr: bn.stack, where: `the ${(bnCard && bnCard.name) || 'Bernal'}` };
+  } else if (to && to.startsWith('colony:')) {
+    // QUEST (Galahad Group, black): "During exomigration, your Human Colonist
+    // may appear at any Colony in a zone for which you hold a glory chit." Any
+    // Colony on the board (the card says any, not yours), in a heliocentric zone
+    // whose chit the player carries or has already banked. The colonist lands in
+    // the player's Outpost at that site, set up on the spot when there is none
+    // yet (an Outpost can stand at another player's Factory, as a hijacked
+    // product does).
+    if (!hasPrivilege(state, player, 'QUEST')) return { ok: false, error: 'no_quest' };
+    const slug = to.slice('colony:'.length);
+    if (!state.colonies || !state.colonies[slug]) return { ok: false, error: 'no_colony_there' };
+    const zone = (siteById(slug) || {}).solarZone;
+    if (!zone || !questZones(player).has(zone)) return { ok: false, error: 'no_glory_chit_for_zone' };
+    player.outposts = player.outposts || {};
+    let o = Object.values(player.outposts).find((x) => x && x.siteId === slug);
+    if (!o) {
+      const taken = new Set(Object.keys(player.outposts));
+      const letter = OUTPOST_LETTERS.find((l) => !taken.has(l));
+      if (!letter) return { ok: false, error: 'no_outpost_slot' };
+      o = player.outposts[letter] = { letter, siteId: slug, cards: [], tank: 0 };
+    }
+    o.cards = o.cards || [];
+    const colonyName = (siteById(slug) || {}).name || slug;
+    dest = { arr: o.cards, where: `the Colony at ${colonyName} (Quest)` };
   } else if (to) {
     return { ok: false, error: 'bad_transfer' };
   } else {
@@ -8105,6 +8129,28 @@ function exomigrateOne(state, player, opts = {}) {
     }
     return { ok: false, error: 'colonist_queue_empty' };
   }
+  // IMMIGRANT (New Pilgrims, black): "When exomigrating, may first name a
+  // specialty to search the chosen queue for the 1st Human with that specialty
+  // (if any), then shuffle." The Human found (if any) is set on top and the
+  // rest of the queue is shuffled beneath it, so the draw below takes that
+  // Human. No match still shuffles the whole queue: the search happened, it
+  // just came up empty.
+  let immigrantNote = '';
+  if (opts.specialty != null && opts.specialty !== '') {
+    const want = String(opts.specialty);
+    if (!hasPrivilege(state, player, 'IMMIGRANT')) return { ok: false, error: 'no_immigrant' };
+    if (!COLONIST_SPECIALTIES.includes(want)) return { ok: false, error: 'bad_specialty' };
+    const isHuman = (c) => c.colonistKind === 'Human' || (c.colonistKind === 'Robot' && state.robotsEmancipated);
+    const hit = queue.findIndex((id) => { const c = PATENTS_BY_ID[id] || {}; return isHuman(c) && c.specialty === want; });
+    const found = hit >= 0 ? queue.splice(hit, 1)[0] : null;
+    const gen = makeRng(state.seed, state.rng.cursor);
+    const rest = shuffle(gen, queue.slice());
+    state.rng.cursor = gen.cursor;
+    queue.splice(0, queue.length, ...(found != null ? [found] : []), ...rest);
+    immigrantNote = found != null
+      ? `searched the queue for a ${want} (Immigrant) and shuffled it; `
+      : `searched the queue for a ${want} (Immigrant), found none, and shuffled it; `;
+  }
   // Handy (2C2a): a HUMAN goes into space at the chosen station, but a ROBOT
   // goes into the HAND (it enters play later via ET production) and the
   // exomigration immediately draws again, until a colonist lands in space or
@@ -8127,9 +8173,9 @@ function exomigrateOne(state, player, opts = {}) {
     cardId = id; card = c;
     break;
   }
-  const robotNote = robotsDrawn.length
+  const robotNote = immigrantNote + (robotsDrawn.length
     ? `${robotsDrawn.join(' and ')} (Robot${robotsDrawn.length === 1 ? '' : 's'}) joined the hand; `
-    : '';
+    : '');
   if (!cardId) {
     // The queue drained mid-draw (Handy skimmed the rest to hand). This is the
     // empty-queue exomigration, so Robot Emancipation fires: one freed Robot
@@ -8147,6 +8193,17 @@ function exomigrateOne(state, player, opts = {}) {
   }
   return placeExomigrant(state, player, cardId, card, dest,
     `${robotNote}${card.name || cardId} exomigrated to ${dest.where}`, opts);
+}
+
+// The four colonist specialties (2C1) an Immigrant may name.
+const COLONIST_SPECIALTIES = ['Miner', 'Prospector', 'Engineer', 'Industrialist'];
+// Heliocentric zones a player holds a glory chit for, carried or already
+// banked. QUEST reads this ("a zone for which you hold a glory chit").
+function questZones(player) {
+  const g = (player && player.glory) || {};
+  const zones = new Set();
+  for (const c of [...(g.chits || []), ...(g.claimed || [])]) if (c && c.zone) zones.add(c.zone);
+  return zones;
 }
 
 // Push the exomigrated colonist onto its destination stack and seat its delegate
@@ -8227,6 +8284,7 @@ function applyExomigrate(state, op, player) {
   const res = exomigrateOne(state, player, {
     to: op.to,
     placeDelegate: op.placeDelegate !== false,
+    specialty: op.specialty,
     // Player-invoked exomigration CAN pause for a tie pick (unlike the automatic
     // mid-op exomigrations, which resolve ties quietly): a tied vote after the
     // arriving delegate seats leaves the active-law star for the player to set
@@ -9946,7 +10004,13 @@ function applyIndustrialize(state, op, player) {
   if (!srcStack) return fail('no_outpost');
   if (srcSiteId !== siteId) return fail('not_at_site');
   const disc = state.discs[siteId];
-  if (!disc || disc.outcome !== 'success' || disc.ownerId !== player.profileId) return fail('not_claimed');
+  // REFUGEE (New Pilgrims, white): "May industrialize an opponent's Claim (not
+  // a Felony); both may use the Factory (even if this card is flipped)." The
+  // Factory is the Refugee's (their cube, their VP); the Claim's owner keeps a
+  // standing right to use it, recorded below.
+  const refugeeOf = (disc && disc.outcome === 'success' && disc.ownerId != null
+    && disc.ownerId !== player.profileId && hasPrivilege(state, player, 'REFUGEE')) ? disc.ownerId : null;
+  if (!disc || disc.outcome !== 'success' || (disc.ownerId !== player.profileId && refugeeOf == null)) return fail('not_claimed');
   if (state.factories[siteId]) return fail('already_industrialized');
   // Cube supply: factories + assembly delegates share the 7 cubes. If the pool
   // is full you may FREE one by removing a delegate from the politics map
@@ -10071,12 +10135,25 @@ function applyIndustrialize(state, op, player) {
   }
   const spectral = site.spectralType || 'C';
   state.factories[siteId] = { ownerId: player.profileId, spectralType: spectral };
+  // REFUGEE: the Claim's owner may use this Factory too. It rides the ordinary
+  // owner grant (canUseFactoryNonVictory reads fac.grants), and refugeeShare
+  // pins it: the right comes from how the Factory was built, so it holds "even
+  // if this card is flipped" (and through Anarchy or the Module 2 lock), and the
+  // owner cannot revoke it.
+  if (refugeeOf != null) {
+    state.factories[siteId].grants = { [String(refugeeOf)]: true };
+    state.factories[siteId].refugeeShare = refugeeOf;
+  }
   // M1: name the cube for the Mobile Factory fleet (1B6); harmless field that
   // only the M1 mobile-factory UI reads (gated so an M1-off game is unchanged).
   if (state.m1) state.factories[siteId].tag = nextFactoryTag(state, player.profileId);
   if (!freeAction) player.opsRemaining -= 1;
   else if (freeViaColonist) spendColonistFreeOp(player, 'Industrialist');
   let log = `${player.name} industrialized ${site.name} (spectral ${spectral}); decommissioned ${decommissioned ? `${cardNames(builtIds)} to hand` : 'nothing'}.`;
+  if (refugeeOf != null) {
+    const claimer = state.players.find((p) => p.profileId === refugeeOf);
+    log += ` (Refugee: built on ${claimer ? claimer.name : 'an opponent'}'s Claim, who may use this Factory too.)`;
+  }
   if (arcology && sparedRobonautId) {
     const rc = PATENTS_BY_ID[sparedRobonautId];
     log += ` (Arcology: the ${(rc && rc.name) || 'robonaut'} was not needed and stays aboard.)`;
@@ -10158,9 +10235,15 @@ function applyEtProduce(state, op, player) {
     // Factory Hijack (Felony, N6a): ET-produce at an opponent's Factory during
     // Anarchy, with your own Human colocated, unless an opposing Human or
     // colony defends it. The product still lands in YOUR outpost here.
-    if (!mayCommitFelony(state, player)) return fail('not_your_factory');
+    // SITDOWN (LEO Workers' Union, black): "Factory hijack; works even if
+    // another player's Humans are present." Read like Collective Bargaining's
+    // "may commit Murder/Suicide": the card grants THIS one felony (no Anarchy
+    // needed) and the hijack cannot be defended by opposing Humans. Your own
+    // Human must still be there - a sitdown needs workers on the floor.
+    const sitdown = hasPrivilege(state, player, 'SITDOWN');
+    if (!sitdown && !mayCommitFelony(state, player)) return fail('not_your_factory');
     if (!actorCrewAtSite(state, siteId, player.profileId)) return fail('felony_needs_human');
-    if (opposingHumanAtSite(state, siteId, player.profileId)) return fail('factory_defended');
+    if (!sitdown && opposingHumanAtSite(state, siteId, player.profileId)) return fail('factory_defended');
   }
   // Engineer colonist (2C1d): one EXTRA product per engineer colocated with
   // this factory - repeats of the operation ride free this turn, up to that
@@ -13533,10 +13616,21 @@ function resolveRoundClose(state, log) {
       log += ` Nobody else has a cube free for the first-player marker - ${chooser.name} leads again.`;
       return { ok: true, state, log };
     }
-    state.pendingFirstPlayer = { chooserId: chooser.profileId };
+    // SITDOWN (LEO Workers' Union, black): "You choose 1st Player." The holder
+    // names the next first player in place of the outgoing leader. The marker
+    // still has to move off the outgoing leader (the base rule), but the holder
+    // may name themselves. Climate Control and Martial Law, above, still win:
+    // they settle the marker before anyone gets to choose.
+    const sitdownHolder = state.players.find((p) => hasPrivilege(state, p, 'SITDOWN'));
+    if (sitdownHolder && sitdownHolder !== chooser) {
+      state.pendingFirstPlayer = { chooserId: sitdownHolder.profileId, outgoingId: chooser.profileId, sitdown: true };
+      log += ` ${sitdownHolder.name} names the next first player (Sitdown).`;
+    } else {
+      state.pendingFirstPlayer = { chooserId: chooser.profileId };
+      log += ` ${chooser.name} names the next first player.`;
+    }
     state.turnActions = [];
     state.turnRedo = [];
-    log += ` ${chooser.name} names the next first player.`;
     return { ok: true, state, log };
   }
 
@@ -15543,6 +15637,9 @@ function applyRevokeFactoryUse(state, op, ctx) {
   const { caller, fac, siteId, site } = r;
   if (fac.ownerId !== caller.profileId) return fail('not_your_factory');
   const key = String(op.granteeId == null ? '' : op.granteeId);
+  // REFUGEE: the Claim owner's share of a Factory built on their Claim is not
+  // the Factory owner's to take back.
+  if (fac.refugeeShare != null && String(fac.refugeeShare) === key) return fail('refugee_share');
   if (fac.grants) delete fac.grants[key];
   const grantee = state.players.find((p) => String(p.profileId) === key);
   return { ok: true, state, log: `${caller.name} revoked ${grantee ? grantee.name : 'a player'}'s access to the Factory at ${(site && site.name) || siteId}.` };
@@ -15913,7 +16010,9 @@ function applySetFirstPlayer(state, op, ctx) {
   const targetIdx = state.players.findIndex((p) => sameId(p.profileId, op.profileId));
   if (targetIdx < 0) return fail('unknown_player');
   // "another player": the first-player token must move off the chooser.
-  if (sameId(state.players[targetIdx].profileId, pending.chooserId)) {
+  // When Sitdown handed the choice to someone else, it is the OUTGOING leader
+  // the marker must move off; the Sitdown holder may name themselves.
+  if (sameId(state.players[targetIdx].profileId, pending.outgoingId != null ? pending.outgoingId : pending.chooserId)) {
     return fail('must_choose_another');
   }
   const chooser = playerByProfile(state, pending.chooserId);
