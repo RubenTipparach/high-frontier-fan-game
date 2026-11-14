@@ -1107,6 +1107,8 @@ function systemMapData(starId) { // AA-B7a, drawn exactly as the Sol board draws
     // gas giants alternate Jupiter-like and Neptune-like, by name
     g._palette = b.kind === 'gas' ? ([...b.name].reduce((h, c) => h + c.charCodeAt(0), 0) % 2 ? BODY_ART.neptune : BODY_ART.jupiter) : b.kind === 'brown' ? BODY_ART.brownDwarf : BODY_ART.whiteDwarf;
     g.planetStyle = styleOfArt(g._palette);
+    // every gas giant has rings, in one of the HF board's four ring styles
+    if (b.kind === 'gas') { const h = [...b.name].reduce((x, c) => x * 31 + c.charCodeAt(0), 7) >>> 0; g.ringKind = g._palette === BODY_ART.neptune ? (h % 2 ? 'uranus' : 'neptune') : (h % 3 ? 'saturn' : 'jupiter'); }
     g.haloR = b.kind === 'white' ? 14 : GIANT_HALO; // SM-7: the ladder curls just outside the sphere
     sites.push(g);
   }

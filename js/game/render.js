@@ -6,7 +6,7 @@ import { assetUrl } from '../base.js';
 import { isBatterySave, onBatterySaveChange } from '../prefs.js';
 import { isSirens, isHermes } from './online-mode.js';
 import { toLayoutPx, uiScale } from '../ui-scale.js';
-import { makePlanetTexture, PlanetSphere } from './planet-texture.js';
+import { makePlanetTexture, PlanetSphere, PlanetRings } from './planet-texture.js';
 import { fleetLabel } from '../../data/fleet-tags.js';
 import { NODE_TAGS, spriteForTags } from '../../data/node-tags.js';
 import { serverTagLabels, tagInfo } from '../../data/node-labels.js';
@@ -504,6 +504,7 @@ const RING_DEFS = {
 // prefix), not its moons. Site names in the data look like
 // 'Saturn Aerostat', 'Jupiter Aerostat-XYZ' etc.
 function ringDefFor(site) {
+  if (site.ringKind) return RING_DEFS[site.ringKind] || null; // a map's own giants (Ad Astra) name their ring style
   const n = (site.name || '').toLowerCase();
   if (n.startsWith('saturn'))  return RING_DEFS.saturn;
   if (n.startsWith('jupiter')) return RING_DEFS.jupiter;
@@ -3696,10 +3697,13 @@ export class MapRenderer {
       const key = `${R}|${spin.toFixed(4)}|${Math.round(Math.atan2(light.y, light.x) * 20)}`;
       if (ent.key !== key) { ent.sphere.render(R, spin, light, mkCanvas); ent.key = key; }
       if (pal.atmosphere) { const g = ctx.createRadialGradient(sx, sy, sr * 0.85, sx, sy, sr * 1.45); g.addColorStop(0, pal.atmosphere); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(sx, sy, sr * 1.45, 0, Math.PI * 2); ctx.fill(); }
-      if (rings) drawPlanetRings(ctx, sx, sy, sr, rings, 'back');
+      // rings: a painted ring plane, the half behind the planet first (planet-texture.js)
+      const rr = rings ? (ent.rings = ent.rings || new PlanetRings(rings)).render(R, light, mkCanvas) : null;
+      const rs = rr ? sr / rr.R : 0;
+      if (rr) ctx.drawImage(rr.back, sx - rr.half * rs, sy - rr.half * rs, rr.half * 2 * rs, rr.half * 2 * rs);
       const cv = ent.sphere.canvas; const half = ((ent.sphere.R + 1) * sr) / ent.sphere.R; // the sphere is R device px; draw it at sr
       ctx.drawImage(cv, sx - half, sy - half, half * 2, half * 2);
-      if (rings) drawPlanetRings(ctx, sx, sy, sr, rings, 'front');
+      if (rr) ctx.drawImage(rr.front, sx - rr.half * rs, sy - rr.half * rs, rr.half * 2 * rs, rr.half * 2 * rs);
       if (site.hazard) { ctx.lineWidth = 1.1; ctx.strokeStyle = '#f87171'; ctx.beginPath(); ctx.arc(sx, sy, sr, 0, Math.PI * 2); ctx.stroke(); }
       return true;
     };

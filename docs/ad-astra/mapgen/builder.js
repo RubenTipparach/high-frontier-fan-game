@@ -38,6 +38,8 @@ const MOON_ART = ['io', 'europa', 'ganymede', 'callisto', 'ceres'];
 // the painted, turning sphere each body art reads as (planet-texture.js)
 const STYLE_OF = { earth: 'earth', mars: 'mars', mercury: 'rock', venus: 'venus', jupiter: 'gas', saturn: 'gas', neptune: 'ice-giant', io: 'volcanic', europa: 'ice', ganymede: 'rock', callisto: 'rock', ceres: 'rock' };
 const styleOfArt = (pal) => STYLE_OF[Object.keys(ART).find((k) => ART[k] === pal)] || null;
+// every gas giant has rings, in one of the HF board's four ring styles
+const ringKindFor = (name, pal) => { const h = [...String(name)].reduce((x, c) => x * 31 + c.charCodeAt(0), 7) >>> 0; return pal === ART.neptune ? (h % 2 ? 'uranus' : 'neptune') : (h % 3 ? 'saturn' : 'jupiter'); };
 
 // Presets are rolled by the same roller the game uses (roll.js), from a fixed
 // seed so each preset is the same every load.
@@ -98,7 +100,7 @@ function toPlanner(map) {
   }
   for (const g of map.bodies) {
     const pal = g.size >= 11 ? ART.jupiter : ART.neptune;
-    sites.push({ id: g.id, id2: `mg-${g.id}`, x: g.x, y: g.y, type: 'gas-giant', name: g.name, isWaypoint: false, isLandable: false, bodyKey: g.id, _palette: pal, planetStyle: styleOfArt(pal), solarZone: null, haloR: GIANT_HALO });
+    sites.push({ id: g.id, id2: `mg-${g.id}`, x: g.x, y: g.y, type: 'gas-giant', name: g.name, isWaypoint: false, isLandable: false, bodyKey: g.id, _palette: pal, planetStyle: styleOfArt(pal), ringKind: ringKindFor(g.name, pal), solarZone: null, haloR: GIANT_HALO });
   }
   const byId = Object.fromEntries(sites.map((s) => [s.id, s]));
   const edges = map.edges.map(([a, b]) => [a, b]);

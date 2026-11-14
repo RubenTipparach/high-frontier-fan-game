@@ -202,3 +202,69 @@ export class PlanetSphere {
     return this.canvas;
   }
 }
+
+// ---------- rings: a painted ring plane with ringlets, gaps and the planet's
+// shadow, split into the half behind the planet and the half in front.
+// `def` is the renderer's ring definition: { tilt (radians, in the screen),
+// flatten (minor / major axis), bands: [{ r, w, color }] } in planet radii.
+const parseRgba = (c) => { const m = String(c).match(/[\d.]+/g) || [200, 180, 140, 0.6]; return [+m[0], +m[1], +m[2], m[3] == null ? 1 : +m[3]]; };
+function ringProfile(def, seed = 7) {
+  const r1 = Math.max(...def.bands.map((b) => b.r + b.w / 2)) + 0.02;
+  const N = 700; const r0 = 1; const rgb = new Float32Array(N * 3); const a = new Float32Array(N);
+  for (let i = 0; i < N; i++) {
+    const r = r0 + ((r1 - r0) * (i + 0.5)) / N;
+    for (const b of def.bands) {
+      const d = Math.abs(r - b.r) - b.w / 2; if (d > 0.01) continue;
+      const [cr, cg, cb, ca] = parseRgba(b.color);
+      const edge = d > 0 ? 1 - d / 0.01 : 1; // soft band edges
+      // ringlets: fine density waves across the band
+      const ring = 0.62 + 0.4 * vnoise(r * 90, 0.5, 0.5, seed) + 0.12 * Math.sin(r * 420) + 0.08 * vnoise(r * 300, 2.5, 0.5, seed + 9);
+      const al = ca * edge * ring;
+      if (al > a[i]) { a[i] = al; rgb[i * 3] = cr * (0.9 + 0.2 * vnoise(r * 40, 1.5, 0.5, seed + 3)); rgb[i * 3 + 1] = cg; rgb[i * 3 + 2] = cb; }
+    }
+  }
+  return { r0, r1, N, rgb, a };
+}
+export class PlanetRings {
+  constructor(def) { this.def = def; this.p = ringProfile(def); this.key = ''; this.out = null; }
+  // R: the planet's radius in device px. light: screen direction toward the star.
+  render(R, light, makeCanvas) {
+    const Rq = Math.max(8, Math.min(128, Math.ceil(R / 16) * 16)); // repaint on zoom steps, not every frame
+    const key = `${Rq}|${Math.round(Math.atan2(light.y, light.x) * 24)}`;
+    if (this.key === key && this.out) return this.out;
+    const { tilt, flatten } = this.def; const ci = Math.sqrt(Math.max(0, 1 - flatten * flatten));
+    const { r0, r1, N, rgb, a } = this.p;
+    const half = Math.ceil(r1 * Rq) + 2; const size = half * 2;
+    const mk = () => { const c = makeCanvas(size, size); return { c, ctx: c.getContext('2d') }; };
+    const B = this.out && this.out.size === size ? this.out.B : mk(), F = this.out && this.out.size === size ? this.out.F : mk();
+    const ib = B.ctx.createImageData(size, size), iF = F.ctx.createImageData(size, size);
+    const ct = Math.cos(tilt), st = Math.sin(tilt);
+    // the light in the ring's own (rotated) frame: x along the ring, y down, z toward you
+    let lx = light.x, ly = light.y; const ll = Math.hypot(lx, ly) || 1; lx /= ll; ly /= ll;
+    let Lx = lx * ct + ly * st, Ly = -lx * st + ly * ct, Lz = 0.55; const ln = Math.hypot(Lx, Ly, Lz); Lx /= ln; Ly /= ln; Lz /= ln;
+    const nL = -ci * Ly + flatten * Lz; // the ring plane's normal against the light
+    const face = nL > 0 ? 0.85 + 0.25 * Math.min(1, nL * 3) : 0.7; // the unlit face is a little dimmer (light through the ring)
+    // 4 samples a pixel: the ring is squashed, so its edges are finer than a pixel
+    const SUB = [[0.25, 0.25], [0.75, 0.25], [0.25, 0.75], [0.75, 0.75]];
+    for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+      let sb = [0, 0, 0, 0], sf = [0, 0, 0, 0];
+      for (const [ox, oy] of SUB) {
+        const X = x + ox - half, Y = y + oy - half;
+        const xr = X * ct + Y * st, yr = -X * st + Y * ct;
+        const u = xr / Rq, v = yr / (Rq * flatten); const r = Math.hypot(u, v);
+        if (r < r0 || r >= r1) continue;
+        const i = Math.min(N - 1, ((r - r0) / (r1 - r0)) * N | 0); const al = Math.min(1, a[i] * 1.1); if (al <= 0.01) continue;
+        // the planet's shadow: the ray from this ring point toward the star meets the planet
+        const Px = u, Py = v * flatten, Pz = v * ci; const d = Px * Lx + Py * Ly + Pz * Lz;
+        const lit = d < 0 && Px * Px + Py * Py + Pz * Pz - d * d < 1 ? 0.25 : face;
+        const acc = yr < 0 ? sb : sf; // premultiplied, so the halves blend cleanly at the edges
+        acc[0] += rgb[i * 3] * lit * al; acc[1] += rgb[i * 3 + 1] * lit * al; acc[2] += rgb[i * 3 + 2] * lit * al; acc[3] += al;
+      }
+      const o = (y * size + x) * 4;
+      for (const [acc, img] of [[sb, ib], [sf, iF]]) if (acc[3] > 0) { img.data[o] = acc[0] / acc[3]; img.data[o + 1] = acc[1] / acc[3]; img.data[o + 2] = acc[2] / acc[3]; img.data[o + 3] = (acc[3] / 4) * 255; }
+    }
+    B.ctx.putImageData(ib, 0, 0); F.ctx.putImageData(iF, 0, 0);
+    this.key = key; this.out = { B, F, back: B.c, front: F.c, half, size, R: Rq };
+    return this.out;
+  }
+}

@@ -14,13 +14,14 @@
 <div class="row"><label><input type="checkbox" id="orbit" checked> light circles</label><label>size <input type="range" id="size" min="12" max="70" value="56"></label><span id="fps"></span></div>
 <div id="stage"></div>
 <script type="module">
-import { makePlanetTexture, PlanetSphere } from '../../../js/game/planet-texture.js';
+import { makePlanetTexture, PlanetSphere, PlanetRings } from '../../../js/game/planet-texture.js';
 const ART = {
   earth: { base: '#3b7fc0', light: '#8fc1ee', dark: '#0e2c4b', atmosphere: 'rgba(135, 206, 250, 0.55)' },
   mars: { base: '#c1502e', light: '#f0a47e', dark: '#3c1408', atmosphere: 'rgba(220, 130, 90, 0.3)' },
   mercury: { base: '#9a8773', light: '#d4c0a8', dark: '#3d3326' },
   venus: { base: '#e8c87a', light: '#fff0c2', dark: '#7a5a1a', atmosphere: 'rgba(255, 220, 140, 0.5)' },
   jupiter: { base: '#c8a373', light: '#f3dab0', dark: '#5a3e22' },
+  uranus: { base: '#9fdcd6', light: '#dff7f5', dark: '#1f5e5a', atmosphere: 'rgba(150, 220, 230, 0.45)' },
   saturn: { base: '#dcc587', light: '#fbe9b8', dark: '#5e4f2b' },
   neptune: { base: '#3c66c7', light: '#9bb9f0', dark: '#0e1f55', atmosphere: 'rgba(120, 160, 240, 0.45)' },
   io: { base: '#e6c84a', light: '#fff2a6', dark: '#5a4a12' },
@@ -29,7 +30,15 @@ const ART = {
   callisto: { base: '#6e6357', light: '#a89a87', dark: '#1f1c18' },
   ceres: { base: '#9c9387', light: '#d4cbbd', dark: '#2f2b25' },
 };
+// the HF board's ring definitions (js/game/render.js RING_DEFS)
+const RINGS = {
+  saturn: { tilt: -0.42, flatten: 0.32, bands: [{ r: 1.18, w: 0.10, color: 'rgba(110, 92, 64, 0.55)' }, { r: 1.30, w: 0.32, color: 'rgba(225, 195, 145, 0.92)' }, { r: 1.72, w: 0.22, color: 'rgba(180, 150, 105, 0.78)' }, { r: 1.96, w: 0.018, color: 'rgba(200, 175, 130, 0.55)' }, { r: 2.04, w: 0.05, color: 'rgba(170, 145, 100, 0.40)' }] },
+  jupiter: { tilt: -0.05, flatten: 0.28, bands: [{ r: 1.50, w: 0.14, color: 'rgba(140, 115, 80, 0.32)' }] },
+  uranus: { tilt: -1.48, flatten: 0.30, bands: [{ r: 1.30, w: 0.08, color: 'rgba(120, 170, 200, 0.45)' }, { r: 1.48, w: 0.025, color: 'rgba(180, 220, 230, 0.30)' }] },
+  neptune: { tilt: -0.50, flatten: 0.30, bands: [{ r: 1.40, w: 0.05, color: 'rgba(170, 195, 230, 0.30)' }, { r: 1.62, w: 0.07, color: 'rgba(170, 195, 230, 0.45)' }] },
+};
 const BODIES = [
+  ['Saturn', 'gas', 'saturn', 8, 0, 1.1, 'saturn'], ['Jupiter', 'gas', 'jupiter', 3, 0, 1, 'jupiter'], ['Uranus', 'ice-giant', 'uranus', 21, 0, 0.8, 'uranus'], ['Neptune', 'ice-giant', 'neptune', 4, 0, 0.8, 'neptune'],
   ['Gas giant', 'gas', 'jupiter', 3, 0.05, 1], ['Pale gas giant', 'gas', 'saturn', 8, 0.2, 1.1], ['Ice giant', 'ice-giant', 'neptune', 4, 0.5, 0.8], ['Brown dwarf', 'brown', 'jupiter', 9, 0.1, 1.2],
   ['Habitable world', 'earth', 'earth', 5, 0.4, 0.7], ['Marginal world', 'mars', 'mars', 6, 0.44, 0.65], ['Cloud world', 'venus', 'venus', 2, 0.05, 0.2], ['Hostile rock', 'rock', 'mercury', 7, 0.02, 0.35],
   ['Ice moon', 'ice', 'europa', 11, 0.1, 0.5], ['Volcanic moon', 'volcanic', 'io', 12, 0.05, 0.6], ['Cratered moon', 'rock', 'callisto', 13, 0.1, 0.4], ['Grey moon', 'rock', 'ganymede', 14, 0.2, 0.45],
@@ -37,11 +46,11 @@ const BODIES = [
 const stage = document.getElementById('stage');
 const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
 const DPR = Math.min(2, window.devicePixelRatio || 1); // render at the screen's real pixels
-const items = BODIES.map(([label, style, art, seed, tilt, speed]) => {
+const items = BODIES.map(([label, style, art, seed, tilt, speed, ring]) => {
   const fig = document.createElement('figure'); const cv = mk(150 * DPR, 150 * DPR); cv.style.width = '150px'; cv.style.height = '150px';
   const cap = document.createElement('figcaption'); cap.textContent = label; fig.append(cv, cap); stage.append(fig);
   const t0 = performance.now(); const tex = makePlanetTexture(style, ART[art], seed); const ms = performance.now() - t0;
-  return { cv, ctx: cv.getContext('2d'), sphere: new PlanetSphere(tex, { tilt, atmosphere: ART[art].atmosphere || null }), speed, atmo: ART[art].atmosphere, ms };
+  return { cv, ctx: cv.getContext('2d'), sphere: new PlanetSphere(tex, { tilt, atmosphere: ART[art].atmosphere || null }), rings: ring ? new PlanetRings(RINGS[ring]) : null, speed, atmo: ART[art].atmosphere, ms };
 });
 window.__texMs = items.map((i) => i.ms.toFixed(1));
 let last = performance.now(), frames = 0, acc = 0; const params = new URLSearchParams(location.search); const fixedT = params.has('t') ? +params.get('t') : null;
@@ -49,10 +58,14 @@ function frame(now) {
   const t = fixedT ?? now / 1000; const R = +document.getElementById('size').value;
   const la = document.getElementById('orbit').checked ? t * 0.25 : -2.4; const light = { x: Math.cos(la), y: Math.sin(la) };
   for (const it of items) {
-    const tex = it.sphere.render(R * DPR, t * 0.35 * it.speed, light, mk);
+    const Rr = it.rings ? R * 0.55 : R; // ringed bodies leave room for their rings
+    const tex = it.sphere.render(Rr * DPR, t * 0.35 * it.speed, light, mk);
+    const rr = it.rings ? it.rings.render(Rr * DPR, light, mk) : null; const rs = rr ? Rr / rr.R : 0;
     const c = it.ctx; c.setTransform(DPR, 0, 0, DPR, 0, 0); c.clearRect(0, 0, 150, 150);
-    if (it.atmo) { const g = c.createRadialGradient(75, 75, R * 0.9, 75, 75, R * 1.35); g.addColorStop(0, it.atmo); g.addColorStop(1, 'rgba(0,0,0,0)'); c.fillStyle = g; c.beginPath(); c.arc(75, 75, R * 1.35, 0, 7); c.fill(); }
+    if (it.atmo) { const Ra = it.rings ? R * 0.55 : R; const g = c.createRadialGradient(75, 75, Ra * 0.9, 75, 75, Ra * 1.35); g.addColorStop(0, it.atmo); g.addColorStop(1, 'rgba(0,0,0,0)'); c.fillStyle = g; c.beginPath(); c.arc(75, 75, Ra * 1.35, 0, 7); c.fill(); }
+    if (rr) c.drawImage(rr.back, 75 - rr.half * rs, 75 - rr.half * rs, rr.half * 2 * rs, rr.half * 2 * rs);
     c.drawImage(tex, 75 - tex.width / DPR / 2, 75 - tex.height / DPR / 2, tex.width / DPR, tex.height / DPR);
+    if (rr) c.drawImage(rr.front, 75 - rr.half * rs, 75 - rr.half * rs, rr.half * 2 * rs, rr.half * 2 * rs);
   }
   frames++; acc += now - last; last = now; if (acc > 1000) { document.getElementById('fps').textContent = `${Math.round((frames * 1000) / acc)} fps`; frames = 0; acc = 0; }
   if (fixedT == null) requestAnimationFrame(frame);
