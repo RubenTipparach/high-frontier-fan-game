@@ -1,7 +1,7 @@
 // HIGH FRONTIER: AD ASTRA - roll a star system's bodies (SM-1f, 5f, 5g, 7c).
 //
 // Turns a star, its companions and its chits into a mapgen spec at the design
-// targets: 4 to 15 planets a star (gas giants included), 30 to 50 asteroids
+// targets: 4 to 15 planets a star (gas giants included), 30 to 100 asteroids
 // and 10 comets a board, gas giants with 4 to 10 major and 10 to 15 minor
 // moons. Shared by the game (prototype/systems.js) and the map builder's
 // "Roll a system". Pure: no DOM. `meta` carries what the game needs per body

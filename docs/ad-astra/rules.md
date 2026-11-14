@@ -1,6 +1,6 @@
 # High Frontier: Ad Astra - Rulebook
 
-**Draft v0.11 (2026-11-14).** A fan variant of High Frontier 4: All that
+**Draft v0.12 (2026-11-14).** A fan variant of High Frontier 4: All that
 takes the game past the edge of the Sol map. Not affiliated with Sierra Madre
 Games. Original rules; it borrows only the hooks HF4 already prints (TW
 thrusters, the three Ad Astra exits, the Ad Astra and Sunlens Futures).
@@ -136,7 +136,7 @@ in the giants' belts, and asteroids as most of the sites. The board's bodies
 come from the star's chits:
 
 Each star has **4 to 15 planets** (gas giants included), and each board
-**30 to 50 asteroids and 10 comets** (SM-1f, 5f, 5g):
+**30 to 100 asteroids and 10 comets** (SM-1f, 5f, 5g):
 
 | Body | Where | What it is |
 |---|---|---|
@@ -802,6 +802,8 @@ regenerate it rather than editing it by hand.
   Replicator cube). Each gets a rendered preview for sign-off before use.
 
 ### Changelog
+- **v0.12 (2026-11-14):** Asteroids: 30 to 100 a board (was 30 to 50; Sol has
+  about 99 asteroids and small bodies) (B7a, SM-5f).
 - **v0.11 (2026-11-14):** The star map is the 94 star systems within 20
   light-years, joined by a Delaunay triangulation (B6); every star is a
   junction. Each system board has an Ad Astra node per link: you arrive at the

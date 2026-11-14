@@ -31,7 +31,7 @@ export const GIANT_HALO = 24; // a giant's sphere radius on these boards (world 
 // SM-1f / 5f / 5g / 7c design targets
 export const SEASONS = ['red', 'yellow', 'blue']; // SM-5g / AA-D3a: the Comet Cycle
 const lift = (p, dy) => ({ x: p.x, y: round1(p.y - dy) });
-export const TARGETS = { planets: [4, 15], asteroids: [30, 50], comets: 10, majors: [4, 10], minors: [10, 15] };
+export const TARGETS = { planets: [4, 15], asteroids: [30, 100], comets: 10, majors: [4, 10], minors: [10, 15] };
 const deg = (a) => (a * Math.PI) / 180;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const round1 = (v) => Math.round(v * 10) / 10;
@@ -171,7 +171,7 @@ export function buildMap(spec) {
     const st = S[clamp(bd0.star | 0, 0, S.length - 1)];
     const bd = { ...bd0, idx, st, zone: clamp(bd0.zone | 0, bd0.kind === 'comet' ? 1 : 0, st.N - 1), fixed: bd0.angle != null }; // SM-5g: no comet in the star's zone
     if (bd.kind === 'belt') {
-      const count = clamp(bd.count | 0 || 6, 1, 30); const nc = Math.ceil(count / 3);
+      const count = clamp(bd.count | 0 || 6, 1, 60); const nc = Math.ceil(count / 3);
       const sizes = bd.sizes && bd.sizes.length ? bd.sizes : [2, 3, 1, 4, 2, 3];
       let k = 0;
       for (let c = 0; c < nc; c++) {

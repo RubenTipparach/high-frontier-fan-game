@@ -128,7 +128,9 @@ for any other reason:
   every footprint already placed, on any star. Bodies that come with an angle
   keep it.
 
-- **SM-5f. Asteroids: 30 to 50 per board (design target).** Sol has 139.
+- **SM-5f. Asteroids: 30 to 100 per board (design target).** Sol has about
+  99 asteroids and small bodies (139 sites typed asteroid, 40 of them giant
+  moons).
   They come in groups:
   - a **main belt** in the zone between the rocky worlds and the giants;
   - **Trojans** at each gas giant, on its ring 60 degrees ahead and behind;
@@ -242,7 +244,7 @@ SM-10 check still runs on the edited board.
 7. Sites at least 26 world px apart (SM-5e).
 8. No moon route touches a flyby point; every moon branches off its giant's
    escape ladder (SM-7a, 7b).
-9. Each star has 4 to 15 planets (SM-1f); the board has 30 to 50 asteroids
+9. Each star has 4 to 15 planets (SM-1f); the board has 30 to 100 asteroids
    (SM-5f) and 10 comets (SM-5g).
 10. Every comet sits outside its star's innermost zone, on its own route with
     two Lagrange points, and its whole route carries one season; with 3 or

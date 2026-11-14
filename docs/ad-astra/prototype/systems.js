@@ -1,7 +1,7 @@
 // HIGH FRONTIER: AD ASTRA - star systems built by the system map rules (AA-B7a).
 //
 // An explored star's chits become a body list (mapgen/roll.js, at the design
-// targets: 4 to 15 planets a star, 30 to 50 asteroids and 10 comets a board,
+// targets: 4 to 15 planets a star, 30 to 100 asteroids and 10 comets a board,
 // gas giants with 4 to 10 major and 10 to 15 minor moons), and
 // mapgen/mapgen.js builds the board by the SM rules
 // (docs/ad-astra/system-map-rules.md). A map that fails an SM-10 check is

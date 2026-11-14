@@ -135,7 +135,7 @@ Run `node docs/ad-astra/analyze-sol-map.mjs` to re-measure. The numbers:
    SM-5e failures between bodies, not inside one.
 
 **The design targets** (`TARGETS` in mapgen.js; the user's numbers, SM-1f / 5f
-/ 5g / 7c): 4 to 15 planets a star, 30 to 50 asteroids and 10 comets a board,
+/ 5g / 7c): 4 to 15 planets a star, 30 to 100 asteroids and 10 comets a board,
 4 to 10 major and 10 to 15 minor moons a gas giant. `mapgen/roll.js` rolls a
 spec at those targets from a star and its chits; the game (`systems.js`) and
 the builder's presets and "Roll a system" all use it. Boards come out at 50 to
@@ -300,7 +300,7 @@ conversion to the planner-map shape `MapRenderer` already draws:
   (no belts). Bump `SPEC_KEY` in builder.js whenever presets or rules change.
 - **No comets.** Sol has 12; boards had none until SM-5g.
 - **Too sparse.** 2-3 asteroids and 1-5 moons a giant read as empty next to
-  Sol. Targets now: 30-50 asteroids, 10 comets, 4-15 planets, gas giants 4-10
+  Sol. Targets now: 30-100 asteroids, 10 comets, 4-15 planets, gas giants 4-10
   major + 10-15 minor moons. At that density, random angles plus retries
   cannot place everything: use the footprint packing (SM-5h).
 - **Footprints guessed instead of measured.** Rocks fan 22 px out from their
