@@ -7142,6 +7142,7 @@ function renderAssemblyView(body, snapshot) {
   btns.className = 'assembly-fr-btns';
   if (!_spectator && !lobbyMode) {
     btns.append(mkBtn('🗳 Lobby', 'modal-btn primary', () => { _assemblyMode = 'lobby'; refreshAssemblyModal(); }));
+    for (const b of promoAssemblyButtons(snapshot)) btns.append(b);
   } else if (lobbyMode) {
     btns.append(mkBtn('↩ Done', 'modal-btn', () => { _assemblyMode = 'view'; refreshAssemblyModal(); }));
   }
@@ -7166,6 +7167,96 @@ function lobbyRouseReady(snapshot, place) {
   if (!isAnarchy() || factionPrivilegesLocked(me)) return false;
   return factionAbilityOf(me) === 'RABBLE-ROUSER';
 }
+// Promo crew Assembly controls (shown beside Lobby, on my own turn only):
+//   EMISSARIES (African Union, white): one button per Ideology tied for the most
+//     delegates that is not already the Active Law, "treat it as the Active Law".
+//   ARBITER (African Union, black): at the very start of my turn, a vote tally
+//     that may count my delegates twice.
+// Both mirror the engine gate (applyEmissaries / applyArbiterTally): the server
+// re-checks the privilege, the tie and the start-of-turn rule.
+function placeLabel(k) {
+  return k === 'centrist' ? 'Centrist' : ((ASSEMBLY_IDEOLOGY_BY_KEY[k] || {}).name || k);
+}
+function promoAssemblyButtons(snapshot) {
+  const out = [];
+  const me = mySnapshotPlayer();
+  if (!me || !snapshot || !snapshot.m0 || !isOnlineMyTurn()) return out;
+  const asm = snapshot.assembly || {};
+  if (playerHasPrivilege(me, 'EMISSARIES')) {
+    const tied = assemblyVoteWinners(asm);
+    const have = new Set(Array.isArray(me.emissaryLaws) ? me.emissaryLaws : []);
+    if (tied.length >= 2) {
+      for (const k of tied) {
+        if (k === snapshot.activeLawStar || have.has(k)) continue;
+        const b = mkBtn(`🤝 Emissaries: ${placeLabel(k)} as Active Law`, 'modal-btn', () => {
+          confirmModal({
+            title: '🤝 Emissaries',
+            body: `${esc(placeLabel(k))} is tied for the most delegates. Treat it as the Active Law for the rest of your turn?`,
+            yes: '🤝 Treat as Active Law', no: 'Cancel',
+          }).then((ok) => { if (ok) submitOnlineOp({ kind: 'EMISSARIES', ideologies: [k] }); });
+        });
+        b.dataset.tip = 'Emissaries: an Ideology tied for the most delegates counts as the Active Law for you this turn.';
+        b.classList.add('promo-emissaries-btn');
+        out.push(b);
+      }
+    }
+  }
+  if (playerHasPrivilege(me, 'ARBITER') && !me.arbiterTallied) {
+    const acts = Array.isArray(snapshot.turnActions) ? snapshot.turnActions : [];
+    const b = mkBtn('⚖ Arbiter vote tally', 'modal-btn', () => openArbiterTally(snapshot));
+    b.classList.add('promo-arbiter-btn');
+    if (acts.length) {
+      b.disabled = true;
+      b.dataset.tip = 'Arbiter: the vote tally may only be called at the start of your turn.';
+    } else {
+      b.dataset.tip = 'Arbiter: call a vote tally now, at the start of your turn. Your delegates may count twice.';
+    }
+    out.push(b);
+  }
+  return out;
+}
+// Tally winners with my delegates optionally counted twice (mirror of the
+// engine's arbiterWinners).
+function arbiterProjectedWinners(delegates, double) {
+  const myId = mySeatId();
+  const totals = {};
+  let max = 0;
+  for (const k of ASSEMBLY_PLACES) {
+    const m = (delegates && delegates[k]) || {};
+    let n = 0;
+    for (const [pid, c] of Object.entries(m)) n += (c | 0) * ((double && String(pid) === String(myId)) ? 2 : 1);
+    totals[k] = n;
+    if (n > max) max = n;
+  }
+  if (max <= 0) return [];
+  return ASSEMBLY_PLACES.filter((k) => totals[k] === max);
+}
+function openArbiterTally(snapshot) {
+  const delegates = (snapshot.assembly && snapshot.assembly.delegates) || {};
+  const star = snapshot.activeLawStar;
+  confirmModal({
+    title: '⚖ Arbiter',
+    body: 'Call a vote tally at the start of your turn. Count each of your delegates as two?',
+    yes: '⚖ Count mine twice', no: 'Count once',
+  }).then((double) => {
+    const winners = arbiterProjectedWinners(delegates, double);
+    const send = (pick) => submitOnlineOp({ kind: 'ARBITER_TALLY', ...(double ? {} : { double: false }), ...(pick ? { star: pick } : {}) });
+    if (winners.length <= 1) { send(null); return; }
+    // A tie: the Arbiter chooses which tied place holds the star (it may stay
+    // where it is when it already sits on one of them).
+    confirmModal({
+      title: '⚖ Arbiter: tie vote',
+      body: `The tally is tied between ${winners.map((k) => `<strong>${esc(placeLabel(k))}</strong>`).join(', ')}. `
+        + `The star ${winners.includes(star) ? `may stay on ${esc(placeLabel(star))} or move` : 'must move'} to one of them. Move it to ${esc(placeLabel(winners.find((k) => k !== star) || winners[0]))}?`,
+      yes: `⚖ ${placeLabel(winners.find((k) => k !== star) || winners[0])}`,
+      no: winners.includes(star) ? `Keep ${placeLabel(star)}` : `⚖ ${placeLabel(winners[winners.length - 1])}`,
+    }).then((first) => {
+      const alt = winners.find((k) => k !== star) || winners[0];
+      if (first) send(alt);
+      else send(winners.includes(star) ? star : winners[winners.length - 1]);
+    });
+  });
+}
 // Click a delegate to Lobby that ideology (server LOBBY: 1 aqua + discard, only
 // an inactive ideology, not while Unity disables lobbying).
 function tryLobbyAt(snapshot, place) {
@@ -7180,16 +7271,31 @@ function tryLobbyAt(snapshot, place) {
   const name = (ASSEMBLY_IDEOLOGY_BY_KEY[place] || {}).name || place;
   // Supreme Cult Future: lobby without removing the delegate used.
   const meLob = mySnapshotPlayer();
-  const keepDelegate = !!(meLob && Array.isArray(meLob.futureEffects) && meLob.futureEffects.includes('lobbyKeepDelegate'));
+  // HEROIC (Galahad Group, white): an honor lobby keeps the delegate too.
+  const heroicKeep = place === 'honor' && playerHasPrivilege(meLob, 'HEROIC');
+  const keepDelegate = heroicKeep
+    || !!(meLob && Array.isArray(meLob.futureEffects) && meLob.futureEffects.includes('lobbyKeepDelegate'));
   confirmModal({
     title: '🗳 Lobby',
     body: keepDelegate
-      ? `Lobby <strong>${esc(name)}</strong>? Pay 1 aqua to use its law this turn. Your delegate stays (Supreme Cult).`
+      ? `Lobby <strong>${esc(name)}</strong>? Pay 1 aqua to use its law this turn. Your delegate stays (${heroicKeep ? 'Heroic' : 'Supreme Cult'}).`
       : `Lobby <strong>${esc(name)}</strong>? Pay 1 aqua and discard your delegate there to use its law this turn.`,
     yes: '🗳 Lobby (1 aqua)', no: 'Cancel',
   }).then((ok) => {
     if (!ok) return;
     _assemblyMode = 'view';   // leave lobby-select mode once a law is lobbied
+    // AMBASSADOR (AEB, white): "During lobby, may move a delegate into centrist
+    // instead of Decommission." A second, explicit choice, like the Rabble-Rouser.
+    if (!keepDelegate && playerHasPrivilege(meLob, 'AMBASSADOR')) {
+      confirmModal({
+        title: '🕊 Ambassador',
+        body: `Move your ${esc(name)} delegate to the Centrists instead of discarding it? It keeps its seat in the Assembly, and the vote tally runs.`,
+        yes: '🕊 Move to Centrist', no: 'Discard it',
+      }).then((amb) => {
+        submitOnlineOp({ kind: 'LOBBY', ideology: place, ...(amb ? { ambassador: true } : {}) });
+      });
+      return;
+    }
     if (!lobbyRouseReady(snapshot, place)) {
       submitOnlineOp({ kind: 'LOBBY', ideology: place });
       return;
@@ -7302,6 +7408,8 @@ function fundraiseProjectedWinners(snapshot) {
   bump(_fr.place, +1);
   bump(_fr.moveFrom, -1);
   bump(_fr.moveTo, +1);
+  // ARBITER: the holder's own tally may count their delegates twice.
+  if (_fr.arbiterDouble) return arbiterProjectedWinners(delegates, true);
   return assemblyVoteWinners({ delegates });
 }
 // After place + move settle, run the vote tally. The fundraiser ALWAYS gets the
@@ -7445,6 +7553,17 @@ function renderAssemblyFundraise(body, snapshot) {
         btns.append(mkBtn(`Keep star on ${curName} (skip)`, 'modal-btn primary', () => { _fr.star = cur; commitFundraise(); }));
       }
     }
+    // ARBITER (African Union, black): "Your vote tallies may treat your
+    // delegates as 2 delegates each." A toggle that re-runs the projected tally.
+    if (playerHasPrivilege(mySnapshotPlayer(), 'ARBITER')) {
+      const t = mkBtn(_fr.arbiterDouble ? '⚖ Arbiter: count my delegates once' : '⚖ Arbiter: count my delegates twice', 'modal-btn promo-arbiter-fr', () => {
+        _fr.arbiterDouble = !_fr.arbiterDouble;
+        _fr.star = null;
+        fundraiseAdvanceToStar(snapshot);
+      });
+      t.dataset.tip = 'Arbiter: your delegates may count as two each in this vote tally.';
+      btns.append(t);
+    }
   }
   // Martial Law (Authority in force OR lobbied): optionally discard one
   // opponent's delegate as part of this Fundraise. A side toggle that remembers
@@ -7553,6 +7672,7 @@ function commitFundraise() {
   if (_fr.freeDelegate) op.freeDelegate = _fr.freeDelegate;
   if (_fr.moveFrom && _fr.moveTo) { op.moveFrom = _fr.moveFrom; op.moveTo = _fr.moveTo; }
   if (_fr.star) op.star = _fr.star;
+  if (_fr.arbiterDouble) op.arbiterDouble = true;
   // Martial Law (Authority): discard an opponent's delegate. The server
   // re-validates the law + that the cube is still there, so a stale pick no-ops.
   if (_fr.discard) op.discard = { profileId: _fr.discard.profileId, place: _fr.discard.place };
@@ -9314,6 +9434,14 @@ function humanizeOnlineOpError(code, detail) {
     reveal_blocks_undo: 'Exomigration revealed a colonist off the queue - it can\'t be undone.',
     component_already_moved: 'A card in this stack already moved on another vehicle this turn. Each component moves only once per turn - it can move again next turn.',
     glory_carry_full: 'Every crew member already carries a glory chit. Surrender one first.',
+    no_ambassador: 'Only the Ambassador may move a lobbied delegate to the Centrists.',
+    no_emissaries: 'Only the Emissaries may treat a tied Ideology as the Active Law.',
+    no_tie: 'No Ideologies are tied for the most delegates right now.',
+    not_tied: 'That Ideology is not tied for the most delegates.',
+    already_active_law: 'That Ideology already holds the Active Law.',
+    no_arbiter: 'Only the Arbiter may count their delegates twice.',
+    already_tallied: 'You already called your Arbiter vote tally this turn.',
+    not_turn_start: 'The Arbiter tally may only be called at the start of your turn.',
     no_such_chit: 'You are not carrying that glory chit.',
     bad_zone: 'No such glory chit.',
     no_pending_star: 'There is no tied vote to resolve.',
@@ -32534,6 +32662,15 @@ function promptGloryPickup(siteName, zone, crewId = null) {
 // pickup the server would reject.
 function snapshotGloryCarriers(player) {
   if (!player) return 0;
+  // HEROIC (Galahad Group, white): "This character can carry any number of
+  // glory chits" - while the Galahad crew card is in play there is no limit.
+  if (player.faction && player.faction.cardId === 'crew_galahad_group' && playerHasPrivilege(player, 'HEROIC')) {
+    const has = (slots) => (slots || []).some((s) => s && s.id === 'crew_galahad_group');
+    if (has(player.leo) || has(player.rocket && player.rocket.stack)
+      || Object.values(player.outposts || {}).some((o) => o && has(o.cards))
+      || (player.freighter && has(player.freighter.stack))
+      || (player.bernals || []).some((bn) => bn && has(bn.stack))) return Infinity;
+  }
   let n = 0;
   const count = (slots) => { for (const s of (slots || [])) if (isCrewSlot(s) || isHumanColonistSlot(s)) n += 1; };
   count(player.leo);
