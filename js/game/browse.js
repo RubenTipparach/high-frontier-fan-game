@@ -31366,8 +31366,8 @@ function renderPatents() {
         el.classList.add('is-module-locked');
         const badge = document.createElement('div');
         badge.className = 'card-module-badge is-required';
-        badge.textContent = `${card.requiresModule} only`;
-        badge.title = `Requires Module ${card.requiresModule.slice(1)} (not yet implemented)`;
+        badge.textContent = `Coming soon · ${card.requiresModule}`;
+        badge.title = `Coming soon: needs Module ${card.requiresModule.slice(1)}.`;
         el.appendChild(badge);
       } else if (card.notRecommendedWithModule) {
         const badge = document.createElement('div');
@@ -33990,7 +33990,7 @@ function openCrewWizard(arg, maybeOnDone) {
       tile.dataset.face = c.face;
       if (locked) {
         tile.setAttribute('aria-disabled', 'true');
-        tile.title = `Requires Module ${c.requiresModule.slice(1)} (not yet implemented) - not selectable.`;
+        tile.title = `Coming soon: needs Module ${c.requiresModule.slice(1)}.`;
       } else if (taken) {
         tile.setAttribute('aria-disabled', 'true');
         tile.title = 'Another player has this crew.';
@@ -34005,7 +34005,7 @@ function openCrewWizard(arg, maybeOnDone) {
       if (locked) {
         const badge = document.createElement('div');
         badge.className = 'card-module-badge is-required';
-        badge.textContent = `${c.requiresModule} only`;
+        badge.textContent = `Coming soon · ${c.requiresModule}`;
         tile.appendChild(badge);
       } else if (c.notRecommendedWithModule) {
         const badge = document.createElement('div');

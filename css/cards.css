@@ -1076,6 +1076,10 @@
   pointer-events: none;
 }
 .card-module-badge.is-required {
+  /* "Coming soon · M4" is longer than the old "M4 only", so the ribbon
+     rides higher, beside the art, clear of the thrust triangle. */
+  bottom: 118px;
+  letter-spacing: 0.5px;
   background: linear-gradient(180deg, #3b82f6, #1d4ed8);
   color: #eff6ff;
   border: 1px solid #1e40af;
