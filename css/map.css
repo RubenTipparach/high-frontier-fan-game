@@ -10567,3 +10567,238 @@ html.theme-halloween .hw-bat:nth-child(3) { top: 66px; width: 23px; height: 10px
 html.battery-save .hw-bats { display: none !important; }
 /* Menu toggle, active state (pumpkin orange, like Battery saver's green). */
 #btn-halloween.is-active { background: #c2410c; color: #fff; border-color: #9a3412; }
+
+/* ===== Holiday theme (html.theme-holiday, js/prefs.js) =====
+   Winter cheer over the app CHROME only: a Santa hat on the menu button, a
+   string of twinkling lights hanging from the top bar, light snowfall, a holly
+   sprig in the side panel's corner, snow caps on the menu panel and hand
+   strip, and a sleigh crossing the top now and then. Like the Halloween skin
+   it never touches the map, card faces, hazard colours or a seat colour.
+   Toggle: menu > View. On by default Nov 1 - Jan 6. */
+html.theme-holiday .main-menu-fab::after {
+  content: '';
+  position: absolute;
+  top: -11px;
+  right: -10px;
+  width: 24px;
+  height: 20px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 26 22'%3E%3Cpath d='M4 15 Q7 3 17 3 Q23 3 23.5 9 L20.5 8.5 Q19 6.5 16.5 7.5 Q18.5 11 19.5 15 Z' fill='%23dc2626' stroke='%237f1d1d' stroke-width='0.8'/%3E%3Cpath d='M8 6.5 Q12 4.8 16 5.2' stroke='%23fca5a5' stroke-width='1' fill='none' opacity='0.7'/%3E%3Crect x='2' y='14' width='20' height='5.5' rx='2.75' fill='%23f8fafc' stroke='%23cbd5e1' stroke-width='0.6'/%3E%3Ccircle cx='23' cy='10' r='2.8' fill='%23f8fafc' stroke='%23cbd5e1' stroke-width='0.6'/%3E%3C/svg%3E") no-repeat center / contain;
+  transform: rotate(14deg);
+  pointer-events: none;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5));
+}
+html.theme-holiday #main-menu-title::after { content: ' 🎄'; }
+/* Top bar: a faint evergreen on the left fading to holly red on the right.
+   Background only: the seat-colour line is a box-shadow and stays. */
+html.theme-holiday .map-toolbar {
+  background:
+    linear-gradient(90deg, rgba(21, 128, 61, 0.28), rgba(15, 16, 35, 0) 36%,
+      rgba(15, 16, 35, 0) 64%, rgba(185, 28, 28, 0.28)),
+    rgba(15, 16, 35, 0.88);
+}
+/* String lights hanging along the top edge of the map, just under the top
+   bar: two layers of bulbs that twinkle out of step. They hang from the map
+   container (already the positioned box its overlays anchor to), so no
+   element's layout changes. No pointer events. */
+html.theme-holiday .browse-map::before,
+html.theme-holiday .browse-map::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: var(--toolbar-h, 44px);
+  height: 27px;
+  background-repeat: repeat-x;
+  background-size: 96px 27px;
+  pointer-events: none;
+  z-index: 3;
+}
+html.theme-holiday .browse-map::before {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 18'%3E%3Cpath d='M0 3 Q16 10 32 3 Q48 10 64 3' stroke='%231f3b2a' stroke-width='1.4' fill='none'/%3E%3Crect x='6.4' y='5.6' width='3.2' height='2.6' fill='%23334155'/%3E%3Cellipse cx='8' cy='11.6' rx='2.6' ry='3.6' fill='%23ef4444'/%3E%3Cellipse cx='7.2' cy='10.399999999999999' rx='0.8' ry='1.2' fill='%23ffffff' opacity='0.7'/%3E%3Crect x='38.4' y='5.6' width='3.2' height='2.6' fill='%23334155'/%3E%3Cellipse cx='40' cy='11.6' rx='2.6' ry='3.6' fill='%2322c55e'/%3E%3Cellipse cx='39.2' cy='10.399999999999999' rx='0.8' ry='1.2' fill='%23ffffff' opacity='0.7'/%3E%3C/svg%3E");
+  animation: xm-twinkle 1.6s ease-in-out infinite alternate;
+  filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.35));
+}
+html.theme-holiday .browse-map::after {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 18'%3E%3Crect x='22.4' y='5.6' width='3.2' height='2.6' fill='%23334155'/%3E%3Cellipse cx='24' cy='11.6' rx='2.6' ry='3.6' fill='%23facc15'/%3E%3Cellipse cx='23.2' cy='10.399999999999999' rx='0.8' ry='1.2' fill='%23ffffff' opacity='0.7'/%3E%3Crect x='54.4' y='5.6' width='3.2' height='2.6' fill='%23334155'/%3E%3Cellipse cx='56' cy='11.6' rx='2.6' ry='3.6' fill='%2338bdf8'/%3E%3Cellipse cx='55.2' cy='10.399999999999999' rx='0.8' ry='1.2' fill='%23ffffff' opacity='0.7'/%3E%3C/svg%3E");
+  animation: xm-twinkle 1.6s ease-in-out 0.8s infinite alternate;
+  filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.35));
+}
+@keyframes xm-twinkle {
+  from { opacity: 1; }
+  to   { opacity: 0.35; }
+}
+/* A holly sprig in the side panel's bottom corner. */
+html.theme-holiday .browse-sidepanel[data-active]:not([data-active=""])::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 84px;
+  height: 84px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cg transform='translate(52 70) rotate(-150)'%3E%3Cpolygon points='0,0 6,-6 10,-3 16,-9 20,-5 26,-10 30,-5 36,-7 42,0 36,7 30,5 26,10 20,5 16,9 10,3 6,6' fill='%2315803d' stroke='%23052e16' stroke-width='1'/%3E%3Cpath d='M2 0 L40 0' stroke='%23052e16' stroke-width='1'/%3E%3C/g%3E%3Cg transform='translate(56 66) rotate(-75)'%3E%3Cpolygon points='0,0 6,-6 10,-3 16,-9 20,-5 26,-10 30,-5 36,-7 42,0 36,7 30,5 26,10 20,5 16,9 10,3 6,6' fill='%2315803d' stroke='%23052e16' stroke-width='1'/%3E%3Cpath d='M2 0 L40 0' stroke='%23052e16' stroke-width='1'/%3E%3C/g%3E%3Cg transform='translate(54 70) rotate(-200)'%3E%3Cpolygon points='0,0 6,-6 10,-3 16,-9 20,-5 26,-10 30,-5 36,-7 42,0 36,7 30,5 26,10 20,5 16,9 10,3 6,6' fill='%23166534' stroke='%23052e16' stroke-width='1'/%3E%3Cpath d='M2 0 L40 0' stroke='%23052e16' stroke-width='1'/%3E%3C/g%3E%3Ccircle cx='50' cy='68' r='6' fill='%23dc2626' stroke='%237f1d1d'/%3E%3Ccircle cx='60' cy='72' r='5.5' fill='%23b91c1c' stroke='%237f1d1d'/%3E%3Ccircle cx='55' cy='60' r='5' fill='%23ef4444' stroke='%237f1d1d'/%3E%3Ccircle cx='48.5' cy='66' r='1.6' fill='%23fff' opacity='0.8'/%3E%3Ccircle cx='53.5' cy='58.5' r='1.4' fill='%23fff' opacity='0.8'/%3E%3C/svg%3E") no-repeat right bottom / contain;
+  opacity: 0.55;
+  pointer-events: none;
+}
+/* Snow caps along the top edge of the menu panel and the hand strip. */
+html.theme-holiday .main-menu-panel::before,
+html.theme-holiday .sandbox-hand::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 9px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 12' preserveAspectRatio='none'%3E%3Cpath d='M0 0 H200 V5 Q192 11 182 6 Q170 12 158 6 Q146 11 132 5 Q120 12 106 6 Q94 10 82 5 Q70 12 56 6 Q44 11 32 5 Q20 12 8 6 Q3 9 0 5 Z' fill='%23f1f5f9'/%3E%3Cpath d='M0 5 Q3 9 8 6 Q20 12 32 5 Q44 11 56 6 Q70 12 82 5 Q94 10 106 6 Q120 12 132 5 Q146 11 158 6 Q170 12 182 6 Q192 11 200 5' stroke='%23bfdbfe' stroke-width='1' fill='none'/%3E%3C/svg%3E") repeat-x left top / 200px 9px;
+  pointer-events: none;
+  z-index: 2;
+}
+html.theme-holiday .main-menu-panel::before { border-radius: 12px 12px 0 0; }
+/* The sleigh layer (fixed, never in the way: no pointer events). */
+.xm-sky, .xm-sleigh-layer, .xm-hand-snow, .xm-lobby-snow { display: none; }
+/* Snow falls only inside the hand panel, behind its cards: the layer sits at
+   z-index -1 in the hand panel's own stacking context (above its background,
+   below its content) and clips the flakes to the panel. Each flake is moved
+   with a transform, so it animates on the GPU at full frame rate. */
+html.theme-holiday .xm-hand-snow {
+  display: block;
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: -1;
+}
+html.theme-holiday .xm-sky,
+html.theme-holiday .xm-sleigh-layer {
+  display: block;
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 85;
+}
+/* The sleigh has its own low layer and flies through the top bar BEHIND its
+   buttons: the turn controls and route group are lifted just above it. (The
+   search group is left alone so its suggestion list keeps its anchor.) */
+html.theme-holiday .xm-sleigh-layer { z-index: 1; }
+html.theme-holiday .map-turn-controls,
+html.theme-holiday .map-route { position: relative; z-index: 2; }
+html.theme-holiday .xm-flake {
+  position: absolute;
+  top: -16px;
+  will-change: transform;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12.0,12.0 L22.5,12.0 M17.8,12.0 L20.3,9.8 M17.8,12.0 L20.3,14.2 M12.0,12.0 L17.2,21.1 M14.9,17.0 L18.0,18.2 M14.9,17.0 L14.3,20.3 M12.0,12.0 L6.8,21.1 M9.1,17.0 L9.7,20.3 M9.1,17.0 L6.0,18.2 M12.0,12.0 L1.5,12.0 M6.2,12.0 L3.7,14.2 M6.2,12.0 L3.7,9.8 M12.0,12.0 L6.7,2.9 M9.1,7.0 L6.0,5.8 M9.1,7.0 L9.7,3.7 M12.0,12.0 L17.2,2.9 M14.9,7.0 L14.3,3.7 M14.9,7.0 L18.0,5.8 ' stroke='%23ffffff' stroke-width='1.60' stroke-linecap='round' fill='none'/%3E%3C/svg%3E") no-repeat center / contain;
+  filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.7));
+  animation-name: xm-fall, xm-sway;
+  animation-timing-function: linear, ease-in-out;
+  animation-iteration-count: infinite, infinite;
+  animation-direction: normal, alternate;
+}
+html.theme-holiday .xm-flake:nth-child(1) { left: 32.7%; width: 7.2px; height: 7.2px; opacity: 0.61; animation-duration: 9.7s, 6.7s; animation-delay: -2.0s, -2.0s; }
+html.theme-holiday .xm-flake:nth-child(2) { left: 6.7%; width: 9.9px; height: 9.9px; opacity: 0.49; animation-duration: 6.1s, 4.3s; animation-delay: -12.1s, -12.1s; }
+html.theme-holiday .xm-flake:nth-child(3) { left: 42.6%; width: 12.3px; height: 12.3px; opacity: 0.88; animation-duration: 6.6s, 7.1s; animation-delay: -6.3s, -6.3s; }
+html.theme-holiday .xm-flake:nth-child(4) { left: 57.6%; width: 9.0px; height: 9.0px; opacity: 0.58; animation-duration: 11.6s, 8.3s; animation-delay: -1.3s, -1.3s; }
+html.theme-holiday .xm-flake:nth-child(5) { left: 15.1%; width: 6.9px; height: 6.9px; opacity: 0.71; animation-duration: 7.7s, 4.9s; animation-delay: -22.9s, -22.9s; }
+html.theme-holiday .xm-flake:nth-child(6) { left: 63.6%; width: 9.0px; height: 9.0px; opacity: 0.54; animation-duration: 9.1s, 4.3s; animation-delay: -1.8s, -1.8s; }
+html.theme-holiday .xm-flake:nth-child(7) { left: 67.7%; width: 9.3px; height: 9.3px; opacity: 0.58; animation-duration: 7.7s, 6.3s; animation-delay: -16.4s, -16.4s; }
+html.theme-holiday .xm-flake:nth-child(8) { left: 78.8%; width: 11.4px; height: 11.4px; opacity: 0.84; animation-duration: 7.3s, 6.6s; animation-delay: -16.1s, -16.1s; }
+html.theme-holiday .xm-flake:nth-child(9) { left: 72.5%; width: 8.1px; height: 8.1px; opacity: 0.79; animation-duration: 11.6s, 6.1s; animation-delay: -3.3s, -3.3s; }
+html.theme-holiday .xm-flake:nth-child(10) { left: 15.9%; width: 9.9px; height: 9.9px; opacity: 0.71; animation-duration: 6.1s, 7.8s; animation-delay: -18.7s, -18.7s; }
+html.theme-holiday .xm-flake:nth-child(11) { left: 86.8%; width: 8.4px; height: 8.4px; opacity: 0.66; animation-duration: 10.0s, 6.9s; animation-delay: -16.6s, -16.6s; }
+html.theme-holiday .xm-flake:nth-child(12) { left: 83.3%; width: 13.5px; height: 13.5px; opacity: 0.77; animation-duration: 8.7s, 4.3s; animation-delay: -18.6s, -18.6s; }
+html.theme-holiday .xm-flake:nth-child(13) { left: 64.4%; width: 13.8px; height: 13.8px; opacity: 0.75; animation-duration: 10.7s, 5.9s; animation-delay: -8.0s, -8.0s; }
+html.theme-holiday .xm-flake:nth-child(14) { left: 3.2%; width: 9.6px; height: 9.6px; opacity: 0.8; animation-duration: 6.9s, 4.3s; animation-delay: -3.3s, -3.3s; }
+html.theme-holiday .xm-flake:nth-child(15) { left: 13.7%; width: 7.8px; height: 7.8px; opacity: 0.65; animation-duration: 8.2s, 4.4s; animation-delay: -24.4s, -24.4s; }
+html.theme-holiday .xm-flake:nth-child(16) { left: 54.8%; width: 12.9px; height: 12.9px; opacity: 0.64; animation-duration: 10.7s, 5.4s; animation-delay: -24.2s, -24.2s; }
+html.theme-holiday .xm-flake:nth-child(17) { left: 36.2%; width: 12.9px; height: 12.9px; opacity: 0.55; animation-duration: 11.5s, 4.9s; animation-delay: -4.2s, -4.2s; }
+html.theme-holiday .xm-flake:nth-child(18) { left: 23.9%; width: 9.9px; height: 9.9px; opacity: 0.64; animation-duration: 9.3s, 4.0s; animation-delay: -7.4s, -7.4s; }
+html.theme-holiday .xm-flake:nth-child(19) { left: 37.2%; width: 10.5px; height: 10.5px; opacity: 0.73; animation-duration: 11.5s, 6.6s; animation-delay: -19.3s, -19.3s; }
+html.theme-holiday .xm-flake:nth-child(20) { left: 67.3%; width: 6.3px; height: 6.3px; opacity: 0.81; animation-duration: 11.2s, 8.4s; animation-delay: -21.8s, -21.8s; }
+html.theme-holiday .xm-flake:nth-child(21) { left: 39.5%; width: 9.0px; height: 9.0px; opacity: 0.48; animation-duration: 6.5s, 4.3s; animation-delay: -17.8s, -17.8s; }
+html.theme-holiday .xm-flake:nth-child(22) { left: 21.5%; width: 7.2px; height: 7.2px; opacity: 0.52; animation-duration: 7.9s, 4.0s; animation-delay: -1.5s, -1.5s; }
+html.theme-holiday .xm-flake:nth-child(23) { left: 10.9%; width: 8.7px; height: 8.7px; opacity: 0.52; animation-duration: 6.0s, 7.1s; animation-delay: -24.5s, -24.5s; }
+html.theme-holiday .xm-flake:nth-child(24) { left: 25.7%; width: 8.7px; height: 8.7px; opacity: 0.9; animation-duration: 8.0s, 8.2s; animation-delay: -3.4s, -3.4s; }
+html.theme-holiday .xm-flake:nth-child(25) { left: 46.7%; width: 9.9px; height: 9.9px; opacity: 0.57; animation-duration: 6.4s, 5.7s; animation-delay: -2.9s, -2.9s; }
+html.theme-holiday .xm-flake:nth-child(26) { left: 82.2%; width: 7.2px; height: 7.2px; opacity: 0.52; animation-duration: 6.0s, 6.6s; animation-delay: -26.6s, -26.6s; }
+@keyframes xm-fall {
+  from { transform: translateY(0); }
+  to   { transform: translateY(var(--xm-fall, 340px)); }
+}
+@keyframes xm-sway {
+  from { margin-left: -14px; }
+  to   { margin-left: 14px; }
+}
+html.theme-holiday .xm-sleigh {
+  position: absolute;
+  left: -160px;
+  top: 6px;
+  width: 128px;
+  height: 38px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 216 64'%3E %3Cg fill='%23fde68a'%3E %3Cpath d='M3,40 l1,-3 l1,3 l3,1 l-3,1 l-1,3 l-1,-3 l-3,-1 Z' opacity='0.8'/%3E %3Cpath d='M9,50 l0.7,-2 l0.7,2 l2,0.7 l-2,0.7 l-0.7,2 l-0.7,-2 l-2,-0.7 Z' opacity='0.6'/%3E %3Ccircle cx='14' cy='44' r='0.9' opacity='0.7'/%3E %3C/g%3E %3Cpath d='M58,30 Q90,38 112,30' stroke='%237f1d1d' stroke-width='1.1' fill='none'/%3E %3Cpath d='M60,31 Q120,44 160,27' stroke='%237f1d1d' stroke-width='1.1' fill='none'/%3E %3Cpath d='M126,30 L148,28' stroke='%23b91c1c' stroke-width='1.6'/%3E %3Cpath d='M24,58 L84,58 Q94,58 95,50 Q96,44 90,44 Q86,44 87,48' stroke='%23eab308' stroke-width='2.6' fill='none' stroke-linecap='round'/%3E %3Cpath d='M24,58 Q18,58 18,54' stroke='%23eab308' stroke-width='2.6' fill='none' stroke-linecap='round'/%3E %3Cpath d='M34,50 L32,58 M72,50 L74,58' stroke='%23eab308' stroke-width='2'/%3E %3Cpath d='M28,16 Q22,14 22,22 L24,46 Q25,51 31,51 L74,51 Q84,51 86,42 Q88,34 94,32 Q99,31 98,26 Q96,22 91,25 Q85,30 76,31 L58,31 L56,20 Q50,15 40,16 Z' fill='%23c81e1e' stroke='%237f1d1d' stroke-width='1'/%3E %3Cpath d='M24,38 Q50,42 86,38' stroke='%23facc15' stroke-width='1.6' fill='none'/%3E %3Cpath d='M58,31 L76,31 Q85,30 91,25' stroke='%23facc15' stroke-width='1.4' fill='none'/%3E %3Ccircle cx='96' cy='27' r='2' fill='%23facc15'/%3E %3Cpath d='M26,22 Q24,8 34,5 Q42,6 40,20 Z' fill='%23a16207' stroke='%23713f12' stroke-width='0.8'/%3E %3Crect x='26' y='1' width='9' height='8' fill='%2316a34a' stroke='%2314532d' stroke-width='0.6' transform='rotate(-12 30 5)'/%3E %3Cpath d='M30.5,0.5 L29,9.5 M26,5 L35,3.5' stroke='%23ef4444' stroke-width='1.2' transform='rotate(-12 30 5)'/%3E %3Crect x='34' y='3' width='7' height='6' fill='%232563eb' stroke='%231e3a8a' stroke-width='0.6'/%3E %3Cpath d='M37.5,3 L37.5,9 M34,6 L41,6' stroke='%23facc15' stroke-width='1'/%3E %3Cpath d='M42,31 Q40,16 52,15 Q62,16 61,31 Z' fill='%23dc2626' stroke='%237f1d1d' stroke-width='0.8'/%3E %3Crect x='41.5' y='25' width='20' height='3.4' rx='1' fill='%231c1917'/%3E%3Crect x='49.5' y='24.4' width='4' height='4.6' rx='0.8' fill='%23facc15'/%3E %3Cpath d='M42.6,20 Q44,16.4 48,16.6 M56,16.6 Q60,16.4 61.4,20' stroke='%2378716c' stroke-width='4.2' fill='none' stroke-linecap='round'/%3E %3Cpath d='M42.6,20 Q44,16.4 48,16.6 M56,16.6 Q60,16.4 61.4,20' stroke='%23efe7d6' stroke-width='3' fill='none' stroke-linecap='round'/%3E %3Ccircle cx='52' cy='10.4' r='5.8' fill='%23fcd5b5'/%3E %3Cpath d='M46.2,10.6 Q46.2,20.5 52,22 Q57.8,20.5 57.8,10.6 Q56.4,14.6 52,14.6 Q47.6,14.6 46.2,10.6 Z' fill='%23f8fafc' stroke='%2394a3b8' stroke-width='0.5'/%3E %3Ccircle cx='49.2' cy='12' r='1.3' fill='%23fca5a5' opacity='0.85'/%3E %3Ccircle cx='54.8' cy='12' r='1.3' fill='%23fca5a5' opacity='0.85'/%3E %3Cpath d='M48.4,8.3 Q49.6,7.6 50.8,8.3 M53.2,8.3 Q54.4,7.6 55.6,8.3' stroke='%23f8fafc' stroke-width='0.9' fill='none' stroke-linecap='round'/%3E %3Ccircle cx='49.7' cy='9.9' r='0.85' fill='%231c1917'/%3E%3Ccircle cx='54.3' cy='9.9' r='0.85' fill='%231c1917'/%3E %3Ccircle cx='49.95' cy='9.65' r='0.28' fill='%23ffffff'/%3E%3Ccircle cx='54.55' cy='9.65' r='0.28' fill='%23ffffff'/%3E %3Cpath d='M52,13.4 Q49.6,12.2 47.8,13.6 Q49.4,15.2 52,14.3 Q54.6,15.2 56.2,13.6 Q54.4,12.2 52,13.4 Z' fill='%23f1f5f9' stroke='%23cbd5e1' stroke-width='0.4'/%3E %3Ccircle cx='52' cy='12' r='1.25' fill='%23f87171'/%3E %3Cpath d='M46.2,6.8 Q47.4,-1 54,-0.4 Q57.4,0.4 57.8,6.8 Z' fill='%23dc2626'/%3E %3Cpath d='M48.2,1.6 Q42,-2 39,3' stroke='%23dc2626' stroke-width='2.6' fill='none' stroke-linecap='round'/%3E %3Ccircle cx='38.6' cy='3.6' r='2' fill='%23f8fafc'/%3E %3Crect x='45.6' y='5.2' width='12.8' height='2.8' rx='1.4' fill='%23f8fafc'/%3E %3Cpath d='M58,21 Q64,21 66,26' stroke='%23dc2626' stroke-width='4' fill='none' stroke-linecap='round'/%3E %3Ccircle cx='66.5' cy='27' r='2.2' fill='%2314532d'/%3E %3Cpath d='M66,27 L58,30' stroke='%237f1d1d' stroke-width='1'/%3E %3Cg transform='translate(130 36)'%3E%3Cg%3E%3CanimateTransform attributeName='transform' type='translate' values='0 0;0 -3.2;0 0.8;0 -0.6;0 0' keyTimes='0;.25;.5;.75;1' dur='0.6s' begin='-0.0s' repeatCount='indefinite'/%3E%3Cg%3E%3CanimateTransform attributeName='transform' type='rotate' values='0;-6;3;1;0' keyTimes='0;.25;.5;.75;1' dur='0.6s' begin='-0.0s' repeatCount='indefinite'/%3E%3Cpath d='M-10,3 L-13,8.5 L-6,10.5' stroke='%236b4423' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'%3E%3Canimate attributeName='d' values='M-10,3 L-13,8.5 L-6,10.5;M-10,3 L-17,6.5 L-24,8;M-10,3 L-15,8.5 L-16,14;M-10,3 L-12,9.5 L-8,15.5;M-10,3 L-13,8.5 L-6,10.5' dur='0.6s' begin='-0.05s' repeatCount='indefinite' calcMode='spline' keySplines='.4 0 .6 1;.4 0 .6 1;.4 0 .6 1;.4 0 .6 1' keyTimes='0;.25;.5;.75;1'/%3E%3C/path%3E%3Cpath d='M10,3 L14,8 L9,10.5' stroke='%236b4423' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'%3E%3Canimate attributeName='d' values='M10,3 L14,8 L9,10.5;M10,3 L16,6.5 L23,8;M10,3 L12,9.5 L12.5,15.5;M10,3 L8,9.5 L4,14.5;M10,3 L14,8 L9,10.5' dur='0.6s' begin='-0.05s' repeatCount='indefinite' calcMode='spline' keySplines='.4 0 .6 1;.4 0 .6 1;.4 0 .6 1;.4 0 .6 1' keyTimes='0;.25;.5;.75;1'/%3E%3C/path%3E%3Cellipse cx='0' cy='0' rx='15' ry='7.5' fill='%239a6332'/%3E %3Cellipse cx='1' cy='3.5' rx='10' ry='3.2' fill='%23d9b48a'/%3E %3Cpath d='M-15,-2 Q-19,-6 -17,-1' fill='%23f5f5f4' stroke='%23f5f5f4' stroke-width='2' stroke-linecap='round'/%3E %3Cpath d='M9,-3 Q14,-12 19,-13 L22,-9 Q16,-6 13,1 Z' fill='%239a6332'/%3E %3Cellipse cx='23' cy='-12.5' rx='6.5' ry='4.4' fill='%239a6332' transform='rotate(-8 23 -12.5)'/%3E %3Cellipse cx='26.5' cy='-11' rx='3' ry='2.4' fill='%23c08a58'/%3E %3Cpath d='M18,-15 L15,-19 L19,-17 Z' fill='%237a4a24'/%3E %3Ccircle cx='22.5' cy='-14' r='1' fill='%231c1917'/%3E %3Cpath d='M20,-16 Q19,-23 15,-27 M18.5,-21 L13.5,-22 M17.5,-24 L19,-28 M22,-16 Q24,-23 22,-28 M23.2,-22 L27,-25 M22.6,-25.5 L20,-29' stroke='%23e7d3b0' stroke-width='1.4' fill='none' stroke-linecap='round'/%3E %3Ccircle cx='28.6' cy='-12' r='1.6' fill='%231c1917'/%3E%3Cpath d='M-10,3 L-13,8.5 L-6,10.5' stroke='%239a6332' stroke-width='2.8' fill='none' stroke-linecap='round' stroke-linejoin='round'%3E%3Canimate attributeName='d' values='M-10,3 L-13,8.5 L-6,10.5;M-10,3 L-17,6.5 L-24,8;M-10,3 L-15,8.5 L-16,14;M-10,3 L-12,9.5 L-8,15.5;M-10,3 L-13,8.5 L-6,10.5' dur='0.6s' begin='-0.0s' repeatCount='indefinite' calcMode='spline' keySplines='.4 0 .6 1;.4 0 .6 1;.4 0 .6 1;.4 0 .6 1' keyTimes='0;.25;.5;.75;1'/%3E%3C/path%3E%3Cpath d='M10,3 L14,8 L9,10.5' stroke='%239a6332' stroke-width='2.8' fill='none' stroke-linecap='round' stroke-linejoin='round'%3E%3Canimate attributeName='d' values='M10,3 L14,8 L9,10.5;M10,3 L16,6.5 L23,8;M10,3 L12,9.5 L12.5,15.5;M10,3 L8,9.5 L4,14.5;M10,3 L14,8 L9,10.5' dur='0.6s' begin='-0.0s' repeatCount='indefinite' calcMode='spline' keySplines='.4 0 .6 1;.4 0 .6 1;.4 0 .6 1;.4 0 .6 1' keyTimes='0;.25;.5;.75;1'/%3E%3C/path%3E%3Cpath d='M8,-6 Q10,1 7,6' stroke='%23b91c1c' stroke-width='2.6' fill='none'/%3E%3Ccircle cx='8.6' cy='2.6' r='2' fill='%23facc15' stroke='%23a16207' stroke-width='0.6'/%3E%3Cpath d='M-10,-6 L-10,6' stroke='%23b91c1c' stroke-width='2.2'/%3E%3C/g%3E%3C/g%3E%3C/g%3E%3Cg transform='translate(178 30)'%3E%3Cg%3E%3CanimateTransform attributeName='transform' type='translate' values='0 0;0 -3.2;0 0.8;0 -0.6;0 0' keyTimes='0;.25;.5;.75;1' dur='0.6s' begin='-0.24s' repeatCount='indefinite'/%3E%3Cg%3E%3CanimateTransform attributeName='transform' type='rotate' values='0;-6;3;1;0' keyTimes='0;.25;.5;.75;1' dur='0.6s' begin='-0.24s' repeatCount='indefinite'/%3E%3Cpath d='M-10,3 L-13,8.5 L-6,10.5' stroke='%236b4423' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'%3E%3Canimate attributeName='d' values='M-10,3 L-13,8.5 L-6,10.5;M-10,3 L-17,6.5 L-24,8;M-10,3 L-15,8.5 L-16,14;M-10,3 L-12,9.5 L-8,15.5;M-10,3 L-13,8.5 L-6,10.5' dur='0.6s' begin='-0.29s' repeatCount='indefinite' calcMode='spline' keySplines='.4 0 .6 1;.4 0 .6 1;.4 0 .6 1;.4 0 .6 1' keyTimes='0;.25;.5;.75;1'/%3E%3C/path%3E%3Cpath d='M10,3 L14,8 L9,10.5' stroke='%236b4423' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'%3E%3Canimate attributeName='d' values='M10,3 L14,8 L9,10.5;M10,3 L16,6.5 L23,8;M10,3 L12,9.5 L12.5,15.5;M10,3 L8,9.5 L4,14.5;M10,3 L14,8 L9,10.5' dur='0.6s' begin='-0.29s' repeatCount='indefinite' calcMode='spline' keySplines='.4 0 .6 1;.4 0 .6 1;.4 0 .6 1;.4 0 .6 1' keyTimes='0;.25;.5;.75;1'/%3E%3C/path%3E%3Cellipse cx='0' cy='0' rx='15' ry='7.5' fill='%239a6332'/%3E %3Cellipse cx='1' cy='3.5' rx='10' ry='3.2' fill='%23d9b48a'/%3E %3Cpath d='M-15,-2 Q-19,-6 -17,-1' fill='%23f5f5f4' stroke='%23f5f5f4' stroke-width='2' stroke-linecap='round'/%3E %3Cpath d='M9,-3 Q14,-12 19,-13 L22,-9 Q16,-6 13,1 Z' fill='%239a6332'/%3E %3Cellipse cx='23' cy='-12.5' rx='6.5' ry='4.4' fill='%239a6332' transform='rotate(-8 23 -12.5)'/%3E %3Cellipse cx='26.5' cy='-11' rx='3' ry='2.4' fill='%23c08a58'/%3E %3Cpath d='M18,-15 L15,-19 L19,-17 Z' fill='%237a4a24'/%3E %3Ccircle cx='22.5' cy='-14' r='1' fill='%231c1917'/%3E %3Cpath d='M20,-16 Q19,-23 15,-27 M18.5,-21 L13.5,-22 M17.5,-24 L19,-28 M22,-16 Q24,-23 22,-28 M23.2,-22 L27,-25 M22.6,-25.5 L20,-29' stroke='%23e7d3b0' stroke-width='1.4' fill='none' stroke-linecap='round'/%3E %3Ccircle cx='29' cy='-12' r='2.6' fill='%23ef4444'/%3E%3Ccircle cx='29' cy='-12' r='5' fill='%23f87171' opacity='0.35'/%3E%3Cpath d='M-10,3 L-13,8.5 L-6,10.5' stroke='%239a6332' stroke-width='2.8' fill='none' stroke-linecap='round' stroke-linejoin='round'%3E%3Canimate attributeName='d' values='M-10,3 L-13,8.5 L-6,10.5;M-10,3 L-17,6.5 L-24,8;M-10,3 L-15,8.5 L-16,14;M-10,3 L-12,9.5 L-8,15.5;M-10,3 L-13,8.5 L-6,10.5' dur='0.6s' begin='-0.24s' repeatCount='indefinite' calcMode='spline' keySplines='.4 0 .6 1;.4 0 .6 1;.4 0 .6 1;.4 0 .6 1' keyTimes='0;.25;.5;.75;1'/%3E%3C/path%3E%3Cpath d='M10,3 L14,8 L9,10.5' stroke='%239a6332' stroke-width='2.8' fill='none' stroke-linecap='round' stroke-linejoin='round'%3E%3Canimate attributeName='d' values='M10,3 L14,8 L9,10.5;M10,3 L16,6.5 L23,8;M10,3 L12,9.5 L12.5,15.5;M10,3 L8,9.5 L4,14.5;M10,3 L14,8 L9,10.5' dur='0.6s' begin='-0.24s' repeatCount='indefinite' calcMode='spline' keySplines='.4 0 .6 1;.4 0 .6 1;.4 0 .6 1;.4 0 .6 1' keyTimes='0;.25;.5;.75;1'/%3E%3C/path%3E%3Cpath d='M8,-6 Q10,1 7,6' stroke='%23b91c1c' stroke-width='2.6' fill='none'/%3E%3Ccircle cx='8.6' cy='2.6' r='2' fill='%23facc15' stroke='%23a16207' stroke-width='0.6'/%3E%3Cpath d='M-10,-6 L-10,6' stroke='%23b91c1c' stroke-width='2.2'/%3E%3C/g%3E%3C/g%3E%3C/g%3E%3C/svg%3E") no-repeat center / contain;
+  filter: drop-shadow(0 0 6px rgba(253, 230, 138, 0.35));
+}
+/* One pass per flight (about 12 s), started from js/prefs.js at a random
+   moment 1 to 5 minutes after the last; the two names let a pass restart. */
+html.theme-holiday .xm-sleigh.xm-fly-a { animation: xm-sleigh-a 12s linear 1 forwards; }
+html.theme-holiday .xm-sleigh.xm-fly-b { animation: xm-sleigh-b 12s linear 1 forwards; }
+@keyframes xm-sleigh-a {
+  0%   { left: -160px; margin-top: 0; }
+  30%  { margin-top: -10px; }
+  60%  { margin-top: 6px; }
+  100% { left: calc(100% + 160px); margin-top: -6px; }
+}
+@keyframes xm-sleigh-b {
+  0%   { left: -160px; margin-top: 0; }
+  30%  { margin-top: -10px; }
+  60%  { margin-top: 6px; }
+  100% { left: calc(100% + 160px); margin-top: -6px; }
+}
+/* Lobby screens: snow falls behind the lobby. The layer is the first element
+   in the page (js/prefs.js), so it paints over the page background and under
+   the lobby view, which has no background of its own. The
+   sleigh flies only over the game board, never the lobby. */
+html.theme-holiday body:has(#view-lobby-list:not(.hidden)) .xm-lobby-snow,
+html.theme-holiday body:has(#view-lobby:not(.hidden)) .xm-lobby-snow {
+  display: block;
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+html.theme-holiday .xm-lobby-snow .xm-flake { animation-name: xm-fall-screen, xm-sway; }
+@keyframes xm-fall-screen {
+  from { transform: translateY(0); }
+  to   { transform: translateY(calc(var(--vhpx, 1vh) * 100 + 20px)); }
+}
+html.theme-holiday .xm-lobby-snow .xm-flake:nth-child(1) { left: 68.6%; width: 8.2px; height: 8.2px; opacity: 0.70; animation-duration: 19.7s, 4.9s; animation-delay: -20.6s, 0s; }
+html.theme-holiday .xm-lobby-snow .xm-flake:nth-child(2) { left: 51.2%; width: 12.7px; height: 12.7px; opacity: 0.65; animation-duration: 16.8s, 4.0s; animation-delay: -9.6s, 0s; }
+html.theme-holiday .xm-lobby-snow .xm-flake:nth-child(3) { left: 7.8%; width: 11.1px; height: 11.1px; opacity: 0.77; animation-duration: 16.8s, 4.9s; animation-delay: -1.1s, 0s; }
+html.theme-holiday .xm-lobby-snow .xm-flake:nth-child(4) { left: 73.4%; width: 14.0px; height: 14.0px; opacity: 0.80; animation-duration: 21.4s, 4.1s; animation-delay: -8.6s, 0s; }
+html.theme-holiday .xm-lobby-snow .xm-flake:nth-child(5) { left: 12.3%; width: 10.5px; height: 10.5px; opacity: 0.83; animation-duration: 18.4s, 4.6s; animation-delay: -21.3s, 0s; }
+html.theme-holiday .xm-lobby-snow .xm-flake:nth-child(6) { left: 91.9%; width: 7.9px; height: 7.9px; opacity: 0.63; animation-duration: 20.6s, 5.4s; animation-delay: -12.6s, 0s; }
+html.theme-holiday .xm-lobby-snow .xm-flake:nth-child(7) { left: 4.6%; width: 8.3px; height: 8.3px; opacity: 0.80; animation-duration: 16.8s, 7.1s; animation-delay: -5.4s, 0s; }
+html.theme-holiday .xm-lobby-snow .xm-flake:nth-child(8) { left: 88.6%; width: 13.8px; height: 13.8px; opacity: 0.75; animation-duration: 23.2s, 6.3s; animation-delay: -19.0s, 0s; }
+html.theme-holiday .xm-lobby-snow .xm-flake:nth-child(9) { left: 47.7%; width: 7.9px; height: 7.9px; opacity: 0.78; animation-duration: 16.4s, 7.7s; animation-delay: -23.1s, 0s; }
+html.theme-holiday .xm-lobby-snow .xm-flake:nth-child(10) { left: 36.8%; width: 9.9px; height: 9.9px; opacity: 0.63; animation-duration: 18.6s, 8.0s; animation-delay: -10.1s, 0s; }
+html.theme-holiday .xm-lobby-snow .xm-flake:nth-child(11) { left: 10.1%; width: 7.2px; height: 7.2px; opacity: 0.74; animation-duration: 25.9s, 6.0s; animation-delay: -12.8s, 0s; }
+html.theme-holiday .xm-lobby-snow .xm-flake:nth-child(12) { left: 74.3%; width: 10.9px; height: 10.9px; opacity: 0.54; animation-duration: 21.3s, 6.2s; animation-delay: -16.2s, 0s; }
+html.theme-holiday .xm-lobby-snow .xm-flake:nth-child(13) { left: 17.7%; width: 8.3px; height: 8.3px; opacity: 0.59; animation-duration: 25.1s, 5.4s; animation-delay: -15.5s, 0s; }
+html.theme-holiday .xm-lobby-snow .xm-flake:nth-child(14) { left: 11.1%; width: 9.1px; height: 9.1px; opacity: 0.48; animation-duration: 23.8s, 7.1s; animation-delay: -9.7s, 0s; }
+html.theme-holiday .xm-lobby-snow .xm-flake:nth-child(15) { left: 67.2%; width: 11.8px; height: 11.8px; opacity: 0.81; animation-duration: 25.5s, 5.6s; animation-delay: -25.7s, 0s; }
+html.theme-holiday .xm-lobby-snow .xm-flake:nth-child(16) { left: 58.9%; width: 13.7px; height: 13.7px; opacity: 0.80; animation-duration: 19.9s, 5.5s; animation-delay: -6.4s, 0s; }
+html.theme-holiday .xm-lobby-snow .xm-flake:nth-child(17) { left: 16.9%; width: 13.1px; height: 13.1px; opacity: 0.48; animation-duration: 23.7s, 7.1s; animation-delay: -12.6s, 0s; }
+html.theme-holiday .xm-lobby-snow .xm-flake:nth-child(18) { left: 6.1%; width: 12.9px; height: 12.9px; opacity: 0.55; animation-duration: 17.5s, 5.7s; animation-delay: -4.4s, 0s; }
+html.theme-holiday body:has(#view-browse.hidden) .xm-sleigh-layer { display: none; }
+/* Battery saver means no motion: no snow, no sleigh, lights hold steady. */
+html.battery-save .xm-sky,
+html.battery-save .xm-sleigh-layer,
+html.battery-save .xm-hand-snow,
+html.battery-save .xm-lobby-snow { display: none !important; }
+html.battery-save.theme-holiday .browse-map::before,
+html.battery-save.theme-holiday .browse-map::after { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  html.theme-holiday .xm-sky, .xm-sleigh-layer { display: none; }
+  html.theme-holiday .browse-map::before,
+  html.theme-holiday .browse-map::after { animation: none; }
+}
+/* Menu toggle, active state (evergreen, like Battery saver's green). */
+#btn-holiday.is-active { background: #166534; color: #fff; border-color: #14532d; }

@@ -30,6 +30,12 @@ export function setRadBoostSideHook(hook) { _radBoostSideHook = hook || null; }
 // the art. Only the 18 shipped colonists have art, so a card with no asset
 // simply keeps its plain body (the guard below reads a manifest set).
 import { COLONIST_ART_IDS } from '../../data/colonist-art.js';
+// Patent card art (thrusters first; scripts/fetch-card-art.py -> assets/cards/).
+// A plain background picture behind the card body, nothing else: the card
+// layout is untouched (unlike the colonist .has-art recipe, which docks the
+// thrust triangle). Only approved entries render; a preview harness can set
+// globalThis.HF_CARD_ART_PREVIEW = true to see pending art.
+import { CARD_ART } from '../../data/card-art.js';
 
 // Spectral type -> { glyph, fill, ink }. Used for the per-card
 // spectral hex. Falls back to 'unknown' for anything unmapped.
@@ -315,7 +321,16 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   // label. The inactive half (driven by data-rotated on the
   // card root) is dimmed.
   if (card.type === 'radiator') {
-    return buildRadiatorFace(card, sideName);
+    const radFace = buildRadiatorFace(card, sideName);
+    // Radiator art sits in the open band between the two half-cards (css
+    // .is-radiator.has-bg-art). The whole card spins 180 degrees to its heavy
+    // side, so the art is drawn to read either way up.
+    const radArt = CARD_ART[card.id] && CARD_ART[card.id][sideName];
+    if (radArt && (radArt.approved || globalThis.HF_CARD_ART_PREVIEW)) {
+      radFace.style.backgroundImage = `url("${assetUrl(radArt.src)}")`;
+      radFace.classList.add('has-bg-art');
+    }
+    return radFace;
   }
 
   // Crew faces are functionally independent: each face is a
@@ -400,6 +415,14 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
         note.textContent = 'Lander (no thruster)';
         thrustHost.appendChild(note);
       }
+    }
+    // Crew background art: the faction's launcher on its home pad, painted
+    // behind the whole face below the name bar (both crew faces are cream).
+    // Same approval gate as the patent decks (data/card-art.js).
+    const crewArt = CARD_ART[card.id] && CARD_ART[card.id][sideName];
+    if (crewArt && (crewArt.approved || globalThis.HF_CARD_ART_PREVIEW)) {
+      face.style.backgroundImage = `url("${assetUrl(crewArt.src)}")`;
+      face.classList.add('has-bg-art', 'is-crew-art');
     }
     return face;
   }
@@ -506,6 +529,14 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
       const artSide = sideName === 'secondary' ? 'back' : 'front';
       body.style.backgroundImage = `url("${assetUrl(`assets/colonists/${card.id}-${artSide}.svg`)}")`;
       face.classList.add('has-art');
+    }
+  }
+  const patentArt = CARD_ART[card.id] && CARD_ART[card.id][sideName];
+  if (patentArt && (patentArt.approved || globalThis.HF_CARD_ART_PREVIEW)) {
+    const body = face.querySelector('.card-body');
+    if (body) {
+      body.style.backgroundImage = `url("${assetUrl(patentArt.src)}")`;
+      face.classList.add('has-bg-art');
     }
   }
   // The Tier-2 face is a different tech with different numbers,
@@ -1358,10 +1389,10 @@ let _tvSeq = 0;   // unique gradient ids so a removed card SVG never breaks othe
 function tvWedge(g1, g2, stroke, id) {
   return `<defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1">`
     + `<stop offset="0" stop-color="${g1}"/><stop offset="1" stop-color="${g2}"/></linearGradient></defs>`
-    + `<path d="${TV_TRI}" fill="url(#${id})" stroke="${stroke}" stroke-width="2.5" stroke-linejoin="round"/>`;
+    + `<path class="tv-wedge" d="${TV_TRI}" fill="url(#${id})" stroke="${stroke}" stroke-width="2.5" stroke-linejoin="round"/>`;
 }
 function tvDarkWedge() {
-  return `<path d="${TV_TRI}" fill="${TVC.darkTri}" stroke="#3c465e" stroke-width="2.5" stroke-linejoin="round"/>`;
+  return `<path class="tv-wedge" d="${TV_TRI}" fill="${TVC.darkTri}" stroke="#3c465e" stroke-width="2.5" stroke-linejoin="round"/>`;
 }
 // Magenta thrust circle (or the dark-pink modifier circle), bottom-aligned to `by`.
 function tvCircle(cx, by, n, fill, rim) {
@@ -1389,16 +1420,14 @@ function tvFlame(cx, cy, n) {
     + (n != null ? `<text x="0" y="3" text-anchor="middle" font-size="7.5" font-weight="800" fill="#3a1500" stroke="#ffe2bf" stroke-width="1.8" paint-order="stroke">${escapeText(String(n))}</text>` : '')
     + '</g>';
 }
-// Open-end wrench: solid head with a U/semicircle jaw notch (notch = wedge bg).
+// Open-end wrench: ONE path - handle, round head and a real U-shaped jaw cut
+// out of it - so whatever is behind the wedge (card art through the 50% fill)
+// shows through the jaw. The old version faked the jaw with a dark patch,
+// which read as a solid block over art (user 2026-11-13: "make it a proper svg").
 function tvWrench(cx, cy, s) {
   s = s || 1.25;
-  // Handle + rounded jaw head, with a U-notch cut from the tip. The notch top
-  // runs ABOVE the head so the jaw opens cleanly (no leftover bridge of metal
-  // across the opening).
   return `<g transform="translate(${cx},${cy}) rotate(-28) scale(${s})">`
-    + `<rect x="-2.4" y="-1" width="4.8" height="13" rx="2.4" fill="${TVC.wrench}"/>`
-    + `<ellipse cx="0" cy="-7" rx="6.2" ry="5.8" fill="${TVC.wrench}"/>`
-    + `<path d="M -3.7 -15 L -3.7 -7.2 A 3.7 3.7 0 0 0 3.7 -7.2 L 3.7 -15 Z" fill="${TVC.darkTri}"/></g>`;
+    + `<path d="M 2.4 -1.07 L 2.4 10.6 A 2.4 2.4 0 0 1 -2.4 10.6 L -2.4 -1.07 A 6.4 6.4 0 0 1 -3 -12.65 L -3 -7 A 3 3 0 0 0 3 -7 L 3 -12.65 A 6.4 6.4 0 0 1 2.4 -1.07 Z" fill="${TVC.wrench}" stroke="#1f2937" stroke-width="0.6" stroke-linejoin="round"/></g>`;
 }
 function tvSun(cx, cy, s) {
   s = s || 1.3;
