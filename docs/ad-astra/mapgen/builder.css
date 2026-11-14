@@ -18,6 +18,10 @@ html, body { margin: 0; height: 100%; background: var(--bg, #07060f); color: var
 .mg-body.mg-giant { border-left-color: #c8a373; }
 .mg-body.mg-asteroid { border-left-color: #7e6f5c; }
 .mg-body.mg-dwarf { border-left-color: #9c9387; }
+.mg-body.mg-belt { border-left-color: #7e6f5c; border-left-style: dotted; }
+.mg-body.mg-star { border-left-color: #fbbf24; }
+.mg-tag { color: var(--warm, #fbbf24); min-width: 14px; }
+.mg-role { color: var(--ink, #e6e9ff); font-size: 12px; padding: 4px 0; }
 .mg-bhead { display: flex; gap: 6px; align-items: center; }
 .mg-name { flex: 1; min-width: 0; }
 .mg-x { background: transparent; border: 0; color: var(--bad, #f87171); font-size: 18px; cursor: pointer; padding: 0 4px; }

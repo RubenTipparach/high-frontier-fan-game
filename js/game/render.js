@@ -2081,7 +2081,10 @@ export class MapRenderer {
   // when `visualizeZones` is on. { polys: {zone:[[{x,y}]]}, colors,
   // order } - order is inner -> outer (drawn outer-first so inner
   // regions paint on top).
-  setCanonicalZones({ polys, colors, order } = {}) {
+  // `restart` (optional) lists zones that begin a NEW nesting (a second star's
+  // innermost zone on a binary board): their fill is not punched by the zone
+  // before them in `order`. The Sol board passes none, so it draws as before.
+  setCanonicalZones({ polys, colors, order, restart } = {}) {
     const cols = colors || {};
     const vivid = {};
     for (const z in cols) vivid[z] = vividHex(cols[z]);
@@ -2090,6 +2093,7 @@ export class MapRenderer {
       colors: cols,
       vivid,   // richer fill colours (the pale palette washes out)
       order: Array.isArray(order) ? order.slice() : [],
+      restart: new Set(Array.isArray(restart) ? restart : []),
     };
     this._invalidateStatic();
     this._scheduleDraw();
@@ -5722,6 +5726,7 @@ export class MapRenderer {
       const polys = cz.polys[zone];
       if (polys && polys.length) {
         arr.push({
+          zone,
           polys,
           col: cz.colors[zone] || '#22d3ee',
           fillCol: (cz.vivid && cz.vivid[zone]) || cz.colors[zone] || '#22d3ee',
@@ -5751,7 +5756,7 @@ export class MapRenderer {
         ctx.fillStyle = arr[i].fillCol;
         ctx.beginPath();
         for (const pts of arr[i].polys) if (pts && pts.length >= 2) addPath(pts);
-        if (i > 0) for (const pts of arr[i - 1].polys) if (pts && pts.length >= 2) addPath(pts);
+        if (i > 0 && !(cz.restart && cz.restart.has(arr[i].zone))) for (const pts of arr[i - 1].polys) if (pts && pts.length >= 2) addPath(pts);
         ctx.fill('evenodd');
       }
     }

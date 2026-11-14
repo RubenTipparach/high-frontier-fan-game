@@ -9,6 +9,7 @@ import { renderCard } from '../../../js/game/card-ui.js';
 import { MapRenderer, LEO_ANCHOR } from '../../../js/game/render.js';
 import { loadPlannerMap, buildChains } from '../../../js/game/planner-map.js';
 import { buildSystem, SYSTEM_LAYOUT, zoneLayer } from './systems.js';
+import { GIANT_HALO } from '../mapgen/mapgen.js';
 import { NODE_TAGS } from '../../../data/node-tags.js';
 import {
   TUNE, SOURCES, HOLDINGS, CLASSES, PROP_PER_MASS, FAMILY_GLYPH, CARD_BY_ID, DECKS, DECK_LABEL,
@@ -234,6 +235,13 @@ function explore(starId, how) { // AA-G12
     st.hz = c;
   }
   st.comps = star.comp.map((k) => ({ kind: k, chit: drawChit('comp') }));
+  // stellar companions (SM-1e): a sun or red dwarf draws its own habitable-zone
+  // chit (a known planet is never "No world"); a white or brown dwarf a companion chit
+  st.stars = (star.stars || []).map((c) => {
+    if (c.type !== 'yellow' && c.type !== 'red') return { ...c, chit: drawChit('comp') };
+    let ch = drawChit(c.type); if (ch === 'None' && c.known) ch = drawChit(c.type); if (ch === 'None' && c.known) ch = 'Hostile';
+    return { ...c, chit: ch };
+  });
   S.systems[starId] = genSystem(starId);
   const found = bodiesOf(starId).map((b) => `${b.body} (${b.kind === 'ocean' ? 'buried ocean' : b.cls})`);
   log(`Explored ${star.name} by ${how}: ${found.length ? found.join(', ') : 'no worlds of note'}. +1 VP (AA-G12).`, 'good');
@@ -243,7 +251,8 @@ function genSystem(starId, keep = null) { // AA-B7a: built by the system map rul
   const st = S.stars[starId];
   const oldHz = keep && keep.find((x) => (x.role === 'hz') || x.id === 'hz');
   const keptName = oldHz ? String(oldHz.body || oldHz.name).split(':')[0] : null;
-  return buildSystem({ star: STAR_BY_ID[starId], chits: { hz: st.hz, comps: st.comps }, rint, worldName: () => keptName || S.worldNames.pop() || 'World', keep });
+  if (!st.stars) st.stars = (STAR_BY_ID[starId].stars || []).map((c) => ({ ...c, chit: c.known ? 'Hostile' : 'None' })); // older saves
+  return buildSystem({ star: STAR_BY_ID[starId], chits: { hz: st.hz, comps: st.comps, stars: st.stars }, rint, worldName: () => keptName || S.worldNames.pop() || 'World', keep });
 }
 // Saved games keep each system's map; rebuild older ones in the current layout,
 // carrying their claims, cubes, colonies and terraform progress across.
@@ -251,7 +260,7 @@ function migrateSystems() {
   for (const [starId, sys] of Object.entries(S.systems || {})) {
     if (sys.layout === SYSTEM_LAYOUT) continue;
     const fresh = genSystem(starId, sys.sites);
-    Object.assign(sys, { nodes: fresh.nodes, edges: fresh.edges, sites: fresh.sites, display: fresh.display, zones: fresh.zones, layout: SYSTEM_LAYOUT });
+    Object.assign(sys, { nodes: fresh.nodes, edges: fresh.edges, sites: fresh.sites, display: fresh.display, stars: fresh.stars, zones: fresh.zones, layout: SYSTEM_LAYOUT });
     if (S.ship.orbit === starId && !sys.nodes.some((n) => n.id === S.ship.sysNode)) S.ship.sysNode = 'high';
     delete _sysData[starId]; delete _adjCache[starId];
   }
@@ -889,7 +898,7 @@ async function enterSpace(id, remaining) {
     if (driveDef() && driveDef().brake === 'staged' && !sh.stagedUsed && owns('beam') && sh.V > 0) {
       if (await modal({ title: 'Staged sail', body: 'Detach the outer ring and brake on your own beam, -2 V, one time only (AA-F6)?', buttons: [{ label: 'Not here', value: false }, { label: 'Brake -2 V', value: true, primary: true }] })) { sh.V = Math.max(0, sh.V - 2); sh.stagedUsed = true; log(`Staged sail: now V${sh.V}.`); }
     }
-    if (sh.V > 0 && star.comp.some((c) => c === 'gas' || c === 'brown')) {
+    if (sh.V > 0 && (star.comp.some((c) => c === 'gas' || c === 'brown') || (star.stars || []).some((c) => c.type === 'brown'))) {
       if (await modal({ title: 'Fryby', body: `Dive through the ${star.comp.includes('gas') ? 'gas giant' : 'brown dwarf'}'s atmosphere: -1 V, free. Roll 1d6: on a 1 or 2 lose a card (a Shield absorbs it once). Now V${sh.V}. (AA-F6)`, buttons: [{ label: 'No', value: false }, { label: 'Fryby -1 V', value: true, primary: true }] })) {
         sh.V--; const r = d6(); log(`Fryby: now V${sh.V}; rolled ${r}.`);
         if (r <= 2) { const sc = working((d) => d.role === 'shield')[0]; if (sc) { sc.glitched = true; log(`${def(sc).name} absorbs it.`); } else await loseCard('Fryby'); }
@@ -1060,7 +1069,8 @@ function systemMapData(starId) { // AA-B7a, drawn exactly as the Sol board draws
   const siteBy = Object.fromEntries(sys.sites.map((x) => [x.id, x]));
   const MOON_ART = ['io', 'ganymede', 'callisto'];
   const moonIdx = {};
-  const sites = [baseSite({ id: 'star', name: star.name, type: 'sun', x: 700, y: 450, sunR: star.type === 'yellow' ? 24 : star.type === 'red' ? 18 : 14 })];
+  const sunR = (x) => (x.type === 'yellow' ? 24 : x.type === 'red' ? 18 : 12) * (x.role === 'distant' ? 0.6 : x.role === 'binary' ? 0.8 : 1);
+  const sites = (sys.stars || [{ name: star.name, type: star.type, x: 700, y: 450 }]).map((x, i) => baseSite({ id: i ? `star${i}` : 'star', id2: `aa-${starId}-star${i}`, name: x.name, type: 'sun', x: x.x, y: x.y, sunR: sunR(x) }));
   for (const n of sys.nodes) {
     const st = siteBy[n.id];
     if (st) {
@@ -1084,7 +1094,7 @@ function systemMapData(starId) { // AA-B7a, drawn exactly as the Sol board draws
   for (const b of sys.display || []) { // the giants themselves, as the Sol board draws Jupiter
     const g = baseSite({ id: b.id, name: b.name, type: 'gas-giant', x: b.x, y: b.y, isLandable: false });
     g._palette = b.kind === 'gas' ? BODY_ART.jupiter : b.kind === 'brown' ? BODY_ART.brownDwarf : BODY_ART.whiteDwarf;
-    if (b.kind === 'white') g.haloR = 14;
+    g.haloR = b.kind === 'white' ? 14 : GIANT_HALO; // SM-7: the ladder curls just outside the sphere
     sites.push(g);
   }
   _sysData[starId] = plannerShape(sites, sys.edges.map(([a, b]) => [a, b]));
@@ -1115,8 +1125,9 @@ function rendererFor(key) {
   if (key === 'stars') { renderer.options.labelFadeMin = 0.4; renderer.options.labelFadeMax = 0.7; }
   if (key !== 'stars' && key !== 'sol' && sysOf(key)) { // a system board: tint its helio zones as Sol's are (SM-1c)
     Object.assign(renderer.options, { visualizeZones: true, zoneFill: true, zoneOpacity: 0.14 });
-    const z = zoneLayer(sysOf(key).zones || 6);
-    renderer.setCanonicalZones({ polys: z.polys, colors: z.colors, order: z.order });
+    const sy = sysOf(key);
+    const z = zoneLayer(sy.stars ? sy.stars.map((x) => ({ zones: x.zones, role: x.role })) : (sy.zones || 6));
+    renderer.setCanonicalZones({ polys: z.polys, colors: z.colors, order: z.order, restart: z.restart });
   }
   try { renderer.setAmbientRocketCount(0); } catch (e) { /* optional */ }
   RENDERERS[key] = { renderer, host, data, fresh: true };
@@ -1231,9 +1242,11 @@ function starActions(id) {
     out.push(ex
       ? { label: '🪐 View system', variant: 'rocket', onClick: act(() => setMapMode('system', nd.star)) }
       : { label: '🪐 View system (reveals it: debug)', variant: 'rocket', onClick: act(() => { explore(nd.star, 'debug'); log(`[debug] revealed ${st.name} from its popup`); commit(); setMapMode('system', nd.star); }) });
+    const kindOf = (t) => ({ yellow: 'sun', red: 'red dwarf', brown: 'brown dwarf', white: 'white dwarf' }[t]);
     out.push(info(`${st.type === 'yellow' ? 'Yellow sun' : st.type === 'red' ? 'Red dwarf' : 'Brown dwarf'}${st.comp.length ? ` + ${st.comp.map((c) => ({ gas: 'gas giant', brown: 'brown dwarf', white: 'white dwarf' }[c])).join(', ')}` : ''}${st.hazard ? `, ${st.hazard === 'flare' ? 'flare star' : 'debris disk'}` : ''}`));
+    for (const c of st.stars || []) out.push(info(`${c.role === 'binary' ? 'Binary' : 'Distant'} companion: ${c.name} (${kindOf(c.type)})`));
     out.push(info(`${MAP.dist[nd.star]} spaces from Sol${fromShip ? `, ${fromShip[nd.star]} from your starship` : ''}`));
-    if (st.known) out.push(info(`Known planet: ${st.known}`));
+    for (const kn of [st.known, ...(st.stars || []).map((c) => c.known && `${c.known}, round ${c.name}`)].filter(Boolean)) out.push(info(`Known planet: ${kn}`));
     if (ex) {
       out.push(info(`Bodies: ${bodiesOf(nd.star).map((b) => `${b.body} (${b.kind === 'ocean' ? 'buried ocean' : b.cls})`).join(', ')}`));
     } else {
@@ -1279,8 +1292,8 @@ function systemActions(starId, id) {
     out.push(info('A giant at the centre of its own gravity well. Come in through its Lagrange points, then branch out to its moons. Skim fuel at its central Lagrange point.'));
   } else {
     const n = sysOf(starId).nodes.find((q) => q.id === id);
-    const burnWhy = (x) => (x.land ? `${x.land === 'half' ? 'Half landing' : 'Landing'} burn${x.body ? ` onto ${x.body}` : ''}` : x.purpose === 'transition' ? 'Zone transition burn' : x.purpose === 'escape' ? `Escape burn, ${x.body}'s well` : 'Burn pad');
-    if (n) out.push(info(n.kind === 'burn' ? `${burnWhy(n)}: entering it costs 1 burn` : n.kind === 'orbit' ? 'The system edge: where ships arrive' : n.kind === 'lagrange' ? (n.label || 'Lagrange point: free to enter') : n.kind === 'hohmann' ? 'Hohmann transfer: free to enter' : n.kind === 'radhaz' ? 'Radiation belt: free, but roll for damage (AA-B7c)' : (n.label || '')));
+    const burnWhy = (x) => (x.land ? `${x.land === 'half' ? 'Half landing' : 'Landing'} burn${x.body ? ` onto ${x.body}` : ''}` : x.purpose === 'transition' ? 'Zone transition burn' : x.purpose === 'escape' ? (x.rung ? `${x.body}'s escape ladder, burn ${x.rung} of 3` : `Escape burn, ${x.body}'s well`) : 'Burn pad');
+    if (n) out.push(info(n.kind === 'burn' ? `${burnWhy(n)}: entering it costs 1 burn` : n.kind === 'orbit' ? 'The system edge: where ships arrive' : n.kind === 'lagrange' ? (n.purpose === 'flyby' ? `${n.body} slingshot: free, +${n.fly || 0} flyby; no route to its moons from here` : (n.label || 'Lagrange point: free to enter')) : n.kind === 'hohmann' ? 'Hohmann transfer: free to enter' : n.kind === 'radhaz' ? 'Radiation belt: free, but roll for damage (AA-B7c)' : (n.label || '')));
     if (here && n && n.skim) out.push({ label: '⛽ Skim gas giant', disabled: fops || sh.sysNode !== id, onClick: act(opSkim) });
   }
   if (here && sh.sysNode !== id && (site || sysOf(starId).nodes.some((q) => q.id === id))) {

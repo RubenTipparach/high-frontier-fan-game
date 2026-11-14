@@ -1,6 +1,6 @@
 # High Frontier: Ad Astra - Rulebook
 
-**Draft v0.7 (2026-11-14).** A fan variant of High Frontier 4: All that
+**Draft v0.8 (2026-11-14).** A fan variant of High Frontier 4: All that
 takes the game past the edge of the Sol map. Not affiliated with Sierra Madre
 Games. Original rules; it borrows only the hooks HF4 already prints (TW
 thrusters, the three Ad Astra exits, the Ad Astra and Sunlens Futures).
@@ -118,21 +118,39 @@ when the star is first explored (G12) and stay face up for the game.
 the **system map rules** (`system-map-rules.md`, SM-0 to SM-10), which are
 measured off the HF Sol board so a system reads like Sol: nested helio zones,
 a ring of Hohmann pivots per zone, one burn per zone crossing, a gravity well
-per body (more burns, bigger well), lander burns, radiation at the star and in
-the giants' belts. The board's bodies come from the star's chits:
+per body (more burns, bigger well), lander burns, radiation at each star and
+in the giants' belts, and asteroids as most of the sites. The board's bodies
+come from the star's chits:
 
-| Body | Yellow sun (6 zones) | Red / brown dwarf (4 zones) | What it is |
+| Body | Yellow sun (6 zones) | Red / brown dwarf, or a binary's primary (4 zones) | What it is |
 |---|---|---|---|
 | Inner rocky world | zone 1 | zone 1 | size 4-6, two regions, Hostile |
+| Near-star rocks | zone 2 | zone 1 | 1-2 asteroids |
 | Habitable-zone world (if its chit is not "No world") | zone 3 | zone 2 | size 6-9, three regions sharing the chit's class (H10); an atmosphere unless Hostile |
-| Asteroid belt | zone 4 | zone 3 | a dwarf planet (size 5-7) and 1-2 rocks (size 2-4), all mines |
-| Companions | zones 5 and 6 | zone 4 | a giant hub: a gas giant has 4 large moons, a brown dwarf 2, a white dwarf 1, plus a moonlet; a buried-ocean chit makes the second large moon (the only one, for a white dwarf) an ocean world |
+| Main belt | zone 4 | zone 3 | a dwarf planet (size 5-7) and 5-8 asteroids (size 1-4) |
+| Giants | zones 5 and 6 | zone 4 | a gas giant has 4 large moons and 1-2 Trojan asteroids at each Lagrange point on its orbit; a brown dwarf 2 moons, a white dwarf 1; each also a moonlet. A buried-ocean chit makes the second large moon (the only one, for a white dwarf) an ocean world |
+| Outer belt | zone 6 | (none) | 3-5 asteroids |
 
-You arrive at the system's **edge** (G4), outside the outer zone. A moon is
-reached only through its giant's hub, so moons sit deep in the giant's well.
-Large moons are Hostile surfaces that take domed Colonies; moonlets, belt
-rocks and dwarf planets are mines. A gas giant's central Lagrange point is
+**Giants (SM-7).** A giant's flyby point is a **slingshot** on the transfer
+layer: free to reach through a radiation belt, back out to the ring or (one
+burn) out to the next zone. You cannot slingshot into a moon's orbit: moons
+are reached down the giant's **escape ladder**, three ordinary burns curling
+round it, branching off the 2nd or 3rd burn. A gas giant's slingshot point is
 its skim point (G13).
+
+**Multiple stars (SM-1e).** A **binary** board holds two systems side by side
+(Alpha Centauri A and B, 61 Cygni, Luyten 726-8, Sirius, Procyon, Luhman 16).
+A **distant companion** is a small system at the board's edge (Proxima, round
+Alpha Centauri; Epsilon Indi B). A companion sun or red dwarf draws its own
+habitable-zone chit; a white or brown dwarf draws a companion chit, where a
+buried ocean is a dark world round it. A binary partner also has a rocky
+world and a belt; a distant companion a few rocks. A known planet (Proxima b)
+is never "No world". Going from one star to the other costs 2 burns: out of
+one outer zone and into the other's (SM-9b).
+
+You arrive at the primary's **edge** (G4), outside its outer zone. Large moons
+are Hostile surfaces that take domed Colonies; moonlets, asteroids and dwarf
+planets are mines.
 
 **B7b. In-system moves (free action).** As on the Sol map, entering a magenta
 burn pad (or landing burn) costs 1 burn; parking orbits, Hohmann dots and
@@ -605,22 +623,22 @@ from Sol in half light-years, rounded; actual paths can run longer. The map
 itself is still to be drawn [OPEN Z8]. Data from public catalogues as of Nov
 2026; recheck before it becomes game data.
 
-| Star | ly | Spaces | Type | Companions | Hazard | Known planets near the habitable zone |
+| Star | ly | Spaces | Type | Companions (giants inside; binary / distant stars, SM-1e) | Hazard | Known planets near the habitable zone |
 |---|---|---|---|---|---|---|
-| Alpha Centauri A + B (+ Proxima) | 4.4 | 9 | Yellow suns + red dwarf | - | Flare (Proxima) | Proxima b |
+| Alpha Centauri A + B (+ Proxima) | 4.4 | 9 | Yellow suns + red dwarf | Binary B; distant Proxima | Flare (Proxima) | Proxima b (round Proxima) |
 | Barnard's Star | 6.0 | 12 | Red dwarf | - | - | - |
-| Luhman 16 | 6.5 | 13 | Brown dwarf pair | Brown dwarf | - | - |
+| Luhman 16 | 6.5 | 13 | Brown dwarf pair | Binary B (brown dwarf) | - | - |
 | WISE 0855-0714 | 7.4 | 15 | Brown dwarf | - | - | - |
 | Wolf 359 | 7.9 | 16 | Red dwarf | - | Flare | - |
 | Lalande 21185 | 8.3 | 17 | Red dwarf | - | - | - |
-| Sirius | 8.6 | 17 | Yellow sun (hot) | White dwarf | - | - |
-| Luyten 726-8 (UV Ceti) | 8.7 | 17 | Red dwarf pair | - | Flare | - |
+| Sirius | 8.6 | 17 | Yellow sun (hot) | Binary B (white dwarf) | - | - |
+| Luyten 726-8 (UV Ceti) | 8.7 | 17 | Red dwarf pair | Binary B (red dwarf) | Flare | - |
 | Ross 154 | 9.7 | 19 | Red dwarf | - | Flare | - |
 | Epsilon Eridani | 10.5 | 21 | Yellow sun | Gas giant | Debris disk | - |
 | Ross 128 | 11.0 | 22 | Red dwarf | - | - | Ross 128 b |
-| 61 Cygni | 11.4 | 23 | Yellow suns (pair) | - | - | - |
-| Procyon | 11.5 | 23 | Yellow sun (hot) | White dwarf | - | - |
-| Epsilon Indi | 11.9 | 24 | Yellow sun | Gas giant, brown dwarf | - | - |
+| 61 Cygni | 11.4 | 23 | Yellow suns (pair) | Binary B | - | - |
+| Procyon | 11.5 | 23 | Yellow sun (hot) | Binary B (white dwarf) | - | - |
+| Epsilon Indi | 11.9 | 24 | Yellow sun | Gas giant; distant B (brown dwarf pair) | - | - |
 | Tau Ceti | 11.9 | 24 | Yellow sun | - | Debris disk | Tau Ceti e, f (unconfirmed) |
 | Luyten's Star | 12.3 | 25 | Red dwarf | - | - | GJ 273 b |
 | Teegarden's Star | 12.5 | 25 | Red dwarf | - | - | Teegarden b, c |
@@ -649,6 +667,12 @@ itself is still to be drawn [OPEN Z8]. Data from public catalogues as of Nov
   Replicator cube). Each gets a rendered preview for sign-off before use.
 
 ### Changelog
+- **v0.8 (2026-11-14):** Giants (B7a, SM-7): the flyby point is a slingshot on
+  the transfer layer, and moons branch off the escape ladder, never the
+  slingshot. Asteroids are most of a system's sites: near-star rocks, a main
+  belt, Trojans, an outer belt (SM-5f). Binary and distant companion stars
+  get their own systems on the same board (SM-1e): Alpha Centauri is A and B
+  with Proxima far out.
 - **v0.7 (2026-11-14):** System boards follow the system map rules
   (`system-map-rules.md`): helio zones, Hohmann rings, burns only for zone
   crossings, escape and landing, wells by size, moons through their giant

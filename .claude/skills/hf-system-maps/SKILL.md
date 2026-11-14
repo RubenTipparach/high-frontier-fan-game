@@ -21,6 +21,7 @@ edit the rule first, then the generator, then the validator, then look at it.
 |---|---|
 | `docs/ad-astra/system-map-rules.md` | The SM rules. Source of truth. |
 | `docs/ad-astra/analyze-sol-map.mjs` | Measures the real Sol board. Every SM number comes from here. |
+| `docs/ad-astra/analyze-moon-branch.mjs` | Shows where Sol's moons join their giant's well (never at the +4 slingshot). |
 | `docs/ad-astra/mapgen/mapgen.js` | Pure generator + validator (no DOM, no imports). `buildMap(spec)`, `validateMap(map)`. |
 | `docs/ad-astra/mapgen/builder.js` + `index.html` + `builder.css` | The interactive builder: edit bodies, the map rebuilds in the game's own `MapRenderer`, rule checks listed live. |
 | `docs/ad-astra/prototype/build-artifact.mjs` | `node ... build-artifact.mjs mapgen` bundles the builder into one page (`docs/ad-astra/mapgen/dist/map-builder.html`) for an Artifact. |
@@ -49,6 +50,11 @@ Run `node docs/ad-astra/analyze-sol-map.mjs` to re-measure. The numbers:
 - **Aerobrakes**: 31, only at atmosphere bodies.
 - **Curves**: every decorative node has exactly 2 edges. **Dead ends**: 5 in
   1514, all map exits.
+- **Asteroids are 139 of 188 sites**, in every zone: main belt 43, Jupiter zone
+  (Trojans) 26, Neptune zone (Kuiper) 20, Saturn 17, Mars 12, Earth 10, Uranus 10.
+- **Jupiter's +4 node is on the transfer layer**: free through radiation belts
+  from the Hohmann pivots, a 6-route crossroads. No moon route passes it; the
+  moons come down burn ladders off Jupiter's pivots.
 - **Flyby boosts**: Jupiter +4; Venus, Earth, Saturn, Uranus, Neptune +2;
   Mars, Mercury +1.
 - **Zone palette** (inner to outer, `data/sites.js` SOLAR_ZONE_INFO):
@@ -58,11 +64,14 @@ Run `node docs/ad-astra/analyze-sol-map.mjs` to re-measure. The numbers:
 
 `buildMap(spec)` builds in this order. Keep the order when extending it.
 
-1. **Star and zones (SM-1).** 4..9 nested elliptical zones (`zoneBounds(n)`,
-   tilted plane `WORLD.kx / ky`, inner 70, outer 420 world px, world is the
-   renderer's 1400 x 900). Zone colours sample the Sol palette in order, so a
-   6-zone system still runs hot yellow inside to violet outside. Zone 0 is the
-   star's zone.
+1. **Stars and zones (SM-1).** `starLayout(stars)` places each star: a lone
+   star fills the 1400 x 900 board (inner 70, outer 420); a **binary** puts the
+   primary left and partner right; a **distant** companion is a small 2-3 zone
+   system at the top right (SM-1e). Each star has its own nested elliptical
+   zones (`zoneBounds(n, L)`), coloured from the Sol palette inner to outer.
+   Nodes carry `star` (index, -1 between stars) and `zone`. `zoneLayer(stars)`
+   returns `restart`: pass it to `setCanonicalZones` so a second star's bands
+   don't punch through the first's.
 2. **Hohmann rings (SM-2).** One ring of pivots per zone at its middle radius:
    at the three spokes (270 = top, toward arrival; 30; 150) plus every body's
    angle in that zone. Pivots closer than 6 degrees merge. Ring arcs between
@@ -70,8 +79,10 @@ Run `node docs/ad-astra/analyze-sol-map.mjs` to re-measure. The numbers:
    radiation node mid-arc (SM-6a).
 3. **Zone transitions (SM-3a).** Along each spoke, neighbouring rings are linked
    by a route carrying EXACTLY ONE burn, placed on the zone boundary.
-4. **Arrival (SM-9a).** One `orbit` node `high` just outside the outer zone at
-   the top, one burn into the outer ring. This is the only legal dead end.
+4. **Arrival and between stars (SM-9).** One `orbit` node `high` just outside
+   the primary's outer zone at the top, one burn into the outer ring: the only
+   legal dead end. Stars are joined outer ring to outer ring with 2 transition
+   burns (pivots facing each other are added to the outer rings).
 5. **Each body's well (SM-4).** From the body's departure pivot (its own ring
    pivot): escape burns (`wellBurns(size)`: 1-5 = 1, 6-7 = 2, 8-11 = 3; giants
    always 3), then its Lagrange point (`fly` = `flybyOf(size)`: 11 = +4, 10 = +2,
@@ -83,25 +94,40 @@ Run `node docs/ad-astra/analyze-sol-map.mjs` to re-measure. The numbers:
    hazard on one landing (SM-6c). Sites fan out on the far side of the body,
    at least `SITE_GAP` (32) world px apart INCLUDING sites on the same body
    (SM-5e). Moons fan round the far side of the hub, alternating near / far.
-7. **Giants (SM-7).** A giant is a hub you cannot land on: departure pivot ->
-   3 escape burns -> giant Lagrange (+4 / +2 flyby). Moons branch FROM THE HUB
-   ONLY: hub -> radiation belt node -> `moonEscape(size)` burns -> moon
-   Lagrange -> landing -> sites. A moon is never reachable without going through
-   its giant. Moonlets (size 1-2): hub -> one burn -> the site.
+7. **Giants (SM-7).** Three ring pivots ~70 px apart (`giantDelta`): ladder
+   start (a - delta), slingshot in (a), slingshot out (a + delta).
+   - **Slingshot** (`purpose: 'flyby'`, +4 / +2) at the giant's centre: free
+     through a radiation node from the in and out pivots, plus one transition
+     burn out to the next zone's ring. It never leads to a moon: you cannot
+     slingshot into a moon's orbit.
+   - **Escape ladder**: 3 burns (`rung` 1-3) curling round the -90 side at
+     R 34 (giant sphere `GIANT_HALO` 24).
+   - **Moons** fan over [outAng - 126, outAng - 18], alternating 64 / 96 px
+     out, and branch off the rung nearer in angle (2 or 3; off rung 3 through
+     a radiation node) -> `moonEscape(size)` burns -> moon Lagrange ->
+     landing -> sites. Moonlets come off rung 1 with one burn.
+8. **Asteroids (SM-5f).** `kind: 'belt'` (count, sizes) and a giant's
+   `trojans: n` expand into clusters: ring pivot -> one escape burn ->
+   Lagrange -> up to 3 asteroid sites, fanned 22 px out. At least 40% of
+   sites must be asteroids; the game's systems run 50%+.
 
 ## The spec
 
 ```js
 { name: 'Epsilon Indi', starType: 'yellow' | 'red', zones: 6,
+  stars: [{ name: 'A', type: 'yellow', zones: 4 }, { name: 'B', type: 'yellow', zones: 3, role: 'binary' }, { name: 'Proxima', type: 'red', zones: 2, role: 'distant' }],
   bodies: [
     { kind: 'planet', name: 'Haven', zone: 2, size: 8, sites: 3, atmosphere: true, cls: 'Marginal', angle: 40 },
-    { kind: 'asteroid', name: 'Belt A', zone: 3, size: 2 },
+    { kind: 'belt', name: 'Belt', zone: 3, count: 8 },
+    { kind: 'planet', name: 'Proxima b', star: 2, zone: 1, size: 7, sites: 2 },
     { kind: 'dwarf', name: 'Vesper', zone: 3, size: 6 },
-    { kind: 'giant', name: 'Epsilon b', zone: 4, size: 11,
+    { kind: 'giant', name: 'Epsilon b', zone: 4, size: 11, trojans: 2,
       moons: [{ name: 'b-I', size: 8, sites: 2 }, { name: 'b-II', size: 7, sites: 2, ocean: true }, { name: 'b-iv', size: 2 }] },
   ] }
 ```
 
+- `stars` is optional (one star from `name` / `starType` / `zones` otherwise).
+  `star` on a body is the star index (default 0).
 - `zone` is 0-based (0 = the star's zone). `angle` is optional; bodies in a
   zone auto-spread when it is missing.
 - `size` 1..11 (the HF site size, which drives wells and landing).
@@ -177,7 +203,7 @@ conversion to the planner-map shape `MapRenderer` already draws:
 6. **Visual checklist** (the validator can't see these):
    - no line ends in empty space; every route reaches a pivot, a body or a site;
    - no two hexes overlap and no label sits on another label, zoomed in;
-   - moons hang off their giant's hub, never off a ring;
+   - moons hang off their giant's escape ladder, never off the slingshot or a ring;
    - each zone is one even tint band; no Sol orbit rings / belt dust / LEO;
    - lander glyphs (full / half rocket), skulls, aerobrake parachutes appear
      where the rules put them and nowhere else.
@@ -200,6 +226,18 @@ conversion to the planner-map shape `MapRenderer` already draws:
   28 px, neighbouring moons of a 4-moon giant still touched in about 8% of
   rolls, and long labels (`Epsilon b-I Far`) ran together: 32 px and short
   labels fixed both. Stress test every change across many seeds, not one.
+- **Moons hung off the giant's flyby point.** Wrong (user, 2026-11-14): a
+  slingshot is for reaching other planets; moon orbits take ordinary burns
+  down the escape ladder. The validator checks no moon route touches a flyby
+  point (SM-10 check 8).
+- **Too few asteroids.** Sol is 74% asteroids; boards with 2-3 rocks read as
+  empty. SM-10 check 9.
+- **Binaries drawn as one star.** Alpha Centauri is two systems on one board
+  with Proxima far out; 61 Cygni, Luyten 726-8, Sirius, Procyon and Luhman 16
+  are binaries too.
+- **Splicing the generator by a substring anchor** that also matched a new
+  line deleted half of `buildMap`. Anchor on something unique, or rewrite the
+  file whole, then run the node check.
 - **Moons in the well-depth check against planets.** A size 9 moon is deeper
   than a size 10 planet by design (SM-4b). Worlds and moons are checked apart.
 - **Sol decor on other maps.** `solDecor = false` hides Sol's orbit guides,

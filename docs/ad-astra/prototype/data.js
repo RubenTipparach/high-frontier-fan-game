@@ -173,22 +173,25 @@ export const EVENTS = {
 };
 
 // ---------------------------------------------------------------- stars (AA-Y)
-// type: yellow | red | brown. comp: companions. known: known HZ planet.
+// type: yellow | red | brown. comp: giants inside the system (gas giant, brown
+// or white dwarf). stars: stellar companions with their own systems on the same
+// board (SM-1e): role 'binary' sits beside the primary, 'distant' far out at the
+// board's edge. known: a known HZ planet (on the companion that names it).
 export const STARS = [
-  { id: 'alphacen', name: 'Alpha Centauri', type: 'yellow', comp: [], hazard: 'flare', known: 'Proxima b' },
+  { id: 'alphacen', name: 'Alpha Centauri', type: 'yellow', comp: [], hazard: 'flare', stars: [{ name: 'Alpha Centauri B', type: 'yellow', role: 'binary' }, { name: 'Proxima Centauri', type: 'red', role: 'distant', known: 'Proxima b' }] },
   { id: 'barnard', name: "Barnard's Star", type: 'red', comp: [], hazard: null },
-  { id: 'luhman16', name: 'Luhman 16', type: 'brown', comp: ['brown'], hazard: null },
+  { id: 'luhman16', name: 'Luhman 16', type: 'brown', comp: [], hazard: null, stars: [{ name: 'Luhman 16 B', type: 'brown', role: 'binary' }] },
   { id: 'wise0855', name: 'WISE 0855-0714', type: 'brown', comp: [], hazard: null },
   { id: 'wolf359', name: 'Wolf 359', type: 'red', comp: [], hazard: 'flare' },
   { id: 'lalande', name: 'Lalande 21185', type: 'red', comp: [], hazard: null },
-  { id: 'sirius', name: 'Sirius', type: 'yellow', comp: ['white'], hazard: null },
-  { id: 'uvceti', name: 'Luyten 726-8', type: 'red', comp: [], hazard: 'flare' },
+  { id: 'sirius', name: 'Sirius', type: 'yellow', comp: [], hazard: null, stars: [{ name: 'Sirius B', type: 'white', role: 'binary' }] },
+  { id: 'uvceti', name: 'Luyten 726-8', type: 'red', comp: [], hazard: 'flare', stars: [{ name: 'Luyten 726-8 B', type: 'red', role: 'binary' }] },
   { id: 'ross154', name: 'Ross 154', type: 'red', comp: [], hazard: 'flare' },
   { id: 'epseri', name: 'Epsilon Eridani', type: 'yellow', comp: ['gas'], hazard: 'debris' },
   { id: 'ross128', name: 'Ross 128', type: 'red', comp: [], hazard: null, known: 'Ross 128 b' },
-  { id: 'cyg61', name: '61 Cygni', type: 'yellow', comp: [], hazard: null },
-  { id: 'procyon', name: 'Procyon', type: 'yellow', comp: ['white'], hazard: null },
-  { id: 'epsind', name: 'Epsilon Indi', type: 'yellow', comp: ['gas', 'brown'], hazard: null },
+  { id: 'cyg61', name: '61 Cygni', type: 'yellow', comp: [], hazard: null, stars: [{ name: '61 Cygni B', type: 'yellow', role: 'binary' }] },
+  { id: 'procyon', name: 'Procyon', type: 'yellow', comp: [], hazard: null, stars: [{ name: 'Procyon B', type: 'white', role: 'binary' }] },
+  { id: 'epsind', name: 'Epsilon Indi', type: 'yellow', comp: ['gas'], hazard: null, stars: [{ name: 'Epsilon Indi B', type: 'brown', role: 'distant' }] },
   { id: 'tauceti', name: 'Tau Ceti', type: 'yellow', comp: [], hazard: 'debris', known: 'Tau Ceti e' },
   { id: 'luyten', name: "Luyten's Star", type: 'red', comp: [], hazard: null, known: 'GJ 273 b' },
   { id: 'teegarden', name: "Teegarden's Star", type: 'red', comp: [], hazard: null, known: 'Teegarden b' },

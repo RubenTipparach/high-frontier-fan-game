@@ -26,6 +26,8 @@ Every rule is grounded in a measurement of the real Sol board
 | Hohmann pivots | the heliocentric transfer layer; degree 2-4 (87 / 67 / 92 nodes) |
 | Curves | every decorative node has exactly 2 edges (517 of 517) |
 | Dead ends | 5 non-site nodes with a single edge in 1514 (map exits / specials only) |
+| Asteroids | 139 of 188 sites are asteroids, in every zone: main belt (Ceres zone) 43, Jupiter zone 26 (Trojans), Neptune zone 20 (Kuiper belt), Saturn 17, Mars 12, Earth 10, Uranus 10; plus 14 comets |
+| Jupiter's moons | the +4 flyby node sits on the transfer layer: free to reach from the Hohmann pivots through radiation belts, a crossroads of 6 routes. No moon route passes through it: Ganymede and Callisto come down a shared burn ladder off Jupiter's pivot (Callisto leaves it one burn earlier), Io and Europa down their own ladders through the radiation belts (`node docs/ad-astra/analyze-moon-branch.mjs`) |
 
 ## SM-1. Helio zones
 
@@ -38,6 +40,12 @@ Every rule is grounded in a measurement of the real Sol board
   outer order (hot yellow inside, through orange and tan, to deep blue and
   violet outside).
 - **SM-1d.** The innermost zone is the star's: radiation lives there (SM-6a).
+- **SM-1e. Multiple stars.** A **binary** board holds two star systems side by
+  side, each with its own nested zones, rings, wells and radiation (Alpha
+  Centauri A and B). A **distant companion** (Proxima, about 13,000 AU out) is
+  its own small system of 2 to 3 zones at the board's edge, with its own
+  planets. Brown dwarfs and gas giants that orbit inside a star's zones are
+  giants (SM-7), not companions.
 
 ## SM-2. Hohmann pivots (green dots): the transfer layer
 
@@ -78,9 +86,9 @@ for any other reason:
 
   Counted with landing (SM-5), a size 1 body is about 1 burn deep and a size 9
   world about 4: the Sol curve.
-- **SM-4b.** A moon's well starts at its giant's Lagrange hub, so moons
-  inherit the giant's well (Sol: Io 6 = Jupiter 3 + Io 2 + landing 1).
-- **SM-4c.** Bigger bodies get a flyby boost on their Lagrange hub: size 11
+- **SM-4b.** A moon's well starts part way down its giant's escape ladder,
+  so moons inherit the giant's well (Sol: Io 6 = Jupiter 3 + Io 2 + landing 1).
+- **SM-4c.** Bigger bodies get a flyby boost on their Lagrange point: size 11
   +4, size 10 +2, size 8-9 +1 (Jupiter +4, Saturn / Venus / Earth / Neptune
   +2, Mars / Mercury +1).
 
@@ -99,10 +107,21 @@ for any other reason:
   least 32 world px apart, sites on the same body included, so hexes and labels
   never stack.
 
+- **SM-5f. Asteroids are most of the sites.** As on Sol (139 of 188),
+  asteroids outnumber everything else: aim for at least 40% of a board's
+  sites. They come in groups:
+  - a **main belt** in the zone between the rocky worlds and the giants;
+  - **Trojans** at each gas giant, on its ring 60 degrees ahead and behind;
+  - a few **near-star rocks** inside the habitable zone;
+  - an **outer belt** (Kuiper belt) in the outermost zone.
+  Each group is a cluster: a ring pivot, one escape burn, a Lagrange point,
+  then 1 to 3 asteroid sites straight off it (no landing, SM-5c).
+
 ## SM-6. Hazards
 
-- **SM-6a. Radiation.** Radiation nodes go in the star's zone (on its ring
-  and transfers) and in each giant's belts (between its hub and its moons).
+- **SM-6a. Radiation.** Radiation nodes go in each star's innermost zone
+  (on its ring and transfers) and in each giant's belts: on the slingshot
+  routes to its flyby point and on the routes down to its inner moons.
   Nowhere else.
 - **SM-6b. Hazardous points.** Lagrange points in the star's zone are hazards.
 - **SM-6c. Aerobrakes.** A body with an atmosphere (habitable-zone worlds that
@@ -111,13 +130,21 @@ for any other reason:
 
 ## SM-7. Giants (gas giants, brown dwarfs, white dwarfs)
 
-- **SM-7a.** A giant is a hub: its departure pivot -> 3 escape burns -> its
-  Lagrange hub (flyby boost, SM-4c). The giant itself is a body you cannot
-  land on.
-- **SM-7b.** Moons branch out from the hub: hub -> radiation belt node ->
-  the moon's own escape burns -> moon Lagrange -> landing -> sites.
-- **SM-7c.** A giant has 2 to 5 large moons and may have moonlets (size 1-2,
-  one site, no landing burn).
+- **SM-7a. The slingshot.** A giant's flyby point (Lagrange, +4 / +2, SM-4c)
+  sits on the transfer layer at the giant: free to reach from its departure
+  pivot through a radiation belt, with a second free route back to the next
+  pivot along the ring and, if there is a zone outside, one transition burn
+  out to that zone's ring. Ships pass through it to slingshot to other
+  planets. It leads to no moon: **you cannot slingshot into a moon's orbit.**
+- **SM-7b. The escape ladder.** From the departure pivot, the giant's well is
+  a ladder of 3 escape burns curving round the giant. Moons branch off the
+  ladder's 2nd and 3rd burns with ordinary burns (each moon takes the nearer
+  of the two): branch burn -> the moon's own escape burns -> moon Lagrange ->
+  landing -> sites. Routes off the 3rd burn (the inner moons) cross a
+  radiation belt. Moonlets (size 1-2) branch off the 1st burn: one burn, one
+  site.
+- **SM-7c.** A giant has 1 to 5 large moons and may have moonlets. The giant
+  itself is a body you cannot land on.
 
 ## SM-8. Curves and routes
 
@@ -130,9 +157,13 @@ for any other reason:
 
 ## SM-9. Arrival
 
-- **SM-9a.** Ships arrive at one node outside the outermost zone (the system
-  edge). Entering the outermost zone's ring from it is a zone transition: one
-  burn (SM-3a).
+- **SM-9a.** Ships arrive at one node outside the primary star's outermost
+  zone (the system edge). Entering the outermost zone's ring from it is a zone
+  transition: one burn (SM-3a).
+- **SM-9b. Between stars.** A binary pair is joined outer ring to outer ring:
+  leaving one star's outer zone and entering the other's are both zone
+  transitions, so the trip costs 2 burns. A distant companion is reached the
+  same way from the nearest outer ring: 2 burns, on a long route.
 
 ## SM-10. Validation (the generator enforces these on every map)
 
@@ -142,5 +173,8 @@ for any other reason:
 4. Worlds (planets, dwarfs, asteroids) get deeper wells with size (SM-4a); moon
    sites sit at least 4 burns deep, under their giant's well (SM-4b).
 5. Every site has one edge and is reachable from arrival (SM-5b, 8c).
-6. Radiation only in the star's zone and giant belts (SM-6a).
+6. Radiation only in a star's innermost zone and giant belts (SM-6a).
 7. Sites at least 32 world px apart (SM-5e).
+8. No moon route touches a flyby point; every moon branches off its giant's
+   escape ladder (SM-7a, 7b).
+9. At least 40% of sites are asteroids (SM-5f).
