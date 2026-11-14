@@ -1086,6 +1086,7 @@ function systemMapData(starId) { // AA-B7a, drawn exactly as the Sol board draws
         : st.kind === 'ocean' ? BODY_ART.europa
         : st.kind === 'moon' ? BODY_ART[MOON_ART[(moonIdx[st.body] ??= Object.keys(moonIdx).length) % MOON_ART.length]]
         : st.big ? BODY_ART.ceres : undefined;
+      if (st.big) x.haloR = 12; // a dwarf planet is Ceres-sized, not a giant
       if (st.role === 'hz') x.haloR = 20; // the habitable world reads bigger, like Earth
       sites.push(x);
     } else {
@@ -1299,7 +1300,7 @@ function systemActions(starId, id) {
   } else {
     const n = sysOf(starId).nodes.find((q) => q.id === id);
     const burnWhy = (x) => (x.land ? `${x.land === 'half' ? 'Half landing' : 'Landing'} burn${x.body ? ` onto ${x.body}` : ''}` : x.purpose === 'transition' ? 'Zone transition burn' : x.purpose === 'escape' ? (x.rung ? `${x.body}'s escape ladder, burn ${x.rung} of 3` : `Escape burn, ${x.body}'s well`) : 'Burn pad');
-    if (n) out.push(info(n.kind === 'burn' ? `${burnWhy(n)}: entering it costs 1 burn` : n.kind === 'orbit' ? 'The system edge: where ships arrive' : n.kind === 'lagrange' ? (n.purpose === 'flyby' ? `${n.body} slingshot: free, +${n.fly || 0} flyby; no route to its moons from here` : (n.label || 'Lagrange point: free to enter')) : n.kind === 'hohmann' ? 'Hohmann transfer: free to enter' : n.kind === 'radhaz' ? 'Radiation belt: free, but roll for damage (AA-B7c)' : (n.label || '')));
+    if (n) out.push(info(n.kind === 'burn' ? `${burnWhy(n)}: entering it costs 1 burn` : n.kind === 'orbit' ? (n.toward ? `Ad Astra toward ${n.toward === 'sol' ? 'Sol' : STAR_BY_ID[n.toward]?.name}: ships from there arrive here; Burn here to leave for it (AA-G4a)` : 'Ad Astra: where ships arrive') : n.kind === 'lagrange' ? (n.purpose === 'flyby' ? `${n.body} slingshot: free, +${n.fly || 0} flyby; no route to its moons from here` : (n.label || 'Lagrange point: free to enter')) : n.kind === 'hohmann' ? 'Hohmann transfer: free to enter' : n.kind === 'radhaz' ? 'Radiation belt: free, but roll for damage (AA-B7c)' : (n.label || '')));
     if (n && n.season) out.push(info(n.season === cometSeason() ? `On a ${n.season} season comet's route: open now` : `On a ${n.season} season comet's route: out of the plane until Gen ${nextSeasonGen(n.season)}`));
     if (here && n && n.skim) out.push({ label: '⛽ Skim gas giant', disabled: fops || sh.sysNode !== id, onClick: act(opSkim) });
   }

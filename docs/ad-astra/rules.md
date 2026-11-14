@@ -1,6 +1,6 @@
 # High Frontier: Ad Astra - Rulebook
 
-**Draft v0.12 (2026-11-14).** A fan variant of High Frontier 4: All that
+**Draft v0.13 (2026-11-14).** A fan variant of High Frontier 4: All that
 takes the game past the edge of the Sol map. Not affiliated with Sierra Madre
 Games. Original rules; it borrows only the hooks HF4 already prints (TW
 thrusters, the three Ad Astra exits, the Ad Astra and Sunlens Futures).
@@ -803,6 +803,14 @@ regenerate it rather than editing it by hand.
   Replicator cube). Each gets a rendered preview for sign-off before use.
 
 ### Changelog
+- **v0.13 (2026-11-14):** System maps keep their lines apart. Rings open
+  round a gas giant's moon system instead of running through it, the way the
+  HF board leaves room for Jupiter and Saturn (SM-2e). A giant's moons each
+  hang off their own orbit hub on the escape ladder, straight out, so no two
+  moon routes cross (SM-7b, 7c). Sites stay 12 px clear of lines they are not
+  on (SM-5j); a board has at most 4 line crossings (SM-5k); small companions
+  get zone bands deep enough to hold a well (SM-1e). A crowded board drops
+  the asteroid groups it has no clean room for.
 - **v0.12 (2026-11-14):** Asteroids: 30 to 100 a board (was 30 to 50; Sol has
   about 99 asteroids and small bodies) (B7a, SM-5f).
 - **v0.11 (2026-11-14):** The star map is the 94 star systems within 20

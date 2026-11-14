@@ -9,7 +9,7 @@
 import { buildMap, zoneLayer } from '../mapgen/mapgen.js';
 import { rollSystem, REGIONS } from '../mapgen/roll.js';
 
-export const SYSTEM_LAYOUT = 10; // 10 = an Ad Astra node per star-map link (SM-9a)
+export const SYSTEM_LAYOUT = 11; // 11 = rings open round giants, moons on straight branches (SM-2e, 7b)
 export { zoneLayer };
 const SPEC = ['C', 'S', 'M', 'V'];
 const CLASS_HYD = { Garden: [6, 9], Habitable: [4, 7], Marginal: [2, 5], Hostile: [0, 3] };

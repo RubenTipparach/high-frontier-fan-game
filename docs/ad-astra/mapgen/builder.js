@@ -86,7 +86,7 @@ function toPlanner(map) {
         atmospheric: n.bodyKind === 'planet' && (SPEC.bodies.find((b) => b.name === n.body) || {}).atmosphere, astrobiology: ['Garden', 'Habitable'].includes(n.cls) };
       if (n.bodyKind === 'planet') s._palette = n.cls === 'Habitable' || n.cls === 'Garden' ? ART.earth : n.cls === 'Marginal' ? ART.mars : n.size >= 11 ? ART.venus : ART.mercury;
       if (n.bodyKind === 'moon') { if (!(n.body in moonArt)) moonArt[n.body] = Object.keys(moonArt).length; s._palette = n.ocean ? ART.europa : ART[MOON_ART[moonArt[n.body] % MOON_ART.length]]; }
-      if (n.bodyKind === 'dwarf') s._palette = ART.ceres;
+      if (n.bodyKind === 'dwarf') { s._palette = ART.ceres; s.haloR = 12; } // a dwarf planet is Ceres-sized, not a giant
       sites.push(s); continue;
     }
     const type = n.kind === 'decorative' ? 'decorative' : n.kind;
@@ -137,7 +137,7 @@ function popup(id) {
     acts.push(info(n.bodyKind === 'moon' ? `Off ${n.moonOf}'s escape ladder (SM-7b)` : n.bodyKind === 'comet' ? `Comet, ${n.season} season: reachable only then (SM-5g)` : n.belt ? 'Asteroid group: one burn out (SM-5f)' : `${wellBurns(n.size)} escape, ${landingOf(n.size) === 'none' ? 'no' : landingOf(n.size)} lander (SM-4a)`));
   } else if (n) {
     const why = { transition: 'Zone transition (SM-3a)', escape: n.rung ? `${n.body} escape ladder, burn ${n.rung} (SM-7b)` : `${n.body} escape burn (SM-3b)`, landing: `${n.land === 'half' ? 'Half' : 'Full'} lander burn (SM-5c)`, orbit: `${n.body} orbit (SM-4a)`, flyby: `${n.body} slingshot: no moons from here (SM-7a)` }[n.purpose];
-    acts.push(info(why || { hohmann: 'Hohmann pivot: free, slow (SM-2a)', radhaz: 'Radiation (SM-6a)', orbit: 'System edge arrival (SM-9a)', star: 'A star' }[n.kind] || n.kind));
+    acts.push(info(why || { hohmann: 'Hohmann pivot: free, slow (SM-2a)', radhaz: 'Radiation (SM-6a)', orbit: n.toward ? `Ad Astra toward ${n.toward}: arrive and leave here (SM-9a)` : 'Ad Astra: arrival (SM-9a)', star: 'A star' }[n.kind] || n.kind));
     if (n.season) acts.push(info(`${n.body}'s route: ${n.season} season, off the plane (SM-5g)`));
     if (n.star >= 0) acts.push(info(`${SPEC.stars.length > 1 ? `${SPEC.stars[n.star].name}, ` : ''}zone ${n.zone + 1}`));
     else acts.push(info('Between the stars'));

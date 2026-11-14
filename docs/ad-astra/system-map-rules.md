@@ -49,6 +49,10 @@ Every rule is grounded in a measurement of the real Sol board
   its own small system of 2 to 3 zones at the board's edge, with its own
   planets. Brown dwarfs and gas giants that orbit inside a star's zones are
   giants (SM-7), not companions.
+  A distant companion's zone bands are at least about 60 px deep where they
+  are thinnest (the top and bottom of the ellipse), so a planet's well fits
+  inside its own band instead of crossing the next ring (SM-5k); the
+  companion grows to fit its zones rather than squeezing them.
 - **SM-1f. Planets per star (design target).** Each star has 4 to 15 planets
   (gas giants included; dwarf planets, moons, asteroids and comets are not
   planets). Its zone count follows: about one zone per two planets, 4 to 9 for
@@ -61,6 +65,12 @@ Every rule is grounded in a measurement of the real Sol board
   around a system. Entering one costs no burn.
 - **SM-2b.** Each zone has a ring of pivots at its middle radius. Travel along
   a zone's ring (pivot to pivot) is free.
+- **SM-2e. Rings open round a giant.** A ring is not always a full circle.
+  HF's own board hand-shapes its zones to leave room for Jupiter's and
+  Saturn's moon systems; here a ring arc that would run through a giant's moon
+  system is left out, so that ring opens there (a C, not an O). No pivot sits
+  in the gap: bodies on that ring are placed round it. The giant's own ring
+  stays whole, since its moons fan out away from it.
 - **SM-2c.** Pivots are junctions: 2 to 4 edges each. A pivot never dead-ends.
 - **SM-2d.** Every body's well starts from a pivot on its zone's ring (its
   departure pivot, SM-4a).
@@ -122,6 +132,18 @@ for any other reason:
   spokes and its neighbours; a giant's moons branch through orbit hubs. A
   generated board must pass; a hand-edited board (SM-11) that breaks it shows
   a **warning**, with the places it happens, instead of a failure.
+- **SM-5j. Sites clear of the lines.** A site sits at least **12 px** from
+  any route line it is not on: ring arcs, spokes, other bodies' routes (Sol:
+  every site is 10+ px clear, 95% are 12+). The generator places a body only
+  where its sites clear every line, leaning its well the other way or more
+  steeply, or moving it round its ring, until they do. On a hand-edited board
+  a break shows as a warning.
+- **SM-5k. Lines cross rarely.** Two route lines cross without meeting at
+  a node only where it cannot be helped (Sol: 82 crossings in 1758 edges).
+  The generator keeps a body's well off the rings it does not belong to, opens
+  rings round giants (SM-2e) and keeps giants off the spokes. A generated
+  board has at most **4** crossings; each is listed with where it is. On a
+  hand-edited board more show as a warning.
 - **SM-5h. Placement.** Bodies are placed largest first. Each has a footprint
   (a giant's moon system, a planet and its sites, an asteroid group, a comet)
   and takes the first angle on its zone's ring where that footprint clears
@@ -183,18 +205,21 @@ for any other reason:
   planets. It leads to no moon: **you cannot slingshot into a moon's orbit.**
 - **SM-7b. The escape ladder.** From the ladder pivot on the ring, the
   giant's well is a ladder of 3 escape burns curling round the outward side of
-  the giant, with the radiation belt between the 1st and 2nd. Moons branch off
-  the 2nd and 3rd burns (each takes the rung on its side) through **orbit
-  hubs**: free Lagrange points that split the branches two ways, so no fork
-  is tighter than SM-5i's 30 degrees (Sol's Jupiter and Saturn branch the same
-  way). A moon's own route is its escape burns -> its Lagrange point -> landing
-  -> sites.
+  the giant. The ladder runs on round the giant as an arc of **orbit hubs**
+  (free Lagrange points): the hubs after the 2nd burn, then the 3rd burn, then
+  the hubs after it. Each hub sends out exactly one moon branch, straight out
+  from the giant, so branches never cross each other, every fork is a right
+  angle, and a hub never leads to two places at once. A moon's own route is
+  its hub -> its escape burns (radiation on the inner shell) -> its Lagrange
+  point -> landing -> sites.
 - **SM-7c. Major and minor moons (design target).** A gas giant has 4 to 10
   **major moons** (size 4+, 1 to 2 sites each) and 10 to 15 **minor moons**
   (size 1-2, one site each; Sol's Himalia group), the minors in groups of up
-  to 3 off one Lagrange point. Majors and minor groups alternate between two
-  shells round the giant, so neighbours' sites stay apart. Brown and white
-  dwarfs have fewer. The moon system spans about 200 px.
+  to 3 off one Lagrange point. Branches alternate between an inner and an
+  outer shell round the giant, minor groups on the outer one first, so a
+  neighbour's sites sit beside a line and never on it. The shells widen with
+  the number of branches, so a full system (10 majors, 5 minor groups) spans
+  about 220 px, a small one about 150. Brown and white dwarfs have fewer.
 - **SM-7d.** The giant itself is a body you cannot land on.
 
 ## SM-8. Curves and routes
@@ -208,7 +233,9 @@ for any other reason:
 
 ## SM-9. Arrival
 
-- **SM-9a. Ad Astra nodes.** Ships arrive and leave at **Ad Astra nodes**
+- **SM-9a. Ad Astra nodes.** Drawn with HF's Ad Astra exit marker (the orange
+  arrow-triangle with a star, pointing out along its route), named for the
+  star it leads to. Ships arrive and leave at **Ad Astra nodes**
   outside the primary star's outermost zone: one per star-map link of the
   star (AA-G4a), placed at the bearing of that neighbour on the star map.
   Entering the outermost zone's ring from one is a zone transition: one burn
@@ -257,5 +284,7 @@ SM-10 check still runs on the edited board.
 11. Each gas giant has 4 to 10 major and 10 to 15 minor moons (SM-7c).
 12. Route nodes at least 10 px apart (SM-5i).
 13. At every node, its two closest connections at least 30 degrees apart (SM-5i).
-Checks 12 and 13 are warnings on a hand-edited board. Every check lists the
+14. Every site 12+ px from any route line it is not on (SM-5j).
+15. At most 4 places where two route lines cross (SM-5k).
+Checks 12 to 15 are warnings on a hand-edited board. Every check lists the
 places it fails, so the builder can take you to each one.

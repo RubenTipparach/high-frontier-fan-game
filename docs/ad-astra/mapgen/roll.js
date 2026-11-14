@@ -76,8 +76,8 @@ export function rollSystem({ star, chits = {}, rint, worldName = () => 'World', 
       add({ kind: 'planet', name: `${p.short} ${ROMAN[1 + j] || `P${j + 2}`}`, star: p.i, zone, size: sz, sites: sz >= 6 ? 2 : 1, cls: 'Hostile' }, { role: 'rock', regions: REGIONS.rock });
     }
     // dwarf planets: one in the belt, one far out on a big system
-    add({ kind: 'dwarf', name: `${p.short} dwarf`, star: p.i, zone: beltZone, size: rint(5, 7) }, { mine: true, big: true });
-    if (Z >= 6) add({ kind: 'dwarf', name: `${p.short} far dwarf`, star: p.i, zone: Z - 1, size: rint(5, 7) }, { mine: true, big: true });
+    add({ kind: 'dwarf', name: `${p.short} dwarf planet`, star: p.i, zone: beltZone, size: rint(5, 7) }, { mine: true, big: true });
+    if (Z >= 6) add({ kind: 'dwarf', name: `${p.short} far dwarf planet`, star: p.i, zone: Z - 1, size: rint(5, 7) }, { mine: true, big: true });
   }
 
   // ---- asteroids for the whole board (SM-5f): Trojans first, then belts.

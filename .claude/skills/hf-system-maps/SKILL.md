@@ -95,19 +95,40 @@ Run `node docs/ad-astra/analyze-sol-map.mjs` to re-measure. The numbers:
    hazard on one landing (SM-6c). Sites fan out on the far side of the body,
    at least `SITE_GAP` (26, Sol's own closest pair) world px apart INCLUDING sites on the same body
    (SM-5e). Moons fan round the far side of the hub, alternating near / far.
-7. **Giants (SM-7).** Three ring pivots ~70 px apart (`giantDelta`): ladder
-   start (a - delta), slingshot in (a), slingshot out (a + delta).
-   - **Slingshot** (`purpose: 'flyby'`, +4 / +2) at the giant's centre: free
-     through a radiation node from the in pivot and back out to the out pivot.
-     It never leads to a moon: you cannot slingshot into a moon's orbit.
-   - **Escape ladder**: 3 burns (`rung` 1-3) on an arc at R 36 round the
-     OUTWARD side (outAng - 150, - 62, + 62), drawn with `arcAround`.
-   - **Major moons** (size 4-9) fan over [outAng - 132, outAng + 112] on two
-     shells (`SHELL.inner` 62 through a radiation node, `SHELL.outer` 98),
-     each off the rung on its side (2 or 3).
-   - **Minor moons** (size 1-2) go in groups of up to 3 on `SHELL.minor` 156,
-     between the majors: rung -> one burn -> Lagrange -> moonlets (bodyKind
-     moon, `minor: true`). The game mines them.
+7. **Giants (SM-7).** ONE geometry function, `giantPlan(it, angle, pivots?)`,
+   drives placement (footprint, penalties), the ring openings and construction,
+   so they can never disagree. Three ring pivots ~70 px apart (`giantDelta`):
+   ladder start (a - delta), slingshot in (a), slingshot out (a + delta).
+   - **Slingshot** (`purpose: 'flyby'`, +4 / +2) at `GIANT_H` (46) px straight
+     out from the in pivot: free through a radiation node (`purpose: 'sling'`)
+     from the in pivot and back out to the out pivot. It never leads to a
+     moon: you cannot slingshot into a moon's orbit.
+   - **Escape ladder + hub arc** (SM-7b): ladder pivot -> burn 1 (on the
+     ladder route) -> burn 2 (first arc node) -> orbit hubs (`purpose: 'hub'`,
+     free Lagrange points) with burn 3 in the middle -> more hubs. The arc
+     radius R = max(38, 12 px / hub spacing), so hubs stay 12+ px apart.
+   - **One branch per hub, straight out from the giant.** Branches never
+     cross, every fork is a right angle. They stay within 90 degrees of
+     straight out (past that, a branch 170 px out lands on the giant's own
+     ring) and clear of the slingshot-out line; a small system packs them up
+     to 32 degrees apart instead of spreading over the half-circle.
+   - **Shells** alternate: even branches inner (through a radiation node),
+     odd ones outer; minor groups take outer branches first. The shell radii
+     are COMPUTED from the hub spacing d (radians): a site's lateral reach
+     plus LINE_GAP over d, so a neighbour's line passes beside its sites and
+     never through them. A full 10 + 5 system reaches about 220 px.
+   - **Major moons** (size 4-9): hub -> [radiation] -> escape burns ->
+     Lagrange -> landing -> 1-2 sites. **Minor moons** (size 1-2) in groups of
+     up to 3: hub -> one burn -> Lagrange -> moonlets (bodyKind moon,
+     `minor: true`). The game mines them.
+   - **Rings open round it (SM-2e).** A ring arc (any star's, other than the
+     giant's own ring) that would pass within LINE_GAP + 2 of a branch or 18
+     px of a moon site is left out, so the ring is a C, not an O, the way
+     HF's hand-drawn board leaves room for Jupiter and Saturn. Placement keeps
+     every pivot out of an opening (`gapPen`), and a giant cannot sit where its
+     opening would swallow a pivot already placed, a spoke or an Ad Astra
+     route (`giantPen`). As a last resort the shorter of two openings beside a
+     stranded pivot is kept (a counted crossing) so no pivot dead-ends.
 8. **Asteroids (SM-5f).** `kind: 'belt'` (count up to 30, sizes) and a giant's
    `trojans: n` expand into groups: ring pivot -> one escape burn ->
    Lagrange -> up to 3 rocks fanned 22 px out, alternating sides of the ring.
@@ -126,8 +147,17 @@ Run `node docs/ad-astra/analyze-sol-map.mjs` to re-measure. The numbers:
      far orbit and comet toward the top of the board, so the route visibly
      climbs off the ring. 16 / 28 / 38 read as "just further out".
 10. **Placement (SM-5h).** Every body has a footprint: its farthest site from
-   its centre plus `HALF_GAP` (13). A giant's is a circle of
-   `SHELL.minor + 24 + 13` round it. Bodies with an `angle` keep it; the rest
+   its centre plus `HALF_GAP` (13). A giant's is a circle of `giantPlan().reach`
+   round it. Footprints live in a 48 px grid (`clash` only meets neighbours;
+   a flat list made a 100-asteroid board take 10 s). Besides overlap, a
+   candidate pays for: crowding its ring, sites within LINE_GAP of a ring or
+   spoke (SM-5j, `lineClash`), a pivot in a ring opening (`gapPen`) and its
+   well crossing a ring it isn't on or a spoke / Ad Astra line (SM-5k,
+   `crossPen`). Planets, dwarfs and lone asteroids try leans of 45 to 105
+   degrees on both sides; asteroid groups try both sides of every zone of
+   their star, nearest first. **An asteroid group (or a Trojan group) with no
+   clean place is left off** (`it.skip`): a crowded board holds fewer rocks
+   rather than stacking them on lines. Bodies with an `angle` keep it; the rest
    are placed largest first at the first angle (from a hash of the name, plus
    `spec.jitter` on a retry) whose footprint clears everything placed and stays
    on the board. If its ring is full, an asteroid group tries the other side
@@ -271,6 +301,22 @@ conversion to the planner-map shape `MapRenderer` already draws:
    `files` = every path in `dist/assets.json`.
 
 ## Failure modes already hit (don't repeat them)
+
+- **Full-circle rings through a giant's moons.** Every ring was a closed
+  ellipse, and a moon system (200+ px) is far deeper than a zone band (about
+  41 px top and bottom), so the next ring out ran through it: 224 line
+  crossings over 15 test boards. Rings now open round giants (SM-2e) and the
+  count is 23. Sol itself has 82 in 1758 edges; the budget is 4 a board (SM-5k).
+- **Moon branches all leaving from two rungs.** Every branch radiated from
+  burn 2 or burn 3, so they converged, crossed and ran over each other's
+  spheres. One hub per branch, straight out, fixed it.
+- **A tiny companion squeezing its zones.** Proxima's bands were 38 px deep,
+  narrower than any well: every planet crossed a ring. Bands are at least
+  about 60 px deep now (SM-1e) and the companion grows instead.
+- **Retries hide slowness.** `buildSystem` retries a failing board up to 12
+  times, so one failure costs 12 builds; fix failures before profiling.
+- **A site on its own approach line is not a clash.** A dwarf's single site
+  sits at the end of its own landing line; SM-5j ignores the body's own lines.
 
 - **Cutting templates out of the Sol board** (the first approach) left stubs
   that went nowhere and long Sol labels piled on top of each other. Maps are
