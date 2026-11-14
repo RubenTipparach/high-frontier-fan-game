@@ -1173,6 +1173,7 @@ function applySnapshot(snapshot, seq) {
   maybePromptSpeciesDeclaration(snapshot);
   syncCrewDraftOverlay(snapshot);
   syncCardDraftOverlay(snapshot);
+  maybePromptPiggyback(snapshot);
 }
 
 // One-at-a-time guard so a flurry of snapshots (e.g. another player's
@@ -5849,6 +5850,25 @@ function clientColonistPowerAt(slug, flag) {
 }
 // Does MY snapshot player hold an in-play colonist granting a GLOBAL power
 // flag (not location-conditioned)? Mirrors the server's playerHasColonistPower.
+// Spectral C at any Factory: the Blue Goo Sybonts colonist power, or TAILINGS
+// REMINING (The Martian Way, black) with that crew card standing at the
+// Factory. Mirror of the engine's spectral gate in ET Production. `siteId`
+// may be a map id or a server slug.
+function myEtProduceAnyC(siteId) {
+  if (myHasColonistPower('etProduceCAnywhere')) return true;
+  if (!_online) return false;
+  const me = mySnapshotPlayer();
+  if (!me || !playerHasPrivilege(me, 'TAILINGS_REMINING')) return false;
+  const slug = SITES_BY_ID[siteId] ? siteId : (toServerId(_onlineMaps, siteId) || siteId);
+  const stacks = [
+    { slots: (me.rocket && me.rocket.stack) || [], siteId: me.rocket ? me.rocket.siteId : null },
+    ...Object.values(me.outposts || {}).filter(Boolean).map((o) => ({ slots: o.cards || [], siteId: o.siteId })),
+    ...(me.freighter ? [{ slots: me.freighter.stack || [], siteId: me.freighter.siteId }] : []),
+    ...(me.bernals || []).filter(Boolean).map((bn) => ({ slots: bn.stack || [], siteId: bn.siteId })),
+  ];
+  return stacks.some((st) => String(st.siteId) === String(slug)
+    && st.slots.some((x) => x && x.id === 'crew_the_martian_way'));
+}
 function myHasColonistPower(key) {
   if (!isM2()) return false;
   const me = mySnapshotPlayer();
@@ -9731,6 +9751,20 @@ function humanizeOnlineOpError(code, detail) {
     buggy_out_of_range: 'The buggy can only road to sites on the same connected body (Mars, the Moon, Io, Callisto, Ganymede, Europa).',
     not_a_radiator: 'That card is not a radiator.',
     already_light: 'That radiator is already on its light side.',
+    already_heavy: 'That radiator is already on its heavy side.',
+    no_thermal_labs: 'Only BRIN\'s Thermal Labs can open a radiator back out to heavy.',
+    thermal_labs_used: 'Thermal Labs has already opened a radiator this turn.',
+    not_at_colony_or_bernal: 'Thermal Labs works on a radiator at your Colony or Bernal.',
+    shuttles_used: 'Your shuttle has already flown this turn.',
+    no_operational_thruster: 'The shuttle needs an operational thruster aboard to dock with.',
+    no_trade_port: 'Only the Makers Guild\'s Trade Port can swap cards for a patent.',
+    trade_port_used: 'The Trade Port has already traded this turn.',
+    not_start_of_turn: 'The Trade Port only trades at the start of your turn.',
+    discard_two: 'The Trade Port takes exactly 2 cards.',
+    no_piggyback: 'Only Utopia, Inc.\'s Piggyback can ride an opponent\'s launch.',
+    no_piggyback_window: 'There is no launch to piggyback on right now.',
+    piggyback_over_mass: 'Those cards are heavier than the launch you are riding.',
+    wrong_spectral: 'That card is not this Factory\'s spectral type.',
     already_afterburned: 'Afterburn is already engaged this turn.',
     no_afterburn: 'The active thruster has no afterburn.',
     no_thruster: 'No active thruster to afterburn.',
@@ -10358,7 +10392,12 @@ function wireHandStrip() {
     // cost IS total mass - so the cheapest possible spend is every radiator on
     // its light side. If even that exceeds the bank, no side choice can afford it.
     const minCost = cards.reduce((s, c) => s + boostMassOf(c, c.type === 'radiator' ? 'light' : undefined), 0);
-    if (minCost > have) {
+    // ISO-SHUTTLES (Explorers Without Borders, black): with an isotope can in
+    // the bank (LEO Stack or Home Bernal) the turn's first boost costs 10 aqua
+    // less. Mirror of the engine rule, so the holder is not refused a launch the
+    // discount makes affordable.
+    const isoShuttle = isoShuttlesDiscount();
+    if (minCost - isoShuttle > have) {
       await confirmModal({
         title: '💸 Not enough Aqua',
         body: `Boosting ${n} card${n === 1 ? '' : 's'} costs at least <strong>${minCost}</strong> Aqua `
@@ -10391,7 +10430,9 @@ function wireHandStrip() {
         : continuedBoost
           ? 'You already boosted this turn, so this rides up free (no operation).'
           : 'The first boost spends your operation; keep boosting free for the rest of the turn.';
-    const res = await openBoostModal({ cards, have, opNote, boostTargets: anchoredBoostTargets() });
+    const res = await openBoostModal({ cards, have, discount: isoShuttle,
+      opNote,
+      boostTargets: anchoredBoostTargets() });
     if (!res.ok) return;
     const radSides = res.radSides || {};
     const cost = res.cost | 0;   // final spend reflects each radiator's chosen side
@@ -11558,8 +11599,73 @@ async function convertRadiatorToLight(stackId, cardId) {
   setStatus('♨ Folded the radiator down to its light side (hardier, less cooling).');
 }
 
+// THERMAL LABS (BRIN, black): "As a 1/turn free action, flip a radiator at
+// your Colony/Bernal to its heavy side." Mirror of the engine's
+// thermalLabsSite: the radiator is aboard one of your Bernals, or stands where
+// you have a Colony or a Bernal. Returns '' when the flip is open, else the
+// reason it is not (for the button tooltip), or null when the card does not
+// apply at all (no Thermal Labs, or the radiator is already heavy).
+function thermalLabsBlock(cardId) {
+  if (!_online) return null;
+  const me = mySnapshotPlayer();
+  if (!me || !playerHasPrivilege(me, 'THERMAL_LABS')) return null;
+  const stacks = [
+    { slots: me.leo || [], siteId: null, bernal: false },
+    { slots: (me.rocket && me.rocket.stack) || [], siteId: me.rocket ? me.rocket.siteId : null, bernal: false },
+    ...Object.values(me.outposts || {}).filter(Boolean).map((o) => ({ slots: o.cards || [], siteId: o.siteId, bernal: false })),
+    ...(me.freighter ? [{ slots: me.freighter.stack || [], siteId: me.freighter.siteId, bernal: false }] : []),
+    ...(me.bernals || []).filter(Boolean).map((bn) => ({ slots: bn.stack || [], siteId: bn.siteId, bernal: true })),
+  ];
+  for (const st of stacks) {
+    const slot = st.slots.find((x) => x && x.id === cardId);
+    if (!slot) continue;
+    if (slot.radSide !== 'light') return null;
+    if (me.thermalLabsUsed) return 'Thermal Labs is spent for this turn.';
+    if (st.bernal) return '';
+    const here = st.siteId ?? null;
+    const col = here != null && ((_onlineSnapshot && _onlineSnapshot.colonies) || {})[here];
+    if (col && String(col.ownerId) === String(me.profileId)) return '';
+    if ((me.bernals || []).some((bn) => bn && (bn.siteId ?? null) === here)) return '';
+    return 'Thermal Labs needs the radiator at your Colony or Bernal.';
+  }
+  return null;
+}
+// The button itself, shared by the stack inspector and the rocket modal.
+function thermalLabsButton(slot, className) {
+  const why = thermalLabsBlock(slot.id);
+  if (why == null) return null;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = `${className} rad-open-heavy`;
+  btn.textContent = '♨ Open to heavy (Thermal Labs)';
+  const locked = !isOnlineMyTurn();
+  btn.disabled = locked || !!why;
+  btn.title = locked ? 'Wait for your turn.'
+    : (why || 'Thermal Labs: open this radiator out to its heavy side (more cooling, less rad-hard). Free, once a turn.');
+  btn.addEventListener('click', async () => {
+    if (btn.disabled) return;
+    btn.disabled = true;
+    await submitOnlineOp({ kind: 'SET_RADIATOR_SIDE', cardId: slot.id, radSide: 'heavy' });
+  });
+  return btn;
+}
+
 function openLeoStackModal() {
   openUnifiedStackInspector('leo');
+}
+
+// ISO-SHUTTLES discount this boost would get (0 when it does not apply): the
+// holder, an isotope can of 1+ in the LEO Stack or Home Bernal, and no boost
+// yet this turn (the discount is once per boost operation).
+function isoShuttlesDiscount() {
+  if (!_online || !_onlineSnapshot) return 0;
+  const me = mySnapshotPlayer();
+  if (!me || !playerHasPrivilege(me, 'ISO-SHUTTLES')) return 0;
+  if ((_onlineSnapshot.turnActions || []).some((a) => a && a.kind === 'BOOST')) return 0;
+  const home = (me.bernals || []).find((bn) => bn && bn.anchored && isHomeBernalUnit(bn));
+  const hosts = [me.leo || [], ...(home ? [home.stack || []] : [])];
+  const banked = hosts.some((arr) => arr.some((x) => x && x.kind === 'fuel' && x.grade === 'isotope' && (Number(x.amount) || 0) >= 1));
+  return banked ? 10 : 0;
 }
 
 // The BLACK / installed face of a card. Secondary for most cards, but PRIMARY
@@ -13503,6 +13609,10 @@ function openUnifiedStackInspector(stackId) {
           });
           actions.appendChild(foldBtn);
         }
+        if (card.type === 'radiator') {
+          const tl = thermalLabsButton(slot, 'rocket-select');
+          if (tl) actions.appendChild(tl);
+        }
         // Free Market (I3b): sell a Black-Side good from the LEO Stack or an
         // anchored Home Bernal - both are boost / boarding stations (2A6), so a
         // product waiting in the colony sells like one waiting in Earth orbit.
@@ -14581,7 +14691,7 @@ function openCardModal(card, kind, slotIdx, { readOnly = false, face, radSide, n
     }
     for (const s of candidates) {
       const f = getFactory(s.id);
-      if (!f || !iCanUseFactory(f) || !spectralProducibleAt(cardSpectral, f.spectralType, { anyC: myHasColonistPower('etProduceCAnywhere') })) continue;
+      if (!f || !iCanUseFactory(f) || !spectralProducibleAt(cardSpectral, f.spectralType, { anyC: myEtProduceAnyC(s.id) })) continue;
       const outpostsHere = Object.values(getOutposts()).filter((o) => o.siteId === s.id);
       const rocketAtS = _online && getStackSiteId('rocket') === s.id;
       if (outpostsHere.length > 0 || exoFreeSlots.length > 0 || rocketAtS) {
@@ -18468,6 +18578,10 @@ function openRocketStackModal() {
         });
         actions.appendChild(foldBtn);
       }
+      if (card.type === 'radiator') {
+        const tl = thermalLabsButton(slot, 'rocket-activate');
+        if (tl) actions.appendChild(tl);
+      }
 
       // Crew never returns to the hand - it can only move stack-to-stack (use
       // Select + Transfer below). A HUMAN colonist can't live in the hand either
@@ -21082,6 +21196,12 @@ function openOpsMenu() {
   addOp('⏭ Pass &amp; take income (+1 aqua)',
     'Take no other operation: bank +1 aqua and end your turn.',
     passTurn);
+  if (tradePortReady()) {
+    addOp('🏪 Trade Port (free)', 'Start of turn: discard 2 hand cards to take the top card of a patent deck. Free action.', doTradePort);
+  }
+  if (piggybackAllowance(_onlineSnapshot) > 0) {
+    addOp(`🚀 Piggyback (up to mass ${piggybackAllowance(_onlineSnapshot)}, free)`, 'Ride an opponent\'s launch: boost hand cards to LEO for free.', doPiggyback);
+  }
 
   // Site-op shortcuts: sites where a site-op is possible (your
   // factories - refuel / ET / colonize; claimed discs without a
@@ -22037,6 +22157,156 @@ function pickMartianMover(movers, destName) {
   });
 }
 
+// Pick cards from the hand (and optionally a patent deck) in one small dialog.
+// Shared by the promo crew free actions that trade hand cards: Trade Port
+// (exactly 2, plus a deck) and Piggyback (any number up to a mass cap).
+// Resolves { cardIds, deckType } or null on cancel.
+function pickHandCardsModal({ title, body, cardIds, exact = 0, massCap = null, decks = null, yes = 'OK' }) {
+  return new Promise((resolve) => {
+    document.querySelector('.hand-pick-overlay')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'card-modal-overlay confirm-modal-overlay hand-pick-overlay';
+    const onKey = (e) => { if (e.key === 'Escape') done(null); };
+    const done = (val) => { overlay.remove(); document.removeEventListener('keydown', onKey); resolve(val); };
+    document.addEventListener('keydown', onKey);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) done(null); });
+    const panel = document.createElement('div');
+    panel.className = 'turn-confirm-panel hand-pick-panel';
+    panel.innerHTML = `<h3>${esc(title)}</h3><p>${body}</p>`;
+    const list = document.createElement('div');
+    list.className = 'hand-pick-list';
+    const picked = new Set();
+    const massOf = (id) => { const c = cardById(id); const f = c && c.faces && c.faces.primary; return (f && Number(f.mass)) || 0; };
+    const status = document.createElement('p');
+    status.className = 'muted hand-pick-status';
+    let deckSel = null;
+    const okBtn = document.createElement('button');
+    okBtn.type = 'button';
+    okBtn.className = 'popup-btn primary';
+    okBtn.textContent = yes;
+    const refresh = () => {
+      const mass = [...picked].reduce((m, id) => m + massOf(id), 0);
+      let ok = picked.size > 0;
+      if (exact) ok = picked.size === exact;
+      if (massCap != null && mass > massCap) ok = false;
+      if (decks && !(deckSel && deckSel.value)) ok = false;
+      okBtn.disabled = !ok;
+      status.textContent = massCap != null
+        ? `Picked mass ${mass} of ${massCap}.`
+        : (exact ? `Picked ${picked.size} of ${exact}.` : '');
+    };
+    (cardIds || []).forEach((id, i) => {
+      const c = cardById(id);
+      const row = document.createElement('label');
+      row.className = 'hand-pick-row';
+      row.style.display = 'block';
+      row.style.margin = '4px 0';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.dataset.idx = String(i);
+      cb.addEventListener('change', () => { if (cb.checked) picked.add(id); else picked.delete(id); refresh(); });
+      row.appendChild(cb);
+      row.appendChild(document.createTextNode(` ${(c && c.name) || id}${massCap != null ? ` (mass ${massOf(id)})` : ''}`));
+      list.appendChild(row);
+    });
+    panel.appendChild(list);
+    if (decks) {
+      deckSel = document.createElement('select');
+      deckSel.className = 'hand-pick-deck';
+      deckSel.style.margin = '8px 0';
+      deckSel.innerHTML = `<option value="">Take the top card of...</option>`
+        + decks.map((d) => `<option value="${esc(d)}">${esc((DRAFT_DECK_GLYPH[d] || '') + ' ' + d)}</option>`).join('');
+      deckSel.addEventListener('change', refresh);
+      panel.appendChild(deckSel);
+    }
+    panel.appendChild(status);
+    const acts = document.createElement('div');
+    acts.className = 'turn-confirm-actions';
+    const noBtn = document.createElement('button');
+    noBtn.type = 'button';
+    noBtn.className = 'popup-btn';
+    noBtn.textContent = 'Cancel';
+    okBtn.addEventListener('click', () => { if (!okBtn.disabled) done({ cardIds: [...picked], deckType: deckSel ? deckSel.value : null }); });
+    noBtn.addEventListener('click', () => done(null));
+    acts.append(okBtn, noBtn);
+    panel.appendChild(acts);
+    overlay.appendChild(panel);
+    refresh();
+    mountOverlay(overlay);
+  });
+}
+
+// TRADE PORT (Makers Guild, black): "At the start of your turn, you may
+// discard 2 cards to take the top card of a patent queue." Offered from the
+// operations menu while it is still the start of the turn (op and move both
+// unspent), and only to the holder.
+function tradePortReady() {
+  if (!_online || !isOnlineMyTurn()) return false;
+  const me = mySnapshotPlayer();
+  if (!me || !playerHasPrivilege(me, 'TRADE_PORT') || me.tradePortUsed) return false;
+  if ((me.opsRemaining | 0) < 1 || (me.movesRemaining | 0) < 1) return false;
+  return (me.hand || []).length >= 2;
+}
+async function doTradePort() {
+  const me = mySnapshotPlayer();
+  if (!me) return;
+  const pick = await pickHandCardsModal({
+    title: '🏪 Trade Port',
+    body: 'Discard 2 cards from your hand to the bottom of their decks, and take the top card of a patent deck. Free, at the start of your turn.',
+    cardIds: (me.hand || []).slice(), exact: 2, decks: draftDeckTypes(_onlineSnapshot), yes: '🏪 Trade',
+  });
+  if (!pick) return;
+  await submitOnlineOp({ kind: 'TRADE_PORT', cardIds: pick.cardIds, deckType: pick.deckType });
+}
+
+// PIGGYBACK (Utopia, Inc., black): "Whenever an opponent boosts cards, you may
+// immediately boost cards up to the mass of the cards boosted, for free." An
+// opponent's boost opens a window on the snapshot (snapshot.piggyback); the
+// holder is prompted once per new allowance and answers off turn, so the op
+// goes through submitGameOp, not the turn-gated submitOnlineOp.
+let _piggybackSeen = null;
+function piggybackAllowance(snapshot) {
+  const win = snapshot && snapshot.piggyback;
+  const me = mySnapshotPlayer();
+  if (!win || !me || _spectator) return 0;
+  if (String(win.boosterId) === String(me.profileId)) return 0;
+  return ((win.allow || {})[String(me.profileId)]) | 0;
+}
+function maybePromptPiggyback(snapshot) {
+  const allow = piggybackAllowance(snapshot);
+  if (allow <= 0) return;
+  const key = `${snapshot.piggyback.boosterId}:${snapshot.round}:${snapshot.turn}:${allow}`;
+  if (_piggybackSeen === key) return;
+  _piggybackSeen = key;
+  const booster = (snapshot.players || []).find((p) => String(p.profileId) === String(snapshot.piggyback.boosterId));
+  confirmModal({
+    title: '🚀 Piggyback',
+    body: `${esc((booster && booster.name) || 'An opponent')} just launched. Ride along: boost hand cards up to mass <strong>${allow}</strong> to your LEO Stack for free.`,
+    yes: '🚀 Pick cards', no: 'Not now',
+  }).then((ok) => { if (ok) doPiggyback(); });
+}
+async function doPiggyback() {
+  const allow = piggybackAllowance(_onlineSnapshot);
+  const me = mySnapshotPlayer();
+  if (allow <= 0 || !me) { _onlineToast('There is no launch to piggyback on right now.', 'error'); return; }
+  const ids = (me.hand || []).filter((id) => {
+    const c = cardById(id);
+    return c && !['gw-thruster', 'freighter', 'bernal', 'colonist'].includes(c.type);
+  });
+  const pick = await pickHandCardsModal({
+    title: '🚀 Piggyback',
+    body: 'Boost these cards to your LEO Stack for free, riding your opponent\'s launch.',
+    cardIds: ids, massCap: allow, yes: '🚀 Boost free',
+  });
+  if (!pick) return;
+  // Off turn, so not the turn-gated submitOnlineOp: the seat-stamped submit,
+  // then apply the board it returns.
+  if (!_online || _spectator || !_onlineGameId || !_onlineMe) return;
+  const r = await submitSeatOp(_onlineGameId, { kind: 'PIGGYBACK', cardIds: pick.cardIds }, _onlineMe.token).catch(() => null);
+  if (!r || !r.ok) { _onlineToast(humanizeOnlineOpError((r && r.error) || 'network', r && r.detail), 'error'); return; }
+  if (r.data && r.data.game) applySnapshot(r.data.game.state, r.data.game.seq);
+}
+
 function confirmModal({ title, body, yes = 'OK', no = 'Cancel' }) {
   return new Promise((resolve) => {
     document.querySelector('.confirm-modal-overlay')?.remove();
@@ -22162,7 +22432,7 @@ setRadBoostSideHook({
   set: (id, side) => { if (radiatorInMyHand(id)) _radBoostSide.set(id, side === 'heavy' ? 'heavy' : 'light'); },
 });
 
-function openBoostModal({ cards, have, opNote, boostTargets = [] }) {
+function openBoostModal({ cards, have, opNote, boostTargets = [], discount = 0 }) {
   return new Promise((resolve) => {
     document.querySelector('.confirm-modal-overlay')?.remove();
     const overlay = document.createElement('div');
@@ -22193,7 +22463,9 @@ function openBoostModal({ cards, have, opNote, boostTargets = [] }) {
     const totalCost = () => {
       const base = baseCost();
       const t = destTarget();
-      return t ? bernalBoostCostClient(base, t.bn, t.card) : base;
+      const priced = t ? bernalBoostCostClient(base, t.bn, t.card) : base;
+      // Iso-Shuttles takes a flat amount off the launch (min 0).
+      return Math.max(0, priced - (discount | 0));
     };
     const close = (ok) => {
       overlay.remove();
@@ -22234,8 +22506,9 @@ function openBoostModal({ cards, have, opNote, boostTargets = [] }) {
     const destName = (d) => (d === 'leo' ? 'the LEO Stack' : ((targets.find((t) => t.id === d) || {}).label || 'the LEO Stack'));
     const costNote = () => {
       const t = destTarget();
-      if (!t) return 'total mass';
-      return totalCost() === baseCost() ? 'total mass' : 'double mass';
+      const iso = discount ? `, ${discount} off for Iso-Shuttles` : '';
+      if (!t) return `total mass${iso}`;
+      return (t && bernalBoostCostClient(baseCost(), t.bn, t.card) === baseCost() ? 'total mass' : 'double mass') + iso;
     };
     const destRow = targets.length ? `
       <div class="boost-dest">
@@ -23098,6 +23371,23 @@ ${fuelTransferSectionMarkup({
       ? !!(_rsForDepot && String(_rsForDepot.id2) === String(_homeSlug))
       : isLeoSite(_rsForDepot))
     || !!(_homeForDepot && _rsForDepot && String(_rsForDepot.id2) === String(_homeForDepot.siteId));
+  // SHUTTLES (Explorers Without Borders, white): once a turn the bank reaches a
+  // ship with an operational thruster in ANY Home Orbit, not just LEO and your
+  // own Home Bernal. Only the aqua-to-water direction rides the shuttle.
+  const _shuttleMe = _online ? mySnapshotPlayer() : null;
+  const shuttleHere = !atLeo && !!(_shuttleMe && _rsForDepot && playerHasPrivilege(_shuttleMe, 'SHUTTLES')
+    && !_shuttleMe.shuttlesUsed && NODE_TAGS[String(_rsForDepot.id2)] && NODE_TAGS[String(_rsForDepot.id2)].homeBernal
+    && ((getActiveThrusterStats() || {}).thrust | 0) > 0);
+  if (shuttleHere && waterInOpen && aquaSection) {
+    aquaSection.hidden = false;
+    aquaSection.classList.add('is-shuttle');
+    const hd = aquaSection.querySelector('.aqua-row > span');
+    if (hd) hd.textContent = '🚀 Shuttles';
+    const help = aquaSection.querySelector('.aqua-help');
+    if (help) help.textContent = 'Shuttles: once a turn, your shuttle carries bank aqua up to this ship in a Home Orbit as water, 1:1. Water does not ride back down.';
+    const back = aquaSection.querySelector('.aqua-direction-reverse');
+    if (back) back.hidden = true;
+  }
   // Aqua <-> water is WATER-ONLY: dirt has no aqua value, and water can't be
   // poured onto a dirt tank (the grades can't mix). The bank panel shows
   // whenever the tank ISN'T already holding dirt, so a dirt-engine rocket with
@@ -23143,7 +23433,7 @@ ${fuelTransferSectionMarkup({
   };
   const fillFromAqua = async (amount, e) => {
     e?.stopPropagation();
-    if (!atLeo) return;
+    if (!atLeo && !shuttleHere) return;
     const cur = getTankWater();
     const room = Math.max(0, cap - cur);
     const want = Math.min(amount, room, getAqua());
@@ -24526,6 +24816,8 @@ function repaintBoostCommit() {
     const f = (c.faces && c.faces.primary) || c;
     cost += ((f.mass != null ? f.mass : c.mass) | 0);
   }
+  // Iso-Shuttles: the isotope in the bank takes 10 off the first launch.
+  if (n > 0) cost = Math.max(0, cost - isoShuttlesDiscount());
   btn.dataset.armed = n > 0 ? '1' : '0';
   btn.disabled = n === 0;
   const home = homeLabel();
@@ -29422,7 +29714,7 @@ function showSitePopupFor(site) {
     const sitdownHijack = !iCanUseFactory(factory) && iMayHijackFactory(factory, site.id);
     if (iCanUseFactory(factory) || sitdownHijack) {
       const handIds = getHandSlots();
-      const etOptions = findEtProduceOptions(handIds, cardById, factory.spectralType, { anyC: myHasColonistPower('etProduceCAnywhere') });
+      const etOptions = findEtProduceOptions(handIds, cardById, factory.spectralType, { anyC: myEtProduceAnyC(site.id) });
       const outpostsAtSite = Object.values(getOutposts()).filter((o) => o.siteId === site.id);
       // ET Produce may also flip a WHITE-side card that is COLOCATED here (in
       // the rocket parked at this site, or a colocated outpost) into its
@@ -29433,7 +29725,7 @@ function showSitePopupFor(site) {
         const addColocated = (id, from) => {
           if (seen.has(id)) return;
           const card = cardById(id);
-          if (!card || !spectralProducibleAt(card.spectralType, factory.spectralType, { anyC: myHasColonistPower('etProduceCAnywhere') })) return;
+          if (!card || !spectralProducibleAt(card.spectralType, factory.spectralType, { anyC: myEtProduceAnyC(site.id) })) return;
           seen.add(id);
           etOptions.push({ id, card, name: card.name || id, from });
         };

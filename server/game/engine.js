@@ -6331,7 +6331,23 @@ function applyBoost(state, op, player) {
     }
     if (atticaTax) cost *= 2;
   }
+  // ISO-SHUTTLES (Explorers Without Borders, black): "If you have an isotope in
+  // your Bank or isovault, pay 10 less Aqua/1 less isotope when boosting (min
+  // 0)." The isotope only has to be THERE (an isotope can in the LEO Stack or
+  // the anchored Home Bernal, the bank stations); it is not spent. Isovaults and
+  // paying a boost in isotope are Module 4, so only the aqua half applies. Once
+  // per boost OPERATION: the discount lands on the turn's first boost, not on
+  // each free continued boost after it.
+  let isoShuttle = false;
+  if (cost > 0 && !hasBoostedThisTurn(state) && hasPrivilege(state, player, 'ISO-SHUTTLES') && playerBanksIsotope(player)) {
+    cost = Math.max(0, cost - ISO_SHUTTLES_DISCOUNT);
+    isoShuttle = true;
+  }
   if (cost > player.aqua) return fail('insufficient_aqua');
+  // PIGGYBACK window: the boosted mass, priced the way the boost was (light /
+  // heavy side), before any re-pricing.
+  let piggyMass = 0;
+  for (const id of ids) piggyMass += boostMass(id, radSides[id] === 'heavy' ? 'heavy' : 'light');
   // Move them hand -> LEO (or, for a Bernal, hand -> a new colony stack). A
   // radiator locks its deployed light/heavy side here (op.radSides[id]); default
   // light (lighter, cheapest to boost). Only radiation damage flips it afterward.
@@ -6390,10 +6406,89 @@ function applyBoost(state, op, player) {
   } else {
     log = `${player.name} boosted ${countedCards(ids)} to ${homeName} for ${cost} aqua${tail}.`;
   }
+  if (isoShuttle) log += ` Iso-Shuttles took ${ISO_SHUTTLES_DISCOUNT} aqua off the launch.`;
   // Launch Fees: a boost pays every Launch Fees holder +1 aqua from the pool.
   const fees = creditPrivilegeIncome(state, 'LAUNCH_FEES', 'Launch Fees');
   if (fees.length) log += ' ' + fees.join(' ');
+  const piggy = openPiggybackWindow(state, player, piggyMass);
+  if (piggy.length) log += ' ' + piggy.join(' ');
   return { ok: true, state, log };
+}
+
+// ISO-SHUTTLES: the flat aqua taken off a boost operation.
+const ISO_SHUTTLES_DISCOUNT = 10;
+// Does the player have an isotope in their Bank: an isotope can of 1+ units in
+// the LEO Stack or their anchored Home Bernal (the bank stations, the same
+// places a station sale reads)?
+function playerBanksIsotope(player) {
+  const homeBn = (player.bernals || []).find(isHomeBernal);
+  const hosts = [player.leo || [], ...(homeBn ? [homeBn.stack || []] : [])];
+  return hosts.some((arr) => arr.some((s) => isFuelCardSlot(s) && s.grade === 'isotope' && (Number(s.amount) || 0) >= 1));
+}
+
+// PIGGYBACK (Utopia, Inc., black): "Whenever an opponent boosts cards, you may
+// immediately boost cards up to the mass of the cards boosted, for free."
+//
+// The reaction window: an opponent's BOOST credits every Piggyback holder with
+// the boosted mass in state.piggyback.allow[holderId]. The window belongs to
+// the booster's turn - it opens on their boost and closes when their turn
+// ends (openTurnFor clears it) - and several boosts in the same turn add up.
+// The holder answers OFF turn with the PIGGYBACK op (dispatched ahead of the
+// turn guard, like an off-turn route), boosting hand cards to their own LEO
+// for free, up to the allowance. Privilege is read through hasPrivilege at both
+// ends, so Anarchy and the M2 lock apply.
+function openPiggybackWindow(state, booster, mass) {
+  if (!(mass > 0)) return [];
+  const notes = [];
+  for (const p of state.players) {
+    if (p.profileId === booster.profileId) continue;
+    if (!hasPrivilege(state, p, 'PIGGYBACK')) continue;
+    if (!state.piggyback || state.piggyback.boosterId !== booster.profileId) {
+      state.piggyback = { boosterId: booster.profileId, allow: {} };
+    }
+    const k = String(p.profileId);
+    state.piggyback.allow[k] = (state.piggyback.allow[k] | 0) + mass;
+    notes.push(`${p.name} may piggyback up to ${state.piggyback.allow[k]} mass of cards for free.`);
+  }
+  return notes;
+}
+function applyPiggyback(state, op, player) {
+  const win = state.piggyback;
+  if (!win || win.boosterId === player.profileId) return fail('no_piggyback_window');
+  if (!hasPrivilege(state, player, 'PIGGYBACK')) return fail('no_piggyback');
+  const allow = (win.allow || {})[String(player.profileId)] | 0;
+  if (allow <= 0) return fail('no_piggyback_window');
+  const ids = Array.isArray(op.cardIds) ? op.cardIds.map(String) : [];
+  if (!ids.length) return fail('nothing_to_boost');
+  const hand = (player.hand || []).slice();
+  for (const id of ids) {
+    const i = hand.indexOf(id);
+    if (i < 0) return fail('not_in_hand');
+    hand.splice(i, 1);
+    const c = PATENTS_BY_ID[id];
+    if (!c) return fail('unknown_card');
+    if (c.type === 'gw-thruster' || c.type === 'freighter') return fail('not_boostable');
+    // A Bernal establishes a whole colony when boosted; a free ride-along to the
+    // LEO Stack is not that, so the piggyback takes ordinary cards only.
+    if (c.type === 'bernal' || c.type === 'colonist') return fail('not_boostable');
+  }
+  const radSides = (op.radSides && typeof op.radSides === 'object') ? op.radSides : {};
+  let mass = 0;
+  for (const id of ids) mass += boostMass(id, radSides[id] === 'heavy' ? 'heavy' : 'light');
+  if (mass > allow) return fail('piggyback_over_mass', { mass, allow });
+  player.leo = player.leo || [];
+  for (const id of ids) {
+    player.hand.splice(player.hand.indexOf(id), 1);
+    const slot = { id, kind: 'patent' };
+    if (PATENTS_BY_ID[id].type === 'radiator') slot.radSide = radSides[id] === 'heavy' ? 'heavy' : 'light';
+    player.leo.push(slot);
+  }
+  win.allow[String(player.profileId)] = allow - mass;
+  const booster = state.players.find((p) => p.profileId === win.boosterId);
+  return {
+    ok: true, state,
+    log: `${player.name} piggybacked ${countedCards(ids)} to ${homeLabelForSpecies(player.species)} for free on ${booster ? booster.name + "'s" : 'the'} launch (Piggyback).`,
+  };
 }
 
 // Free Market sell (rulebook I3): drop a HAND card to the bottom of
@@ -6677,7 +6772,20 @@ function applyRefuel(state, op, player) {
     bn.tankGrade = bgrade;
     return { ok: true, state, log: `${player.name} converted ${bres.steps} aqua to water in the Bernal (tank ${round6(bn.tank)}${bgrade === 'dirt' ? ', mixed down to dirt' : ''}).` };
   }
-  if (!rocketAtRefuelDepot(state, player)) return fail('rocket_not_at_leo');
+  // SHUTTLES (Explorers Without Borders, white): "1/turn you may cargo transfer
+  // Aqua from your Bank to an operational thruster in a Home Orbit or LEO." The
+  // bank already reaches LEO and the player's own Home Bernal for everyone, so
+  // the card's reach is the OTHER Home Orbits: any Home Orbit space, once a
+  // turn, and only into a ship whose thruster can fire (an operational
+  // thruster). hasPrivilege, so Anarchy and the M2 lock both apply.
+  let shuttle = false;
+  if (!rocketAtRefuelDepot(state, player)) {
+    const here = player.rocket && player.rocket.siteId;
+    if (!(here != null && isHomeBernalSite(here) && hasPrivilege(state, player, 'SHUTTLES'))) return fail('rocket_not_at_leo');
+    if (player.shuttlesUsed && !op._replay) return fail('shuttles_used');
+    if (!(activeNetThrust(player.rocket) > 0)) return fail('no_operational_thruster');
+    shuttle = true;
+  }
   const want = Math.floor(Number(op.amount));
   if (!Number.isFinite(want) || want <= 0) return fail('bad_amount');
   const tank = Number(player.rocket.tank) || 0;
@@ -6700,6 +6808,11 @@ function applyRefuel(state, op, player) {
   player.aqua -= res.steps;
   player.rocket.tank = res.tank;
   setRocketGrade(player.rocket, rgrade);
+  if (shuttle) {
+    player.shuttlesUsed = true;
+    const where = (siteById(player.rocket.siteId) || {}).name || 'the Home Orbit';
+    return { ok: true, state, log: `${player.name}'s shuttle carried ${res.steps} aqua up to the ship at ${where} as water (tank ${round6(player.rocket.tank)}, Shuttles).` };
+  }
   return { ok: true, state, log: `${player.name} converted ${res.steps} aqua to water (tank ${round6(player.rocket.tank)}${rgrade !== 'water' ? `, mixed down to ${rgrade}` : ''}).` };
 }
 
@@ -9587,10 +9700,43 @@ function applySirenTradeFlip(state, op, player) {
   };
 }
 
+// THERMAL LABS (BRIN, black): "As a 1/turn free action, flip a radiator at
+// your Colony/Bernal to its heavy side." The light fold below is one-way for
+// everyone; this is the one road back up. "At your Colony/Bernal" reads as the
+// radiator standing where the player has a Colony dome (their own Colony at that
+// site) or one of their Bernals (aboard it, or in a stack sharing its space).
+// Rides SET_RADIATOR_SIDE with radSide 'heavy'. Read through hasPrivilege, so
+// Anarchy suspends it and the M2 Home-Bernal lock applies like any privilege.
+function thermalLabsSite(state, player, cardId) {
+  for (const st of playerStacks(player)) {
+    const slot = (st.slots || []).find((s) => s && s.id === cardId);
+    if (!slot) continue;
+    if (st.from.startsWith('bernal')) return { slot, ok: true };
+    const here = st.siteId ?? null;
+    const col = here != null && (state.colonies || {})[here];
+    if (col && col.ownerId === player.profileId) return { slot, ok: true };
+    if ((player.bernals || []).some((bn) => bn && (bn.siteId ?? null) === here)) return { slot, ok: true };
+    return { slot, ok: false };
+  }
+  return null;
+}
+function applyThermalLabsFlip(state, op, player, card) {
+  if (!hasPrivilege(state, player, 'THERMAL_LABS')) return fail('no_thermal_labs');
+  if (player.thermalLabsUsed && !op._replay) return fail('thermal_labs_used');
+  const at = thermalLabsSite(state, player, card.id);
+  if (!at) return fail('not_in_stack');
+  if (!at.ok) return fail('not_at_colony_or_bernal');
+  if (at.slot.radSide !== 'light') return fail('already_heavy');
+  at.slot.radSide = 'heavy';
+  player.thermalLabsUsed = true;
+  return { ok: true, state, log: `${player.name} opened ${card.name} out to its heavy side at their station (Thermal Labs).` };
+}
+
 function applySetRadiatorSide(state, op, player) {
   const cardId = String(op.cardId || '');
   const card = PATENTS_BY_ID[cardId];
   if (!card || card.type !== 'radiator') return fail('not_a_radiator');
+  if (op.radSide === 'heavy') return applyThermalLabsFlip(state, op, player, card);
   let slot = (player.rocket.stack || []).find((s) => s.id === cardId)
     || (player.leo || []).find((s) => s.id === cardId);
   if (!slot && player.outposts) {
@@ -10267,6 +10413,17 @@ function applyMineRevival(state, op, player) {
 // so the rocket need NOT be parked here (owning the factory is the presence).
 // The card leaves the hand and lands face='secondary' in the outpost at the
 // site (created there if new). Costs an op.
+// TAILINGS REMINING: the privilege, AND The Martian Way crew card standing at
+// the Factory's site in one of the player's stacks ("if this Crew is
+// colocated").
+function tailingsRemining(state, player, siteId) {
+  if (!hasPrivilege(state, player, 'TAILINGS_REMINING')) return false;
+  for (const st of playerStacks(player)) {
+    if ((st.siteId ?? null) !== (siteId ?? null)) continue;
+    if ((st.slots || []).some((s) => s && s.id === 'crew_the_martian_way')) return true;
+  }
+  return false;
+}
 function applyEtProduce(state, op, player) {
   const siteId = String(op.siteId || '');
   const site = siteById(siteId);
@@ -10301,6 +10458,19 @@ function applyEtProduce(state, op, player) {
   const cardId = String(op.cardId || '');
   const hIdx = player.hand.indexOf(cardId);
   const prodCard = PATENTS_BY_ID[cardId];
+  // Spectral match (I7): a product comes out of a Factory of its own spectral
+  // type ('any' fits every Factory). TAILINGS REMINING (The Martian Way,
+  // black): "If this Crew is colocated, can produce ET products of Spectral
+  // Type C at any Factory." The Blue Goo Sybonts colonist power is the same
+  // rule. A legacy Factory with no spectral on record is not checked.
+  if (prodCard && fac.spectralType && !op._replay) {
+    const spec = prodCard.spectralType;
+    const anyC = tailingsRemining(state, player, siteId)
+      || playerHasColonistPower(state, player, 'etProduceCAnywhere');
+    if (spec && String(spec).toLowerCase() !== 'any' && spec !== fac.spectralType && !(anyC && spec === 'C')) {
+      return fail('wrong_spectral', { product: spec, factory: fac.spectralType });
+    }
+  }
   // M1 Freighter: producing a freighter card spawns the player's Freighter
   // UNIT (the big cube) at this Factory's site, NOT a card in an outpost. One
   // freighter per player (1A4). Gated on M1 (zero bleed-through when off). A
@@ -12857,7 +13027,15 @@ const FUNCTIONAL = {
   EMISSARIES: applyEmissaries,
   ARBITER_TALLY: applyArbiterTally,
   TRADE_PORT: applyTradePort,
+  // PIGGYBACK is dispatched off turn in applyOperation; it sits here only so an
+  // UNDO/REDO replay of the booster's turn can re-apply it (by holderId).
+  PIGGYBACK: applyPiggybackReplay,
 };
+function applyPiggybackReplay(state, op) {
+  const holder = state.players.find((p) => String(p.profileId) === String(op.holderId));
+  if (!holder) return fail('not_a_player');
+  return applyPiggyback(state, op, holder);
+}
 
 function pickPayload(op) {
   switch (op.kind) {
@@ -12925,6 +13103,7 @@ function pickPayload(op) {
     case 'EMISSARIES': return { ideologies: Array.isArray(op.ideologies) ? op.ideologies.slice() : [] };
     case 'ARBITER_TALLY': return { ...(op.double === false ? { double: false } : {}), ...(op.star != null ? { star: op.star } : {}) };
     case 'TRADE_PORT': return { cardIds: Array.isArray(op.cardIds) ? op.cardIds.slice() : [], deckType: op.deckType };
+    case 'PIGGYBACK': return { holderId: op.holderId, cardIds: Array.isArray(op.cardIds) ? op.cardIds.slice() : [], ...(op.radSides ? { radSides: op.radSides } : {}) };
     case 'DISCARD': return { cardId: op.cardId };
     // stackId or the replay re-applies a Bernal / Freighter / Outpost's own
     // reconfiguration to the ROCKET, which is a different stack entirely.
@@ -13075,6 +13254,8 @@ function openTurnFor(state, player) {
   player.arbiterTallied = false;
   player.emissaryLaws = [];
   player.tradePortUsed = false;
+  // A Piggyback window lives for the booster's turn only.
+  state.piggyback = null;
   // Afterburn lasts one turn: clear it as the player's next turn opens.
   if (player.rocket) player.rocket.afterburnEngaged = false;
   // Solar-sail thrust is LOCKED at the START of the turn (user decision): record
@@ -14800,9 +14981,58 @@ function highestOtherBid(state, profileId) {
   return hi;
 }
 
-// TRADE PORT (Makers Guild, black). STUB - filled in by the economy pass.
-function applyTradePort(_state, _op, _player) {
-  return fail('not_implemented');
+// TRADE PORT (Makers Guild, black): "At the start of your turn, you may
+// discard 2 cards to take the top card of a patent queue."
+//
+// "Start of your turn": before the player has spent the operation or the move
+// and before any other action this turn (planning a route or wiring is not an
+// action). The two discards go to the bottoms of their decks exactly as a
+// plain discard does, then the top card of the chosen patent deck goes to the
+// hand. It is a free action (no operation) and once a turn. Drawing the top
+// card reveals it, so the swap cannot be undone. hasPrivilege: Anarchy and the
+// M2 lock apply.
+const TRADE_PORT_PREP_OPS = new Set(['SET_ROUTE', 'CLEAR_ROUTE', 'SET_WIRING', 'SET_CARD_GROUPS', 'ARBITER_TALLY', 'EMISSARIES']);
+function atStartOfTurn(state, player) {
+  if ((player.opsRemaining | 0) < OPS_PER_TURN) return false;
+  if ((player.movesRemaining | 0) < MOVES_PER_TURN) return false;
+  return (state.turnActions || []).every((a) => a && TRADE_PORT_PREP_OPS.has(a.kind));
+}
+function applyTradePort(state, op, player) {
+  if (!hasPrivilege(state, player, 'TRADE_PORT')) return fail('no_trade_port');
+  if (!op._replay) {
+    if (player.tradePortUsed) return fail('trade_port_used');
+    if (!atStartOfTurn(state, player)) return fail('not_start_of_turn');
+  }
+  const ids = Array.isArray(op.cardIds) ? op.cardIds.map(String) : [];
+  if (ids.length !== 2) return fail('discard_two');
+  const hand = (player.hand || []).slice();
+  for (const id of ids) {
+    const i = hand.indexOf(id);
+    if (i < 0) return fail('not_in_hand');
+    hand.splice(i, 1);
+  }
+  const deckType = String(op.deckType || '');
+  const patentDecks = [...DECK_TYPES, ...(state.m1 ? M1_DECK_TYPES : []), ...(state.m2 ? M2_DECK_TYPES : [])];
+  if (!patentDecks.includes(deckType)) return fail('bad_deck');
+  const deck = decksFor(state, player)[deckType];
+  if (!deck || !deck.length) return fail('deck_empty');
+  if (atOwnershipCap(player, deckType)) return fail(ownershipCapError(deckType));
+  // Take the top card BEFORE the discards land, so a card discarded into the
+  // same deck goes under it and can never come straight back.
+  const taken = deck.shift();
+  const names = [];
+  for (const id of ids) {
+    const r = applyDiscard(state, { cardId: id }, player);
+    if (!r.ok) return r;
+    names.push((PATENTS_BY_ID[id] || {}).name || id);
+  }
+  player.hand.push(taken);
+  player.tradePortUsed = true;
+  const tc = PATENTS_BY_ID[taken];
+  return {
+    ok: true, state, noUndo: true,
+    log: `${player.name} traded ${names.join(' and ')} away at the Trade Port and took ${tc ? tc.name : taken} from the top of the ${deckType} deck.`,
+  };
 }
 
 function applyAuctionStart(state, op, ctx) {
@@ -16388,6 +16618,27 @@ export function applyOperation(prevState, op, ctx) {
     return FUNCTIONAL[op.kind](st, op, caller);
   }
 
+  // PIGGYBACK (Utopia, Inc.) is a reaction to an opponent's boost, so it is
+  // taken OFF turn, against the CALLER (the holder), never the active player.
+  // It is recorded onto the BOOSTER's per-turn history as a barrier entry
+  // (noUndo), carrying the holder's id: the booster cannot undo the boost a
+  // rival already rode on (the boost is the last thing before it on the stack),
+  // and an undo of anything the booster does LATER replays the piggyback with
+  // the rest of the turn, so the holder's cards are never lost to a rebuild.
+  if (op.kind === 'PIGGYBACK' && !op.debug) {
+    if (prevState.auction) return fail('auction_in_progress');
+    const st = clonePrev();
+    const caller = playerByProfile(st, ctx.profileId);
+    if (!caller) return fail('not_a_player');
+    const res = applyPiggyback(st, op, caller);
+    if (!res.ok) return res;
+    const payload = { holderId: caller.profileId, cardIds: (op.cardIds || []).map(String),
+      ...(op.radSides && typeof op.radSides === 'object' ? { radSides: { ...op.radSides } } : {}) };
+    res.state.turnActions = [...(res.state.turnActions || []), { kind: 'PIGGYBACK', payload, rolled: false, noUndo: true }];
+    res.state.turnRedo = [];
+    return noted(res);
+  }
+
   // SET_CARD_GROUPS is a purely COSMETIC per-player organizer for the rocket-
   // stack view: it changes no rule and no shared state, so it ALWAYS runs against
   // the caller regardless of whose turn it is (a waiting player may relabel any
@@ -16637,7 +16888,7 @@ export const SUPPORTED_OPS = [
   ...Object.keys(TRADE), ...Object.keys(FACTORY_ACCESS), ...Object.keys(LUNA_ACCESS),
   ...Object.keys(CREW), ...Object.keys(LIFECYCLE), 'DRAFT_PICK', 'DRAFT_CYCLE',
   'DRAFT_BONUS_SELL', 'DRAFT_BONUS_DONE', 'EVENT_CHOICE', 'POWERSAT_BEAM',
-];
+].filter((k, i, a) => a.indexOf(k) === i);
 // Ops that require the caller to supply ctx.turnBaseState.
 export const NEEDS_TURN_BASE = new Set(['UNDO', 'REDO']);
 
