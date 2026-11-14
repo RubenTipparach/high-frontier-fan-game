@@ -10245,8 +10245,8 @@ function wireHandStrip() {
         : continuedBoost
           ? 'You already boosted this turn, so this rides up free (no operation).'
           : 'The first boost spends your operation; keep boosting free for the rest of the turn.';
-    const res = await openBoostModal({ cards, have: have + isoShuttle,
-      opNote: isoShuttle ? `${opNote} Iso-Shuttles: the isotope in your bank takes ${isoShuttle} aqua off this launch.` : opNote,
+    const res = await openBoostModal({ cards, have, discount: isoShuttle,
+      opNote,
       boostTargets: anchoredBoostTargets() });
     if (!res.ok) return;
     const radSides = res.radSides || {};
@@ -21964,6 +21964,8 @@ function pickHandCardsModal({ title, body, cardIds, exact = 0, massCap = null, d
       const c = cardById(id);
       const row = document.createElement('label');
       row.className = 'hand-pick-row';
+      row.style.display = 'block';
+      row.style.margin = '4px 0';
       const cb = document.createElement('input');
       cb.type = 'checkbox';
       cb.dataset.idx = String(i);
@@ -21976,6 +21978,7 @@ function pickHandCardsModal({ title, body, cardIds, exact = 0, massCap = null, d
     if (decks) {
       deckSel = document.createElement('select');
       deckSel.className = 'hand-pick-deck';
+      deckSel.style.margin = '8px 0';
       deckSel.innerHTML = `<option value="">Take the top card of...</option>`
         + decks.map((d) => `<option value="${esc(d)}">${esc((DRAFT_DECK_GLYPH[d] || '') + ' ' + d)}</option>`).join('');
       deckSel.addEventListener('change', refresh);
@@ -22194,7 +22197,7 @@ setRadBoostSideHook({
   set: (id, side) => { if (radiatorInMyHand(id)) _radBoostSide.set(id, side === 'heavy' ? 'heavy' : 'light'); },
 });
 
-function openBoostModal({ cards, have, opNote, boostTargets = [] }) {
+function openBoostModal({ cards, have, opNote, boostTargets = [], discount = 0 }) {
   return new Promise((resolve) => {
     document.querySelector('.confirm-modal-overlay')?.remove();
     const overlay = document.createElement('div');
@@ -22225,7 +22228,9 @@ function openBoostModal({ cards, have, opNote, boostTargets = [] }) {
     const totalCost = () => {
       const base = baseCost();
       const t = destTarget();
-      return t ? bernalBoostCostClient(base, t.bn, t.card) : base;
+      const priced = t ? bernalBoostCostClient(base, t.bn, t.card) : base;
+      // Iso-Shuttles takes a flat amount off the launch (min 0).
+      return Math.max(0, priced - (discount | 0));
     };
     const close = (ok) => {
       overlay.remove();
@@ -22266,8 +22271,9 @@ function openBoostModal({ cards, have, opNote, boostTargets = [] }) {
     const destName = (d) => (d === 'leo' ? 'the LEO Stack' : ((targets.find((t) => t.id === d) || {}).label || 'the LEO Stack'));
     const costNote = () => {
       const t = destTarget();
-      if (!t) return 'total mass';
-      return totalCost() === baseCost() ? 'total mass' : 'double mass';
+      const iso = discount ? `, ${discount} off for Iso-Shuttles` : '';
+      if (!t) return `total mass${iso}`;
+      return (t && bernalBoostCostClient(baseCost(), t.bn, t.card) === baseCost() ? 'total mass' : 'double mass') + iso;
     };
     const destRow = targets.length ? `
       <div class="boost-dest">
@@ -24575,6 +24581,8 @@ function repaintBoostCommit() {
     const f = (c.faces && c.faces.primary) || c;
     cost += ((f.mass != null ? f.mass : c.mass) | 0);
   }
+  // Iso-Shuttles: the isotope in the bank takes 10 off the first launch.
+  if (n > 0) cost = Math.max(0, cost - isoShuttlesDiscount());
   btn.dataset.armed = n > 0 ? '1' : '0';
   btn.disabled = n === 0;
   const home = homeLabel();
