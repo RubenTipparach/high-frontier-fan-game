@@ -1859,6 +1859,48 @@ function hasPowersat(state, player) {
   return hasPrivilege(state, player, 'POWERSAT') || hasPushFactory(state, player)
     || hasPowersatBernal(state, player);
 }
+// POWERSAT reaching a RIVAL's craft (ESA, B6a): "During any player's Turn, may
+// give +1 thrust to any Spacecraft that has a push icon. Negotiable." The holder
+// keeps a public, standing list of rivals they beam (player.powersatBeams, set
+// with the off-turn POWERSAT_BEAM op, so a deal struck in a trade can be honoured
+// at once and withdrawn just as fast). A beamed craft gets the push THRUST only:
+// the Safe Factory-Assist half (rule e) stays with the holder's own craft,
+// because the card's text names the +1 thrust and nothing else. The beam is the
+// holder's privilege in use, so it goes through hasPrivilege: suspended by
+// Anarchy and locked under M2 until the HOLDER has a Home Bernal.
+function powersatBeamedTo(state, target) {
+  if (!target) return null;
+  for (const p of (state.players || [])) {
+    if (!p || p === target || String(p.profileId) === String(target.profileId)) continue;
+    const beams = Array.isArray(p.powersatBeams) ? p.powersatBeams : [];
+    if (!beams.some((id) => String(id) === String(target.profileId))) continue;
+    if (hasPrivilege(state, p, 'POWERSAT')) return p;
+  }
+  return null;
+}
+// +1 push thrust for this player's craft: their own Powersat, or a rival's beam.
+function powersatPushFor(state, player) {
+  return hasPowersat(state, player) || !!powersatBeamedTo(state, player);
+}
+// Off-turn op (dispatched against the CALLER, like SET_CARD_GROUPS): the
+// Powersat holder starts or stops beaming one rival. op = { targetId, on }.
+function applyPowersatBeam(state, op, player) {
+  if (!hasPrivilege(state, player, 'POWERSAT')) return fail('no_powersat');
+  const target = (state.players || []).find((p) => String(p.profileId) === String(op.targetId));
+  if (!target) return fail('bad_target');
+  if (target === player) return fail('beam_self');
+  const on = op.on !== false;
+  const beams = (Array.isArray(player.powersatBeams) ? player.powersatBeams : [])
+    .filter((id) => String(id) !== String(target.profileId));
+  if (on) beams.push(target.profileId);
+  player.powersatBeams = beams;
+  return {
+    ok: true, state,
+    log: on
+      ? `${player.name} trained their Powersat on ${target.name}: push-icon craft of ${target.name} get +1 thrust while the beam holds.`
+      : `${player.name} switched their Powersat beam off ${target.name}.`,
+  };
+}
 // May this player commit a Felony? Yes during Anarchy (everyone gains
 // Felonious, K2e), OR if they hold the Felonious privilege (Taikonauts) the
 // rest of the time. (Anarchy suspends privilegeOf, but state.anarchy covers
@@ -4129,7 +4171,7 @@ function applyMoveFreighter(state, op, player) {
   let originThrustBonus = 0;
   if (frPw0 && frPw0.beltOriginThrust && hazardKind(here) === 'rad') originThrustBonus += frPw0.beltOriginThrust;
   if (frPw0 && frPw0.factoryOriginThrust && state.factories[here]) originThrustBonus += frPw0.factoryOriginThrust;
-  const frThrust = freighterNetThrust(powersat) + originThrustBonus;
+  const frThrust = freighterNetThrust(powersatPushFor(state, player)) + originThrustBonus;
   // Acetylene Rocketplane Liftoff (H6c). The published text names the craft
   // outright - "A Spacecraft (Rocket, Freighter or Mobile Factory) may use
   // factory-assist to exit (but not enter) an Atmospheric Site to allow movement
@@ -5280,7 +5322,7 @@ function applyMove(state, op, player) {
     const raftWet = rocketDryMass(sumMass) + (Number(player.rocket.tank) || 0);
     const raftFail = lifeRaftFail(state, player, raftWet);
     if (raftFail) return raftFail;
-    const raftThrust = freighterNetThrust(hasPowersat(state, player));
+    const raftThrust = freighterNetThrust(powersatPushFor(state, player));
     if (thisTurnBurns > raftThrust) return fail('freighter_over_thrust', { thrust: raftThrust, burns: thisTurnBurns });
   }
   // A thruster whose support chain is broken cannot BURN. Coasting is a
@@ -5348,6 +5390,8 @@ function applyMove(state, op, player) {
   // before hitting dry mass. The water it costs is the non-linear mass drop
   // (applied when the burn commits, below), which can leave a sub-1 remainder.
   const powersat = hasPowersat(state, player);   // +1 push thrust + Safe Factory-Assist
+  // Push thrust also arrives from a rival ESA's beam (thrust only, no assist).
+  const powersatPush = powersatPushFor(state, player);
   const solarBonus = solarCellThrustBonus(player.bernals);   // anchored Solar Cell Bernal: +1/+2 to solar craft
   const powersatFutureBonus = hasFutureEffect(player, 'powersatPlus2') ? 2 : 0;   // MASS BEAM Future
   const perBurn = thrusterFuelPerBurn(player.rocket, playerCrewReactorKinds(player));            // fuel steps per burn
@@ -5473,7 +5517,7 @@ function applyMove(state, op, player) {
   // dry-run (result.calc) so the client can show every intermediate value
   // instead of just tank before/after.
   const moveCalc = {
-    finalThrust: activeNetThrust(player.rocket, powersat, solarBonus, powersatFutureBonus, playerCrewReactorKinds(player)),
+    finalThrust: activeNetThrust(player.rocket, powersatPush, solarBonus, powersatFutureBonus, playerCrewReactorKinds(player)),
     fuelStepsPerBurn: perBurn,
     dryMass,
     wetMass,
@@ -5542,9 +5586,9 @@ function applyMove(state, op, player) {
   const engineLive = !!op._replay || (!!player.rocket.activeThrusterId
     && rocketSupportStatus(player.rocket, player).operational);
   const thrust = asFreighter
-    ? freighterNetThrust(powersat)
+    ? freighterNetThrust(powersatPush)
     : (engineLive
-      ? activeNetThrust(player.rocket, powersat, solarBonus, powersatFutureBonus, playerCrewReactorKinds(player))
+      ? activeNetThrust(player.rocket, powersatPush, solarBonus, powersatFutureBonus, playerCrewReactorKinds(player))
       : 0);
   // Factory-assist liftoff / landing gate. A maneuver where net thrust
   // <= site size is only legal if a factory carries it (assist), which
@@ -14400,6 +14444,8 @@ function carryOffTurnRoutes(rebuilt, live) {
     if (lp && lp.rocket && rebuilt.players[i] && rebuilt.players[i].rocket && lp.rocket.groups) {
       rebuilt.players[i].rocket.groups = lp.rocket.groups;
     }
+    // A Powersat beam is set off the undo stack too (any turn), so carry it.
+    if (lp && rebuilt.players[i] && lp.powersatBeams) rebuilt.players[i].powersatBeams = lp.powersatBeams;
   }
   for (let i = 0; i < rebuilt.players.length; i++) {
     if (i === activeIdx) continue;
@@ -16347,6 +16393,17 @@ export function applyOperation(prevState, op, ctx) {
   // the caller regardless of whose turn it is (a waiting player may relabel any
   // time) and it never rides the per-turn undo stack. The active player's own
   // groups are carried across an undo by carryOffTurnRoutes, like a route.
+  // POWERSAT_BEAM: the ESA player's standing beam on a rival's craft. "During
+  // any player's Turn", so like SET_CARD_GROUPS it runs against the CALLER on or
+  // off turn and never rides the undo stack (carryOffTurnRoutes carries it
+  // across an undo). Public, so it returns a real log line. An open auction
+  // does not block it - it touches no auction state.
+  if (op.kind === 'POWERSAT_BEAM' && !op.debug) {
+    const st = clonePrev();
+    const caller = playerByProfile(st, ctx.profileId);
+    if (!caller) return fail('not_a_player');
+    return applyPowersatBeam(st, op, caller);
+  }
   if (op.kind === 'SET_CARD_GROUPS' && !op.debug) {
     const st = clonePrev();
     const caller = playerByProfile(st, ctx.profileId);
@@ -16579,7 +16636,7 @@ export const SUPPORTED_OPS = [
   ...Object.keys(FUNCTIONAL), ...Object.keys(META), ...Object.keys(AUCTION),
   ...Object.keys(TRADE), ...Object.keys(FACTORY_ACCESS), ...Object.keys(LUNA_ACCESS),
   ...Object.keys(CREW), ...Object.keys(LIFECYCLE), 'DRAFT_PICK', 'DRAFT_CYCLE',
-  'DRAFT_BONUS_SELL', 'DRAFT_BONUS_DONE', 'EVENT_CHOICE',
+  'DRAFT_BONUS_SELL', 'DRAFT_BONUS_DONE', 'EVENT_CHOICE', 'POWERSAT_BEAM',
 ];
 // Ops that require the caller to supply ctx.turnBaseState.
 export const NEEDS_TURN_BASE = new Set(['UNDO', 'REDO']);
