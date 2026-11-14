@@ -136,7 +136,8 @@ in the giants' belts, and asteroids as most of the sites. The board's bodies
 come from the star's chits:
 
 Each star has **4 to 15 planets** (gas giants included), and each board
-**30 to 100 asteroids and 10 comets** (SM-1f, 5f, 5g):
+**30 to 100 asteroids** (as many as the board has room for: a binary holds about
+70) **and 10 comets** (SM-1f, 5f, 5g):
 
 | Body | Where | What it is |
 |---|---|---|

@@ -6,7 +6,7 @@
 // moons. Shared by the game (prototype/systems.js) and the map builder's
 // "Roll a system". Pure: no DOM. `meta` carries what the game needs per body
 // (role, class, regions); mapgen ignores it.
-import { TARGETS } from './mapgen.js';
+import { TARGETS, starLayout, zoneBounds } from './mapgen.js';
 
 const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII', 'XIII', 'XIV', 'XV'];
 export const REGIONS = { hz: ['north', 'equator', 'south'], rock: ['day side', 'night side'], moon: ['near side', 'far side'], ocean: ['ice shell', 'dark side'] };
@@ -18,7 +18,7 @@ export function seededRint(seed) {
 }
 
 // star: { name, type }; chits: { hz, comps: [{ kind, chit }], stars: [{ name, type, role, chit, known }] }
-export function rollSystem({ star, chits = {}, rint, worldName = () => 'World', planets = null, links = null }) {
+export function rollSystem({ star, chits = {}, rint, worldName = () => 'World', planets = null, links = null, asteroids = null }) {
   const short = star.name.split(' ')[0].replace(/'s$/, '');
   const comps = chits.stars || [];
   const hasB = comps.some((c) => c.role === 'binary');
@@ -79,22 +79,35 @@ export function rollSystem({ star, chits = {}, rint, worldName = () => 'World', 
     if (Z >= 6) add({ kind: 'dwarf', name: `${p.short} far dwarf`, star: p.i, zone: Z - 1, size: rint(5, 7) }, { mine: true, big: true });
   }
 
-  // ---- asteroids for the whole board (SM-5f): Trojans first, then the belts
-  const total = rint(TARGETS.asteroids[0], TARGETS.asteroids[1]);
-  let rest = total - gasGiants * 4;
-  const belt = (name, starIdx, zone, count) => { if (count > 0) add({ kind: 'belt', name, star: starIdx, zone, count, sizes: Array.from({ length: count }, () => rint(1, 4)) }, { belt: true }); };
-  const share = (f) => Math.max(0, Math.round(rest * f));
+  // ---- asteroids for the whole board (SM-5f): Trojans first, then belts.
+  // A ring holds as many rock groups as its length allows (a group needs ~90 px
+  // of ring, and planets keep their share), so a big belt spills into the zones
+  // beside it, the way Sol's main belt runs on into the Hildas; a board short of
+  // room gets as many as it can hold.
+  const Ls = starLayout(stars.map((x, i) => ({ ...x, role: i === 0 ? 'primary' : x.role })));
+  const ringRocks = (si, z) => { const L = Ls[si]; const b = zoneBounds(stars[si].zones, L); const r = z === 0 ? b[1] * 0.62 : (b[z] + b[z + 1]) / 2;
+    const len = 2 * Math.PI * Math.sqrt(((r * L.kx) ** 2 + (r * L.ky) ** 2) / 2); return Math.max(0, Math.floor((len * 0.45) / 90)) * 3; };
+  const room = {}; const roomOf = (si, z) => (room[`${si}:${z}`] ??= ringRocks(si, z));
+  const wantTotal = asteroids ?? rint(TARGETS.asteroids[0], TARGETS.asteroids[1]);
+  const belts = {}; // `${si}:${z}` -> { name, count }
+  const pour = (si, z0, n, name) => { // fill zone z0, then its neighbours outward / inward
+    const Z = stars[si].zones; const order = [z0]; for (let d = 1; d < Z; d++) { if (z0 + d < Z) order.push(z0 + d); if (z0 - d >= 1) order.push(z0 - d); }
+    for (const z of order) { if (n <= 0) break; const take = Math.min(n, roomOf(si, z)); if (take <= 0) continue; room[`${si}:${z}`] -= take; const k = `${si}:${z}`; belts[k] = belts[k] || { si, z, name: z === z0 ? name : `${name} ${z > z0 ? 'outer' : 'inner'} reach`, count: 0 }; belts[k].count += take; n -= take; }
+    return n;
+  };
+  let rest = Math.max(0, wantTotal - gasGiants * 4);
   const pB = plan.find((p) => p.role === 'binary'), pD = plan.find((p) => p.role === 'distant');
-  const toB = pB ? share(0.2) : 0, toD = pD ? Math.min(3, share(0.06)) : 0;
-  rest -= toB + toD;
   const P0 = plan[0];
+  const toB = pB ? Math.round(rest * 0.2) : 0, toD = pD ? Math.min(3, Math.round(rest * 0.06)) : 0;
+  rest -= toB + toD;
   const near = Math.max(1, Math.round(rest * 0.1));
   const outer = P0.Z - 1 > P0.beltZone ? Math.round(rest * 0.32) : 0;
-  belt(`${P0.short} near rocks`, 0, Math.max(0, P0.beltZone - 2), near);
-  belt(`${P0.short} belt`, 0, P0.beltZone, rest - near - outer);
-  belt(`${P0.short} outer belt`, 0, P0.Z - 1, outer);
-  if (pB) belt(`${pB.short} belt`, pB.i, pB.Z - 1, toB);
-  if (pD) belt(`${pD.short} rocks`, pD.i, pD.Z - 1, toD);
+  pour(0, Math.max(0, P0.beltZone - 2), near, `${P0.short} near rocks`);
+  pour(0, P0.Z - 1, outer, `${P0.short} outer belt`);
+  pour(0, P0.beltZone, rest - near - outer, `${P0.short} belt`);
+  if (pB) pour(pB.i, pB.Z - 1, toB, `${pB.short} belt`);
+  if (pD) pour(pD.i, pD.Z - 1, toD, `${pD.short} rocks`);
+  for (const b of Object.values(belts)) if (b.count > 0) add({ kind: 'belt', name: b.name, star: b.si, zone: b.z, count: b.count, sizes: Array.from({ length: b.count }, () => rint(1, 4)) }, { belt: true });
 
   // ---- comets for the whole board (SM-5g): half in the main-belt zone
   const cometHomes = [];

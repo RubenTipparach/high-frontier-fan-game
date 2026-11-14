@@ -131,6 +131,11 @@ for any other reason:
 - **SM-5f. Asteroids: 30 to 100 per board (design target).** Sol has about
   99 asteroids and small bodies (139 sites typed asteroid, 40 of them giant
   moons).
+  A ring holds only as many asteroid groups as its length allows (a group
+  needs about 90 px of ring; planets keep their share), so a big belt spills
+  into the zones beside it, as Sol's main belt runs on into the Hildas, and a
+  small board holds fewer: a lone yellow sun up to 100, a red dwarf about 85,
+  a board with a distant companion about 80, a binary about 70.
   They come in groups:
   - a **main belt** in the zone between the rocky worlds and the giants;
   - **Trojans** at each gas giant, on its ring 60 degrees ahead and behind;
