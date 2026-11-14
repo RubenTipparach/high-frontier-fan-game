@@ -3674,7 +3674,9 @@ export class MapRenderer {
       // Ceres punches above its dwarf-class default - shrink it 50% so
       // it doesn't dominate the belt next to Vesta / Pallas / Hygiea.
       const bodyScale = /(^|\s)ceres/i.test(site.name || '') ? 0.5 : 1;
-      const haloR = vis.haloR * bodyScale;
+      // A site may carry its own body size (haloR, world units) instead of
+      // its type's default; no Sol site sets it.
+      const haloR = (site.haloR || vis.haloR) * bodyScale;
       const pal = paletteFor(site);
       if (vis.rocky) {
         // Rocky silhouettes carry a per-site random vertex shape, so

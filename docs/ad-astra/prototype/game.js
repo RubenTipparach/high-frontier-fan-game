@@ -237,7 +237,9 @@ function explore(starId, how) { // AA-G12
   log(`Explored ${star.name} by ${how}: ${found.length ? found.join(', ') : 'no worlds of note'}. +1 VP (AA-G12).`, 'good');
   return true;
 }
-function genSystem(starId) { // AA-B7a: a gravity well in the Sol map idiom
+function genSystem(starId, keep = null) { // AA-B7a: a gravity well in the Sol map idiom
+  // keep: { [siteId]: site } from a saved system being re-laid out; its game
+  // state (claims, cubes, colonies, terraform) carries over unchanged.
   // You arrive at the EDGE of the system and burn DOWN the well: one descent
   // path with a parking orbit (cyan ring) at each band. Moving around a band
   // is free (green Hohmann dots); each band further in costs more burns
@@ -248,7 +250,7 @@ function genSystem(starId) { // AA-B7a: a gravity well in the Sol map idiom
   const KX = 1.6, KY = 0.8, CY = 420;
   const P = (deg, r) => ({ x: 700 + Math.cos(deg * Math.PI / 180) * r * KX, y: CY + Math.sin(deg * Math.PI / 180) * r * KY });
   const node = (id, kind, pos, label, extra = {}) => { nodes.push({ id, kind, ...pos, label, ...extra }); return id; };
-  const site = (o) => sites.push({ claimed: false, cubes: 0, pop: 0, step: 0, startStep: 0, ...o, node: o.id });
+  const site = (o) => sites.push(keep && keep[o.id] ? { ...keep[o.id], node: o.id } : { claimed: false, cubes: 0, pop: 0, step: 0, startStep: 0, ...o, node: o.id });
   const link = (a, b) => edges.push([a, b]);
   const TRUNK = 270; // the descent path comes in from the top
   const RINGS = { comp: 250, belt: 195, hz: 135, inner: 72 };
@@ -282,8 +284,8 @@ function genSystem(starId) { // AA-B7a: a gravity well in the Sol map idiom
     link(end, lid);
     if (cmp.chit === 'Ocean') {
       const id = `c${i}`; const nm = cmp.kind === 'gas' ? `${short} icy moon` : `${short} dark world`;
-      const pos = P(ang + (i === 0 ? -8 : 8), RINGS.comp + 42);
-      const b1 = node(`c${i}L1`, 'burn', P(ang + (i === 0 ? -4 : 4), RINGS.comp + 21), 'Landing burn');
+      const pos = P(ang + (i === 0 ? -12 : 12), RINGS.comp - 40);
+      const b1 = node(`c${i}L1`, 'burn', P(ang + (i === 0 ? -6 : 6), RINGS.comp - 20), 'Landing burn');
       node(id, 'site', pos, nm); link(lid, b1); link(b1, id);
       site({ id, kind: 'ocean', name: nm, cls: 'Hostile', size: rint(5, 7), hyd: rint(7, 9), spec: 'C', terra: false, body: cmp.kind });
     }
@@ -299,7 +301,7 @@ function genSystem(starId) { // AA-B7a: a gravity well in the Sol map idiom
   }
   // the habitable-zone world: 1 landing burn from its orbit
   if (st.hz && st.hz !== 'None') {
-    const [lo, hi] = CLASS_HYD[st.hz]; const nm = S.worldNames.pop() || 'World';
+    const [lo, hi] = CLASS_HYD[st.hz]; const nm = (keep && keep.hz && keep.hz.name) || S.worldNames.pop() || 'World';
     const end = around(oHz, RINGS.hz, 150, 'h');
     const lo2 = node('hzLO', 'orbit', P(150, RINGS.hz), `${nm} orbit`); link(end, lo2);
     const b1 = node('hzL1', 'burn', P(150, RINGS.hz - 22), 'Landing burn'); link(lo2, b1);
@@ -308,12 +310,25 @@ function genSystem(starId) { // AA-B7a: a gravity well in the Sol map idiom
     site({ id: 'hz', kind: 'world', name: nm, cls: st.hz, size: rint(6, 9), hyd: rint(lo, hi), spec: SPEC[rint(0, 3)], terra: true, step, startStep: step });
   }
   // the inner rocky world, always: 1 landing burn from the inner orbit
-  const rEnd = around(oIn, RINGS.inner, 20, 'r');
-  const rLO = node('rockLO', 'orbit', P(20, RINGS.inner), `${star.name} I orbit`); link(rEnd, rLO);
-  const rb = node('rockL1', 'burn', P(20, RINGS.inner + 20), 'Landing burn'); link(rLO, rb);
-  node('rock', 'site', P(20, RINGS.inner + 40), `${star.name} I`); link(rb, 'rock');
+  const rEnd = around(oIn, RINGS.inner, 335, 'r');
+  const rLO = node('rockLO', 'orbit', P(335, RINGS.inner), `${star.name} I orbit`); link(rEnd, rLO);
+  const rb = node('rockL1', 'burn', P(335, RINGS.inner + 22), 'Landing burn'); link(rLO, rb);
+  node('rock', 'site', P(335, RINGS.inner + 46), `${star.name} I`); link(rb, 'rock');
   site({ id: 'rock', kind: 'world', name: `${star.name} I`, cls: 'Hostile', size: rint(4, 6), hyd: rint(0, 1), spec: ['M', 'V'][rint(0, 1)], terra: true });
-  return { nodes, edges, sites, landfall: [], blueprints: [] };
+  return { nodes, edges, sites, landfall: [], blueprints: [], layout: SYSTEM_LAYOUT };
+}
+const SYSTEM_LAYOUT = 3;
+// Saved games keep each system's map; bring old ones up to the current layout
+// without touching their game state.
+function migrateSystems() {
+  for (const [starId, sys] of Object.entries(S.systems || {})) {
+    if (sys.layout === SYSTEM_LAYOUT) continue;
+    const keep = Object.fromEntries(sys.sites.map((x) => [x.id, x]));
+    const fresh = genSystem(starId, keep);
+    sys.nodes = fresh.nodes; sys.edges = fresh.edges; sys.sites = fresh.sites; sys.layout = SYSTEM_LAYOUT;
+    if (S.ship.orbit === starId && !sys.nodes.some((n) => n.id === S.ship.sysNode)) S.ship.sysNode = 'high';
+    delete _sysData[starId];
+  }
 }
 const siteById = (starId, id) => sysOf(starId)?.sites.find((x) => x.id === id);
 const sysAdj = (starId, id) => sysOf(starId).edges.filter((e) => e[0] === id || e[1] === id).map((e) => (e[0] === id ? e[1] : e[0]));
@@ -1034,6 +1049,17 @@ function plannerShape(sites, edgePairs) {
 // label); everything else is a waypoint marker (burn pad, Lagrange ring, ...).
 const REAL_TYPES = new Set(['sun', 'planet', 'moon', 'asteroid', 'dwarf', 'site']);
 const baseSite = (o) => ({ id2: `aa-${o.id}`, isDecorative: false, solarZone: null, aeroLandable: false, hazard: false, isWaypoint: !REAL_TYPES.has(o.type), bodyKey: o.id, ...o });
+// HF body art (the renderer's BODY_PALETTES), plus two the Sol board never needed
+const BODY_ART = {
+  earth: { base: '#3b7fc0', light: '#8fc1ee', dark: '#0e2c4b', atmosphere: 'rgba(135, 206, 250, 0.55)' },
+  mars: { base: '#c1502e', light: '#f0a47e', dark: '#3c1408', atmosphere: 'rgba(220, 130, 90, 0.3)' },
+  mercury: { base: '#9a8773', light: '#d4c0a8', dark: '#3d3326' },
+  europa: { base: '#d4cdb8', light: '#f3eee0', dark: '#5a5346' },
+  callisto: { base: '#6e6357', light: '#a89a87', dark: '#1f1c18' },
+  jupiter: { base: '#c8a373', light: '#f3dab0', dark: '#5a3e22' },
+  brownDwarf: { base: '#7c3f1d', light: '#c27a45', dark: '#2a1208', atmosphere: 'rgba(190, 90, 40, 0.35)' },
+  whiteDwarf: { base: '#e8f1ff', light: '#ffffff', dark: '#8aa0c0', atmosphere: 'rgba(220, 235, 255, 0.6)' },
+};
 let _starData = null;
 function starMapData() { // AA-B6, drawn in HF node idioms
   if (_starData) return _starData;
@@ -1069,8 +1095,29 @@ function systemMapData(starId) { // AA-B7a
   const sites = [baseSite({ id: 'star', name: star.name, type: star.type === 'brown' ? 'dwarf' : 'sun', x: 700, y: 420, sunR: 22 })];
   for (const n of sys.nodes) {
     const st = siteBy[n.id];
-    if (st) sites.push(baseSite({ id: n.id, name: st.name, type: st.kind === 'mine' ? 'asteroid' : st.kind === 'ocean' ? 'moon' : 'planet', x: n.x, y: n.y, siteSize: `${st.size}`, hydration: st.hyd }));
-    else sites.push(baseSite({ id: n.id, name: n.label, type: TYPE[n.kind] || 'unknown', x: n.x, y: n.y }));
+    if (st) {
+      // the HF board's body art and site flags (the renderer reads _palette
+      // and submarine / astrobiology / atmospheric off the site)
+      const cls = st.cls;
+      const pal = st.kind === 'mine' ? null
+        : st.kind === 'ocean' ? BODY_ART[st.body === 'gas' ? 'europa' : 'callisto']
+        : cls === 'Garden' || cls === 'Habitable' ? BODY_ART.earth : cls === 'Marginal' ? BODY_ART.mars : BODY_ART.mercury;
+      const x = baseSite({ id: n.id, name: st.name, type: st.kind === 'mine' ? 'asteroid' : st.kind === 'ocean' ? 'moon' : 'planet', x: n.x, y: n.y, siteSize: `${st.size}${st.spec}`, hydration: st.hyd,
+        submarine: st.kind === 'ocean', astrobiology: cls === 'Garden' || cls === 'Habitable', atmospheric: st.kind === 'world' && st.id === 'hz' && cls !== 'Hostile' });
+      if (pal) x._palette = pal;
+      // body size: the habitable-zone world biggest, like Earth on the Sol board
+      x.haloR = st.kind === 'mine' ? undefined : st.id === 'hz' ? 26 : st.kind === 'ocean' ? 15 : 18;
+      sites.push(x);
+    } else {
+      const debrisBelt = n.id === 'belt' && star.hazard === 'debris';
+      sites.push(baseSite({ id: n.id, name: debrisBelt ? 'Asteroid belt (debris disk)' : n.label, type: debrisBelt ? 'radhaz' : (TYPE[n.kind] || 'unknown'), x: n.x, y: n.y, hazard: debrisBelt }));
+      if (n.body) { // the companion itself, drawn as a body beside its Lagrange point
+        const out = 1.18;
+        const b = baseSite({ id: `${n.id}-body`, name: n.body === 'gas' ? 'Gas giant' : n.body === 'brown' ? 'Brown dwarf' : 'White dwarf', type: n.body === 'white' ? 'moon' : 'dwarf', x: 700 + (n.x - 700) * out, y: 420 + (n.y - 420) * out, isLandable: false, haloR: n.body === 'gas' ? 32 : n.body === 'brown' ? 24 : 10 });
+        b._palette = n.body === 'gas' ? BODY_ART.jupiter : n.body === 'brown' ? BODY_ART.brownDwarf : BODY_ART.whiteDwarf;
+        sites.push(b);
+      }
+    }
   }
   _sysData[starId] = plannerShape(sites, sys.edges.map(([a, b]) => [a, b]));
   return _sysData[starId];
@@ -1252,6 +1299,8 @@ function systemActions(starId, id) {
       }
       if (here && site.cubes > 0 && driveCard() && !sh.recycled) out.push({ label: '♻ Recycle drive here (free)', onClick: act(() => freeRecycle(site)) });
     }
+  } else if (String(id).endsWith('-body')) {
+    out.push(info(id.startsWith('c') ? 'A companion body. Its Lagrange point is where you park, skim (gas giants) and reach its moon.' : ''));
   } else {
     const n = sysOf(starId).nodes.find((q) => q.id === id);
     if (n) out.push(info(n.kind === 'burn' ? 'Burn pad: entering it costs 1 burn' : n.kind === 'orbit' ? 'High Orbit: where ships arrive' : n.kind === 'lagrange' ? `${n.label}: Lagrange point` : n.label));
@@ -1609,6 +1658,7 @@ async function setupPick() {
 function start(data) {
   if (data && data.S) { S = data.S; _uid = data._uid || 1000; }
   else if (!load()) newGame();
+  migrateSystems();
   if (S.ship.orbit) { MAPMODE = 'system'; SYSVIEW = S.ship.orbit; }
   render();
   if (S.phase === 'setup') setupPick();
