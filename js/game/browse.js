@@ -124,6 +124,7 @@ import { uiIcon, cardPileBadge } from './ui-icons.js';
 import { SITE_TAGS, normaliseTag, tagDisplay } from '../../data/site-tags.js';
 import { NODE_TAGS } from '../../data/node-tags.js';
 import { hazardFlavorOf } from '../../data/hazard-flavors.js';
+import { NODE_LABELS, MAP_LABELS } from '../../data/map-labels.js';
 import { routeFlewAerobrake } from '../../data/lander-burn.js';
 import { nodeSeason, seasonEntryBlocked } from '../../data/season-gate.js';
 import { serverTagLabels, tagInfo } from '../../data/node-labels.js';
@@ -15814,7 +15815,7 @@ function ensureMapShell(host) {
       </div>
       <div class="map-search">
         <input id="map-search-input" type="text" autocomplete="off"
-          spellcheck="false" placeholder="Find site or node id…" />
+          spellcheck="false" placeholder="Find a site, node id or board text…" />
         <button id="map-search-go" title="Fly to site"
           aria-label="Fly to site">🔍</button>
         <button id="map-search-close" class="map-search-close"
@@ -15822,6 +15823,7 @@ function ensureMapShell(host) {
         <ul id="map-search-suggestions" class="hidden"></ul>
       </div>
       <div id="map-search-backdrop" class="map-search-backdrop hidden"></div>
+      <div id="map-pins" class="map-pins" hidden></div>
       <div class="map-route">
         <span id="route-status" class="muted">Tap a site to plan a route.</span>
         <button id="route-copy" title="Copy the plotted route's site list" aria-label="Copy route">📋 Copy route</button>
@@ -16479,6 +16481,7 @@ function ensureMapShell(host) {
     if (_renderer) _renderer.setOption('debug', false);
   });
   wireSearch(host);
+  renderMapPins(host);
   // Toolbar height drives where the side panel starts (panel is
   // top: var(--toolbar-h) so it sits flush below the toolbar
   // regardless of whether the toolbar has wrapped to a second row
@@ -16874,6 +16877,138 @@ function siteGroupLinked(text) {
   return frag;
 }
 
+// ----- board text search + pinned result lists -----
+//
+// The printed board text (data/map-labels.js) is searchable from the map
+// search: a hazard caption ("rapid spin"), a cluster name ("Jovian Himalia
+// Moonlets"), a Lagrange name ("Sol-Saturn Lagrange"). A caption printed in
+// many places returns EVERY place it appears, as a list, and the player can
+// PIN that list to the map to look up again later (pins persist in this
+// browser, per viewer).
+const BOARD_VIEW_W = 1400, BOARD_VIEW_H = 900;   // loadPlannerMap's view
+const MAP_PINS_KEY = 'hf.mapPins';
+let _boardTextIndex = null;
+// Nearest named site to a world point, to say WHERE a caption sits.
+function nearestNamedSite(x, y) {
+  let best = null; let bd = Infinity;
+  for (const s of (_activeData && _activeData.sites) || []) {
+    if (s.isWaypoint || !s.name) continue;
+    const d = (s.x - x) ** 2 + (s.y - y) ** 2;
+    if (d < bd) { bd = d; best = s; }
+  }
+  return best;
+}
+function boardTextIndex() {
+  if (_boardTextIndex || !_activeData || !_activeData.sites) return _boardTextIndex || [];
+  const byId2 = new Map(_activeData.sites.map((s) => [s.id2, s]));
+  const out = [];
+  const seen = new Set();
+  // Node captions first: they sit ON a space, so the hit can ring it.
+  for (const [slug, text] of Object.entries(NODE_LABELS)) {
+    const node = byId2.get(slug);
+    if (!node) continue;
+    const near = nearestNamedSite(node.x, node.y);
+    out.push({ __board: true, text, x: node.x, y: node.y, nodeId: node.id,
+      where: near ? near.name : '' });
+    seen.add(`${text.toLowerCase()}@${Math.round(node.x / 6)},${Math.round(node.y / 6)}`);
+  }
+  for (const l of MAP_LABELS) {
+    const x = l.nx * BOARD_VIEW_W; const y = l.ny * BOARD_VIEW_H;
+    // The same caption already indexed off its node (within a short reach).
+    const dup = out.some((o) => o.text.toLowerCase() === l.text.toLowerCase()
+      && Math.abs(o.x - x) < 30 && Math.abs(o.y - y) < 30);
+    if (dup) continue;
+    const near = nearestNamedSite(x, y);
+    out.push({ __board: true, text: l.text, x, y, nodeId: null, kind: l.kind,
+      where: near ? near.name : '' });
+  }
+  _boardTextIndex = out;
+  return out;
+}
+// Every board-text place matching the query (words in any order), sorted
+// by caption then by place.
+function searchBoardText(q) {
+  const words = String(q || '').toLowerCase().trim().split(/\s+/).filter(Boolean);
+  if (!words.length || words.join('').length < 3) return [];
+  return boardTextIndex()
+    .filter((h) => { const t = h.text.toLowerCase(); return words.every((w) => t.includes(w)); })
+    .sort((a, b) => a.text.localeCompare(b.text) || a.where.localeCompare(b.where));
+}
+function loadMapPins() {
+  try { const v = JSON.parse(localStorage.getItem(MAP_PINS_KEY) || '[]'); return Array.isArray(v) ? v : []; }
+  catch { return []; }
+}
+function saveMapPins(pins) {
+  try { localStorage.setItem(MAP_PINS_KEY, JSON.stringify(pins)); } catch { /* storage blocked: pins last this visit */ }
+}
+let _mapPinsMem = null;
+function mapPins() { if (!_mapPinsMem) _mapPinsMem = loadMapPins(); return _mapPinsMem; }
+function pinBoardResults(query, hits) {
+  const items = hits.map((h) => ({ text: h.text, where: h.where, x: h.x, y: h.y, nodeId: h.nodeId || null }));
+  const pins = mapPins().filter((p) => p.query.toLowerCase() !== query.toLowerCase());
+  pins.unshift({ query, items, open: true });
+  _mapPinsMem = pins.slice(0, 8);
+  saveMapPins(_mapPinsMem);
+  renderMapPins();
+}
+function flyToBoardHit(h) {
+  if (!_renderer) return;
+  _renderer.flyTo({ x: h.x, y: h.y }, locateZoom(SEARCH_FLY_ZOOM));
+  if (h.nodeId && typeof _renderer.setGroupHighlight === 'function') {
+    _renderer.setGroupHighlight([h.nodeId]);
+    if (_groupHighlightTimer) clearTimeout(_groupHighlightTimer);
+    _groupHighlightTimer = setTimeout(() => { _groupHighlightTimer = null; _renderer && _renderer.setGroupHighlight(null); }, 8000);
+  }
+}
+// The pinned lists, docked on the map. Each pin is a collapsible card:
+// its rows fly to the place, ✕ unpins it.
+let _mapPinsHost = null;
+function renderMapPins(root) {
+  if (root) _mapPinsHost = root.querySelector('#map-pins') || _mapPinsHost;
+  const host = (_mapPinsHost && _mapPinsHost.isConnected) ? _mapPinsHost
+    : (document.getElementById('map-pins') || _mapPinsHost);
+  if (!host) return;
+  const pins = mapPins();
+  host.innerHTML = '';
+  host.hidden = !pins.length;
+  pins.forEach((pin, pi) => {
+    const card = document.createElement('details');
+    card.className = 'map-pin';
+    card.open = pin.open !== false;
+    card.addEventListener('toggle', () => { pin.open = card.open; saveMapPins(pins); });
+    const sum = document.createElement('summary');
+    const title = document.createElement('span');
+    title.className = 'map-pin-title';
+    title.textContent = `📌 ${pin.query} (${pin.items.length})`;
+    const un = document.createElement('button');
+    un.type = 'button';
+    un.className = 'map-pin-unpin';
+    un.textContent = '✕';
+    un.title = 'Unpin this list';
+    un.setAttribute('aria-label', `Unpin ${pin.query}`);
+    un.addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      _mapPinsMem = pins.filter((_, i) => i !== pi);
+      saveMapPins(_mapPinsMem);
+      renderMapPins();
+    });
+    sum.append(title, un);
+    card.appendChild(sum);
+    const ul = document.createElement('ul');
+    for (const it of pin.items) {
+      const li = document.createElement('li');
+      const b = document.createElement('strong'); b.textContent = it.text;
+      const w = document.createElement('em'); w.textContent = it.where ? `near ${it.where}` : '';
+      li.append(b, w);
+      li.title = 'Show on the map';
+      li.addEventListener('click', () => flyToBoardHit(it));
+      ul.appendChild(li);
+    }
+    card.appendChild(ul);
+    host.appendChild(card);
+  });
+}
+
 function wireSearch(host) {
   const input    = host.querySelector('#map-search-input');
   const goBtn    = host.querySelector('#map-search-go');
@@ -16928,7 +17063,13 @@ function wireSearch(host) {
     // A named group ("centaur", "greek", "trojan") leads the list: picking it
     // lights up every member at once.
     const groups = siteGroupsMatching(q).map((g) => ({ __group: g, name: `${g.name} (${siteGroupNodes(g).length})`, type: `group · ${g.blurb}` }));
-    return groups.concat(nameStarts, nameIncl, idStarts, idIncl).slice(0, 12);
+    // Printed board text: EVERY place the text appears, as one list, led by a
+    // row that pins the whole list to the map.
+    const board = searchBoardText(q);
+    const pinRow = board.length ? [{ __pin: { query: q.trim(), hits: board },
+      name: `📌 Pin these ${board.length} board-text result${board.length === 1 ? '' : 's'}`, type: 'keep this list on the map' }] : [];
+    return groups.concat(nameStarts, nameIncl, idStarts, idIncl).slice(0, 12)
+      .concat(pinRow, board.map((h) => ({ ...h, name: h.text, type: h.where ? `board text · near ${h.where}` : 'board text' })));
   }
 
   function renderList(items) {
@@ -16942,7 +17083,8 @@ function wireSearch(host) {
       const nodeId = s.id2 || s.id || '';
       // Named site -> name + type; a bare node -> its id + type.
       li.querySelector('strong').textContent = s.name || ('id: ' + nodeId);
-      li.querySelector('em').textContent = s.__group ? s.type : (s.name ? `${s.type} · ${nodeId}` : (s.type || 'node'));
+      li.querySelector('em').textContent = (s.__group || s.__pin || s.__board) ? s.type : (s.name ? `${s.type} · ${nodeId}` : (s.type || 'node'));
+      if (s.__pin) li.classList.add('map-search-pin-row');
       li.classList.toggle('active', i === activeIndex);
       li.addEventListener('mousedown', (e) => {
         // mousedown not click so the input doesn't blur before we
@@ -16963,6 +17105,20 @@ function wireSearch(host) {
 
   function pickItem(site) {
     if (!site || !_renderer) return;
+    if (site.__pin) {
+      pinBoardResults(site.__pin.query, site.__pin.hits);
+      list.classList.add('hidden');
+      closeSearchModal();
+      setStatus(`📌 Pinned "${site.__pin.query}" (${site.__pin.hits.length}) to the map.`);
+      return;
+    }
+    if (site.__board) {
+      flyToBoardHit(site);
+      input.value = site.text;
+      list.classList.add('hidden');
+      closeSearchModal();
+      return;
+    }
     if (site.__group) {
       highlightSiteGroup(site.__group);
       input.value = site.__group.name;

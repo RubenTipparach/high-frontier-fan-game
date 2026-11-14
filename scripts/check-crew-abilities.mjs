@@ -28,6 +28,7 @@ import { PATENTS, PATENTS_BY_ID } from '../data/patents.js';
 import { COLONISTS_BY_ID } from '../data/colonists.js';
 import { lineOfSightSites, leoSlug, neighborSlugs, siteBySlug } from '../server/game/planner-graph.js';
 import { FACTION_BANK_AQUA } from '../data/altruism.js';
+import { NODE_LABELS, NODE_LABEL_KINDS } from '../data/map-labels.js';
 
 const STRICT = process.argv.includes('--strict');
 let failures = 0;
@@ -1166,6 +1167,35 @@ check('POWER SERIES CHAOS MODEL: a geyser hazard needs no roll or FINAO; WSB fac
   const c = chaos('primary', GEYSER_SKULL);
   assert(c.ok, c.error);
   assert(c.state.players[0].aqua < 20, 'control paid no FINAO for the geysers');
+});
+// The flavours come from the caption the board prints beside each hazard
+// (data/map-labels.js). Walk EVERY captioned skull hazard on the board: the
+// holder passes exactly the ones whose caption mentions geysers / rings / spin /
+// winds, and rolls (pays FINAO) for every other.
+check('POWER SERIES CHAOS MODEL: immune on every board hazard captioned geysers / rings / spin / winds, and only those', () => {
+  const MENTIONS = /\b(geysers?|rings?|spin|winds?)\b/i;
+  let immune = 0; let plain = 0;
+  for (const [slug, caption] of Object.entries(NODE_LABELS)) {
+    const k = NODE_LABEL_KINDS[slug] || [];
+    if (!k.includes('skull') || k.includes('aero')) continue;
+    // A hazard on a space the ship may not stop on (a lander burn) is flown
+    // THROUGH, onto a neighbour.
+    let r = chaos('secondary', slug);
+    const paths = r.ok ? [] : neighborSlugs(slug).flatMap((nb) => [[nb], ...neighborSlugs(nb).filter((n2) => n2 !== slug).map((n2) => [nb, n2])]);
+    for (const path of paths) {
+      const { st } = promoSeat('crew_heliocentricity', 'secondary');
+      const hops = [slug, ...path];
+      const segments = [{ from: null, to: slug, burns: 0, turn: 1 }, ...path.map((to, i) => ({ from: hops[i], to, burns: 0, turn: 1 }))];
+      r = op(st, 0, { kind: 'MOVE', hazardPay: true, segments });
+      if (r.ok) break;
+    }
+    assert(r.ok, `${slug} (${caption}): ${r.error}`);
+    const passed = rollsOf(r).some((x) => x.slug === slug && x.chaosModel);
+    eq(passed, MENTIONS.test(caption), `${slug} "${caption}" chaos pass`);
+    if (passed) immune++; else plain++;
+  }
+  assert(immune > 20 && plain > 20, `too few hazards walked: ${immune} immune, ${plain} plain`);
+  return `${immune} immune, ${plain} roll as normal`;
 });
 check('POWER SERIES CHAOS MODEL: a plain hazard still costs FINAO; Anarchy suspends; M2 locks', () => {
   assert(chaos('secondary', PLAIN_SKULL).state.players[0].aqua < 20, 'immune to a hazard with no geysers / rings / spin / winds');

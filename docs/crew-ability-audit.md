@@ -13,7 +13,7 @@ that had no engine rule and fixed the 4 bugs the first pass found.
   `scripts/check-engine.mjs`. Run `node scripts/check-crew-abilities.mjs
   --strict` (`--strict` makes any known bug fail the run). It needs the vendored
   map: `git submodule update --init vendor/hf-mission-planner`.
-- Result, with `--strict`: **125 ok, 0 failed, 0 known bugs, exit 0.** The
+- Result, with `--strict`: **126 ok, 0 failed, 0 known bugs, exit 0.** The
   closing inventory reports **0 in-scope faces with no engine rule**.
   `check-engine.mjs` (253 ok), `check-boot.mjs` and `build.mjs` also pass.
 - The script is NOT wired into CI (`.github/workflows/deploy.yml`). Add it next
@@ -107,7 +107,7 @@ Promo picks need `ctx.allowPromoCrew` (admin) and m0+m1+m2.
 | Galahad Group / QUEST | `exomigrateOne` `:8217` (key at `:8251`, `to: 'colony:<slug>'`) | Quest Colony destinations in the exomigrate modal | Yes | Yes | No | Any Colony in a zone where you hold a glory chit. Holder vs Heroic face; no-chit and no-Colony refusals; Anarchy; M2 lock. Driven in a browser. |
 | VerisAI / CAVITATION ENGINEERS | `:1970` `cavitationIgnores`, in `applyMove` and `aerobrakeParkingHazard` `:13341` | hazard checklist drops the ignored aerobrake | Yes | Yes | No | First aerobrake each turn, rocket only. Holder vs Incubator face (out of scope, so it does nothing); once per turn; Anarchy; M2 lock. The checklist change was not driven in a browser. |
 | Heliocentricity / WEAK STABILITY BOUNDARY | `applyMove` `wsb` path `:5239` (key at `:5241`) | "Coast again" confirm after a move | Yes | Yes | No | Coast only, once per turn, after the move is spent; the Sundiver becomes the active thruster. Holder vs Power Series face; must coast; once; Anarchy; M2 lock. Driven in a browser. |
-| Heliocentricity / POWER SERIES CHAOS MODEL | `:1962` `chaosModelImmune` over `data/hazard-flavors.js` | hazard checklist drops immune hazards | Yes | Yes | No | Rocket and Freighter moves plus parked descents. Holder vs WSB face; Anarchy; M2 lock. The checklist change was not driven in a browser. See ruling 2. |
+| Heliocentricity / POWER SERIES CHAOS MODEL | `:1962` `chaosModelImmune` over `data/hazard-flavors.js` (flavours from the board captions in `data/map-labels.js`) | hazard checklist drops immune hazards | Yes | Yes | No | Rocket and Freighter moves plus parked descents. Holder vs WSB face; every captioned board hazard walked (39 immune, 43 roll); Anarchy; M2 lock. The checklist change was not driven in a browser. See ruling 9. |
 | Cerulean / BLUE PLANET | `:1984` `applyBluePlanetFinao` via `END_TURN bluePlanet:true`, and the parked-descent skip in `aerobrakeParkingHazard` | Blue Planet choice before ending a turn on an aerobrake | Yes | Yes | No | Pays 1 aqua for the descent roll and loads 1 FT. Holder vs Dowsers face; Anarchy; M2 lock. Driven in a browser. |
 | Cerulean / DOWSERS | `:11391` | existing | Yes | Yes | No | |
 
@@ -185,12 +185,15 @@ can be flipped):
 8. **Cavitation Engineers:** applies to the rocket only, not a Freighter,
    Bernal or Mobile Factory. A parked turn-start descent uses that turn's
    ignore.
-9. **Power Series Chaos Model:** the map data carries no hazard text, so 18
-   nodes were transcribed into `data/hazard-flavors.js` from the outer-system
-   map PDF.
-   - **Please check this list against the board.**
-   - The inner-system sheet is not checked in, so an inner "winds" hazard
-     (Venus, say) is missing.
+9. **Power Series Chaos Model:** the hazard's flavour is read off the caption
+   the published board prints beside it. Every hazard, radiation-belt, aerobrake
+   and lander-burn caption was transcribed from the board image into
+   `data/map-labels.js` (reviewed by the user against an overlay of the board,
+   2026-11-14).
+   - Of the 82 captioned skull hazards, 39 mention geysers, rings, spin or winds
+     and are immune; the other 43 roll as normal. A check walks every one.
+   - Only Hazards count. A radiation belt captioned "dust ring" is a Belt Roll,
+     not a Hazard, so it is not covered.
    - Immunity covers the rocket and Freighter, not Bernals.
 10. **Blue Planet:** "ending turn on an aerobrake" settles the NEXT turn's
     descent roll at END_TURN for 1 aqua. The 1 FT is one refuel step and is lost

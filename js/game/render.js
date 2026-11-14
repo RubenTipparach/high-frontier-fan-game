@@ -5996,7 +5996,11 @@ export class MapRenderer {
       ctx.save();
       ctx.globalAlpha = alpha * 0.9;
       ctx.translate(sx, sy);
-      if (l.angle) ctx.rotate((l.angle * Math.PI) / 180);
+      // The board is read from both sides of the table, so some text is
+      // printed upside down; on a screen, turn it to read upright.
+      let ang = ((l.angle % 360) + 540) % 360 - 180;
+      if (ang > 90) ang -= 180; else if (ang < -90) ang += 180;
+      if (ang) ctx.rotate((ang * Math.PI) / 180);
       ctx.lineWidth = Math.max(2, px * 0.22);
       ctx.strokeStyle = 'rgba(5, 4, 16, 0.85)';
       ctx.strokeText(l.text, 0, 0);
