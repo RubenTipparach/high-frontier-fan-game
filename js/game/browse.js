@@ -19774,8 +19774,28 @@ function myPromotedFreighterSelfAssist(site, opts = {}) {
   return { ok: true, assist: true, needsRoll: !myHasPowersat(), size };
 }
 
+// Elective factory-assist liftoff (H6c): a ship whose own thrust already beats
+// the site size may still take a factory-assist liftoff, because "if the Space
+// first moved into with a factory-assist liftoff is a Hazard, ignore the
+// Hazard". Taken only when the assist is SAFE (a colony, or Powersat) so it never
+// trades one Hazard Roll for another, at a Factory the player may use as their
+// own, never at a lander-burn site. Liftoff gates only (opts.liftoff). Mirror of
+// the server's electiveLiftoffAssist.
+function electiveLiftoffAssist(site, opts = {}) {
+  if (!site || siteHasLanderBurn(site)) return null;
+  const factory = getFactory(site.id);
+  if (!factory || !iCanUseFactory(factory)) return null;
+  const powersat = (opts.powersat != null) ? !!opts.powersat : myHasPowersat();
+  if (!getColony(site.id) && !powersat) return null;
+  return { ok: true, assist: true, needsRoll: false, size: siteSizeNumber(site), elective: true };
+}
+
 function maneuverGate(site, netThrust, opts = {}) {
   const size = siteSizeNumber(site);
+  if (size > 0 && netThrust > size && opts.liftoff) {
+    const elective = electiveLiftoffAssist(site, opts);
+    if (elective) return elective;
+  }
   if (size <= 0 || netThrust > size) {
     return { ok: true, assist: false, needsRoll: false, size };
   }
@@ -25809,7 +25829,7 @@ async function commitFreighterMoveOnline() {
     const frSize = siteSizeNumber(frSite);
     let frLiftG = (frSize <= 1 || (frNoAssistUnder6 && frSize < 6))
       ? { ok: true, needsRoll: false }
-      : maneuverGate(frSite, myFreighterThrust(), { powersat: playerHasPowersat(mySnapshotPlayer()), isFreighter: true });
+      : maneuverGate(frSite, myFreighterThrust(), { powersat: playerHasPowersat(mySnapshotPlayer()), isFreighter: true, liftoff: true });
     if (!frLiftG.ok) frLiftG = myPromotedFreighterSelfAssist(frSite) || frLiftG;
     if (!frLiftG.ok && frLiftG.landerBurn) {
       const atmospheric = isAtmosphericSite(frSite.id2) || isAtmosphericSite(frSite.id) || siteIsAerostat(frSite);
@@ -25836,7 +25856,7 @@ async function commitFreighterMoveOnline() {
         });
         if (!go) { setStatus('Move cancelled - no water spent.'); return false; }
         frAcetyleneLiftoff = true;
-        frLiftG = maneuverGate(frSite, myFreighterThrust(), { powersat: playerHasPowersat(mySnapshotPlayer()), isFreighter: true, acetylene: true });
+        frLiftG = maneuverGate(frSite, myFreighterThrust(), { powersat: playerHasPowersat(mySnapshotPlayer()), isFreighter: true, acetylene: true, liftoff: true });
       }
     }
     if (!frLiftG.ok) {
@@ -26330,7 +26350,7 @@ async function moveRocket() {
     let liftoffAssistItem = null;
     let landingAssistItem = null;
     let acetyleneLiftoff = false;
-    let liftG = curSite ? maneuverGate(curSite, netThrust) : { ok: true };
+    let liftG = curSite ? maneuverGate(curSite, netThrust, { liftoff: true }) : { ok: true };
     // Engaged when the player ARMED it, OR automatically when a plain liftoff is
     // blocked by lander burns. The armed case is the point: acetylene is a
     // choice, not a fallback (user 2026-08-07, "I should be able to use
@@ -26366,7 +26386,7 @@ async function moveRocket() {
           if (!go) { setStatus('Move cancelled - no water spent.'); return false; }
         }
         acetyleneLiftoff = true;
-        liftG = maneuverGate(curSite, netThrust, { acetylene: true });
+        liftG = maneuverGate(curSite, netThrust, { acetylene: true, liftoff: true });
       }
     }
     if (curSite && !liftG.ok) {
@@ -30232,7 +30252,7 @@ function planRocketRouteTo(destSite) {
   const netThrust = (engineLiveP && thrStats && Number.isFinite(thrStats.thrust)) ? thrStats.thrust : 0;
   // Armed acetylene boosters (the explicit site-popup button) carry the
   // liftoff through the lander burns, so plan with the exception applied.
-  const liftGate = maneuverGate(origin, netThrust, { acetylene: _acetyleneArmed });
+  const liftGate = maneuverGate(origin, netThrust, { acetylene: _acetyleneArmed, liftoff: true });
   const landGate = maneuverGate(destSite, netThrust);
   if (!liftGate.ok) {
     setStatus(liftGate.landerBurn
@@ -30265,8 +30285,10 @@ function planRocketRouteTo(destSite) {
   }
   const assistNote = (!landGate.ok && destAeroCapable)
     ? ` <em class="muted">(🪂 aerobrake descent - parachutes down through the atmosphere)</em>`
+    : (liftGate.elective && !landGate.assist)
+      ? ` <em class="muted">(🏭 safe factory-assist liftoff - a hazard on the first space out is ignored)</em>`
     : (liftGate.assist || landGate.assist)
-      ? ` <em class="muted">(🏭 factory assist${(liftGate.needsRoll || landGate.needsRoll) ? ' - hazard roll on the move' : ' - free, colony present'})</em>`
+      ? ` <em class="muted">(🏭 factory assist${(liftGate.needsRoll || landGate.needsRoll) ? ' - hazard roll on the move' : ' - no hazard roll'})</em>`
       : '';
   // Synodic-season gate: a seasonal space is only on the board during its
   // Sunspot phase, so it can't be entered (or even routed to) off-season. A
