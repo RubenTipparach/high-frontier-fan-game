@@ -419,7 +419,12 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
     // Crew background art: the faction's launcher on its home pad, painted
     // behind the whole face below the name bar (both crew faces are cream).
     // Same approval gate as the patent decks (data/card-art.js).
-    const crewArt = CARD_ART[card.id] && CARD_ART[card.id][sideName];
+    // The Library and the crew picker render single-face projections
+    // (data/crew.js#CREW_FACES: id "<card>__<face>", the face itself stored
+    // as faces.primary), so look the art up by the physical card + real face.
+    const artId = card.srcId || card.id;
+    const artSide = card.srcId && card.face ? card.face : sideName;
+    const crewArt = CARD_ART[artId] && CARD_ART[artId][artSide];
     if (crewArt && (crewArt.approved || globalThis.HF_CARD_ART_PREVIEW)) {
       face.style.backgroundImage = `url("${assetUrl(crewArt.src)}")`;
       face.classList.add('has-bg-art', 'is-crew-art');
