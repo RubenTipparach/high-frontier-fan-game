@@ -6,6 +6,7 @@ import { MapRenderer } from '../../../js/game/render.js';
 import { buildChains } from '../../../js/game/planner-map.js';
 import { NODE_TAGS } from '../../../data/node-tags.js';
 import { buildMap, wellBurns, landingOf, GIANT_HALO } from './mapgen.js';
+import { rollSystem, seededRint } from './roll.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const h = (tag, attrs = {}, ...kids) => {
@@ -35,55 +36,25 @@ const ART = {
 };
 const MOON_ART = ['io', 'europa', 'ganymede', 'callisto', 'ceres'];
 
-const GIANT4 = (n) => [{ name: `${n}-I`, size: 8, sites: 2 }, { name: `${n}-II`, size: 7, sites: 2, ocean: true }, { name: `${n}-III`, size: 9, sites: 2 }, { name: `${n}-IV`, size: 6, sites: 1 }, { name: `${n} moonlet`, size: 2 }];
-const PRESETS = {
-  'Epsilon Indi (yellow sun, gas giant)': { name: 'Epsilon Indi', stars: [{ name: 'Epsilon Indi', type: 'yellow', zones: 6 }], bodies: [
-    { kind: 'planet', name: 'Ember', zone: 0, size: 5, sites: 2 },
-    { kind: 'belt', name: 'Inner rocks', zone: 1, angle: 108, count: 2 },
-    { kind: 'planet', name: 'Haven', zone: 2, size: 8, sites: 3, atmosphere: true, cls: 'Marginal' },
-    { kind: 'belt', name: 'Belt', zone: 3, angle: 302, count: 8 },
-    { kind: 'dwarf', name: 'Vesper', zone: 3, angle: 245, size: 6 },
-    { kind: 'giant', name: 'Epsilon b', zone: 4, angle: 118, size: 11, trojans: 2, moons: GIANT4('b') },
-    { kind: 'belt', name: 'Kuiper', zone: 5, angle: 84, count: 5 },
-    { kind: 'comet', name: 'Comet Vey', zone: 3, size: 2 },
-    { kind: 'comet', name: 'Comet Ilse', zone: 5, size: 1 },
-  ] },
-  'Alpha Centauri (binary + Proxima)': { name: 'Alpha Centauri', stars: [{ name: 'Alpha Centauri A', type: 'yellow', zones: 4 }, { name: 'Alpha Centauri B', type: 'yellow', zones: 3, role: 'binary' }, { name: 'Proxima', type: 'red', zones: 2, role: 'distant' }], bodies: [
-    { kind: 'planet', name: 'A I', zone: 0, size: 5, sites: 2 },
-    { kind: 'planet', name: 'A II', zone: 1, size: 8, sites: 3, atmosphere: true, cls: 'Marginal' },
-    { kind: 'belt', name: 'A belt', zone: 2, count: 6 },
-    { kind: 'giant', name: 'A b', zone: 3, size: 10, trojans: 1, moons: [{ name: 'A b-I', size: 7, sites: 2 }, { name: 'A b-II', size: 6, sites: 1 }] },
-    { kind: 'planet', name: 'B I', star: 1, zone: 1, size: 6, sites: 2 },
-    { kind: 'belt', name: 'B belt', star: 1, zone: 2, count: 4 },
-    { kind: 'planet', name: 'Proxima b', star: 2, zone: 1, size: 7, sites: 2, atmosphere: true, cls: 'Marginal' },
-    { kind: 'belt', name: 'Proxima rocks', star: 2, zone: 1, count: 2 },
-    { kind: 'comet', name: 'Comet Ardo', zone: 3, size: 2 },
-  ] },
-  "Red dwarf (Barnard's Star)": { name: "Barnard's Star", stars: [{ name: "Barnard's Star", type: 'red', zones: 4 }], bodies: [
-    { kind: 'planet', name: 'Barnard b', zone: 0, size: 6, sites: 2 },
-    { kind: 'planet', name: 'Barnard c', zone: 1, size: 4, sites: 1 },
-    { kind: 'belt', name: 'Belt', zone: 2, count: 6 },
-    { kind: 'belt', name: 'Outer rocks', zone: 3, count: 3 },
-    { kind: 'comet', name: 'Comet Barn', zone: 2, size: 2 },
-  ] },
-  'Sol-like (9 zones)': { name: 'Sol-like', stars: [{ name: 'Sol-like', type: 'yellow', zones: 9 }], bodies: [
-    { kind: 'planet', name: 'Hot rock', zone: 0, size: 10, sites: 2 },
-    { kind: 'planet', name: 'Veiled', zone: 1, size: 11, sites: 1, atmosphere: true },
-    { kind: 'planet', name: 'Blue', zone: 2, size: 9, sites: 2, atmosphere: true, cls: 'Habitable' },
-    { kind: 'belt', name: 'Near rocks', zone: 2, angle: 323, count: 3 },
-    { kind: 'planet', name: 'Red', zone: 3, size: 8, sites: 3, atmosphere: true, cls: 'Marginal' },
-    { kind: 'belt', name: 'Main belt', zone: 4, angle: 212, count: 9 }, { kind: 'dwarf', name: 'Dwarf', zone: 4, angle: 55, size: 6 },
-    { kind: 'giant', name: 'Giant', zone: 5, angle: 167, size: 11, trojans: 3, moons: GIANT4('G') },
-    { kind: 'giant', name: 'Ringed', zone: 6, angle: 293, size: 10, moons: [{ name: 'R-I', size: 7, sites: 1 }, { name: 'R-II', size: 5, sites: 1 }] },
-    { kind: 'giant', name: 'Ice giant', zone: 7, angle: 92, size: 10, moons: [{ name: 'I-I', size: 6, sites: 1 }] },
-    { kind: 'belt', name: 'Kuiper', zone: 8, angle: 39, count: 6 }, { kind: 'dwarf', name: 'Far dwarf', zone: 8, angle: 136, size: 7 },
-    { kind: 'comet', name: 'Comet Encka', zone: 4, size: 2 }, { kind: 'comet', name: 'Comet Hal', zone: 7, size: 2 }, { kind: 'comet', name: 'Comet Mac', zone: 8, size: 1 },
-  ] },
+// Presets are rolled by the same roller the game uses (roll.js), from a fixed
+// seed so each preset is the same every load.
+const ROLLS = {
+  'Yellow sun, 15 planets': { seed: 11, star: { name: 'Tau Ceti', type: 'yellow' }, chits: { hz: 'Marginal', comps: [{ kind: 'gas', chit: 'Ocean' }] }, planets: 15 },
+  'Yellow sun with a gas giant': { seed: 4, star: { name: 'Epsilon Eridani', type: 'yellow' }, chits: { hz: 'Habitable', comps: [{ kind: 'gas', chit: 'Ocean' }] } },
+  'Red dwarf': { seed: 9, star: { name: "Barnard's Star", type: 'red' }, chits: { hz: 'Hostile', comps: [] } },
+  'Alpha Centauri (binary + Proxima)': { seed: 3, star: { name: 'Alpha Centauri', type: 'yellow' }, chits: { hz: 'None', comps: [], stars: [{ name: 'Alpha Centauri B', type: 'yellow', role: 'binary', chit: 'Marginal' }, { name: 'Proxima Centauri', type: 'red', role: 'distant', chit: 'Hostile', known: 'Proxima b' }] } },
+  'Epsilon Indi (giant + distant brown dwarf)': { seed: 5, star: { name: 'Epsilon Indi', type: 'yellow' }, chits: { hz: 'Habitable', comps: [{ kind: 'gas', chit: 'None' }], stars: [{ name: 'Epsilon Indi B', type: 'brown', role: 'distant', chit: 'Ocean' }] } },
 };
-const FIRST = 'Epsilon Indi (yellow sun, gas giant)';
+const WORLDS = ['Verge', 'Haven', 'Cinder', 'Tethys', 'Morrow', 'Ashfall', 'Lumen', 'Brine', 'Kestrel', 'Halcyon'];
+const rolled = ({ seed, star, chits, planets }, rint = seededRint(seed)) => {
+  let w = 0; const r = rollSystem({ star, chits, rint, planets, worldName: () => WORLDS[(seed + w++) % WORLDS.length] });
+  return r.spec;
+};
+const PRESETS = Object.fromEntries(Object.entries(ROLLS).map(([k, v]) => [k, rolled(v)]));
+const FIRST = 'Yellow sun with a gas giant';
 // bump when the presets or the rules change, so a saved map from an older
 // builder doesn't hide them (the old one simply isn't loaded)
-const SPEC_KEY = 'aa-mapgen-spec-v3';
+const SPEC_KEY = 'aa-mapgen-spec-v4';
 // older saved specs had one star at the top level
 const upgrade = (s) => (s.stars ? s : { name: s.name, stars: [{ name: s.name || 'Star', type: s.starType || 'yellow', zones: s.zones || 6 }], bodies: s.bodies || [] });
 let SPEC = (() => { try { const s = JSON.parse(localStorage.getItem(SPEC_KEY)); if (s && s.bodies) return upgrade(s); } catch (e) { /* none */ } return structuredClone(PRESETS[FIRST]); })();
@@ -220,6 +191,9 @@ function renderPanel() {
   p.replaceChildren(
     h('h2', {}, 'System map builder'),
     h('p', { class: 'muted' }, 'Add stars and bodies and the map rebuilds from the system map rules (SM). Tap a node on the map to see which rule placed it.'),
+    h('div', { class: 'mg-adds' },
+      h('select', { id: 'mg-roll-kind', 'aria-label': 'Kind of star to roll' }, [['yellow', 'Yellow sun'], ['red', 'Red dwarf'], ['binary', 'Binary + distant']].map(([v, l]) => h('option', { value: v }, l))),
+      h('button', { onclick: () => rollRandom($('#mg-roll-kind').value) }, '🎲 Roll a system')),
     h('h3', {}, 'Stars'),
     h('div', { class: 'mg-bodies' }, SPEC.stars.map(starRow)),
     h('div', { class: 'mg-adds' },
@@ -242,5 +216,16 @@ function renderPanel() {
         h('option', { value: '' }, 'Load a preset...'), Object.keys(PRESETS).map((k) => h('option', { value: k }, k)))));
 }
 
-window.__mg = { get spec() { return SPEC; }, set spec(s) { SPEC = upgrade(s); rebuild(); }, get map() { return MAP; }, get renderer() { return RENDERER; }, rebuild, popup, PRESETS };
+// roll a fresh random system with the game's own roller
+function rollRandom(kind) {
+  const r = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
+  const hz = ['Garden', 'Habitable', 'Marginal', 'Hostile', 'None'][r(0, 4)];
+  const def = kind === 'binary'
+    ? { seed: r(1, 9999), star: { name: 'Rigel Kent', type: 'yellow' }, chits: { hz, comps: [], stars: [{ name: 'Rigel Kent B', type: 'yellow', role: 'binary', chit: ['Habitable', 'Marginal', 'Hostile', 'None'][r(0, 3)] }, { name: 'Rigel Kent C', type: 'red', role: 'distant', chit: 'Hostile' }] } }
+    : { seed: r(1, 9999), star: { name: kind === 'red' ? 'Wolf 424' : 'Gliese 667', type: kind }, chits: { hz, comps: r(0, 1) ? [{ kind: 'gas', chit: r(0, 1) ? 'Ocean' : 'None' }] : [] } };
+  SPEC = rolled(def, (a, b) => a + Math.floor(Math.random() * (b - a + 1)));
+  rebuild(); try { RENDERER.reset(); } catch (e) { /* sizing */ }
+}
+
+window.__mg = { get spec() { return SPEC; }, set spec(s) { SPEC = upgrade(s); rebuild(); }, get map() { return MAP; }, get renderer() { return RENDERER; }, rebuild, popup, PRESETS, rollRandom };
 rebuild();

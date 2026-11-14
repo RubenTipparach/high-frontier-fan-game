@@ -23,6 +23,7 @@ edit the rule first, then the generator, then the validator, then look at it.
 | `docs/ad-astra/analyze-sol-map.mjs` | Measures the real Sol board. Every SM number comes from here. |
 | `docs/ad-astra/analyze-moon-branch.mjs` | Shows where Sol's moons join their giant's well (never at the +4 slingshot). |
 | `docs/ad-astra/mapgen/mapgen.js` | Pure generator + validator (no DOM, no imports). `buildMap(spec)`, `validateMap(map)`. |
+| `docs/ad-astra/mapgen/roll.js` | `rollSystem({ star, chits, rint })`: a full body list at the design targets. Shared by the game and the builder. |
 | `docs/ad-astra/mapgen/builder.js` + `index.html` + `builder.css` | The interactive builder: edit bodies, the map rebuilds in the game's own `MapRenderer`, rule checks listed live. |
 | `docs/ad-astra/prototype/build-artifact.mjs` | `node ... build-artifact.mjs mapgen` bundles the builder into one page (`docs/ad-astra/mapgen/dist/map-builder.html`) for an Artifact. |
 | `js/game/render.js` | The real HF map renderer. Do not fork it; feed it planner-shaped data. |
@@ -92,30 +93,44 @@ Run `node docs/ad-astra/analyze-sol-map.mjs` to re-measure. The numbers:
    Lagrange. `landingOf(size)`: 7+ full lander burn, 4-6 half lander burn,
    1-3 none (straight from orbit). An atmosphere planet gets an aerobrake +
    hazard on one landing (SM-6c). Sites fan out on the far side of the body,
-   at least `SITE_GAP` (32) world px apart INCLUDING sites on the same body
+   at least `SITE_GAP` (26, Sol's own closest pair) world px apart INCLUDING sites on the same body
    (SM-5e). Moons fan round the far side of the hub, alternating near / far.
 7. **Giants (SM-7).** Three ring pivots ~70 px apart (`giantDelta`): ladder
    start (a - delta), slingshot in (a), slingshot out (a + delta).
    - **Slingshot** (`purpose: 'flyby'`, +4 / +2) at the giant's centre: free
-     through a radiation node from the in and out pivots, plus one transition
-     burn out to the next zone's ring. It never leads to a moon: you cannot
-     slingshot into a moon's orbit.
-   - **Escape ladder**: 3 burns (`rung` 1-3) curling round the -90 side at
-     R 34 (giant sphere `GIANT_HALO` 24).
-   - **Moons** fan over [outAng - 126, outAng - 18], alternating 64 / 96 px
-     out, and branch off the rung nearer in angle (2 or 3; off rung 3 through
-     a radiation node) -> `moonEscape(size)` burns -> moon Lagrange ->
-     landing -> sites. Moonlets come off rung 1 with one burn.
-8. **Asteroids (SM-5f).** `kind: 'belt'` (count, sizes) and a giant's
-   `trojans: n` expand into clusters: ring pivot -> one escape burn ->
-   Lagrange -> up to 3 asteroid sites, fanned 22 px out. At least 40% of
-   sites must be asteroids; the game's systems run 50%+.
+     through a radiation node from the in pivot and back out to the out pivot.
+     It never leads to a moon: you cannot slingshot into a moon's orbit.
+   - **Escape ladder**: 3 burns (`rung` 1-3) on an arc at R 36 round the
+     OUTWARD side (outAng - 150, - 62, + 62), drawn with `arcAround`.
+   - **Major moons** (size 4-9) fan over [outAng - 132, outAng + 112] on two
+     shells (`SHELL.inner` 62 through a radiation node, `SHELL.outer` 98),
+     each off the rung on its side (2 or 3).
+   - **Minor moons** (size 1-2) go in groups of up to 3 on `SHELL.minor` 156,
+     between the majors: rung -> one burn -> Lagrange -> moonlets (bodyKind
+     moon, `minor: true`). The game mines them.
+8. **Asteroids (SM-5f).** `kind: 'belt'` (count up to 30, sizes) and a giant's
+   `trojans: n` expand into groups: ring pivot -> one escape burn ->
+   Lagrange -> up to 3 rocks fanned 22 px out, alternating sides of the ring.
 9. **Comets (SM-5g).** `kind: 'comet'` (never zone 0): ring pivot -> 1 / 2 / 3
    escape burns (inner half / outer half / outermost zone) -> Lagrange -> a
-   second Lagrange -> the comet site (`bodyKind: 'comet'`, size 1-3). Name it
-   "Comet ..." and the renderer's comet palette applies. Comets skip the
-   well-depth check. The game puts one in the main-belt zone and 0-2 further
-   out (Sol: 12 comets, 7 in the belt zone).
+   second Lagrange -> the comet site. Name it "Comet ..." and the renderer's
+   comet palette applies. Comets skip the well-depth check.
+10. **Placement (SM-5h).** Every body has a footprint: its farthest site from
+   its centre plus `HALF_GAP` (13). A giant's is a circle of
+   `SHELL.minor + 24 + 13` round it. Bodies with an `angle` keep it; the rest
+   are placed largest first at the first angle (from a hash of the name, plus
+   `spec.jitter` on a retry) whose footprint clears everything placed and stays
+   on the board. If its ring is full, an asteroid group tries the other side
+   and a comet the zones further out. A wrong footprint shows up as
+   SM-5e failures between bodies, not inside one.
+
+**The design targets** (`TARGETS` in mapgen.js; the user's numbers, SM-1f / 5f
+/ 5g / 7c): 4 to 15 planets a star, 30 to 50 asteroids and 10 comets a board,
+4 to 10 major and 10 to 15 minor moons a gas giant. `mapgen/roll.js` rolls a
+spec at those targets from a star and its chits; the game (`systems.js`) and
+the builder's presets and "Roll a system" all use it. Boards come out at 50 to
+160 sites (Sol: 188).
+
 
 ## The spec
 
@@ -248,6 +263,16 @@ conversion to the planner-map shape `MapRenderer` already draws:
   viewer's browser. After a rules change an old saved map hid the new presets
   (no belts). Bump `SPEC_KEY` in builder.js whenever presets or rules change.
 - **No comets.** Sol has 12; boards had none until SM-5g.
+- **Too sparse.** 2-3 asteroids and 1-5 moons a giant read as empty next to
+  Sol. Targets now: 30-50 asteroids, 10 comets, 4-15 planets, gas giants 4-10
+  major + 10-15 minor moons. At that density, random angles plus retries
+  cannot place everything: use the footprint packing (SM-5h).
+- **Footprints guessed instead of measured.** Rocks fan 22 px out from their
+  Lagrange point, so a 30 px footprint let two groups' rocks sit 16 px apart.
+  A footprint is the farthest site plus half a gap, nothing less.
+- **Spreading `extra` over a site** that carried a `kind` key overwrote the
+  node kind, so no asteroid sites existed at all. Keep `bodyKind` a separate
+  argument.
 - **Moons in the well-depth check against planets.** A size 9 moon is deeper
   than a size 10 planet by design (SM-4b). Worlds and moons are checked apart.
 - **Sol decor on other maps.** `solDecor = false` hides Sol's orbit guides,

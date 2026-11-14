@@ -1,6 +1,6 @@
 # High Frontier: Ad Astra - Rulebook
 
-**Draft v0.8 (2026-11-14).** A fan variant of High Frontier 4: All that
+**Draft v0.9 (2026-11-14).** A fan variant of High Frontier 4: All that
 takes the game past the edge of the Sol map. Not affiliated with Sierra Madre
 Games. Original rules; it borrows only the hooks HF4 already prints (TW
 thrusters, the three Ad Astra exits, the Ad Astra and Sunlens Futures).
@@ -122,19 +122,26 @@ per body (more burns, bigger well), lander burns, radiation at each star and
 in the giants' belts, and asteroids as most of the sites. The board's bodies
 come from the star's chits:
 
-| Body | Yellow sun (6 zones) | Red / brown dwarf, or a binary's primary (4 zones) | What it is |
-|---|---|---|---|
-| Inner rocky world | zone 1 | zone 1 | size 4-6, two regions, Hostile |
-| Near-star rocks | zone 2 | zone 1 | 1-2 asteroids |
-| Habitable-zone world (if its chit is not "No world") | zone 3 | zone 2 | size 6-9, three regions sharing the chit's class (H10); an atmosphere unless Hostile |
-| Main belt | zone 4 | zone 3 | a dwarf planet (size 5-7) and 6-9 asteroids (size 1-4) |
-| Giants | zones 5 and 6 | zone 4 | a gas giant has 4 large moons and 2 Trojan asteroids at each Lagrange point on its orbit; a brown dwarf 2 moons, a white dwarf 1; each also a moonlet. A buried-ocean chit makes the second large moon (the only one, for a white dwarf) an ocean world |
-| Outer belt | zone 6 | (none) | 3-5 asteroids |
-| Comets | zone 4, then 0-2 more in zones 5-6 | zone 3, then 0-2 in zone 4 | water-rich mines (hydration 3-5) on far orbits: 1 to 3 escape burns, then two Lagrange points (SM-5g) |
+Each star has **4 to 15 planets** (gas giants included), and each board
+**30 to 50 asteroids and 10 comets** (SM-1f, 5f, 5g):
+
+| Body | Where | What it is |
+|---|---|---|
+| Inner rocky world | innermost zone | size 4-6, two regions, Hostile |
+| Habitable-zone world (if its chit is not "No world") | about a third of the way out | size 6-9, three regions sharing the chit's class (H10); an atmosphere unless Hostile |
+| Other rocky worlds | spread through the zones | size 3-9, one or two regions, Hostile |
+| Gas giants | outer zones | 4 to 10 major moons (size 4-9) and 10 to 15 minor moons (size 1-2), 2 Trojan asteroids at each Lagrange point on its orbit. A buried-ocean chit makes the second major moon an ocean world. A yellow sun has up to 3, a red dwarf up to 1-2; a binary's stars none beyond their chits |
+| Dwarf planets | the main-belt zone (and the outermost zone on a big system) | size 5-7 |
+| Asteroids | near-star rocks, the main belt, Trojans, an outer belt; a binary partner and a distant companion get their own | size 1-4, in groups of up to 3 |
+| Comets | half in the main-belt zone, the rest further out (one round a binary partner) | water-rich (hydration 3-5) on far orbits (SM-5g) |
+
+A lone yellow sun has 6 to 15 planets on up to 9 zones; a red dwarf 4 to 9;
+a binary's primary 4 to 6 on 4 zones, its partner 4 to 5 on 3 zones; a
+distant companion 4 on 3 zones.
 
 **Giants (SM-7).** A giant's flyby point is a **slingshot** on the transfer
-layer: free to reach through a radiation belt, back out to the ring or (one
-burn) out to the next zone. You cannot slingshot into a moon's orbit: moons
+layer: free to reach through a radiation belt, and free back out to the ring
+a little further along. You cannot slingshot into a moon's orbit: moons
 are reached down the giant's **escape ladder**, three ordinary burns curling
 round it, branching off the 2nd or 3rd burn. A gas giant's slingshot point is
 its skim point (G13).
@@ -668,6 +675,10 @@ itself is still to be drawn [OPEN Z8]. Data from public catalogues as of Nov
   Replicator cube). Each gets a rendered preview for sign-off before use.
 
 ### Changelog
+- **v0.9 (2026-11-14):** Sol-scale boards (B7a): 4 to 15 planets a star, 30
+  to 50 asteroids and 10 comets a board, gas giants with 4 to 10 major and
+  10 to 15 minor moons. Bodies are packed by footprint (SM-5h); sites 26 px
+  apart, the Sol board's own minimum.
 - **v0.8 (2026-11-14):** Giants (B7a, SM-7): the flyby point is a slingshot on
   the transfer layer, and moons branch off the escape ladder, never the
   slingshot. Asteroids are most of a system's sites: near-star rocks, a main

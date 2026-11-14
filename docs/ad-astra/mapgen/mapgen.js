@@ -9,13 +9,13 @@
 //   { name, starType, zones,                       (one star; or:)
 //     stars: [{ name, type: 'yellow'|'red'|'brown'|'white', zones, role: 'primary'|'binary'|'distant' }],
 //     bodies: [{ kind: 'planet'|'giant'|'dwarf'|'asteroid'|'belt'|'comet', name, star (index, default 0),
-//                zone (0 = innermost), angle (deg, optional), size 1..11, sites 1..3,
-//                atmosphere, cls,
-//                moons: [{ name, size, sites, ocean }], trojans: n per side   (giants)
+//                zone (0 = innermost), angle (deg, optional: placed by SM-5h when absent),
+//                size 1..11, sites 1..3, atmosphere, cls,
+//                moons: [{ name, size, sites, ocean }], trojans: n per side   (giants: size 1-2 = minor)
 //                count, sizes: [..]                                          (belts) }] }
 
 export const SOL_ZONE_PALETTE = ['#fdf441', '#fefab1', '#f97316', '#ffdd92', '#97a0bf', '#585e90', '#2b3534', '#2a2d4c', '#1d102e'];
-export const WORLD = { cx: 700, cy: 450, kx: 1.45, ky: 0.95, inner: 70, outer: 420 }; // a lone star fills the board
+export const WORLD = { cx: 700, cy: 450, kx: 1.45, ky: 0.95, inner: 70, outer: 420, w: 1400, h: 900 }; // a lone star fills the board
 
 // SM-4a: escape burns by size; SM-5c: landing by size; SM-4c: flyby boost
 export const wellBurns = (size) => (size <= 5 ? 1 : size <= 7 ? 2 : 3);
@@ -23,9 +23,10 @@ export const landingOf = (size) => (size >= 7 ? 'full' : size >= 4 ? 'half' : 'n
 export const flybyOf = (size) => (size >= 11 ? 4 : size >= 10 ? 2 : size >= 8 ? 1 : 0);
 export const moonEscape = (size) => Math.max(1, wellBurns(size) - 1); // SM-4b: the giant's ladder comes first
 
-export const SITE_GAP = 32; // SM-5e: world px between any two sites
+export const SITE_GAP = 26; // SM-5e: the Sol board's own closest pair of sites
 export const GIANT_HALO = 24; // a giant's sphere radius on these boards (world px)
-export const ASTEROID_SHARE = 0.4; // SM-5f
+// SM-1f / 5f / 5g / 7c design targets
+export const TARGETS = { planets: [4, 15], asteroids: [30, 50], comets: 10, majors: [4, 10], minors: [10, 15] };
 const deg = (a) => (a * Math.PI) / 180;
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const round1 = (v) => Math.round(v * 10) / 10;
@@ -38,15 +39,15 @@ export function starLayout(stars) {
   const at = (cx, cy, inner, outer) => ({ cx, cy, inner, outer, kx: WORLD.kx, ky: WORLD.ky });
   return stars.map((s, i) => {
     const role = i === 0 ? 'primary' : s.role;
-    if (role === 'binary') return at(1075, 450, 40, 165);
-    if (role === 'distant') return at(1270, 112, 26, 75);
-    if (hasB) return at(400, 480, 48, 225);
-    if (hasD) return at(600, 462, 60, 350);
+    if (role === 'binary') return at(1080, 470, 40, 180);
+    if (role === 'distant') return at(1240, 128, 24, 104);
+    if (hasB) return at(400, 470, 48, 250);
+    if (hasD) return at(590, 470, 60, 355);
     return at(WORLD.cx, WORLD.cy, WORLD.inner, WORLD.outer);
   });
 }
 const normStars = (spec) => (spec.stars && spec.stars.length ? spec.stars : [{ name: spec.name, type: spec.starType, zones: spec.zones }])
-  .map((s, i) => { const role = i === 0 ? 'primary' : (s.role === 'distant' ? 'distant' : 'binary'); const [lo, hi] = ZONES_FOR[role]; return { ...s, role, zones: clamp(s.zones | 0 || (role === 'primary' ? 6 : role === 'binary' ? 4 : 2), lo, hi) }; });
+  .map((s, i) => { const role = i === 0 ? 'primary' : (s.role === 'distant' ? 'distant' : 'binary'); const [lo, hi] = ZONES_FOR[role]; return { ...s, role, zones: clamp(s.zones | 0 || (role === 'primary' ? 6 : role === 'binary' ? 4 : 3), lo, hi) }; });
 
 export function zoneBounds(n, L = WORLD) { // SM-1a: b[0]=0 (star) .. b[n]=outer edge
   const b = [0];
@@ -56,6 +57,8 @@ export function zoneBounds(n, L = WORLD) { // SM-1a: b[0]=0 (star) .. b[n]=outer
 const P = (L, a, r) => ({ x: round1(L.cx + Math.cos(deg(a)) * r * L.kx), y: round1(L.cy + Math.sin(deg(a)) * r * L.ky) });
 export function radiusOf(x, y, L = WORLD) { return Math.hypot((x - L.cx) / L.kx, (y - L.cy) / L.ky); }
 const angleTo = (L, x, y) => ((Math.atan2((y - L.cy) / L.ky, (x - L.cx) / L.kx) * 180) / Math.PI + 360) % 360;
+const outAngOf = (L, a) => (Math.atan2(Math.sin(deg(a)) * L.ky, Math.cos(deg(a)) * L.kx) * 180) / Math.PI;
+const hash = (str) => { let h = 2166136261; for (const c of String(str)) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } return Math.abs(h); };
 
 // SM-1c: the zone bands as the renderer draws them (setCanonicalZones), with
 // the Sol palette sampled inner to outer. Takes a zone count (one star) or the
@@ -76,6 +79,11 @@ export function zoneLayer(starsOrN) {
   });
   return out;
 }
+
+// SM-7c geometry of a giant's moon system (world px from the giant)
+const SHELL = { inner: 62, outer: 98, minor: 156 };
+const HALF_GAP = 13; // SITE_GAP / 2: a footprint reaches half a gap past its farthest site
+const giantReach = (it) => ((it.moons || []).some((m) => (m.size | 0 || 6) <= 2) ? SHELL.minor + 24 : SHELL.outer + 22) + HALF_GAP;
 
 export function buildMap(spec) {
   const stars = normStars(spec);
@@ -121,6 +129,17 @@ export function buildMap(spec) {
     }
     link(prev, to);
   };
+  // an arc round a point (a giant's escape ladder, SM-7b)
+  const arcAround = (from, to, C, R, a0, a1) => {
+    const n = Math.max(1, Math.round(Math.abs(a1 - a0) / 14) - 1);
+    let prev = from;
+    for (let j = 1; j <= n; j++) {
+      const a = a0 + ((a1 - a0) * j) / (n + 1);
+      const id = add('decorative', { x: round1(C.x + Math.cos(deg(a)) * R), y: round1(C.y + Math.sin(deg(a)) * R) });
+      link(prev, id); prev = id;
+    }
+    link(prev, to);
+  };
 
   const starNodes = S.map((st) => add('star', { x: st.L.cx, y: st.L.cy }, { id: st.i === 0 ? 'star' : `star${st.i}`, label: st.name || 'Star', starType: st.type || 'yellow', role: st.role }));
 
@@ -128,15 +147,15 @@ export function buildMap(spec) {
   const items = [];
   (spec.bodies || []).forEach((bd0, idx) => {
     const st = S[clamp(bd0.star | 0, 0, S.length - 1)];
-    const bd = { ...bd0, idx, st, zone: clamp(bd0.zone | 0, bd0.kind === 'comet' ? 1 : 0, st.N - 1) }; // SM-5g: no comet in the star's zone
+    const bd = { ...bd0, idx, st, zone: clamp(bd0.zone | 0, bd0.kind === 'comet' ? 1 : 0, st.N - 1), fixed: bd0.angle != null }; // SM-5g: no comet in the star's zone
     if (bd.kind === 'belt') {
-      const count = clamp(bd.count | 0 || 6, 1, 12); const nc = Math.ceil(count / 3);
+      const count = clamp(bd.count | 0 || 6, 1, 30); const nc = Math.ceil(count / 3);
       const sizes = bd.sizes && bd.sizes.length ? bd.sizes : [2, 3, 1, 4, 2, 3];
       let k = 0;
       for (let c = 0; c < nc; c++) {
         const n = Math.min(3, count - c * 3);
-        items.push({ kind: 'cluster', st, zone: bd.zone, angle: bd.angle == null ? null : (bd.angle + (360 * c) / nc) % 360, belt: bd.name, side: c % 2 ? -1 : 1,
-          rocks: Array.from({ length: n }, () => ({ name: `${bd.name} ${String.fromCharCode(65 + k)}`, size: clamp(sizes[k++ % sizes.length] | 0 || 2, 1, 4) })), beltIdx: idx, beltSpread: nc });
+        items.push({ kind: 'cluster', st, zone: bd.zone, name: `${bd.name}#${c}`, fixed: bd.angle != null, angle: bd.angle == null ? null : (bd.angle + (360 * c) / nc) % 360, belt: bd.name, side: bd.zone === 0 ? 1 : (c % 2 ? -1 : 1),
+          rocks: Array.from({ length: n }, () => ({ name: `${bd.name} ${k < 26 ? String.fromCharCode(65 + k) : `A${String.fromCharCode(65 + k - 26)}`}`, size: clamp(sizes[k++ % sizes.length] | 0 || 2, 1, 4) })) });
       }
       return;
     }
@@ -144,26 +163,54 @@ export function buildMap(spec) {
     if (bd.kind === 'giant' && (bd.trojans | 0) > 0) {
       for (const [lp, off] of [['L4', -60], ['L5', 60]]) {
         const n = clamp(bd.trojans | 0, 1, 3);
-        items.push({ kind: 'cluster', st, zone: bd.zone, trojanOf: bd, offset: off, belt: `${bd.name} ${lp}`, side: 1,
+        items.push({ kind: 'cluster', st, zone: bd.zone, name: `${bd.name} ${lp}`, trojanOf: bd, offset: off, belt: `${bd.name} ${lp}`, side: -1,
           rocks: Array.from({ length: n }, (_, j) => ({ name: `${bd.name} ${lp}${n > 1 ? String.fromCharCode(97 + j) : ''}`, size: [2, 1, 3][j] })) });
       }
     }
   });
-  // auto angles: spread a zone's bodies round the ring; a belt's clusters spread evenly
-  const byZone = {};
-  for (const it of items) if (it.kind !== 'cluster' || it.belt) { const key = `${it.st.i}:${it.zone}`; (byZone[key] = byZone[key] || []).push(it); }
-  for (const list of Object.values(byZone)) {
-    const lone = list.filter((it) => it.kind !== 'cluster');
-    lone.forEach((it, j) => { if (it.angle == null) it.angle = (200 + (360 * j) / lone.length + it.zone * 37) % 360; });
-  }
-  const beltBase = {};
-  for (const it of items) {
-    if (it.kind !== 'cluster') continue;
-    if (it.trojanOf) { it.angle = (it.trojanOf.angle + it.offset + 360) % 360; continue; }
-    if (it.angle == null) {
-      if (beltBase[it.beltIdx] == null) beltBase[it.beltIdx] = { a: (40 + it.zone * 53 + it.st.i * 90) % 360, c: 0 };
-      it.angle = (beltBase[it.beltIdx].a + (360 * beltBase[it.beltIdx].c++) / it.beltSpread) % 360;
+
+  // ---- SM-5h: placement. Every item has a footprint round a point that
+  // depends on its angle; bodies are placed largest first at the first angle
+  // whose footprint clears every footprint already placed.
+  const wOf = (st, k) => st.b[k + 1] - st.b[k];
+  const footprint = (it, a) => {
+    const st = it.st, k = it.zone, w = wOf(st, k), L = st.L;
+    if (it.kind === 'giant') { const C = P(L, a, st.mid(k) + 0.42 * w); return { x: C.x, y: C.y, r: giantReach(it) }; } // the moons fan almost all the way round
+    // footprint = the farthest site from the centre, plus half a gap (SM-5e)
+    if (it.kind === 'cluster') { const c = P(L, a, st.mid(k) + it.side * 0.3 * w); return { x: c.x, y: c.y, r: 22 + HALF_GAP }; }
+    if (it.kind === 'comet') { const c = P(L, a + 9, st.mid(k) + 0.44 * w); return { x: c.x, y: c.y, r: HALF_GAP + 1 }; }
+    const c = P(L, a, st.mid(k) + 0.36 * w);
+    return { x: c.x, y: c.y, r: (it.kind === 'planet' ? 26 : 12) + HALF_GAP };
+  };
+  const placed = [];
+  const clash = (f) => placed.reduce((worst, g) => Math.max(worst, f.r + g.r - Math.hypot(f.x - g.x, f.y - g.y)), -Infinity);
+  const offBoard = (f) => Math.max(0, f.r * 0.6 - f.x, f.x + f.r * 0.6 - WORLD.w, f.r * 0.6 - f.y, f.y + f.r * 0.6 - WORLD.h);
+  const size0 = (it) => (it.kind === 'giant' ? 1000 + giantReach(it) : it.kind === 'planet' ? 500 + (it.sites | 0) : it.kind === 'comet' ? 200 : it.kind === 'cluster' ? (it.trojanOf ? 50 : 100) : 300);
+  const order = items.filter((it) => !it.trojanOf).sort((p, q) => (q.fixed - p.fixed) || (size0(q) - size0(p)));
+  // variants a body may fall back on when its ring is full: an asteroid group
+  // may sit on either side of its ring, a comet one zone further out
+  const variants = (it) => (it.kind === 'cluster' && !it.trojanOf && it.zone > 0 ? [{ side: it.side }, { side: -it.side }]
+    : it.kind === 'comet' ? Array.from({ length: it.st.N - it.zone }, (_, d) => ({ zone: it.zone + d })) : [{}]);
+  const placeOne = (it) => {
+    if (it.fixed) { placed.push(footprint(it, it.angle)); return; }
+    const start = hash(`${it.name || it.kind}${spec.jitter || ''}`) % 360; // a retry re-places with another start
+    let best = null;
+    for (const v of variants(it)) {
+      const cand = { ...it, ...v };
+      for (let s = 0; s < 360; s += 3) {
+        const a = (start + s) % 360;
+        const f = footprint(cand, a);
+        const bad = Math.max(clash(f), 0) + offBoard(f) * 2;
+        if (!best || bad < best.bad) best = { a, f, bad, v };
+        if (bad <= 0) break;
+      }
+      if (best.bad <= 0) break;
     }
+    Object.assign(it, best.v); it.angle = best.a; placed.push(best.f);
+  };
+  for (const it of order) {
+    placeOne(it);
+    if (it.kind === 'giant') for (const tr of items.filter((x) => x.trojanOf && x.trojanOf.name === it.name)) { tr.angle = (it.angle + tr.offset + 360) % 360; placed.push(footprint(tr, tr.angle)); }
   }
 
   // ---- SM-9b: the routes between stars need a pivot facing the other star
@@ -188,7 +235,7 @@ export function buildMap(spec) {
         if (it.kind === 'giant') { it.delta = giantDelta(st, k); angles.add(Math.round((it.angle - it.delta + 360) % 360)); angles.add(Math.round((it.angle + it.delta) % 360)); }
       }
       if (k === st.N - 1) for (const a of facing[st.i]) angles.add(a);
-      const list = [...angles].sort((p, q) => p - q).filter((a, i, arr) => i === 0 || a - arr[i - 1] >= 6);
+      const list = [...angles].sort((p, q) => p - q).filter((a, i, arr) => i === 0 || a - arr[i - 1] >= 5);
       ringPivots[st.i][k] = list.map((a) => ({ a, id: add('hohmann', P(st.L, a, st.mid(k))) }));
     }
     for (let k = 0; k < st.N; k++) {
@@ -219,7 +266,6 @@ export function buildMap(spec) {
   }
 
   // ---- SM-4 / SM-5 / SM-7: each body's well
-  const outAngOf = (L, a) => (Math.atan2(Math.sin(deg(a)) * L.ky, Math.cos(deg(a)) * L.kx) * 180) / Math.PI;
   const addSite = (pos, extra) => { const sid = add('site', pos, extra); sites.push(byId[sid]); return sid; };
   const fanPos = (centre, i, count, around, dist, spreadDeg) => {
     const ang = around + (count === 1 ? 0 : (i - (count - 1) / 2) * spreadDeg); // SM-5e: SITE_GAP apart
@@ -236,74 +282,79 @@ export function buildMap(spec) {
     if (aerobrake) byId[lb].tags.aerobrake = true;
     link(lagId, lb); link(lb, siteId);
   };
+  // an asteroid group: from a node, one escape burn -> Lagrange -> 1-3 rocks fanned outward
+  const rockGroup = (fromId, lagPos, around, rocks, bodyKind, extra, dist = 22, spread = 100) => {
+    const lag = add('lagrange', lagPos, { purpose: 'orbit', body: extra.belt || extra.moonOf, ...(extra.moonOf ? { moonOf: extra.moonOf } : {}) });
+    route(fromId, lag, [{ kind: 'burn', t: 0.5, extra: { purpose: 'escape', body: extra.belt || rocks[0].name, ...(extra.moonOf ? { moonOf: extra.moonOf } : {}) } }], 0.08, 16);
+    rocks.forEach((r, j) => link(lag, addSite(fanPos(byId[lag], j, rocks.length, around, dist, spread), { ...extra, body: r.name, bodyKind, size: r.size, region: 0 })));
+    return lag;
+  };
   for (const it of items) {
     const st = it.st; const L = st.L; const k = it.zone; const a = it.angle;
     const dep = pivotAt(st, k, a);
-    const w = st.b[k + 1] - st.b[k];
+    const w = wOf(st, k);
     const outAng = outAngOf(L, a);
     if (it.kind === 'cluster') { // SM-5f: pivot -> one escape burn -> Lagrange -> 1-3 asteroids
-      const side = k === 0 ? 1 : it.side;
-      const lag = add('lagrange', P(L, a, st.mid(k) + side * 0.3 * w), { purpose: 'orbit', body: it.belt });
+      const side = it.side;
+      const lag = rockGroup(dep.id, P(L, a, st.mid(k) + side * 0.3 * w), side > 0 ? outAng : outAng + 180, it.rocks, 'asteroid', { belt: it.belt, home: st.i });
       if (k === 0) byId[lag].tags.hazard = true; // SM-6b
-      route(dep.id, lag, [{ kind: 'burn', t: 0.5, extra: { purpose: 'escape', body: it.belt } }], 0.1, 16);
-      const around = side > 0 ? outAng : outAng + 180;
-      it.rocks.forEach((r, j) => link(lag, addSite(fanPos(byId[lag], j, it.rocks.length, around, 22, 95), { body: r.name, bodyKind: 'asteroid', size: r.size, region: 0, belt: it.belt })));
+      continue;
+    }
+    if (it.kind === 'comet') { // SM-5g: pivot -> escape burns -> orbit -> far orbit -> the comet
+      const esc = k === st.N - 1 ? 3 : k >= st.N / 2 ? 2 : 1;
+      const lag1 = add('lagrange', P(L, a, st.mid(k) + 0.2 * w), { purpose: 'orbit', body: it.name, comet: true });
+      route(dep.id, lag1, Array.from({ length: esc }, (_, i) => ({ kind: 'burn', t: (i + 1) / (esc + 1), extra: { purpose: 'escape', body: it.name } })), 0.18, 16);
+      const lag2 = add('lagrange', P(L, a + 5, st.mid(k) + 0.34 * w), { purpose: 'orbit', body: it.name, comet: true });
+      route(lag1, lag2, [], 0.25, 14);
+      link(lag2, addSite(P(L, a + 9, st.mid(k) + 0.44 * w), { body: it.name, bodyKind: 'comet', size: clamp(it.size | 0 || 2, 1, 3), region: 0, home: st.i }));
       continue;
     }
     const size = clamp(it.size | 0 || 4, 1, 11);
     if (it.kind === 'giant') {
       const C = P(L, a, st.mid(k) + 0.42 * w);
       const pol = (ang, r) => ({ x: round1(C.x + Math.cos(deg(ang)) * r), y: round1(C.y + Math.sin(deg(ang)) * r) });
-      // Local frame round the giant: outAng points away from the star; the
-      // slingshot uses the +90 side, the ladder and the moons the -90 side.
       const D0 = pivotAt(st, k, a - it.delta), D2 = pivotAt(st, k, a + it.delta);
       // SM-7a: the slingshot point, on the transfer layer: in from the ring and
-      // back out to it a little further on, free through radiation belts; one
-      // transition burn out to the next zone. No moon route touches it.
+      // back out to it a little further on, free through radiation belts. No
+      // moon route touches it.
       const F = add('lagrange', C, { purpose: 'flyby', body: it.name, fly: flybyOf(size) || null, giant: true });
       route(dep.id, F, [{ kind: 'radhaz', t: 0.5 }], 0.05, 16);
       if (D2.id !== dep.id) route(F, D2.id, [{ kind: 'radhaz', t: 0.45 }], 0.12, 16);
-      if (k + 1 < st.N) route(F, pivotAt(st, k + 1, a).id, [{ kind: 'burn', t: 0.55, extra: { purpose: 'transition' } }], 0.03, 18);
       bodies.push({ id: `${F}-body`, name: it.name, kind: it.giantKind || 'gas', x: C.x, y: C.y, size, star: st.i });
-      // SM-7b: the escape ladder curls round the -90 side; moons branch off burns 2 and 3
-      const R = 34; // just outside the giant's sphere (haloR 24)
-      const b1 = add('burn', pol(outAng - 158, R + 6), { purpose: 'escape', body: it.name, rung: 1 });
-      const b2 = add('burn', pol(outAng - 112, R), { purpose: 'escape', body: it.name, rung: 2 });
-      const b3 = add('burn', pol(outAng - 62, R), { purpose: 'escape', body: it.name, rung: 3 });
-      route((D0.id !== dep.id ? D0 : dep).id, b1, [], 0.1, 16); route(b1, b2, [], 0.12, 14); route(b2, b3, [], 0.12, 14);
-      const moons = (it.moons || []).filter((m) => (m.size | 0 || 6) > 2);
-      const moonlets = (it.moons || []).filter((m) => (m.size | 0 || 6) <= 2);
-      // the moon sector: from just past rung 1 round to just short of the slingshot exit
-      const lo = outAng - 126, hi = outAng - 18;
-      moons.forEach((m, i) => {
-        const ma = moons.length === 1 ? (lo + hi) / 2 : lo + ((hi - lo) * i) / (moons.length - 1);
-        const md = 64 + (i % 2) * 32; // alternate near / far so sites stay SITE_GAP apart (SM-5e)
+      // SM-7b: the escape ladder curls round the outward side; moons branch off burns 2 and 3
+      const R = 36; // just outside the giant's sphere (GIANT_HALO)
+      const A1 = outAng - 150, A2 = outAng - 62, A3 = outAng + 62;
+      const b1 = add('burn', pol(A1, R + 4), { purpose: 'escape', body: it.name, rung: 1 });
+      const b2 = add('burn', pol(A2, R), { purpose: 'escape', body: it.name, rung: 2 });
+      const b3 = add('burn', pol(A3, R), { purpose: 'escape', body: it.name, rung: 3 });
+      route((D0.id !== dep.id ? D0 : dep).id, b1, [], 0.1, 16);
+      arcAround(b1, b2, C, R + 2, A1, A2); arcAround(b2, b3, C, R, A2, A3);
+      const rungFor = (ang) => (((ang - outAng + 540) % 360) - 180 < 0 ? b2 : b3);
+      const majors = (it.moons || []).filter((m) => (m.size | 0 || 6) > 2);
+      const minors = (it.moons || []).filter((m) => (m.size | 0 || 6) <= 2);
+      // SM-7c: majors on two shells over the outward sector, inner shell through radiation
+      const lo = outAng - 132, hi = outAng + 112;
+      majors.forEach((m, i) => {
+        const ma = majors.length === 1 ? outAng : lo + ((hi - lo) * i) / (majors.length - 1);
+        const inner = i % 2 === 0;
+        const md = inner ? SHELL.inner : SHELL.outer;
         const mc = pol(ma, md);
-        const msize = clamp(m.size | 0 || 6, 3, 9);
+        const msize = clamp(m.size | 0 || 6, 4, 9);
         const tag = { moonOf: it.name };
         const mlag = add('lagrange', pol(ma, md - 18), { purpose: 'orbit', body: m.name, ...tag });
-        const from = Math.abs(((ma - (outAng - 112) + 540) % 360) - 180) <= Math.abs(((ma - (outAng - 62) + 540) % 360) - 180) ? b2 : b3; // the rung nearer in angle
         const me = moonEscape(msize);
-        const stops = [...(from === b3 ? [{ kind: 'radhaz', t: 0.25 }] : []), // SM-6a: the inner moons' belts
-          ...Array.from({ length: me }, (_, j) => ({ kind: 'burn', t: 0.4 + (0.5 * (j + 1)) / (me + 1), extra: { purpose: 'escape', body: m.name, ...tag } }))];
-        route(from, mlag, stops, 0.06, 14);
-        const ss = placeSites(m.name, 'moon', mc, clamp(m.sites | 0 || 1, 1, 2), ma, 24, msize, { ...tag, ocean: !!m.ocean }, 84);
+        const stops = [...(inner ? [{ kind: 'radhaz', t: 0.3 }] : []),
+          ...Array.from({ length: me }, (_, j) => ({ kind: 'burn', t: 0.42 + (0.5 * (j + 1)) / (me + 1), extra: { purpose: 'escape', body: m.name, ...tag } }))];
+        route(rungFor(ma), mlag, stops, 0.05, 14);
+        const ss = placeSites(m.name, 'moon', mc, clamp(m.sites | 0 || 1, 1, 2), ma, 22, msize, { ...tag, ocean: !!m.ocean, home: st.i }, 80);
         ss.forEach((s, j) => landTo(mlag, s.sid, landingOf(msize), j === 0 && msize >= 8, false));
       });
-      moonlets.forEach((m, i) => { // SM-7b moonlets: off the first burn, one burn, one site
-        const ma = outAng - 174 - i * 26;
-        const s = placeSites(m.name, 'moon', pol(ma, 80), 1, ma, 0, clamp(m.size | 0 || 2, 1, 2), { moonOf: it.name, ocean: !!m.ocean })[0];
-        route(b1, s.sid, [{ kind: 'burn', t: 0.55, extra: { purpose: 'escape', body: m.name, moonOf: it.name } }], 0.08, 16);
+      // SM-7c: minors in groups of up to 3 on the outer shell, between the majors
+      const groups = []; for (let i = 0; i < minors.length; i += 3) groups.push(minors.slice(i, i + 3));
+      groups.forEach((g, i) => {
+        const ga = lo + ((hi - lo) * (i + 0.5)) / groups.length;
+        rockGroup(rungFor(ga), pol(ga, SHELL.minor - 16), ga, g.map((m) => ({ name: m.name, size: clamp(m.size | 0 || 2, 1, 2) })), 'moon', { moonOf: it.name, minor: true, home: st.i }, 24, 70);
       });
-      continue;
-    }
-    if (it.kind === 'comet') { // SM-5g: pivot -> escape burns -> orbit -> far orbit -> the comet
-      const esc = k === st.N - 1 ? 3 : k >= st.N / 2 ? 2 : 1;
-      const lag1 = add('lagrange', P(L, a, st.mid(k) + 0.22 * w), { purpose: 'orbit', body: it.name, comet: true });
-      route(dep.id, lag1, Array.from({ length: esc }, (_, i) => ({ kind: 'burn', t: (i + 1) / (esc + 1), extra: { purpose: 'escape', body: it.name } })), 0.18, 16);
-      const lag2 = add('lagrange', P(L, a + 5, st.mid(k) + 0.36 * w), { purpose: 'orbit', body: it.name, comet: true });
-      route(lag1, lag2, [], 0.25, 14);
-      link(lag2, addSite(P(L, a + 9, st.mid(k) + 0.46 * w), { body: it.name, bodyKind: 'comet', size: clamp(it.size | 0 || 2, 1, 3), region: 0, starAt: { x: L.cx, y: L.cy } }));
       continue;
     }
     // planets, dwarfs, lone asteroids: pivot -> escape burns -> orbit -> landing -> sites
@@ -314,7 +365,7 @@ export function buildMap(spec) {
     route(dep.id, lag, Array.from({ length: esc }, (_, i) => ({ kind: 'burn', t: (i + 1) / (esc + 1), extra: { purpose: 'escape', body: it.name } })), 0.18, 16);
     const count = it.kind === 'planet' ? clamp(it.sites | 0 || 1, 1, 3) : 1; // SM-5a
     const landing = landingOf(size);
-    const ss = placeSites(it.name, it.kind, centre, count, outAng, it.kind === 'planet' ? 33 : 14, size, { cls: it.cls || null });
+    const ss = placeSites(it.name, it.kind, centre, count, outAng, it.kind === 'planet' ? 26 : 12, size, { cls: it.cls || null, home: st.i }, 64);
     ss.forEach((s, j) => landTo(lag, s.sid, landing, false, !!it.atmosphere && j === 0)); // SM-6c aerobrake on one landing
   }
   const zones = zoneLayer(stars);
@@ -346,7 +397,7 @@ export function validateMap(map) {
       if (n.id > m) continue;
       const nm = byId[m];
       if (zkey(n) !== zkey(nm) && n.kind !== 'site' && nm.kind !== 'site' && n.kind !== 'star' && nm.kind !== 'star') {
-        if (n.purpose === 'escape' || nm.purpose === 'escape' || n.purpose === 'orbit' || nm.purpose === 'orbit') continue; // a well may straddle a boundary
+        if (n.purpose === 'escape' || nm.purpose === 'escape' || n.purpose === 'orbit' || nm.purpose === 'orbit' || n.purpose === 'flyby' || nm.purpose === 'flyby') continue; // a well may straddle a boundary
         crossings++; if (n.kind === 'burn' || nm.kind === 'burn') crossOk++;
       }
     }
@@ -361,7 +412,8 @@ export function validateMap(map) {
   const wellDepth = (s, avoidFly = false) => {
     const dist = { [s]: 0 }; const open = [s]; const done = new Set();
     while (open.length) {
-      open.sort((p, q) => dist[p] - dist[q]); const n = open.shift(); if (done.has(n)) continue; done.add(n);
+      let bi = 0; for (let i = 1; i < open.length; i++) if (dist[open[i]] < dist[open[bi]]) bi = i;
+      const n = open.splice(bi, 1)[0]; if (done.has(n)) continue; done.add(n);
       if (byId[n].kind === 'hohmann') return dist[n];
       for (const m of adj[n]) { if (avoidFly && isFly(byId[m])) continue; const nd = dist[n] + (byId[m].kind === 'burn' ? 1 : 0); if (dist[m] == null || nd < dist[m]) { dist[m] = nd; open.push(m); } }
     }
@@ -371,15 +423,15 @@ export function validateMap(map) {
   // sit deeper than their giant's own well, so they are checked on their own
   const wells = {}; const moonBad = []; let moonCount = 0;
   for (const s of nodes.filter((n) => n.kind === 'site')) {
-    const d = wellDepth(s.id);
     if (s.bodyKind === 'comet') continue; // SM-5g: a comet's burns buy an orbit, not a climb out of a well
-    if (s.bodyKind === 'moon') { if (s.size <= 2) continue; moonCount++; if (d == null || d < 4) moonBad.push(s.body); continue; } // ladder 2+ and at least 1 of its own + landing
+    if (s.bodyKind === 'moon') { if (s.size <= 2) continue; moonCount++; const d = wellDepth(s.id); if (d == null || d < 4) moonBad.push(s.body); continue; } // ladder 2+, 1 of its own, landing
+    const d = wellDepth(s.id);
     (wells[s.size] = wells[s.size] || []).push(d);
   }
   const wellText = Object.entries(wells).sort((p, q) => p[0] - q[0]).map(([sz, ds]) => `size ${sz}: ${(ds.reduce((a, c) => a + c, 0) / ds.length).toFixed(1)}`).join(' | ');
   const mono = Object.entries(wells).sort((p, q) => p[0] - q[0]).map(([, ds]) => Math.min(...ds));
   check('SM-4a bigger worlds have deeper wells', mono.every((v, i) => i === 0 || v >= mono[i - 1]), wellText || 'no worlds');
-  check('SM-4b moons inherit the giant\'s well', moonBad.length === 0, moonBad.length ? `too shallow: ${[...new Set(moonBad)].join(', ')}` : `${moonCount} moon sites, all 4+ burns deep`);
+  check('SM-4b moons inherit the giant\'s well', moonBad.length === 0, moonBad.length ? `too shallow: ${[...new Set(moonBad)].join(', ')}` : `${moonCount} major moon sites, all 4+ burns deep`);
   // 5. sites: one edge, reachable from arrival
   const multi = nodes.filter((n) => n.kind === 'site' && adj[n.id].length !== 1);
   check('SM-5b each site has one edge', multi.length === 0, multi.length ? `${multi.length} sites with ${multi.map((n) => adj[n.id].length).join('/')}` : `${nodes.filter((n) => n.kind === 'site').length} sites`);
@@ -388,13 +440,13 @@ export function validateMap(map) {
   const unreach = nodes.filter((n) => n.kind === 'site' && !seen.has(n.id));
   check('SM-8c every site reachable', unreach.length === 0, unreach.length ? `${unreach.length} unreachable` : 'all reachable from the edge');
   // 6. radiation only in a star's innermost zone or a giant's belts
-  const nearGiant = (n) => (map.bodies || []).some((g) => Math.hypot(g.x - n.x, g.y - n.y) < 150);
+  const nearGiant = (n) => (map.bodies || []).some((g) => Math.hypot(g.x - n.x, g.y - n.y) < 160);
   const stray = nodes.filter((n) => n.kind === 'radhaz' && !(n.star >= 0 && n.zone === 0) && !nearGiant(n));
   check('SM-6a radiation only near a star or a giant', stray.length === 0, stray.length ? `${stray.length} stray radiation nodes` : `${nodes.filter((n) => n.kind === 'radhaz').length} radiation nodes`);
   // 7. site spacing
-  const ss = nodes.filter((n) => n.kind === 'site'); let close = 0;
-  for (let i = 0; i < ss.length; i++) for (let j = i + 1; j < ss.length; j++) if (Math.hypot(ss[i].x - ss[j].x, ss[i].y - ss[j].y) < SITE_GAP) close++; // same body too: hexes must not stack
-  check(`SM-5e sites at least ${SITE_GAP} px apart`, close === 0, close ? `${close} pairs too close` : 'labels clear');
+  const ss = nodes.filter((n) => n.kind === 'site'); let close = 0; const pairs = [];
+  for (let i = 0; i < ss.length; i++) for (let j = i + 1; j < ss.length; j++) if (Math.hypot(ss[i].x - ss[j].x, ss[i].y - ss[j].y) < SITE_GAP) { close++; if (pairs.length < 3) pairs.push(`${ss[i].body}/${ss[j].body}`); } // same body too: hexes must not stack
+  check(`SM-5e sites at least ${SITE_GAP} px apart`, close === 0, close ? `${close} pairs too close (${pairs.join(', ')})` : 'labels clear');
   // 8. no slingshot into a moon's orbit: moon routes never touch a flyby point,
   // and every moon is reachable down its giant's ladder without one
   const flys = nodes.filter(isFly);
@@ -403,12 +455,27 @@ export function validateMap(map) {
   const viaFly = moonSites.filter((n) => wellDepth(n.id, true) == null);
   check('SM-7 moons branch off the ladder, not the slingshot', !touch.length && !viaFly.length,
     touch.length ? `${touch.length} flyby points lead to a moon` : viaFly.length ? `${viaFly.length} moon sites only reachable by slingshot` : `${flys.length} slingshot points, ${moonSites.length} moon sites off the ladders`);
-  // 9. asteroids are most of the sites
+  // 9. design targets: planets per star, asteroids and comets per board
+  const planetsBy = {};
+  for (const n of ss.filter((x) => x.bodyKind === 'planet')) (planetsBy[n.home] = planetsBy[n.home] || new Set()).add(n.body);
+  for (const g of map.bodies || []) (planetsBy[g.star] = planetsBy[g.star] || new Set()).add(g.name);
+  const pCounts = (map.stars || [{}]).map((_, i) => (planetsBy[i] ? planetsBy[i].size : 0));
   const rocks = ss.filter((n) => n.bodyKind === 'asteroid').length;
-  check(`SM-5f asteroids at least ${Math.round(ASTEROID_SHARE * 100)}% of sites`, !ss.length || rocks / ss.length >= ASTEROID_SHARE, `${rocks} of ${ss.length} sites (${ss.length ? Math.round((100 * rocks) / ss.length) : 0}%)`);
-  // 10. comets: outside the star's zone, two Lagrange points on their route
   const comets = ss.filter((n) => n.bodyKind === 'comet');
+  const [p0, p1] = TARGETS.planets, [a0, a1] = TARGETS.asteroids;
+  check(`SM-1f/5f/5g ${p0}-${p1} planets a star, ${a0}-${a1} asteroids, ${TARGETS.comets} comets`,
+    pCounts.every((c) => c >= p0 && c <= p1) && rocks >= a0 && rocks <= a1 && comets.length === TARGETS.comets,
+    `planets ${pCounts.join(' + ')}, asteroids ${rocks}, comets ${comets.length}`);
+  // 10. comets: outside the star's zone, two Lagrange points on their route
   const badComet = comets.filter((c) => c.zone === 0 || nodes.filter((n) => n.comet && n.body === c.body && n.kind === 'lagrange').length !== 2);
   check('SM-5g comets on their own far orbits', badComet.length === 0, badComet.length ? `${badComet.length} comets misplaced` : `${comets.length} comets`);
+  // 11. gas giants: 4-10 major and 10-15 minor moons
+  const moonsOf = {};
+  for (const n of moonSites) { const e = (moonsOf[n.moonOf] = moonsOf[n.moonOf] || { major: new Set(), minor: new Set() }); (n.size > 2 ? e.major : e.minor).add(n.body); }
+  const gas = (map.bodies || []).filter((g) => g.kind === 'gas');
+  const [m0, m1] = TARGETS.majors, [n0, n1] = TARGETS.minors;
+  const badGas = gas.filter((g) => { const e = moonsOf[g.name] || { major: new Set(), minor: new Set() }; return e.major.size < m0 || e.major.size > m1 || e.minor.size < n0 || e.minor.size > n1; });
+  check(`SM-7c gas giants: ${m0}-${m1} major, ${n0}-${n1} minor moons`, badGas.length === 0,
+    gas.length ? gas.map((g) => { const e = moonsOf[g.name] || { major: new Set(), minor: new Set() }; return `${g.name} ${e.major.size}+${e.minor.size}`; }).join(', ') : 'no gas giants');
   return out;
 }

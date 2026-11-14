@@ -27,6 +27,8 @@ Every rule is grounded in a measurement of the real Sol board
 | Curves | every decorative node has exactly 2 edges (517 of 517) |
 | Dead ends | 5 non-site nodes with a single edge in 1514 (map exits / specials only) |
 | Asteroids | 139 of 188 sites are asteroids, in every zone: main belt (Ceres zone) 43, Jupiter zone 26 (Trojans), Neptune zone 20 (Kuiper belt), Saturn 17, Mars 12, Earth 10, Uranus 10; plus 14 comets |
+| Site spacing | nearest neighbour between sites: min 26 px, 25% within 33 px, median 38 px (board 1400 x 900) |
+| Jupiter's moon system | its moons spread up to ~155 px from the +4 node; Saturn has 25 moon sites |
 | Comets | 12 comet sites: 7 in the main-belt (Ceres) zone, then one or two each in the Jupiter, Saturn, Uranus and Neptune zones. Each hangs off a Hohmann pivot by its own route: 0 to 3 escape burns (more further out: Encke 1, Halley 2, McNaught 3), then 1 to 2 Lagrange points, then the site. Water-rich (hydration 4). Drawn as icy hexes with a tail streaming away from the Sun |
 | Jupiter's moons | the +4 flyby node sits on the transfer layer: free to reach from the Hohmann pivots through radiation belts, a crossroads of 6 routes. No moon route passes through it: Ganymede and Callisto come down a shared burn ladder off Jupiter's pivot (Callisto leaves it one burn earlier), Io and Europa down their own ladders through the radiation belts (`node docs/ad-astra/analyze-moon-branch.mjs`) |
 
@@ -47,6 +49,11 @@ Every rule is grounded in a measurement of the real Sol board
   its own small system of 2 to 3 zones at the board's edge, with its own
   planets. Brown dwarfs and gas giants that orbit inside a star's zones are
   giants (SM-7), not companions.
+- **SM-1f. Planets per star (design target).** Each star has 4 to 15 planets
+  (gas giants included; dwarf planets, moons, asteroids and comets are not
+  planets). Its zone count follows: about one zone per two planets, 4 to 9 for
+  a lone star; a binary partner or distant companion is drawn smaller and
+  keeps to the low end of the range.
 
 ## SM-2. Hohmann pivots (green dots): the transfer layer
 
@@ -105,12 +112,16 @@ for any other reason:
   sphere (one body = one sphere, however many sites).
 - **SM-5e.** Sites keep short labels (the body name plus a short region word;
   a moon or belt rock drops the star's name: `b-I Near`, `Belt C`), and sit at
-  least 32 world px apart, sites on the same body included, so hexes and labels
-  never stack.
+  least 26 world px apart, sites on the same body included: the Sol board's
+  own closest pair (SM-0). Labels fade in as you zoom, as on Sol.
+- **SM-5h. Placement.** Bodies are placed largest first. Each has a footprint
+  (a giant's moon system, a planet and its sites, an asteroid group, a comet)
+  and takes the first angle on its zone's ring where that footprint clears
+  every footprint already placed, on any star. Bodies that come with an angle
+  keep it.
 
-- **SM-5f. Asteroids are most of the sites.** As on Sol (139 of 188),
-  asteroids outnumber everything else: aim for at least 40% of a board's
-  sites. They come in groups:
+- **SM-5f. Asteroids: 30 to 50 per board (design target).** Sol has 139.
+  They come in groups:
   - a **main belt** in the zone between the rocky worlds and the giants;
   - **Trojans** at each gas giant, on its ring 60 degrees ahead and behind;
   - a few **near-star rocks** inside the habitable zone;
@@ -118,8 +129,9 @@ for any other reason:
   Each group is a cluster: a ring pivot, one escape burn, a Lagrange point,
   then 1 to 3 asteroid sites straight off it (no landing, SM-5c).
 
-- **SM-5g. Comets.** A board has 1 to 3 comets, never in the star's zone:
-  one in the main-belt zone and the rest in the outer zones. A comet is one
+- **SM-5g. Comets: 10 per board (design target; Sol has 12).** Never in a
+  star's innermost zone: about half in the main-belt zone (as on Sol, 7 of
+  12), the rest in the outer zones. A comet is one
   water-rich site (size 1 to 3, hydration 3 to 5) on its own route: its ring
   pivot -> escape burns (1 in the inner half of the zones, 2 beyond, 3 in the
   outermost zone) -> a Lagrange orbit point -> a second Lagrange point (its
@@ -142,19 +154,22 @@ for any other reason:
 
 - **SM-7a. The slingshot.** A giant's flyby point (Lagrange, +4 / +2, SM-4c)
   sits on the transfer layer at the giant: free to reach from its departure
-  pivot through a radiation belt, with a second free route back to the next
-  pivot along the ring and, if there is a zone outside, one transition burn
-  out to that zone's ring. Ships pass through it to slingshot to other
+  pivot through a radiation belt, and free back out to a second pivot a little
+  further along the same ring. Ships pass through it to slingshot to other
   planets. It leads to no moon: **you cannot slingshot into a moon's orbit.**
-- **SM-7b. The escape ladder.** From the departure pivot, the giant's well is
-  a ladder of 3 escape burns curving round the giant. Moons branch off the
-  ladder's 2nd and 3rd burns with ordinary burns (each moon takes the nearer
-  of the two): branch burn -> the moon's own escape burns -> moon Lagrange ->
-  landing -> sites. Routes off the 3rd burn (the inner moons) cross a
-  radiation belt. Moonlets (size 1-2) branch off the 1st burn: one burn, one
-  site.
-- **SM-7c.** A giant has 1 to 5 large moons and may have moonlets. The giant
-  itself is a body you cannot land on.
+- **SM-7b. The escape ladder.** From the ladder pivot on the ring, the
+  giant's well is a ladder of 3 escape burns curling round the outward side of
+  the giant. Moons branch off the ladder's 2nd and 3rd burns with ordinary
+  burns (each takes the rung on its side): branch burn -> the moon's own
+  escape burns -> moon Lagrange -> landing -> sites.
+- **SM-7c. Major and minor moons (design target).** A gas giant has 4 to 10
+  **major moons** (size 4+, 1 to 2 sites each) and 10 to 15 **minor moons**
+  (size 1-2, one site each; Sol's Himalia group). Brown and white dwarfs have
+  fewer. Majors sit on two shells round the giant (inner shell through a
+  radiation belt, SM-6a); minors sit in groups of up to 3 on an outer shell,
+  each group off a rung by one burn and a Lagrange point, like an asteroid
+  group. The moon system spans about 160 px, as Jupiter's does on Sol.
+- **SM-7d.** The giant itself is a body you cannot land on.
 
 ## SM-8. Curves and routes
 
@@ -184,9 +199,11 @@ for any other reason:
    sites sit at least 4 burns deep, under their giant's well (SM-4b).
 5. Every site has one edge and is reachable from arrival (SM-5b, 8c).
 6. Radiation only in a star's innermost zone and giant belts (SM-6a).
-7. Sites at least 32 world px apart (SM-5e).
+7. Sites at least 26 world px apart (SM-5e).
 8. No moon route touches a flyby point; every moon branches off its giant's
    escape ladder (SM-7a, 7b).
-9. At least 40% of sites are asteroids (SM-5f).
+9. Each star has 4 to 15 planets (SM-1f); the board has 30 to 50 asteroids
+   (SM-5f) and 10 comets (SM-5g).
 10. Every comet sits outside its star's innermost zone, on its own route with
     two Lagrange points (SM-5g).
+11. Each gas giant has 4 to 10 major and 10 to 15 minor moons (SM-7c).
