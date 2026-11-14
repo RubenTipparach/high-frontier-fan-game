@@ -1,40 +1,39 @@
-// The printed FLAVOUR of a map Hazard: the word the board prints beside the
-// skull / parachute (e.g. "electric geysers" by Enceladus, "F ring" by
-// Prometheus, "chaotic spin" by Hyperion, "winds" by the Neptune aerostat).
+// The printed FLAVOUR of a map Hazard, read off the caption the board prints
+// beside it (data/map-labels.js#NODE_LABELS, transcribed from the published
+// board: "electric geysers", "F ring spokes", "chaotic spin", "winds", ...).
 // The engine's hazardKind only knows rad / aero / skull; a few rules care which
 // hazard it is. Today that is POWER SERIES CHAOS MODEL (Heliocentricity promo
 // crew): "Immune to Hazards mentioning geysers, rings, spin, and winds."
 //
-// Keyed by the planner node id2 (the SERVER slug, the same key data/node-tags.js
-// uses). Transcribed from the outer solar system map sheet
-// (reference/HF4-outer-solar-system-maps.pdf): each Hazard node beside a label
-// naming one of the four words. The inner-system sheet is not checked in, so an
-// inner hazard that mentions winds (if any) is not listed yet. Pure data: no DOM,
-// no node: imports.
-export const HAZARD_FLAVORS = {
-  // geysers
-  'lag-qeogw': 'geysers',   // Enceladus, "electric geysers"
-  'burn-0ktq5': 'geysers',  // Triton, "nitrogen geyser"
-  'lag-mdelw': 'geysers',   // Triton, "nitrogen geyser"
-  'lag-wx5rf': 'geysers',   // Triton Mahilani Plume, "nitrogen geyser"
-  'burn-bh269': 'geysers',  // Io, "sulfur geyser"
-  'burn-jis7t': 'geysers',  // Europa, "geyser"
-  // rings
-  'lag-cfzlh': 'rings',     // Prometheus / Pandora, "F ring"
-  'lag-tphnu': 'rings',     // Janus / Epimetheus, Saturn "ring crossing"
-  'burn-opo7v': 'rings',    // Rhea, "debris ring"
-  'lag-4b5ej': 'rings',     // Larissa / Galatea, Neptune "ring crossing"
-  'lag-8cwyu': 'rings',     // Larissa / Galatea, Neptune "ring crossing"
-  'lag-f1v9f': 'rings',     // Chariklo, "ring crossing"
-  'lag-lqd3p': 'rings',     // Haumea moons, "ring"
-  // spin
-  'lag-j9xww': 'spin',      // Hyperion, "chaotic spin"
-  'lag-xrng4': 'spin',      // Nereid, "chaotic spin"
-  'burn-b2645': 'spin',     // Haumea, "rapid spin"
-  'lag-liadb': 'spin',      // Uranian irregulars (Sycorax / Prospero), "rapid spin"
-  // winds
-  'lag-e9ydu': 'winds',     // Neptune aerostat aerobrake, "winds"
-};
+// Only Hazards count (skull and aerobrake spaces). Radiation Belts are a
+// separate rule (the Belt Roll), so a belt captioned "dust ring" is not a
+// Hazard that mentions rings. Pure data: no DOM, no node: imports.
+import { NODE_LABELS, NODE_LABEL_KINDS } from './map-labels.js';
+
+// Word stems the card names, matched as whole-word starts in the caption, so
+// "ring crossing", "F ring spokes", "nitrogen geyser", "rapid spin" and
+// "winds" all match, but "springs" or "Bering" would not.
+const FLAVOR_WORDS = [
+  ['geysers', /\bgeysers?\b/i],
+  ['rings', /\brings?\b/i],
+  ['spin', /\bspin\b/i],
+  ['winds', /\bwinds?\b/i],
+];
+
+function flavorOfCaption(caption) {
+  for (const [flavor, re] of FLAVOR_WORDS) if (re.test(caption)) return flavor;
+  return null;
+}
+
+export const HAZARD_FLAVORS = Object.fromEntries(
+  Object.entries(NODE_LABELS)
+    .filter(([slug]) => {
+      const k = NODE_LABEL_KINDS[slug] || [];
+      return k.includes('skull') || k.includes('aero');
+    })
+    .map(([slug, caption]) => [slug, flavorOfCaption(caption)])
+    .filter(([, flavor]) => !!flavor),
+);
 
 export function hazardFlavorOf(slug) {
   return HAZARD_FLAVORS[String(slug)] || null;

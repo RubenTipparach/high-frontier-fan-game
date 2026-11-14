@@ -1016,7 +1016,7 @@ check('DOWSERS: suspended by Anarchy; locked under m0+m1+m2 until a Home Bernal'
 // rocket. `game` defaults to a core game; PROMO + `home` exercises the M2 lock.
 const AERO_VENUS = 'lag-c3cha';      // Venus aerobrake corridor
 const GEYSER_SKULL = 'lag-qeogw';    // Enceladus "electric geysers" hazard
-const PLAIN_SKULL = 'lag-ibzms';     // Hathor hazard: no geyser / ring / spin / wind
+const PLAIN_SKULL = 'lag-olko7';     // "rubble pile" hazard: no geyser / ring / spin / wind (data/map-labels.js)
 function promoSeat(cardId, face, { game = {}, anarchy = false, home = false, crewAboard = true } = {}) {
   const st = playing(2, game);
   const me = only(st, 0, cardId, face);

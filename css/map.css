@@ -2873,6 +2873,15 @@
   margin-bottom: 8px;
   text-transform: lowercase;
 }
+/* The caption the board prints beside a hazard / belt / aerobrake / lander
+   icon: set in the board's own italic white-on-map style. */
+.map-popup .t-board-caption {
+  font-style: italic;
+  font-weight: 600;
+  color: #e2e8f0;
+  text-transform: none;
+  margin-top: -4px;
+}
 .map-popup .t-id {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 10px;
