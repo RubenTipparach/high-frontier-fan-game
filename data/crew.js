@@ -124,7 +124,7 @@ export const PROMO_CREW = [
     color: '#fccc00',
     faces: {
       primary:   { requiresModule: 'M4', name: 'The Sea Peoples', role: 'Faction H', bonus: 'COURIER', blurb: 'Connections (4B2f).', mass: 1, radHardness: 4, isru: 4, prospector: 'buggy', thruster: { name: 'Fúú S010', thrustMN: 0.45, specImpKs: 0.46, thrust: 14, fuelPerBurn: 8, afterburn: 2 } },
-      secondary: { name: 'The Sea Peoples', role: 'Faction H', bonus: 'POWER BROKERS', blurb: 'After you pay FINAO, gain 1 Aqua per Seniority Disk on the Assembly (max half FINAO paid, round down).', mass: 1, radHardness: 4, isru: 4, prospector: 'buggy', thruster: { name: 'Fúú S010', thrustMN: 0.45, specImpKs: 0.46, thrust: 14, fuelPerBurn: 8, afterburn: 2 } },
+      secondary: { needsModules: ['M0'], name: 'The Sea Peoples', role: 'Faction H', bonus: 'POWER BROKERS', blurb: 'After you pay FINAO, gain 1 Aqua per Seniority Disk on the Assembly (max half FINAO paid, round down).', mass: 1, radHardness: 4, isru: 4, prospector: 'buggy', thruster: { name: 'Fúú S010', thrustMN: 0.45, specImpKs: 0.46, thrust: 14, fuelPerBurn: 8, afterburn: 2 } },
     },
   },
   {
@@ -147,24 +147,24 @@ export const PROMO_CREW = [
     id: 'crew_space_force',
     color: '#c09cc0',
     faces: {
-      primary:   { name: 'Space Force', role: 'Faction C', bonus: 'LIFE RAFT', blurb: 'May move as a Freighter (1B4) if the stack Wet Mass is less than 5 & doesn\'t contain a glory chit.', mass: 1, radHardness: 4, isru: 4, prospector: 'missile', thruster: { name: 'Falcon X', thrustMN: 7.13, specImpKs: 0.4, thrust: 14, fuelPerBurn: 10, afterburn: 2 } },
-      secondary: { name: 'Space Force', role: 'Faction C', bonus: 'LIFEBOAT', blurb: 'May move as a Freighter (1B4) if the stack Wet Mass is less than 7.', mass: 1, radHardness: 4, isru: 4, prospector: 'missile', thruster: { name: 'Falcon X', thrustMN: 7.13, specImpKs: 0.4, thrust: 14, fuelPerBurn: 10, afterburn: 2 } },
+      primary:   { needsModules: ['M1'], name: 'Space Force', role: 'Faction C', bonus: 'LIFE RAFT', blurb: 'May move as a Freighter (1B4) if the stack Wet Mass is less than 5 & doesn\'t contain a glory chit.', mass: 1, radHardness: 4, isru: 4, prospector: 'missile', thruster: { name: 'Falcon X', thrustMN: 7.13, specImpKs: 0.4, thrust: 14, fuelPerBurn: 10, afterburn: 2 } },
+      secondary: { needsModules: ['M1'], name: 'Space Force', role: 'Faction C', bonus: 'LIFEBOAT', blurb: 'May move as a Freighter (1B4) if the stack Wet Mass is less than 7.', mass: 1, radHardness: 4, isru: 4, prospector: 'missile', thruster: { name: 'Falcon X', thrustMN: 7.13, specImpKs: 0.4, thrust: 14, fuelPerBurn: 10, afterburn: 2 } },
     },
   },
   {
     id: 'crew_aeb',
     color: '#c09cc0',
     faces: {
-      primary:   { name: 'AEB', role: 'Faction B', bonus: 'AMBASSADOR', blurb: 'During lobby, may move a delegate into centrist instead of Decommission.', mass: 1, radHardness: 5, isru: 4, prospector: 'missile', thruster: { name: 'O’Bean II-A', thrustMN: 0.92, specImpKs: 0.46, thrust: 11, fuelPerBurn: 8, afterburn: 2 } },
-      secondary: { name: 'AEB', role: 'Faction B', bonus: 'RABBLE-ROUSER', blurb: 'When you lobby authority in season blue, you may end or initiate anarchy.', mass: 1, radHardness: 5, isru: 4, prospector: 'missile', thruster: { name: 'O’Bean III', thrustMN: 0.98, specImpKs: 0.52, thrust: 11, fuelPerBurn: 8, afterburn: 2 } },
+      primary:   { needsModules: ['M0'], name: 'AEB', role: 'Faction B', bonus: 'AMBASSADOR', blurb: 'During lobby, may move a delegate into centrist instead of Decommission.', mass: 1, radHardness: 5, isru: 4, prospector: 'missile', thruster: { name: 'O’Bean II-A', thrustMN: 0.92, specImpKs: 0.46, thrust: 11, fuelPerBurn: 8, afterburn: 2 } },
+      secondary: { needsModules: ['M0'], name: 'AEB', role: 'Faction B', bonus: 'RABBLE-ROUSER', blurb: 'When you lobby authority in season blue, you may end or initiate anarchy.', mass: 1, radHardness: 5, isru: 4, prospector: 'missile', thruster: { name: 'O’Bean III', thrustMN: 0.98, specImpKs: 0.52, thrust: 11, fuelPerBurn: 8, afterburn: 2 } },
     },
   },
   {
     id: 'crew_explorers_without_borders',
     color: '#b40054',
     faces: {
-      primary:   { notRecommendedWithModule: 'M5', name: 'Explorers Without Borders', role: 'Faction M', bonus: 'SHUTTLES', blurb: '1/turn you may cargo transfer Aqua from your Bank to an operational thruster in a Home Orbit or LEO.', mass: 1, radHardness: 3, isru: 4, prospector: 'missile', thruster: { name: 'Vulcan Centaur RL10E', thrustMN: 0.215, specImpKs: 0.46, thrust: 9, fuelPerBurn: 8, afterburn: 2 } },
-      secondary: { notRecommendedWithModule: 'M5', name: 'Explorers Without Borders', role: 'Faction M', bonus: 'ISO-SHUTTLES', blurb: 'If you have an isotope in your Bank or isovault, pay 10 less Aqua/1 less isotope when boosting (min 0).', mass: 1, radHardness: 3, isru: 4, prospector: 'missile', thruster: { name: 'Vulcan Centaur RL10E', thrustMN: 0.215, specImpKs: 0.46, thrust: 9, fuelPerBurn: 8, afterburn: 2 } },
+      primary:   { needsModules: ['M2'], notRecommendedWithModule: 'M5', name: 'Explorers Without Borders', role: 'Faction M', bonus: 'SHUTTLES', blurb: '1/turn you may cargo transfer Aqua from your Bank to an operational thruster in a Home Orbit or LEO.', mass: 1, radHardness: 3, isru: 4, prospector: 'missile', thruster: { name: 'Vulcan Centaur RL10E', thrustMN: 0.215, specImpKs: 0.46, thrust: 9, fuelPerBurn: 8, afterburn: 2 } },
+      secondary: { needsModules: ['M1'], notRecommendedWithModule: 'M5', name: 'Explorers Without Borders', role: 'Faction M', bonus: 'ISO-SHUTTLES', blurb: 'If you have an isotope in your Bank or isovault, pay 10 less Aqua/1 less isotope when boosting (min 0).', mass: 1, radHardness: 3, isru: 4, prospector: 'missile', thruster: { name: 'Vulcan Centaur RL10E', thrustMN: 0.215, specImpKs: 0.46, thrust: 9, fuelPerBurn: 8, afterburn: 2 } },
     },
   },
   {
@@ -179,8 +179,8 @@ export const PROMO_CREW = [
     id: 'crew_african_union_space_directorate',
     color: '#fccc00',
     faces: {
-      primary:   { name: 'African Union Space Directorate', role: 'Faction A', bonus: 'EMISSARIES', blurb: 'On your turn, you may treat any or all Ideologies tied for the most delegates as the Active Law.', mass: 1, radHardness: 4, isru: 4, prospector: 'buggy', thruster: { name: 'Uru Anga A01', thrustMN: 1.51, specImpKs: 0.42, thrust: 12, fuelPerBurn: 9, afterburn: 2 } },
-      secondary: { name: 'African Union Space Directorate', role: 'Faction A', bonus: 'ARBITER', blurb: 'At the start of your turn you may perform a vote tally. Your vote tallies may treat your delegates as 2 delegates each.', mass: 1, radHardness: 4, isru: 4, prospector: 'buggy', thruster: { name: 'Uru Anga A01', thrustMN: 1.51, specImpKs: 0.42, thrust: 12, fuelPerBurn: 9, afterburn: 2 } },
+      primary:   { needsModules: ['M0'], name: 'African Union Space Directorate', role: 'Faction A', bonus: 'EMISSARIES', blurb: 'On your turn, you may treat any or all Ideologies tied for the most delegates as the Active Law.', mass: 1, radHardness: 4, isru: 4, prospector: 'buggy', thruster: { name: 'Uru Anga A01', thrustMN: 1.51, specImpKs: 0.42, thrust: 12, fuelPerBurn: 9, afterburn: 2 } },
+      secondary: { needsModules: ['M0'], name: 'African Union Space Directorate', role: 'Faction A', bonus: 'ARBITER', blurb: 'At the start of your turn you may perform a vote tally. Your vote tallies may treat your delegates as 2 delegates each.', mass: 1, radHardness: 4, isru: 4, prospector: 'buggy', thruster: { name: 'Uru Anga A01', thrustMN: 1.51, specImpKs: 0.42, thrust: 12, fuelPerBurn: 9, afterburn: 2 } },
     },
   },
   {
@@ -195,7 +195,7 @@ export const PROMO_CREW = [
     id: 'crew_makers_guild',
     color: '#9c9c9c',
     faces: {
-      primary:   { notRecommendedWithModule: 'M5', name: 'Makers Guild', role: 'Faction J', bonus: 'OFFWORLD TRADE NEXUS', blurb: 'If you have either a Factory or Anchored Bernal, gain Bernal Profits.', mass: 1, radHardness: 4, isru: 4, prospector: 'missile', thruster: { name: 'NCC 1702-A', thrustMN: 8.47, specImpKs: 0.4, thrust: 14, fuelPerBurn: 9, afterburn: 2 } },
+      primary:   { needsModules: ['M2'], notRecommendedWithModule: 'M5', name: 'Makers Guild', role: 'Faction J', bonus: 'OFFWORLD TRADE NEXUS', blurb: 'If you have either a Factory or Anchored Bernal, gain Bernal Profits.', mass: 1, radHardness: 4, isru: 4, prospector: 'missile', thruster: { name: 'NCC 1702-A', thrustMN: 8.47, specImpKs: 0.4, thrust: 14, fuelPerBurn: 9, afterburn: 2 } },
       secondary: { name: 'Makers Guild', role: 'Faction J', bonus: 'TRADE PORT', blurb: 'At the start of your turn, you may discard 2 cards to take the top card of a patent queue.', mass: 1, radHardness: 4, isru: 4, prospector: 'missile', thruster: { name: 'NCC 1702-A', thrustMN: 8.47, specImpKs: 0.4, thrust: 14, fuelPerBurn: 9, afterburn: 2 } },
     },
   },
@@ -204,7 +204,7 @@ export const PROMO_CREW = [
     color: '#9c9c9c',
     faces: {
       primary:   { name: 'New Pilgrims', role: 'Faction K', bonus: 'REFUGEE', blurb: 'May industrialize an opponent\'s Claim (not a Felony); both may use the Factory (even if this card is flipped).', mass: 1, radHardness: 5, isru: 4, prospector: 'buggy', thruster: { name: 'Liberty Rockoon', thrustMN: 1.34, specImpKs: 0.43, thrust: 12, fuelPerBurn: 9, afterburn: 2 } },
-      secondary: { name: 'New Pilgrims', role: 'Faction K', bonus: 'IMMIGRANT', blurb: 'When exomigrating, may first name a specialty to search the chosen queue for the 1st Human with that specialty (if any), then shuffle.', mass: 1, radHardness: 5, isru: 4, prospector: 'buggy', thruster: { name: 'Liberty Rockoon', thrustMN: 1.34, specImpKs: 0.43, thrust: 12, fuelPerBurn: 9, afterburn: 2 } },
+      secondary: { needsModules: ['M2'], name: 'New Pilgrims', role: 'Faction K', bonus: 'IMMIGRANT', blurb: 'When exomigrating, may first name a specialty to search the chosen queue for the 1st Human with that specialty (if any), then shuffle.', mass: 1, radHardness: 5, isru: 4, prospector: 'buggy', thruster: { name: 'Liberty Rockoon', thrustMN: 1.34, specImpKs: 0.43, thrust: 12, fuelPerBurn: 9, afterburn: 2 } },
     },
   },
   {
@@ -220,7 +220,7 @@ export const PROMO_CREW = [
     color: '#e3e0d4',
     faces: {
       primary:   { name: 'Galahad Group', role: 'Faction G', bonus: 'HEROIC', blurb: 'This character can carry any number of glory chits. You may lobby honor without losing a delegate.', mass: 1, radHardness: 4, isru: 4, prospector: 'missile', thruster: { name: 'Nakamoto-1', thrustMN: 16.3, specImpKs: 0.39, thrust: 15, fuelPerBurn: 9, afterburn: 2 } },
-      secondary: { name: 'Galahad Group', role: 'Faction G', bonus: 'QUEST', blurb: 'During exomigration, your Human Colonist may appear at any Colony in a zone for which you hold a glory chit.', mass: 1, radHardness: 4, isru: 4, prospector: 'missile', thruster: { name: 'Nakamoto-1', thrustMN: 16.3, specImpKs: 0.39, thrust: 15, fuelPerBurn: 9, afterburn: 2 } },
+      secondary: { needsModules: ['M2'], name: 'Galahad Group', role: 'Faction G', bonus: 'QUEST', blurb: 'During exomigration, your Human Colonist may appear at any Colony in a zone for which you hold a glory chit.', mass: 1, radHardness: 4, isru: 4, prospector: 'missile', thruster: { name: 'Nakamoto-1', thrustMN: 16.3, specImpKs: 0.39, thrust: 15, fuelPerBurn: 9, afterburn: 2 } },
     },
   },
   {
@@ -313,6 +313,9 @@ export const CREW_FACES = [...CREW, ...PROMO_CREW].flatMap((card) => (
     // Module tags live on each face (see the PROMO_CREW note).
     requiresModule: card.faces[faceKey].requiresModule || null,
     notRecommendedWithModule: card.faces[faceKey].notRecommendedWithModule || null,
+    // The implemented modules this face's ability needs (M0 / M1 / M2); the
+    // pick is refused in a room without them.
+    needsModules: card.faces[faceKey].needsModules || [],
     faces: { primary: card.faces[faceKey] },
   }))
 ));

@@ -9,6 +9,7 @@ import { toLayoutPx, uiScale } from '../ui-scale.js';
 import { fleetLabel } from '../../data/fleet-tags.js';
 import { NODE_TAGS, spriteForTags } from '../../data/node-tags.js';
 import { serverTagLabels, tagInfo } from '../../data/node-labels.js';
+import { nodeLabelOf, MAP_LABELS } from '../../data/map-labels.js';
 import { BUGGY_ROAD_GROUPS } from '../../data/buggy-roam.js';
 import { ZONE_ASSIGNMENTS } from '../../data/zones.js';
 import { SIREN_HOME_ZONE } from '../../data/sirens.js';
@@ -5266,6 +5267,14 @@ export class MapRenderer {
       }
     }
 
+    // Printed board labels (data/map-labels.js): cluster names ("Jovian
+    // Himalia Moonlets"), Lagrange names ("Sol-Saturn Lagrange"), hazard
+    // captions ("dust storm"), flyby / belt / zone text - drawn where the
+    // board prints them, at the board's own angle and relative size, so the
+    // map reads like the table. Positions are normalised board coordinates,
+    // the same space as the planner nodes (scaled to the 1400 x 900 view).
+    if (labelAlpha > 0 && MAP_LABELS.length) this._drawBoardLabels(ctx, eff, hostW, hostH, labelAlpha);
+
     // Exit / special node names. These Lagrange points carry a player-given
     // name (the message note, baked into NODE_TAGS.label); draw it under the
     // marker, tinted to match the marker (orange exit, red special).
@@ -5965,6 +5974,52 @@ export class MapRenderer {
     });
   }
 
+  _drawBoardLabels(ctx, eff, hostW, hostH, alpha) {
+    const VIEW_W = 1400, VIEW_H = 900;   // loadPlannerMap's view (see LEO_ANCHOR)
+    const INK = {
+      lagrange: '#f4a259', cluster: '#f0abfc', flyby: '#93c5fd',
+      hazard: '#f1f5f9', aerobrake: '#f1f5f9', lander: '#f1f5f9', radbelt: '#fde68a',
+      note: '#fde047',
+    };
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round';
+    for (const l of MAP_LABELS) {
+      const sx = this.pan.x + l.nx * VIEW_W * eff;
+      const sy = this.pan.y + l.ny * VIEW_H * eff;
+      if (sx < -200 || sx > hostW + 200 || sy < -200 || sy > hostH + 200) continue;
+      // Printed cap height scales with the map; too small to read -> skip.
+      const px = Math.min(28, l.size * VIEW_W * eff * 1.35);
+      if (px < 7) continue;
+      const italic = l.kind === 'hazard' || l.kind === 'aerobrake' || l.kind === 'lander' || l.kind === 'radbelt';
+      ctx.font = `${italic ? 'italic ' : ''}600 ${px.toFixed(1)}px ui-sans-serif, system-ui, sans-serif`;
+      ctx.save();
+      // Zone captions ("EARTH ZONE +0") sit behind the play at half strength.
+      ctx.globalAlpha = alpha * (l.kind === 'zone' ? 0.5 : 0.9);
+      ctx.translate(sx, sy);
+      // The board is read from both sides of the table, so some text is
+      // printed upside down; on a screen, turn it to read upright.
+      let ang = ((l.angle % 360) + 540) % 360 - 180;
+      if (ang > 90) ang -= 180; else if (ang < -90) ang += 180;
+      if (ang) ctx.rotate((ang * Math.PI) / 180);
+      ctx.lineWidth = Math.max(2, px * 0.22);
+      ctx.strokeStyle = 'rgba(5, 4, 16, 0.85)';
+      ctx.fillStyle = INK[l.kind] || '#cbd5e1';
+      // A printed rule block (the Sungrazer note) breaks over several lines,
+      // centred on its anchor like the board's own paragraph.
+      const lines = l.text.split('\n');
+      const lh = px * 1.25;
+      lines.forEach((line, i) => {
+        const y = (i - (lines.length - 1) / 2) * lh;
+        ctx.strokeText(line, 0, y);
+        ctx.fillText(line, 0, y);
+      });
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
   _buildSitePopup(site, actions) {
     const el = this._popupEl;
     if (!el) return;
@@ -5986,6 +6041,17 @@ export class MapRenderer {
     meta.textContent = parts.join(' · ');
     el.appendChild(name);
     if (meta.textContent) el.appendChild(meta);
+    // The caption the board prints beside this space's hazard / belt /
+    // aerobrake / lander icon ("dust storm", "contact binary", "jovian
+    // current"), so the popup reads the same as the table.
+    const caption = nodeLabelOf(site.id2);
+    if (caption) {
+      const cap = document.createElement('div');
+      cap.className = 't-meta t-board-caption';
+      cap.textContent = caption;
+      cap.title = 'Printed beside this space on the board.';
+      el.appendChild(cap);
+    }
     // Marker row: what the node's glyphs MEAN (burn / hazard / aerobrake /
     // lander-burn / flyby / radiation), each with a gameplay tooltip so a
     // player can look up an unfamiliar symbol without leaving the popup. Same

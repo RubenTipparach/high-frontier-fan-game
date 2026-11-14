@@ -189,10 +189,15 @@ implementation right now:
   open to EVERY host now - no admin check, no tester list - so the
   server reads `body.hermes` straight and both wizards show its entry.
   Do not re-gate it.
-- **V9 The Sirens - still in testing**, still behind the admin OR
-  `tester_profiles` gate, and still the reason `variantsAllowed`
-  exists in the create-lobby route. It is also what the lobby's
-  alpha-tester banner names.
+- **V9 The Sirens - RELEASED (user 2026-11-14).** Play as Sirenian
+  factions out of Cordelia instead of LEO, with the Siren home orbits at
+  Uranus. Open to every host: the create-lobby route reads `body.sirens`
+  straight, and both wizards show its entry. It was the last variant
+  behind the admin OR `tester_profiles` gate, so that gate
+  (`variantsAllowed`) is gone and the alpha-tester banner is hidden
+  (nothing is in testing). Do not re-gate it. If a new variant ships to
+  testers first, bring the gate back for that flag alone and name it on
+  the banner.
 
 Other variants (campaign, scenarios) are explicitly out of scope
 for now. Don't pull them in without a discussion first. When one of
@@ -227,6 +232,21 @@ per room and carried into the game state as a boolean (`state.m0`,
   but adds NO decks (unlike M1's two Terawatt decks). Both flags are still fixed
   at room creation, default OFF, with no retroactive apply. **Rat Frontier is
   the one feature still behind `profileIsAdmin`.**
+- **Promo crew (data/crew.js#PROMO_CREW) - RELEASED to every player
+  (user 2026-11-14).** No admin check (the old `promo_crew_admin_only` is
+  gone) and no blanket m0+m1+m2 gate: each face needs only the modules its OWN
+  text uses, tagged per face as `needsModules` in `data/crew.js` (e.g. Life Raft
+  `['M1']`, Arbiter `['M0']`, Quest `['M2']`; most faces need none). A pick of a
+  face the room lacks a module for is refused (`crew_face_needs_modules`, with
+  the missing list) and the crew picker shows it greyed under "Not available to
+  pick" with a "Needs M1" badge. A face tagged `requiresModule` M4 / M5 ("Coming
+  soon") is refused outright (`crew_face_needs_module`). `ctx.allowPromoCrew`
+  (admin) now only keeps the solo "Test drive promo crew" swap AFTER the draft
+  closed. Every in-scope promo face has an engine rule, a client control where it
+  needs a choice, and checks in `scripts/check-crew-abilities.mjs` (see
+  `docs/crew-ability-audit.md`). Under M2, like every faction privilege, a promo
+  privilege stays locked until its holder anchors a Home Bernal; outside M2 it
+  works from the start.
 - **Futures gate on `state.m2`.** The Futures deck physically ships in M1, but a
   Future is not playable until M2 (it needs Bernals / anchoring / the Epic-Hazard
   economy), so in this implementation futures are an M2 mechanic: every futures
@@ -258,6 +278,8 @@ worse, the reverse).
    means dropping the guard to a plain `body.<flag> ? 1 : 0`. The client control
    is only UI; this line is what decides. Leave `variantsAllowed` /
    `profileIsAdmin` / `isTester` in place if ANY sibling is still gated.
+   (Nothing is gated today: Sirens, the last, released 2026-11-14 and took
+   `variantsAllowed` with it.)
 2. **Reveal the control, per entry, not per group.** `js/main.js#syncVariantRows`
    (variants) and `#setAdminModuleRows` (modules) hide their controls. Un-hide
    the released one UNCONDITIONALLY and keep the still-gated siblings on the
