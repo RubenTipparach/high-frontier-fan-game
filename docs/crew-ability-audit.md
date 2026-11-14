@@ -69,17 +69,21 @@ Bernal is anchored. That holds for ROCKETEERS, THERMAL RESEARCH, RABBLE-ROUSER,
 COLLECTIVE BARGAINING and DOWSERS. The Arcjets and the Nexus are deliberately
 exempt.
 
-Out of scope (`requiresModule` M4 / M5, "Coming soon", not tested): The Sea
-Peoples (COURIER, POWER BROKERS), JAXA (FUTURISTS, STARCHILD), Utopia Inc.
-(EXECUTIVE DISCOUNT, PIGGYBACK), Brotherhood of Cryptobankers (SILENT PARTNER,
-CHAIRMAN'S CUT), VerisAI (INCUBATOR, CAVITATION ENGINEERS). Note: an admin can
-still PICK one of these (the server gate is the blanket m0+m1+m2 check, no
-per-card refusal); it then does nothing.
+Module tags are judged PER FACE (`data/crew.js`, commit 9084b63, user
+2026-11-14): each side of a promo card is in or out of scope on its own ability
+text. Out of scope (`requiresModule` M4 / M5 on that face, "Coming soon", not
+tested): The Sea Peoples / COURIER, JAXA / FUTURISTS, JAXA / STARCHILD,
+Utopia Inc. / EXECUTIVE DISCOUNT, Brotherhood of Cryptobankers / SILENT PARTNER
+and CHAIRMAN'S CUT, VerisAI / INCUBATOR. Their card-mates POWER BROKERS,
+PIGGYBACK and CAVITATION ENGINEERS are in scope and listed below. Note: an admin
+can still PICK a card with an out-of-scope face (the server gate is the blanket
+m0+m1+m2 check, no per-card or per-face refusal); that face then does nothing.
 
 | Card / privilege | Engine | Implemented? | Verified? | Bug? | Note |
 |---|---|---|---|---|---|
 | BRIN / THERMAL RESEARCH | `engine.js:3505` | Yes | Yes | No | A radiator the Thermal Labs face loses on a seeded Earth belt roll survives with it; lost again under Anarchy. |
 | BRIN / THERMAL LABS | - | No | - | - | No engine rule. |
+| The Sea Peoples / POWER BROKERS | - | No | - | - | No engine rule. In scope since 9084b63 (its card-mate COURIER needs M4). Hook: the FINAO payment sites via `finaoPerFor` (`engine.js:1566`), seniority disks in `asm.seniority`. |
 | The Martian Way / ROCKETEERS | `engine.js:2395` (pad), `:5687` (belt) | Yes | Yes | No | Survives a Pad Explosion, the other face does not; off under Anarchy; in an m0+m1+m2 game off until a Home Bernal. Belt -2 is covered in `check-engine.mjs`. |
 | The Martian Way / TAILINGS REMINING | - | No | - | - | No engine rule. |
 | Space Force / LIFE RAFT | - | No | - | - | No engine rule. |
@@ -98,14 +102,16 @@ per-card refusal); it then does nothing.
 | Makers Guild / TRADE PORT | - | No | - | - | No engine rule. |
 | New Pilgrims / REFUGEE | - | No | - | - | No engine rule. |
 | New Pilgrims / IMMIGRANT | - | No | - | - | No engine rule. |
+| Utopia, Inc. / PIGGYBACK | - | No | - | - | No engine rule. In scope since 9084b63. Needs an out-of-turn reaction to an opponent's BOOST (`engine.js:6038`), which no op has today. |
 | Galahad Group / HEROIC | - | No | - | - | No engine rule. |
 | Galahad Group / QUEST | - | No | - | - | No engine rule. |
+| VerisAI / CAVITATION ENGINEERS | - | No | - | - | No engine rule. In scope since 9084b63 (its card-mate INCUBATOR needs M5). Hook: the aerobrake hazard waiver (`stackSafeAerobrake`) with a once-per-turn flag. |
 | Heliocentricity / WEAK STABILITY BOUNDARY | - | No | - | - | No engine rule. |
 | Heliocentricity / POWER SERIES CHAOS MODEL | - | No | - | - | No engine rule. |
 | Cerulean / BLUE PLANET | - | No | - | - | No engine rule. |
 | Cerulean / DOWSERS | `engine.js:10782` | Yes | Yes | No | An out-rated rig refuels at ISRU 0; Blue Planet face `isru_too_high`; off under Anarchy; m0+m1+m2 locked until a Home Bernal. |
 
-The script prints the 18 unimplemented in-scope faces as an `info` list at the
+The script prints the 21 unimplemented in-scope faces as an `info` list at the
 end, so this column can be re-derived after future work.
 `docs/promo-crew-plan.md` has the per-face hooks for building them.
 
@@ -198,4 +204,7 @@ the ESA player (an off-turn grant), so it is a design decision, not a one-liner.
 3. Dharma Refuel: must the chit-carrying Human be colocated with the refuel
    ("Colocated site refuel operation")? The engine doubles the refuel if the
    player has any chit anywhere.
-4. Should the M4 / M5 "Coming soon" promo cards be refused at PICK_CREW?
+4. Should a promo card be refused at PICK_CREW when a face is M4 / M5? With
+   per-face tags, only JAXA has BOTH faces out of scope. The other four cards
+   have one playable face, so a per-face refusal (allow the pick only on an
+   in-scope face) is the natural rule.

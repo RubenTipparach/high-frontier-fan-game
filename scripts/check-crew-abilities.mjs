@@ -989,13 +989,15 @@ check('DOWSERS: suspended by Anarchy; locked under m0+m1+m2 until a Home Bernal'
 // ---- inventory: in-scope faces with no engine rule ----
 // Not a behaviour test: lists every in-scope face whose privilege key appears
 // nowhere in the engine, so the audit doc's "not implemented" column can be
-// re-derived. Promo cards tagged requiresModule M4 / M5 are out of scope.
+// re-derived. Promo faces tagged requiresModule M4 / M5 are out of scope.
 import * as nodeFs from 'node:fs';
 {
   const src = nodeFs.readFileSync(new URL('../server/game/engine.js', import.meta.url), 'utf8');
-  const inScope = [...CREW, ...PROMO_CREW].filter((c) => !c.requiresModule);
+  // Module tags are PER FACE (data/crew.js, 9084b63): each side is judged on
+  // its own ability text. A card-level tag is still honoured as a fallback.
   const missing = [];
-  for (const c of inScope) for (const f of ['primary', 'secondary']) {
+  for (const c of [...CREW, ...PROMO_CREW]) for (const f of ['primary', 'secondary']) {
+    if (c.faces[f].requiresModule || c.requiresModule) continue;
     const k = pkey(c.faces[f].bonus);
     // Baltimore Gun Club is wired by card id (colocation), not by key.
     if (c.id === 'crew_baltimore_gun_club') continue;
