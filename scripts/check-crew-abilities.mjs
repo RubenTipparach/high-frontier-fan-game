@@ -1033,6 +1033,253 @@ check('DOWSERS: suspended by Anarchy; locked under m0+m1+m2 until a Home Bernal'
 // ================================================================ promo group C
 // economy and cards: SHUTTLES, ISO-SHUTTLES, TRADE PORT, PIGGYBACK, THERMAL LABS, TAILINGS REMINING
 // (group C checks go here)
+// ---- THERMAL LABS (BRIN, black) ----
+// "As a 1/turn free action, flip a radiator at your Colony/Bernal to its heavy side."
+const RAD_A = 'rad_dielectric_x_ray_window';
+const RAD_B = 'rad_ether_charged_dust';
+function thermalLabs({ face = 'secondary', anarchy = false, game = {}, home = false, where = 'bernal', twice = false } = {}) {
+  const st = playing(2, game);
+  const me = only(st, 0, 'crew_brin', face);
+  if (anarchy) st.anarchy = true;
+  const rads = [{ id: RAD_A, kind: 'patent', face: 'primary', radSide: 'light' },
+    { id: RAD_B, kind: 'patent', face: 'primary', radSide: 'light' }];
+  if (home) { anchorHome(me); me.bernals[0].stack = rads; }
+  else if (where === 'bernal') {
+    me.bernals = [{ cardId: PLAIN_BERNAL, siteId: EARTH_ORBIT, anchored: false, face: 'primary', stack: rads }];
+  } else {
+    me.bernals = [];
+    me.rocket.siteId = 'hathor';
+    me.rocket.stack = rads;
+    if (where === 'colony') st.colonies = { hathor: { ownerId: me.profileId } };
+  }
+  let r = op(st, 0, { kind: 'SET_RADIATOR_SIDE', cardId: RAD_A, radSide: 'heavy' });
+  if (!r.ok || !twice) return r;
+  return op(r.state, 0, { kind: 'SET_RADIATOR_SIDE', cardId: RAD_B, radSide: 'heavy' });
+}
+const radSideOf = (st, id) => {
+  const me = st.players[0];
+  const all = [...(me.rocket.stack || []), ...((me.bernals || []).flatMap((b) => b.stack || []))];
+  return (all.find((s) => s.id === id) || {}).radSide;
+};
+check('THERMAL LABS: flips a light radiator aboard a Bernal to heavy, free; Thermal Research face cannot', () => {
+  const r = thermalLabs();
+  assert(r.ok, `Thermal Labs refused: ${r.error}`);
+  eq(radSideOf(r.state, RAD_A), 'heavy', 'radiator side after the flip');
+  eq(r.state.players[0].opsRemaining, 4, 'the flip spent an operation');
+  assert(/Thermal Labs/.test(r.log), 'log line does not name the ability');
+  eq(thermalLabs({ face: 'primary' }).error, 'no_thermal_labs', 'Thermal Research face');
+});
+check('THERMAL LABS: works at your Colony, not at a bare site; once per turn', () => {
+  assert(thermalLabs({ where: 'colony' }).ok, 'refused at own Colony');
+  eq(thermalLabs({ where: 'site' }).error, 'not_at_colony_or_bernal', 'bare site');
+  eq(thermalLabs({ twice: true }).error, 'thermal_labs_used', 'second flip in one turn');
+});
+check('THERMAL LABS: suspended by Anarchy; locked under m0+m1+m2 until a Home Bernal', () => {
+  eq(thermalLabs({ anarchy: true }).error, 'no_thermal_labs', 'Anarchy');
+  eq(thermalLabs({ game: PROMO }).error, 'no_thermal_labs', 'promo game, no Home Bernal');
+  assert(thermalLabs({ game: PROMO, home: true }).ok, 'promo game, Home Bernal anchored');
+});
+
+// ---- SHUTTLES (Explorers Without Borders, white) ----
+// "1/turn you may cargo transfer Aqua from your Bank to an operational thruster in a Home Orbit or LEO."
+function shuttle({ face = 'primary', anarchy = false, game = {}, home = false, at = EARTH_ORBIT, thruster = true, twice = false } = {}) {
+  const st = playing(2, game);
+  const me = only(st, 0, 'crew_explorers_without_borders', face);
+  if (anarchy) st.anarchy = true;
+  if (home) anchorHome(me);
+  me.rocket.siteId = at;
+  me.rocket.stack = thruster ? [{ id: SOLAR_PUSH, kind: 'patent', face: 'primary' }] : [{ id: RAD_A, kind: 'patent', face: 'primary', radSide: 'light' }];
+  me.rocket.activeThrusterId = thruster ? SOLAR_PUSH : null;
+  me.rocket.tank = 0;
+  me.aqua = 20;
+  let r = op(st, 0, { kind: 'REFUEL', amount: 2 });
+  if (!r.ok || !twice) return r;
+  return op(r.state, 0, { kind: 'REFUEL', amount: 1 });
+}
+check('SHUTTLES: bank aqua reaches a ship in a Home Orbit; Iso-Shuttles face cannot', () => {
+  const r = shuttle();
+  assert(r.ok, `Shuttles refused: ${r.error}`);
+  eq(20 - r.state.players[0].aqua, 2, 'aqua drawn');
+  assert(r.state.players[0].rocket.tank > 0, 'no water went in');
+  eq(r.state.players[0].opsRemaining, 4, 'spent an operation');
+  eq(shuttle({ face: 'secondary' }).error, 'rocket_not_at_leo', 'Iso-Shuttles face');
+});
+check('SHUTTLES: once per turn, needs an operational thruster, not at an ordinary site', () => {
+  eq(shuttle({ twice: true }).error, 'shuttles_used', 'second shuttle this turn');
+  eq(shuttle({ thruster: false }).error, 'no_operational_thruster', 'no thruster aboard');
+  eq(shuttle({ at: 'hathor' }).error, 'rocket_not_at_leo', 'a non-Home-Orbit site');
+});
+check('SHUTTLES: suspended by Anarchy; locked under m0+m1+m2 until a Home Bernal', () => {
+  eq(shuttle({ anarchy: true }).error, 'rocket_not_at_leo', 'Anarchy');
+  eq(shuttle({ game: PROMO }).error, 'rocket_not_at_leo', 'promo game, no Home Bernal');
+  assert(shuttle({ game: PROMO, home: true }).ok, 'promo game, Home Bernal anchored');
+});
+
+// ---- ISO-SHUTTLES (Explorers Without Borders, black) ----
+// "If you have an isotope in your Bank or isovault, pay 10 less Aqua/1 less isotope when boosting (min 0)."
+const ISO_CARD = 'rea_project_orion';
+function isoBoost({ face = 'secondary', anarchy = false, game = {}, home = false, isotope = true, second = false } = {}) {
+  const st = playing(2, game);
+  const me = only(st, 0, 'crew_explorers_without_borders', face);
+  if (anarchy) st.anarchy = true;
+  if (home) anchorHome(me);
+  me.hand = [ISO_CARD, 'thr_hall_effect'];
+  me.leo = isotope ? [{ id: 'fuel_9001', kind: 'fuel', grade: 'isotope', amount: 1 }] : [];
+  me.aqua = 40;
+  let r = op(st, 0, { kind: 'BOOST', cardIds: [ISO_CARD] });
+  assert(r.ok, `boost: ${r.error}`);
+  if (!second) return 40 - r.state.players[0].aqua;
+  const before = r.state.players[0].aqua;
+  r = op(r.state, 0, { kind: 'BOOST', cardIds: ['thr_hall_effect'] });
+  assert(r.ok, `second boost: ${r.error}`);
+  return before - r.state.players[0].aqua;
+}
+check('ISO-SHUTTLES: an isotope in the bank takes up to 10 aqua off a boost; Shuttles face pays full', () => {
+  const full = isoBoost({ face: 'primary' });
+  const iso = isoBoost();
+  assert(full > 0, 'fixture card costs nothing to boost');
+  eq(iso, Math.max(0, full - 10), 'Iso-Shuttles boost cost');
+  eq(isoBoost({ isotope: false }), full, 'no isotope in the bank');
+  return `full ${full}, Iso-Shuttles ${iso}`;
+});
+check('ISO-SHUTTLES: once per boost operation (a continued boost pays full)', () => {
+  eq(isoBoost({ second: true }), isoBoost({ face: 'primary', second: true }), 'continued boost');
+});
+check('ISO-SHUTTLES: suspended by Anarchy; locked under m0+m1+m2 until a Home Bernal', () => {
+  const full = isoBoost({ face: 'primary' });
+  eq(isoBoost({ anarchy: true }), full, 'Anarchy');
+  eq(isoBoost({ game: PROMO }), full, 'promo game, no Home Bernal');
+  eq(isoBoost({ game: PROMO, home: true }), Math.max(0, full - 10), 'promo game, Home Bernal anchored');
+});
+
+// ---- TRADE PORT (Makers Guild, black) ----
+// "At the start of your turn, you may discard 2 cards to take the top card of a patent queue."
+function tradePort({ face = 'secondary', anarchy = false, game = {}, home = false, late = false, twice = false } = {}) {
+  const st = playing(2, game);
+  const me = only(st, 0, 'crew_makers_guild', face);
+  if (anarchy) st.anarchy = true;
+  if (home) anchorHome(me);
+  me.hand = ['thr_hall_effect', RAD_A, RAD_B];
+  if (late) me.opsRemaining = 0;
+  const top = st.decks.thruster[0];
+  let r = op(st, 0, { kind: 'TRADE_PORT', cardIds: ['thr_hall_effect', RAD_A], deckType: 'thruster' });
+  if (r.ok && twice) r = op(r.state, 0, { kind: 'TRADE_PORT', cardIds: [RAD_B, top], deckType: 'thruster' });
+  return { r, top, base: st };
+}
+check('TRADE PORT: discard 2 at the start of the turn, take the top patent card; Nexus face cannot', () => {
+  const { r, top } = tradePort();
+  assert(r.ok, `Trade Port refused: ${r.error}`);
+  const me = r.state.players[0];
+  assert(me.hand.includes(top), 'the top thruster did not reach the hand');
+  assert(!me.hand.includes('thr_hall_effect') && !me.hand.includes(RAD_A), 'discards stayed in hand');
+  eq(me.hand.length, 2, 'hand size after the swap');
+  eq(me.opsRemaining, 4, 'spent an operation');
+  eq(r.state.decks.thruster[r.state.decks.thruster.length - 1], 'thr_hall_effect', 'discard went under the deck');
+  eq(tradePort({ face: 'primary' }).r.error, 'no_trade_port', 'Offworld Trade Nexus face');
+});
+check('TRADE PORT: start of turn only, once per turn, and the reveal cannot be undone', () => {
+  eq(tradePort({ late: true }).r.error, 'not_start_of_turn', 'after spending the operation');
+  eq(tradePort({ twice: true }).r.error, 'trade_port_used', 'second swap in one turn');
+  const { r, base } = tradePort();
+  const u = op(r.state, 0, { kind: 'UNDO' }, { turnBaseState: base });
+  eq(u.error, 'reveal_blocks_undo', 'undo after the swap');
+});
+check('TRADE PORT: suspended by Anarchy; locked under m0+m1+m2 until a Home Bernal', () => {
+  eq(tradePort({ anarchy: true }).r.error, 'no_trade_port', 'Anarchy');
+  eq(tradePort({ game: PROMO }).r.error, 'no_trade_port', 'promo game, no Home Bernal');
+  assert(tradePort({ game: PROMO, home: true }).r.ok, 'promo game, Home Bernal anchored');
+});
+
+// ---- PIGGYBACK (Utopia, Inc., black) ----
+// "Whenever an opponent boosts cards, you may immediately boost cards up to the mass of the cards boosted, for free."
+// Seat 0 boosts on their turn; seat 1 holds the card and answers off turn.
+function piggyBoost({ face = 'secondary', anarchy = false, game = {}, home = false } = {}) {
+  const st = playing(2, game);
+  only(st, 1, 'crew_utopia_inc', face);
+  if (anarchy) st.anarchy = true;
+  if (home) anchorHome(st.players[1]);
+  st.players[0].hand = [ISO_CARD, 'thr_hall_effect'];
+  st.players[0].aqua = 40;
+  st.players[1].hand = ['thr_hall_effect', ISO_CARD];
+  st.players[1].aqua = 7;
+  st.players[1].leo = [];
+  const base = clone(st);
+  const r = op(st, 0, { kind: 'BOOST', cardIds: [ISO_CARD] });
+  assert(r.ok, `opponent boost: ${r.error}`);
+  return { st: r.state, base, log: r.log };
+}
+const allowOf = (st) => ((st.piggyback && st.piggyback.allow) || {})[String(st.players[1].profileId)] | 0;
+check('PIGGYBACK: an opponent\'s boost lets the Utopia seat boost up to that mass free, off turn', () => {
+  const { st } = piggyBoost();
+  const mass = allowOf(st);
+  assert(mass > 0, 'no piggyback window opened');
+  const r = op(st, 1, { kind: 'PIGGYBACK', cardIds: ['thr_hall_effect'] });
+  assert(r.ok, `piggyback refused: ${r.error}`);
+  const me = r.state.players[1];
+  assert(me.leo.some((s) => s.id === 'thr_hall_effect'), 'card did not reach LEO');
+  eq(me.aqua, 7, 'piggyback cost aqua');
+  assert(/Piggyback/.test(r.log), 'log line does not name the ability');
+  return `window ${mass} mass`;
+});
+check('PIGGYBACK: capped at the boosted mass; Executive Discount face and the booster get no window', () => {
+  const { st } = piggyBoost();
+  const over = op(st, 1, { kind: 'PIGGYBACK', cardIds: ['thr_hall_effect', ISO_CARD] });
+  eq(over.error, 'piggyback_over_mass', 'two cards over the boosted mass');
+  const other = piggyBoost({ face: 'primary' });
+  eq(allowOf(other.st), 0, 'Executive Discount face window');
+  eq(op(other.st, 1, { kind: 'PIGGYBACK', cardIds: ['thr_hall_effect'] }).error, 'no_piggyback_window', 'Executive Discount face');
+  eq(op(st, 0, { kind: 'PIGGYBACK', cardIds: ['thr_hall_effect'] }).error, 'no_piggyback_window', 'the booster');
+});
+check('PIGGYBACK: the window closes with the booster\'s turn; the ridden boost cannot be undone', () => {
+  const { st, base } = piggyBoost();
+  const ended = op(st, 0, { kind: 'END_TURN' });
+  assert(ended.ok, ended.error);
+  eq(op(ended.state, 1, { kind: 'PIGGYBACK', cardIds: ['thr_hall_effect'] }).error, 'no_piggyback_window', 'after the booster ended the turn');
+  const rode = op(st, 1, { kind: 'PIGGYBACK', cardIds: ['thr_hall_effect'] });
+  eq(op(rode.state, 0, { kind: 'UNDO' }, { turnBaseState: base }).error, 'reveal_blocks_undo', 'booster undo after a piggyback');
+  // A later action of the booster's is still undoable, and the rebuild keeps
+  // the piggybacked card where it landed.
+  const more = op(rode.state, 0, { kind: 'BOOST', cardIds: ['thr_hall_effect'] });
+  assert(more.ok, more.error);
+  const u = op(more.state, 0, { kind: 'UNDO' }, { turnBaseState: base });
+  assert(u.ok, `undo of the later boost: ${u.error}`);
+  assert(u.state.players[1].leo.some((s) => s.id === 'thr_hall_effect'), 'the rebuild lost the piggybacked card');
+});
+check('PIGGYBACK: suspended by Anarchy; locked under m0+m1+m2 until a Home Bernal', () => {
+  eq(allowOf(piggyBoost({ anarchy: true }).st), 0, 'Anarchy');
+  eq(allowOf(piggyBoost({ game: PROMO }).st), 0, 'promo game, no Home Bernal');
+  assert(allowOf(piggyBoost({ game: PROMO, home: true }).st) > 0, 'promo game, Home Bernal anchored');
+});
+
+// ---- TAILINGS REMINING (The Martian Way, black) ----
+// "If this Crew is colocated, can produce ET products of Spectral Type C at any Factory."
+function tailings({ face = 'secondary', anarchy = false, game = {}, home = false, crew = true, card = 'thr_hall_effect' } = {}) {
+  const SITE = 'mathilde';
+  const st = playing(2, game);
+  const me = only(st, 0, 'crew_the_martian_way', face);
+  if (anarchy) st.anarchy = true;
+  if (home) anchorHome(me);
+  st.factories = { [SITE]: { ownerId: me.profileId, spectralType: 'S' } };
+  me.rocket.siteId = SITE;
+  me.rocket.stack = crew ? [{ id: 'crew_the_martian_way', kind: 'crew', face }] : [];
+  me.hand = [card];
+  return op(st, 0, { kind: 'ET_PRODUCE', siteId: SITE, cardId: card, letter: 'A' });
+}
+check('TAILINGS REMINING: a C product comes out of an S Factory with the crew there; Rocketeers face cannot', () => {
+  const r = tailings();
+  assert(r.ok, `Tailings Remining refused: ${r.error}`);
+  eq(tailings({ face: 'primary' }).error, 'wrong_spectral', 'Rocketeers face');
+});
+check('TAILINGS REMINING: needs the crew colocated, and only Spectral C', () => {
+  eq(tailings({ crew: false }).error, 'wrong_spectral', 'crew not at the Factory');
+  eq(tailings({ card: 'thr_re_solar_moth' }).error, 'wrong_spectral', 'a Spectral D product');
+  assert(tailings({ card: 'thr_dumbo', face: 'primary' }).ok, 'a matching S product is refused for anyone');
+});
+check('TAILINGS REMINING: suspended by Anarchy; locked under m0+m1+m2 until a Home Bernal', () => {
+  eq(tailings({ anarchy: true }).error, 'wrong_spectral', 'Anarchy');
+  eq(tailings({ game: PROMO }).error, 'wrong_spectral', 'promo game, no Home Bernal');
+  assert(tailings({ game: PROMO, home: true }).ok, 'promo game, Home Bernal anchored');
+});
 
 
 
