@@ -1039,6 +1039,10 @@ export class MapRenderer {
       zoneOpacity: 0.1,
       zoneCurved: true,
       zoneEditMode: false,
+      // Sol's own backdrop: the heliocentric guide rings and the animated
+      // asteroid belt. Maps of other places (e.g. the Ad Astra star map and
+      // its star systems) turn this off; Sol keeps it.
+      solDecor: true,
     };
     // Canonical zone polygons (the frozen source-of-truth data),
     // wired in from browse.js: { polys: {zone:[[{x,y}]]}, colors, order }.
@@ -2077,7 +2081,10 @@ export class MapRenderer {
   // when `visualizeZones` is on. { polys: {zone:[[{x,y}]]}, colors,
   // order } - order is inner -> outer (drawn outer-first so inner
   // regions paint on top).
-  setCanonicalZones({ polys, colors, order } = {}) {
+  // `restart` (optional) lists zones that begin a NEW nesting (a second star's
+  // innermost zone on a binary board): their fill is not punched by the zone
+  // before them in `order`. The Sol board passes none, so it draws as before.
+  setCanonicalZones({ polys, colors, order, restart } = {}) {
     const cols = colors || {};
     const vivid = {};
     for (const z in cols) vivid[z] = vividHex(cols[z]);
@@ -2086,6 +2093,7 @@ export class MapRenderer {
       colors: cols,
       vivid,   // richer fill colours (the pale palette washes out)
       order: Array.isArray(order) ? order.slice() : [],
+      restart: new Set(Array.isArray(restart) ? restart : []),
     };
     this._invalidateStatic();
     this._scheduleDraw();
@@ -2671,7 +2679,7 @@ export class MapRenderer {
     ctx.save();
     ctx.translate(this.pan.x, this.pan.y);
     ctx.scale(eff, eff);
-    this._step('guides', () => this._drawGuides(ctx));
+    if (this.options.solDecor !== false) this._step('guides', () => this._drawGuides(ctx));
     if (this._bodiesVisible) this._step('sun/comet', () => this._drawSiteSunCometWorld(ctx));
     ctx.restore();
 
@@ -2691,7 +2699,7 @@ export class MapRenderer {
     // Delta-v edges over the planets; animated belt + cosmetic traffic +
     // the gameplay route/trail follow on top.
     this._step('edges', () => this._drawEdges(ctx));
-    this._step('belt', () => this._drawAsteroidBelt(ctx));
+    if (this.options.solDecor !== false) this._step('belt', () => this._drawAsteroidBelt(ctx));
     // Battery saver: skip the ambient chibi-ship traffic entirely. With the
     // redraw loop stopped these advance by the whole elapsed gap on each
     // on-demand repaint (e.g. a 5s snapshot poll), so they JUMP across the map
@@ -2730,7 +2738,7 @@ export class MapRenderer {
       this._drawFactoriesScreen(ctx);
       this._drawMobileCubesScreen(ctx);
       this._drawFocusedStackRingScreen(ctx);
-      this._drawLeoAnchorScreen(ctx);
+      if (this.options.solDecor !== false) this._drawLeoAnchorScreen(ctx); // LEO is a Sol-board label
       this._drawPlayerShipScreen(ctx);
       // Reset the per-frame ship hit-boxes; each ship draw routine repopulates
       // them so a tap can map a screen point back to the ship under it.
@@ -3670,7 +3678,9 @@ export class MapRenderer {
       // Ceres punches above its dwarf-class default - shrink it 50% so
       // it doesn't dominate the belt next to Vesta / Pallas / Hygiea.
       const bodyScale = /(^|\s)ceres/i.test(site.name || '') ? 0.5 : 1;
-      const haloR = vis.haloR * bodyScale;
+      // A site may carry its own body size (haloR, world units) instead of
+      // its type's default; no Sol site sets it.
+      const haloR = (site.haloR || vis.haloR) * bodyScale;
       const pal = paletteFor(site);
       if (vis.rocky) {
         // Rocky silhouettes carry a per-site random vertex shape, so
@@ -3701,12 +3711,15 @@ export class MapRenderer {
       if (this._mergedSites.has(site.id)) continue;
       const vis = TYPE_VIS[site.type] || TYPE_VIS.unknown;
       if (vis.kind === 'sun') {
-        if (!offscreen(site.x, site.y, vis.r)) {
+        // A site may carry its own sun radius (sunR, world units); maps with
+        // many stars (the Ad Astra star map) draw them smaller than Sol.
+        const sr = site.sunR || vis.r;
+        if (!offscreen(site.x, site.y, sr)) {
           let g = this._sunGrad;
-          if (!g || g.cx !== site.x || g.cy !== site.y || g.r !== vis.r) {
-            g = this._sunGrad = buildSunGrads(ctx, site.x, site.y, vis.r);
+          if (!g || g.cx !== site.x || g.cy !== site.y || g.r !== sr) {
+            g = this._sunGrad = buildSunGrads(ctx, site.x, site.y, sr);
           }
-          drawSun(ctx, site.x, site.y, vis.r, g);
+          drawSun(ctx, site.x, site.y, sr, g);
         }
         continue;
       }
@@ -5255,7 +5268,7 @@ export class MapRenderer {
       const hasFactory = !!(this._factories && this._factories[site.id]);
       if (labelAlpha > 0 && !hasFactory) {
         ctx.globalAlpha = labelAlpha;
-        const labelOffset = vis.r + 12;
+        const labelOffset = (vis.kind === 'sun' && site.sunR ? site.sunR : vis.r) + 12;
         ctx.font = '500 11px ui-sans-serif, system-ui, sans-serif';
         ctx.strokeStyle = 'rgba(5, 4, 16, 0.85)';
         ctx.lineWidth = 3;
@@ -5713,6 +5726,7 @@ export class MapRenderer {
       const polys = cz.polys[zone];
       if (polys && polys.length) {
         arr.push({
+          zone,
           polys,
           col: cz.colors[zone] || '#22d3ee',
           fillCol: (cz.vivid && cz.vivid[zone]) || cz.colors[zone] || '#22d3ee',
@@ -5742,7 +5756,7 @@ export class MapRenderer {
         ctx.fillStyle = arr[i].fillCol;
         ctx.beginPath();
         for (const pts of arr[i].polys) if (pts && pts.length >= 2) addPath(pts);
-        if (i > 0) for (const pts of arr[i - 1].polys) if (pts && pts.length >= 2) addPath(pts);
+        if (i > 0 && !(cz.restart && cz.restart.has(arr[i].zone))) for (const pts of arr[i - 1].polys) if (pts && pts.length >= 2) addPath(pts);
         ctx.fill('evenodd');
       }
     }

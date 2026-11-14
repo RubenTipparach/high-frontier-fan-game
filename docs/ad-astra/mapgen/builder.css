@@ -1,0 +1,40 @@
+/* Map builder: the map fills the stage, the editor sits in a left panel.
+   Colours come from the app's :root tokens (css/style.css). */
+:root { color-scheme: dark; } /* a deliberately single-dark page, like the game */
+html, body { margin: 0; height: 100%; background: var(--bg, #07060f); color: var(--ink, #e6e9ff); font: 13px/1.4 ui-sans-serif, system-ui, sans-serif; }
+#mg-app { display: grid; grid-template-columns: minmax(300px, 360px) minmax(0, 1fr); height: 100%; }
+@media (max-width: 760px) { #mg-app { grid-template-columns: minmax(0, 1fr); grid-template-rows: 62vh auto; height: auto; } #mg-stage { order: 1; } #mg-panel { order: 2; border-right: 0; } }
+#mg-panel { overflow: auto; padding: 12px 14px 24px; background: var(--panel, #11101e); border-right: 1px solid var(--border, #2a2740); min-width: 0; }
+#mg-panel h2 { margin: 0 0 4px; font-size: 14px; letter-spacing: .12em; text-transform: uppercase; color: var(--accent, #7dd3fc); }
+#mg-panel h3 { margin: 14px 0 6px; font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--warm, #fbbf24); }
+.muted { color: var(--ink-dim, #8b90b8); margin: 4px 0 10px; }
+#mg-stage { position: relative; min-width: 0; }
+#mg-map { position: absolute; inset: 0; }
+.mg-row, .mg-adds { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; align-items: flex-end; }
+.mg-adds button, .mg-adds select { background: var(--panel-2, #1a1830); color: var(--ink, #e6e9ff); border: 1px solid var(--border, #2a2740); border-radius: 6px; padding: 6px 10px; font-weight: 600; cursor: pointer; }
+.mg-adds button:hover { border-color: var(--accent, #7dd3fc); }
+.mg-bodies { display: grid; gap: 8px; }
+.mg-body { background: var(--panel-2, #1a1830); border: 1px solid var(--border, #2a2740); border-left: 3px solid #a8967e; border-radius: 8px; padding: 8px; }
+.mg-body.mg-giant { border-left-color: #c8a373; }
+.mg-body.mg-asteroid { border-left-color: #7e6f5c; }
+.mg-body.mg-dwarf { border-left-color: #9c9387; }
+.mg-body.mg-belt { border-left-color: #7e6f5c; border-left-style: dotted; }
+.mg-body.mg-star { border-left-color: #fbbf24; }
+.mg-tag { color: var(--warm, #fbbf24); min-width: 14px; }
+.mg-role { color: var(--ink, #e6e9ff); font-size: 12px; padding: 4px 0; }
+.mg-bhead { display: flex; gap: 6px; align-items: center; }
+.mg-name { flex: 1; min-width: 0; }
+.mg-x { background: transparent; border: 0; color: var(--bad, #f87171); font-size: 18px; cursor: pointer; padding: 0 4px; }
+.mg-fields { display: flex; flex-wrap: wrap; gap: 6px 10px; margin-top: 6px; }
+.mg-f { display: flex; flex-direction: column; gap: 2px; font-size: 11px; color: var(--ink-dim, #8b90b8); }
+.mg-f.wide { flex: 1 1 100%; }
+#mg-panel *, #mg-panel *::before { box-sizing: border-box; }
+#mg-panel input, #mg-panel select { background: #0c0a1c; color: var(--ink, #e6e9ff); border: 1px solid var(--border, #2a2740); border-radius: 5px; padding: 4px 6px; font: inherit; }
+#mg-panel input[type="number"] { width: 56px; }
+#mg-panel input[type="range"] { padding: 0; width: 100%; }
+.mg-report { list-style: none; padding: 0; margin: 0; display: grid; gap: 4px; }
+.mg-report li { font-size: 12px; }
+.mg-report li.ok { color: var(--good, #4ade80); }
+.mg-report li.no { color: var(--bad, #f87171); }
+.mg-report b { font-weight: 600; margin-right: 6px; }
+.mg-report small { display: block; color: var(--ink-dim, #8b90b8); margin-left: 16px; }
