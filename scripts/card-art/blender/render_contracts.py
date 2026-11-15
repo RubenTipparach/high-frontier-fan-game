@@ -739,6 +739,10 @@ def main():
     ap.add_argument('--out', required=True)
     ap.add_argument('--only', default='')
     ap.add_argument('--samples', type=int, default=32)
+    # The craft is an SVG layered over the card art (assets/cards/contracts/
+    # craft/, user 2026-11-15: "svg ships ... keep planets and asteroids as 3d
+    # backdrops"); --with-craft keeps the rendered craft for comparison.
+    ap.add_argument('--with-craft', action='store_true')
     a = ap.parse_args(argv)
     os.makedirs(a.out, exist_ok=True)
     keys = [k for k in SUBJECTS if not a.only or k in a.only.split(',')]
@@ -761,7 +765,7 @@ def main():
         # The mission's own hardware in the foreground, except where the scene
         # already IS hardware (a station card shows the station).
         builder = HARDWARE.get(types.get(code))
-        if builder and kind != 'station':
+        if a.with_craft and builder and kind != 'station':
             root = craft(builder, seed)
             rim_col = GLOW.get(p.get('body', ''), ((1.0, 0.85, 0.6), 0))[0] if kind == 'planet' else (1.0, 0.85, 0.6)
             lamps = [sun((-0.6, -0.8, 0.55), 4.0), sun((0.5, -0.7, -0.1), 0.6, (0.6, 0.75, 1.0), 20),

@@ -127,3 +127,20 @@ export function abilityHtml(text) {
   }
   return out;
 }
+
+// The Spaceborn icon: a curled infant on a white disc, ringed by an orbit with
+// a small moon ("born in space"), printed beside the thrust triangle on both
+// faces of every human Spaceborn colonist. Mockup-only until signed off; the
+// game's card renderer does not draw it yet.
+export function spacebornGlyph({ size = 24 } = {}) {
+  return `<span class="m4-spaceborn" data-tip="Spaceborn: a colonist born and raised in space.">
+<svg viewBox="0 0 28 28" width="${size}" height="${size}" aria-hidden="true">
+  <ellipse cx="13" cy="15" rx="13" ry="4.2" transform="rotate(-28 13 15)" fill="none" stroke="#111" stroke-width="3"/>
+  <circle cx="13" cy="15" r="10" fill="#fff" stroke="#111" stroke-width="1.6"/>
+  <circle cx="11.2" cy="10.6" r="3" fill="#111"/>
+  <path d="M13.4 12.6 C 17.2 13, 18.2 17.6, 15.2 19.6 C 12.2 21.6, 8 20, 7.8 16.6 C 7.6 14.6, 8.8 13.2, 10 13.2 C 10.6 14.8, 12 15.2, 13.4 12.6 Z" fill="#111"/>
+  <path d="M17.8 9.6 A 13 4.2 -28 0 1 24.8 9.3" fill="none" stroke="#fff" stroke-width="1.4"/>
+  <ellipse cx="13" cy="15" rx="13" ry="4.2" transform="rotate(-28 13 15)" fill="none" stroke="#fff" stroke-width="1.2" stroke-dasharray="0 17 22 100"/>
+  <circle cx="23.6" cy="5.2" r="2.6" fill="#fff" stroke="#111" stroke-width="1.3"/>
+</svg></span>`;
+}

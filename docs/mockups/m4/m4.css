@@ -40,23 +40,31 @@ body.m4-mock { background: #0b0a14; color: #ddd; padding: 16px; font-family: Int
 .m4-box { border-radius: 6px; padding: 4px 6px; font-size: 11px; line-height: 1.25; }
 .m4-box b { display: block; font-size: 9px; letter-spacing: .12em; text-transform: uppercase; margin-bottom: 1px; }
 .m4-dest { background: rgba(0, 0, 0, .78); color: #fff; align-self: flex-start; max-width: 70%; }
-.m4-ability { background: rgba(255, 255, 255, .93); color: #111; text-align: center; font-size: 11.5px; }
-.m4-when { background: rgba(220, 220, 226, .9); color: #111; align-self: flex-start; max-width: 75%; margin-top: auto; }
+.m4-ability { background: rgba(0, 0, 0, .72); color: #fff; text-align: center; font-size: 11.5px; }
+.m4-when { background: rgba(0, 0, 0, .72); color: #fff; align-self: flex-start; max-width: 75%; margin-top: auto; }
 .m4-money { display: flex; align-items: center; justify-content: space-between; padding: 4px 7px; background: #111; }
 .m4-pay { display: flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; }
 .m4-footer { display: flex; justify-content: space-between; align-items: center; font-size: 10px; color: #999; background: #232328; padding: 3px 7px; }
 .m4-footer code { font-size: 9px; color: #777; }
 .m4-kw { text-decoration: underline dotted; cursor: help; font-weight: 700; }
 .m4-body-glyph { font-weight: 700; color: #ffd36b; }
-.m4-ability .m4-body-glyph, .m4-when .m4-body-glyph { color: #7a4b00; }
 .m4-hexchip { display: inline-block; background: #111; color: #fff; font-size: 9px; font-weight: 800; padding: 0 3px; clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%); }
 .m4-inline-icon { color: #2fb36a; cursor: help; }
 .m4-season { font-weight: 700; }
 .m4-season-red { color: #ff6b6b; } .m4-season-yellow { color: #f5c400; } .m4-season-blue { color: #6bb6ff; }
-.m4-ability .m4-season-yellow { color: #a07a00; }
 .m4-immune { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; border: 2px solid #2fb36a; background: #111; color: #fff; font-size: 10px; vertical-align: -3px; cursor: help; }
 /* A contract with a long destination plus both ability boxes needs more than the
    patent card's fixed 220 x 350; let it grow instead of clipping the last box. */
 .card.m4-contract { aspect-ratio: auto; height: auto; max-height: none; }
 .card.m4-contract .card-inner { height: auto; }
 .card.m4-contract .card-face { position: relative; height: auto; }
+/* Spaceborn icon beside the colonist's thrust triangle (mockup-only). */
+.m4-sb-host { position: relative; }
+.m4-sb-host > .m4-spaceborn { position: absolute; left: 100%; bottom: 30px; margin-left: -24px; }
+.m4-spaceborn { display: inline-flex; width: 24px; height: 24px; cursor: help; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .5)); }
+.m4-body.has-craft { background-size: 100% auto, cover; background-position: center bottom, right bottom; background-repeat: no-repeat; }
+/* The printed original beside each new face (review artifact only). */
+.m4-orig { margin: 0; width: 220px; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.m4-orig img { width: 220px; height: auto; border-radius: 10px; display: block; }
+.m4-orig figcaption { font-size: 11px; color: #9aa3b2; letter-spacing: .08em; text-transform: uppercase; }
+.m4-pair.with-orig { gap: 8px 10px; }

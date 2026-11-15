@@ -5462,6 +5462,7 @@ export const CARD_DATA = {
         "💣 Reactor": false,
         "Electric": false,
         "Pulse": false,
+        "Spaceborn": false,
         "Code": "M4B252F",
         "Transcription Notes": "Black border (robot)."
       },
@@ -5480,6 +5481,7 @@ export const CARD_DATA = {
         "💣 Reactor": false,
         "Electric": false,
         "Pulse": false,
+        "Spaceborn": false,
         "Ability": "Freedom to Roam Treaty (O5f) is in effect at any player's Colocated Site/Bernal.",
         "Future": "VINGE FUTURE: Req= This card at Promoted Bernal and have completed an Exodus contract. Effects = Space Empire established, emancipate Robots, 10 VP.",
         "Code": "M4B252R",
@@ -5509,6 +5511,7 @@ export const CARD_DATA = {
         "💣 Reactor": false,
         "Electric": false,
         "Pulse": false,
+        "Spaceborn": false,
         "Code": "M4B253F",
         "Transcription Notes": "Black border (robot)."
       },
@@ -5528,6 +5531,7 @@ export const CARD_DATA = {
         "💣 Reactor": false,
         "Electric": false,
         "Pulse": false,
+        "Spaceborn": false,
         "Ability": "+1 Aqua from Pool after you do a free market op.",
         "Future": "EXONET FUTURE: Req= Colonies in 4 Heliocentric Zones, augmented Colonist plus this card at one of them. Effects = choose any contract deck when fundraising, Endgame Effect: 11 VP.",
         "Code": "M4B253R"
@@ -5555,6 +5559,7 @@ export const CARD_DATA = {
         "💣 Reactor": false,
         "Electric": false,
         "Pulse": false,
+        "Spaceborn": false,
         "Code": "M4B254F",
         "Transcription Notes": "Black border (robot)."
       },
@@ -5573,6 +5578,7 @@ export const CARD_DATA = {
         "💣 Reactor": false,
         "Electric": false,
         "Pulse": false,
+        "Spaceborn": false,
         "Ability": "Insight. FINAO cost for Epic Hazard Rolls halved (drop fractions).",
         "Future": "SPACE SURVEILLANCE FUTURE: Req = Active Law in Freedom. Effects = Space Republic established, 9 VP.",
         "Code": "M4B254R"
@@ -5601,6 +5607,7 @@ export const CARD_DATA = {
         "💣 Reactor": false,
         "Electric": false,
         "Pulse": false,
+        "Spaceborn": false,
         "Code": "M4B255F",
         "Transcription Notes": "Black border (robot)."
       },
@@ -5620,6 +5627,7 @@ export const CARD_DATA = {
         "💣 Reactor": false,
         "Electric": false,
         "Pulse": false,
+        "Spaceborn": false,
         "Ability": "All your Stacks are Glitch-free.",
         "Future": "UNION WAR FUTURE: Req= 2 Promoted augmented Robots at your Colony on Size 7+ Site. Effect = Casus belli (per 4F2 if Module 3), 9 VP.",
         "Code": "M4B255R"
@@ -5649,6 +5657,7 @@ export const CARD_DATA = {
         "💣 Reactor": false,
         "Electric": false,
         "Pulse": false,
+        "Spaceborn": false,
         "Ability": "Can't enter aerobrake.",
         "Code": "M4B256F",
         "Transcription Notes": "Black border (robot). Spectral hex reads 'any'. Thrust triangle is blue (sail style), arrow separator."
@@ -5670,6 +5679,7 @@ export const CARD_DATA = {
         "💣 Reactor": false,
         "Electric": false,
         "Pulse": false,
+        "Spaceborn": false,
         "Ability": "Your Spacecraft may land/liftoff Sites with Size = net thrust. Cannot enter aerobrake.",
         "Future": "TNO LAB FUTURE: Req= This card and 2 other Promoted Colonists at your Colony in [Neptune] zone. Endgame Effect = +4 VP per Factory in [Neptune] zone.",
         "Code": "M4B256R",
@@ -5698,6 +5708,7 @@ export const CARD_DATA = {
         "💣 Reactor": false,
         "Electric": false,
         "Pulse": false,
+        "Spaceborn": false,
         "Code": "M4B257F",
         "Transcription Notes": "Black border (robot)."
       },
@@ -5716,6 +5727,7 @@ export const CARD_DATA = {
         "💣 Reactor": false,
         "Electric": false,
         "Pulse": false,
+        "Spaceborn": false,
         "Ability": "You may boost white-side patents to an Anchored BEO Bernal for 2 Aqua/mass.",
         "Future": "VON NEUMANN FUTURE: Req = Decom. this card & Operational refinery at your Synodic Comet Factory. Effects = Your Robots are always Promoted, 9 VP.",
         "Code": "M4B257R"
@@ -5746,6 +5758,7 @@ export const CARD_DATA = {
         "💣 Reactor": false,
         "Electric": true,
         "Pulse": false,
+        "Spaceborn": true,
         "Code": "M4B258F",
         "Transcription Notes": "Arrow separator between thrust and fuel."
       },
@@ -5767,6 +5780,7 @@ export const CARD_DATA = {
         "💣 Reactor": false,
         "Electric": true,
         "Pulse": false,
+        "Spaceborn": true,
         "Ability": "You may ignore the Solar-Power icon on 1 Colocated card.",
         "Future": "NANITE GOO FUTURE: Reqs = This card at your Colonized Push Factory. Effects = 1 free implant op at this Site, 11 VP.",
         "Code": "M4B258R",
@@ -5799,6 +5813,7 @@ export const CARD_DATA = {
         "💣 Reactor": false,
         "Electric": false,
         "Pulse": false,
+        "Spaceborn": true,
         "Code": "M4B259F",
         "Transcription Notes": "Arrow separator between thrust and fuel."
       },
@@ -5821,6 +5836,7 @@ export const CARD_DATA = {
         "💣 Reactor": false,
         "Electric": false,
         "Pulse": false,
+        "Spaceborn": true,
         "Ability": "Your Spacecraft may land or liftoff sites with Size = net thrust.",
         "Future": "QUANTUM ENTANGLEMENT FUTURE: Reqs = This card at Haumea with Operational X reactor. Effects = 1 reroll per Crash Hazard Roll, 10 VP.",
         "Code": "M4B259R",
@@ -5850,6 +5866,7 @@ export const CARD_DATA = {
         "💣 Reactor": false,
         "Electric": false,
         "Pulse": false,
+        "Spaceborn": true,
         "Code": "M4B260F"
       },
       "tier2": {
@@ -5868,6 +5885,7 @@ export const CARD_DATA = {
         "💣 Reactor": false,
         "Electric": false,
         "Pulse": false,
+        "Spaceborn": true,
         "Ability": "You may boost contracts to your Home Bernal without doubling Boost cost.",
         "Future": "INTERSTELLAR EXPLORATION FUTURE: Reqs = this card plus augmented Colonist at EM Sunlens. Effects = immediate research grant at no cost, 14 VP.",
         "Code": "M4B260R"
@@ -5896,6 +5914,7 @@ export const CARD_DATA = {
         "💣 Reactor": false,
         "Electric": false,
         "Pulse": true,
+        "Spaceborn": true,
         "Code": "M4B261F"
       },
       "tier2": {
@@ -5914,6 +5933,7 @@ export const CARD_DATA = {
         "💣 Reactor": false,
         "Electric": false,
         "Pulse": true,
+        "Spaceborn": true,
         "Ability": "Constructing Space Elevators is a free action.",
         "Future": "ISOTOPE CARTEL FUTURE: Reqs = This card and 15 isotope at your Promoted Anchored Bernal. Effects = Isotope exchange rate is now 12 Aqua for all players. Endgame Effect: 9 VP.",
         "Code": "M4B261R"
@@ -5941,6 +5961,7 @@ export const CARD_DATA = {
         "💣 Reactor": false,
         "Electric": false,
         "Pulse": false,
+        "Spaceborn": true,
         "Code": "M4B262F"
       },
       "tier2": {
@@ -5958,6 +5979,7 @@ export const CARD_DATA = {
         "💣 Reactor": false,
         "Electric": false,
         "Pulse": false,
+        "Spaceborn": true,
         "Ability": "Implant is a 1/turn free action.",
         "Future": "LIC SCAN FUTURE: Reqs = This card and another Promoted Colonist at your Synodic Comet Factory. Effects = If you produce any isotopes as part of a site refuel operation, you may move 1 of them to your Bank, 9 VP.",
         "Code": "M4B262R",
@@ -5990,6 +6012,7 @@ export const CARD_DATA = {
         "💣 Reactor": false,
         "Electric": false,
         "Pulse": false,
+        "Spaceborn": true,
         "Code": "M4B263F",
         "Transcription Notes": "Separator between thrust and fuel is a white DOT, not the usual arrow (same on the back SB_back_11)."
       },
@@ -6012,6 +6035,7 @@ export const CARD_DATA = {
         "💣 Reactor": false,
         "Electric": false,
         "Pulse": false,
+        "Spaceborn": true,
         "Ability": "As an Op, Decom. to remove Busted disk and place Claim on a Colocated Site of Size 2+.",
         "Future": "AVATAR FUTURE: Reqs = This card at Promoted Bernal with Neptune zone Dirtside, Active Law = Individuality. Effects = immune to Felonies, 9 VP.",
         "Code": "M4B263R",
@@ -6042,6 +6066,7 @@ export const CARD_DATA = {
         "💣 Reactor": false,
         "Electric": false,
         "Pulse": false,
+        "Spaceborn": true,
         "Ability": "Can't enter aerobrake.",
         "Code": "M4B264F",
         "Transcription Notes": "Thrust triangle is blue (sail style), thrust 0 and fuel 0, arrow separator."
@@ -6063,6 +6088,7 @@ export const CARD_DATA = {
         "💣 Reactor": false,
         "Electric": false,
         "Pulse": false,
+        "Spaceborn": true,
         "Ability": "You may cargo transfer between your non-ET Home Bernal and LEO. Cannot enter Aerobrake Hazards.",
         "Future": "WARDEN STARSHOT FUTURE: Reqs = Ad astra with TW Thruster and Promoted Freighter. Effect = Freighter/Mobile Factories receive +1 thrust, 7 VP.",
         "Code": "M4B264R",
@@ -6092,6 +6118,7 @@ export const CARD_DATA = {
         "💣 Reactor": false,
         "Electric": false,
         "Pulse": false,
+        "Spaceborn": true,
         "Code": "M4B265F"
       },
       "tier2": {
@@ -6110,6 +6137,7 @@ export const CARD_DATA = {
         "💣 Reactor": false,
         "Electric": false,
         "Pulse": false,
+        "Spaceborn": true,
         "Ability": "You may add 1 & move 2 delegates during a fundraise op.",
         "Future": "TW COMMANDER FUTURE: Reqs = Contribute 8+ & more than any opponent to isototal. Effects = Your delegates count as 2 votes, 9 VP.",
         "Code": "M4B265R"
@@ -6137,6 +6165,7 @@ export const CARD_DATA = {
         "💣 Reactor": false,
         "Electric": false,
         "Pulse": false,
+        "Spaceborn": true,
         "Code": "M4B266F"
       },
       "tier2": {
@@ -6154,6 +6183,7 @@ export const CARD_DATA = {
         "💣 Reactor": false,
         "Electric": false,
         "Pulse": false,
+        "Spaceborn": true,
         "Ability": "You may commit Felonies against players with no spaceborn.",
         "Future": "EXODUS FUTURE: Reqs = Ad astra with TW Thruster and your Promoted Bernal. Effects = Casus belli, 12 VP.",
         "Code": "M4B266R"
@@ -6182,6 +6212,7 @@ export const CARD_DATA = {
         "💣 Reactor": false,
         "Electric": false,
         "Pulse": false,
+        "Spaceborn": true,
         "Code": "M4B267F"
       },
       "tier2": {
@@ -6200,6 +6231,7 @@ export const CARD_DATA = {
         "💣 Reactor": false,
         "Electric": false,
         "Pulse": false,
+        "Spaceborn": true,
         "Ability": "You may implant the parenthood augmentation into your spaceborn.",
         "Future": "VATS FUTURE: Reqs = Your Colonist with the life-support augmentation has a wunderkind. Effects = 9 VP.",
         "Code": "M4B267R"

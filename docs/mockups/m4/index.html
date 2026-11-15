@@ -38,6 +38,7 @@ const legendItems = [
   ...Object.keys(G.AUGMENTS).map((k) => [`${G.AUGMENTS[k].name}`, G.augmentGlyph(k, { size: 30 })]),
   ['Late fee', G.lateFeeBadge(3, { size: 32 })], ['Advance', G.advanceBadge(12, { size: 30 })],
   ['VP', G.vpBadge(4, { size: 32 })], ['Manned', G.mannedGlyph({ size: 30 })],
+  ['Spaceborn', G.spacebornGlyph({ size: 30 })],
 ];
 for (const [label, svg] of legendItems) {
   const d = document.createElement('div'); d.className = 'm4-legend-item';
@@ -52,9 +53,23 @@ function section(id, title, blurb) {
   const a = document.createElement('a'); a.href = `#${id}`; a.textContent = title; nav.appendChild(a);
   return s.querySelector('.m4-grid');
 }
+// With a reference folder (M4_REF_BASE, the review artifact only: the scans are
+// the publisher's art and are not in the repo) each new face sits beside the
+// printed original it was drawn from.
+const REF = globalThis.M4_REF_BASE || params.get('ref');
+function original(code) {
+  if (!REF || !code) return null;
+  const fig = document.createElement('figure'); fig.className = 'm4-orig';
+  fig.innerHTML = `<img src="${REF}${code}.webp" alt="" loading="lazy"><figcaption>Original</figcaption>`;
+  return fig;
+}
+function sideBySide(wrap, pairs) {
+  for (const [code, el] of pairs) { const o = original(code); if (o) wrap.append(o); wrap.append(el); }
+  if (REF) wrap.classList.add('with-orig');
+}
 function pairOf(card) {
   const wrap = document.createElement('div'); wrap.className = 'm4-pair';
-  wrap.append(renderContractFace(card.tier1), renderContractFace(card.tier2));
+  sideBySide(wrap, [[card.tier1.Code, renderContractFace(card.tier1)], [card.tier2.Code, renderContractFace(card.tier2)]]);
   return wrap;
 }
 
@@ -83,7 +98,18 @@ if (!only || only === 'colonists') {
     c.specialty = row.Specialty; c.colonistKind = row.Type;
     c.spectralType = row['Spectral Type'] && row['Spectral Type'] !== 'n/a' ? row['Spectral Type'] : null;
     const wrap = document.createElement('div'); wrap.className = 'm4-pair';
-    wrap.append(renderCard(c, { face: 'primary' }), renderCard(c, { face: 'secondary' }));
+    const faces = [renderCard(c, { face: 'primary' }), renderCard(c, { face: 'secondary' })];
+    if (row.tier1.Spaceborn) {
+      for (const el of faces) {
+        el.querySelectorAll('.card-face').forEach((f) => {
+          const host = f.querySelector('.card-thrust') || f.querySelector('.card-spectral');
+          if (!host) return;
+          host.classList.add('m4-sb-host');
+          host.insertAdjacentHTML('beforeend', G.spacebornGlyph());
+        });
+      }
+    }
+    sideBySide(wrap, [[row.tier1.Code, faces[0]], [row.tier2.Code, faces[1]]]);
     grid.appendChild(wrap);
   }
 }

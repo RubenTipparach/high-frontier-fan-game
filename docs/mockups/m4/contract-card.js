@@ -43,7 +43,10 @@ export function renderContractFace(face) {
   // Card art is ALWAYS the Blender render of the destination
   // (scripts/card-art/blender/render_contracts.py): planets, asteroids and
   // comets are rendered, never drawn in SVG (user 2026-11-15).
-  const art = `url("${globalThis.M4_ART_BASE ?? '../../../'}assets/cards/contracts/${face.Code}-3d.webp")`;
+  // Over it, this face's OWN foreground, drawn after its printed illustration
+  // (scripts/gen-contract-craft.mjs, one SVG per face, never shared).
+  const base = `${globalThis.M4_ART_BASE ?? '../../../'}assets/cards/contracts/`;
+  const art = `url("${base}craft/${face.Code}.svg"), url("${base}${face.Code}-3d.webp")`;
   el.innerHTML = `
     <div class="card-inner"><div class="card-face">
       <div class="card-typebar m4-typebar">
@@ -58,7 +61,7 @@ export function renderContractFace(face) {
         <span class="m4-cyb" data-tip="Cybernetics: the augmentation shapes this contract adds to your portfolio once fulfilled.">${cyb}</span>
         ${vpBadge(face.VP)}
       </div>
-      <div class="card-body m4-body" style='background-image:${art}'>
+      <div class="card-body m4-body has-craft" style='background-image:${art}'>
         <div class="m4-box m4-dest"><b>Destination</b>${richText(face.Destination)}</div>
         ${face['Fulfilled Ability'] ? `<div class="m4-box m4-ability"><b>Fulfilled ability</b>${richText(face['Fulfilled Ability'])}</div>` : ''}
         ${face['When Fulfilling'] ? `<div class="m4-box m4-when"><b>When fulfilling</b>${richText(face['When Fulfilling'])}</div>` : ''}
