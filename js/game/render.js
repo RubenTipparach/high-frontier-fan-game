@@ -10,6 +10,7 @@ import { fleetLabel } from '../../data/fleet-tags.js';
 import { NODE_TAGS, spriteForTags } from '../../data/node-tags.js';
 import { serverTagLabels, tagInfo } from '../../data/node-labels.js';
 import { nodeLabelOf, MAP_LABELS } from '../../data/map-labels.js';
+import { SIGNPOST_COLORS, SIGNPOST_DARK_TEXT, signpostColorsOf } from '../../data/signpost-routes.js';
 import { BUGGY_ROAD_GROUPS } from '../../data/buggy-roam.js';
 import { ZONE_ASSIGNMENTS } from '../../data/zones.js';
 import { SIREN_HOME_ZONE } from '../../data/sirens.js';
@@ -904,6 +905,20 @@ function drawShadedSphere(ctx, cx, cy, r, palette, hazard) {
   ctx.stroke();
 }
 
+// Shift a polyline sideways by `off` (world units, + = left of travel), each
+// vertex along the mean normal of its two hops: one stripe of a shared route.
+function offsetPolyline(pts, off) {
+  const out = [];
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)];
+    let dx = b.x - a.x, dy = b.y - a.y;
+    const len = Math.hypot(dx, dy) || 1;
+    dx /= len; dy /= len;
+    out.push({ x: pts[i].x - dy * off, y: pts[i].y + dx * off });
+  }
+  return out;
+}
+
 export class MapRenderer {
   constructor(host, { data, onSelect } = {}) {
     this.host = host;
@@ -1781,6 +1796,18 @@ export class MapRenderer {
     }
     this._normalEdges = [];
     this._hazardEdges = [];
+    // Signposted routes ("LEO - Mars"): every one starts at LEO and the board
+    // draws it as a bold line in its sign's colour; routes sharing a hop run
+    // side by side as a rainbow. Each entry carries the polyline (oriented
+    // away from LEO, so stripe order holds from hop to hop) and its colours.
+    this._signpostLines = [];
+    const leo = this.data.sites.find((x) => x.id2 === 'lag-leo');
+    const fromLeo = (pts) => {
+      if (!leo) return pts;
+      const d0 = Math.hypot(pts[0].x - leo.x, pts[0].y - leo.y);
+      const d1 = Math.hypot(pts[pts.length - 1].x - leo.x, pts[pts.length - 1].y - leo.y);
+      return d1 < d0 ? pts.slice().reverse() : pts;
+    };
     // Seasonal edges are bucketed by the synodic season
     // ('red'|'yellow'|'blue'). Any site with siteSynodic
     // (comets AND seasonal asteroids like Icarus / Phaethon /
@@ -1801,7 +1828,11 @@ export class MapRenderer {
           if (!this._cometEdgesBySeason.has(season)) this._cometEdgesBySeason.set(season, []);
           this._cometEdgesBySeason.get(season).push(seg);
         }
-        else this._normalEdges.push(seg);
+        else {
+          const cols = signpostColorsOf(sa.id2, sb.id2);
+          if (cols.length) this._signpostLines.push({ pts: fromLeo([sa, sb]), cols, smooth: false });
+          else this._normalEdges.push(seg);
+        }
       }
     }
     // One-way edges (planner '0'-label): draw ONE direction arrow per one-way
@@ -1853,7 +1884,21 @@ export class MapRenderer {
           if (!this._cometChainsBySeason.has(season)) this._cometChainsBySeason.set(season, []);
           this._cometChainsBySeason.get(season).push(pts);
         }
-        else this._chains.push(pts);
+        else {
+          // A chain is one smooth ribbon: it carries every signpost colour
+          // most of its hops carry (a bend node can sit just off the line).
+          const tally = new Map();
+          for (let i = 1; i < pts.length; i++) {
+            for (const c of signpostColorsOf(pts[i - 1].id2, pts[i].id2)) tally.set(c, (tally.get(c) || 0) + 1);
+          }
+          const cols = [...tally].filter(([, n]) => n * 2 >= pts.length - 1).map(([c]) => c);
+          if (cols.length) {
+            const order = signpostColorsOf(pts[0].id2, pts[1].id2);
+            cols.sort((a, b) => (order.indexOf(a) + 99 * (order.indexOf(a) < 0)) - (order.indexOf(b) + 99 * (order.indexOf(b) < 0)));
+            this._signpostLines.push({ pts: fromLeo(pts), cols, smooth: true });
+          }
+          else this._chains.push(pts);
+        }
       }
     }
 
@@ -3039,13 +3084,14 @@ export class MapRenderer {
   _drawEdges(ctx) {
     // One stroke call per category. Browser batches all the line
     // segments in the path into a single GPU command.
-    // - normal (sign-posted) paths : pale grey
+    // - normal paths              : pale grey
+    // - signposted LEO routes     : bold, in their board sign's colour
     // - comet paths               : icy cyan-blue
     // - hazard paths              : red dashed
     const eff = this.zoom * this.fitScale;
     ctx.lineWidth = 1.4 / eff;
 
-    // Normal "sign-posted" board routes.
+    // Normal board routes.
     ctx.strokeStyle = '#cbd5e1';
     ctx.globalAlpha = 0.85;
     ctx.beginPath();
@@ -3055,6 +3101,37 @@ export class MapRenderer {
     }
     for (const pts of this._chains) appendSmoothPath(ctx, pts);
     ctx.stroke();
+
+    // Signposted routes: bold, in the colour of their board sign. A hop
+    // shared by several routes splits into side-by-side stripes (the board's
+    // rainbow); one stroke per colour.
+    if (this._signpostLines.length) {
+      const single = 3.4 / eff, stripe = 2.4 / eff;
+      const byCol = new Map();
+      for (const line of this._signpostLines) {
+        const n = line.cols.length;
+        line.cols.forEach((col, i) => {
+          const off = n > 1 ? (i - (n - 1) / 2) * stripe : 0;
+          if (!byCol.has(col)) byCol.set(col, { wide: [], thin: [] });
+          byCol.get(col)[n > 1 ? 'thin' : 'wide'].push({ pts: off ? offsetPolyline(line.pts, off) : line.pts, smooth: line.smooth });
+        });
+      }
+      ctx.globalAlpha = 0.95;
+      for (const [col, { wide, thin }] of byCol) {
+        ctx.strokeStyle = SIGNPOST_COLORS[col] || '#cbd5e1';
+        for (const [list, w] of [[wide, single], [thin, stripe]]) {
+          if (!list.length) continue;
+          ctx.lineWidth = w;
+          ctx.beginPath();
+          for (const { pts, smooth } of list) {
+            if (smooth) appendSmoothPath(ctx, pts);
+            else { ctx.moveTo(pts[0].x, pts[0].y); for (let k = 1; k < pts.length; k++) ctx.lineTo(pts[k].x, pts[k].y); }
+          }
+          ctx.stroke();
+        }
+      }
+      ctx.lineWidth = 1.4 / eff;
+    }
 
     // Comet routes are coloured by the destination comet's
     // synodic season - red, yellow, or blue - so a glance at
@@ -6018,6 +6095,7 @@ export class MapRenderer {
       let ang = ((l.angle % 360) + 540) % 360 - 180;
       if (ang > 90) ang -= 180; else if (ang < -90) ang += 180;
       if (ang) ctx.rotate((ang * Math.PI) / 180);
+      if (l.kind === 'signpost') { this._drawSignpost(ctx, l, px); ctx.restore(); continue; }
       ctx.lineWidth = Math.max(2, px * 0.22);
       ctx.strokeStyle = 'rgba(5, 4, 16, 0.85)';
       ctx.fillStyle = INK[l.kind] || '#cbd5e1';
@@ -6033,6 +6111,57 @@ export class MapRenderer {
       ctx.restore();
     }
     ctx.restore();
+  }
+
+  // A "LEO - <site>" route sign as the board prints it: an arrow-ended plate in
+  // the route's colour with a magenta disc carrying the burn count, and a short
+  // post down to the route line. Drawn in the label's own rotated frame.
+  _drawSignpost(ctx, l, px) {
+    const fill = SIGNPOST_COLORS[l.color] || '#cbd5e1';
+    ctx.font = `700 ${px.toFixed(1)}px ui-sans-serif, system-ui, sans-serif`;
+    const tw = ctx.measureText(l.text).width;
+    const h = px * 1.7, r = h * 0.62, tip = h * 0.5, pad = px * 0.45;
+    const numAtEnd = l.numberAt !== 'start';
+    // Plate spans the text plus padding; the disc sits on the number end, the
+    // arrow point on the other.
+    const left = -tw / 2 - pad - (numAtEnd ? 0 : r * 1.2);
+    const right = tw / 2 + pad + (numAtEnd ? r * 1.2 : 0);
+    const textX = numAtEnd ? left + pad + tw / 2 : right - pad - tw / 2;
+    ctx.beginPath();
+    if (numAtEnd) {
+      ctx.moveTo(left - tip, 0); ctx.lineTo(left, -h / 2); ctx.lineTo(right, -h / 2);
+      ctx.lineTo(right, h / 2); ctx.lineTo(left, h / 2);
+    } else {
+      ctx.moveTo(right + tip, 0); ctx.lineTo(right, -h / 2); ctx.lineTo(left, -h / 2);
+      ctx.lineTo(left, h / 2); ctx.lineTo(right, h / 2);
+    }
+    ctx.closePath();
+    // Post down to the line.
+    const postX = textX;
+    ctx.moveTo(postX - px * 0.18, h / 2); ctx.lineTo(postX - px * 0.18, h / 2 + px * 0.7);
+    ctx.lineTo(postX + px * 0.18, h / 2 + px * 0.7); ctx.lineTo(postX + px * 0.18, h / 2);
+    ctx.lineWidth = Math.max(1.5, px * 0.16);
+    ctx.strokeStyle = 'rgba(5, 4, 16, 0.6)';
+    ctx.stroke();
+    ctx.fillStyle = fill;
+    ctx.fill();
+    ctx.fillStyle = SIGNPOST_DARK_TEXT.has(l.color) ? '#141414' : '#ffffff';
+    ctx.fillText(l.text, textX, 0);
+    // Burn-count disc.
+    if (l.burns != null) {
+      const cx = numAtEnd ? right - r * 0.15 : left + r * 0.15;
+      ctx.beginPath();
+      ctx.arc(cx, 0, r, 0, Math.PI * 2);
+      ctx.fillStyle = '#e6007e';
+      ctx.fill();
+      ctx.lineWidth = Math.max(1.2, px * 0.14);
+      ctx.strokeStyle = '#ffffff';
+      ctx.stroke();
+      const label = String(l.burns);
+      ctx.font = `800 ${(px * (label.length > 2 ? 0.85 : 1.05)).toFixed(1)}px ui-sans-serif, system-ui, sans-serif`;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(label, cx, px * 0.05);
+    }
   }
 
   _buildSitePopup(site, actions) {
