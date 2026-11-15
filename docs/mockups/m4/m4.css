@@ -1,0 +1,56 @@
+/* Module 4 card mockup styles (docs/mockups/m4). Layered on css/cards.css so a
+   contract reads as one of the game's own cards: same 220px frame, typebar,
+   name row, stat row, art body and footer. Border colour = the side. */
+body.m4-mock { background: #0b0a14; color: #ddd; padding: 16px; font-family: Inter, system-ui, sans-serif; }
+.m4-head h1 { font-size: 20px; margin: 0 0 6px; }
+.m4-head p { max-width: 900px; color: #aaa; font-size: 13px; }
+.m4-head nav { display: flex; gap: 12px; flex-wrap: wrap; font-size: 13px; }
+.m4-head nav a { color: #7cc4ff; }
+.m4-section { margin: 22px 0; }
+.m4-section h2 { font-size: 15px; letter-spacing: .08em; text-transform: uppercase; color: #cfd6e6; margin: 0 0 4px; }
+.m4-blurb { color: #999; font-size: 12px; margin: 0 0 10px; }
+.m4-grid { display: flex; flex-wrap: wrap; gap: 18px; }
+.m4-pair { display: flex; gap: 8px; }
+.m4-legend { display: flex; flex-wrap: wrap; gap: 10px; }
+.m4-legend-item { width: 92px; text-align: center; font-size: 11px; color: #bbb; }
+.m4-legend-icon { height: 46px; display: flex; align-items: center; justify-content: center; border-radius: 8px; }
+.m4-dark { background: #2a2a31; }
+.m4-tip { position: absolute; z-index: 50; max-width: 280px; background: #111; color: #eee; border: 1px solid #555; border-radius: 6px; padding: 6px 8px; font-size: 12px; pointer-events: none; }
+
+/* ---- The contract card ---- */
+.card.m4-contract { --side: #3e9ad6; }
+.card.m4-contract.side-gold { --side: #d8b90c; }
+.card.m4-contract.side-exodus { --side: #b9a0d8; }
+.m4-contract .card-inner { border: 6px solid var(--side); border-radius: 10px; overflow: hidden; background: #18181d; }
+.m4-contract .card-face { background: #18181d; color: #f2f2f2; display: flex; flex-direction: column; min-height: 340px; }
+.m4-typebar { display: grid; grid-template-columns: 26px 1fr 40px; align-items: center; gap: 4px;
+  background: linear-gradient(#3a3a40, #232328); color: #fff; padding: 3px 5px; min-height: 40px; }
+.m4-type { text-align: center; font-size: 13px; font-weight: 700; letter-spacing: .02em; line-height: 1.05; }
+.m4-type small { display: block; font-size: 10px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: #c9c9cf; }
+.m4-title-left, .m4-title-right { display: flex; align-items: center; justify-content: center; }
+.m4-contract .card-name-row { background: #2b2b31; border-bottom: 1px solid #44444b; }
+.m4-contract .card-name { color: #fff; }
+.m4-stats { display: flex; align-items: center; gap: 5px; padding: 5px 7px; background: #111; white-space: nowrap; }
+.m4-stats .m4-aug { width: 17px; height: 17px; }
+.m4-stat { font-size: 9px; letter-spacing: .08em; color: #c9c9cf; }
+.m4-stat strong { font-size: 17px; color: #fff; margin-right: 2px; letter-spacing: 0; }
+.m4-cyb { flex: 1; display: flex; gap: 2px; justify-content: center; }
+.m4-body { flex: 1; background-size: cover; background-position: center; padding: 6px; display: flex; flex-direction: column; gap: 5px; min-height: 160px; }
+.m4-box { border-radius: 6px; padding: 4px 6px; font-size: 11px; line-height: 1.25; }
+.m4-box b { display: block; font-size: 9px; letter-spacing: .12em; text-transform: uppercase; margin-bottom: 1px; }
+.m4-dest { background: rgba(0, 0, 0, .78); color: #fff; align-self: flex-start; max-width: 70%; }
+.m4-ability { background: rgba(255, 255, 255, .93); color: #111; text-align: center; font-size: 11.5px; }
+.m4-when { background: rgba(220, 220, 226, .9); color: #111; align-self: flex-start; max-width: 75%; margin-top: auto; }
+.m4-money { display: flex; align-items: center; justify-content: space-between; padding: 4px 7px; background: #111; }
+.m4-pay { display: flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; }
+.m4-footer { display: flex; justify-content: space-between; align-items: center; font-size: 10px; color: #999; background: #232328; padding: 3px 7px; }
+.m4-footer code { font-size: 9px; color: #777; }
+.m4-kw { text-decoration: underline dotted; cursor: help; font-weight: 700; }
+.m4-body-glyph { font-weight: 700; color: #ffd36b; }
+.m4-ability .m4-body-glyph, .m4-when .m4-body-glyph { color: #7a4b00; }
+.m4-hexchip { display: inline-block; background: #111; color: #fff; font-size: 9px; font-weight: 800; padding: 0 3px; clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%); }
+.m4-inline-icon { color: #2fb36a; cursor: help; }
+.m4-season { font-weight: 700; }
+.m4-season-red { color: #ff6b6b; } .m4-season-yellow { color: #f5c400; } .m4-season-blue { color: #6bb6ff; }
+.m4-ability .m4-season-yellow { color: #a07a00; }
+.m4-immune { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; border: 2px solid #2fb36a; background: #111; color: #fff; font-size: 10px; vertical-align: -3px; cursor: help; }
