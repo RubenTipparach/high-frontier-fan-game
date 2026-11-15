@@ -25,9 +25,20 @@ import os
 import random
 import re
 
-from PIL import Image
+from PIL import Image, ImageChops, ImageFilter
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+
+
+def bloom(im, threshold=150, radius=16, gain=0.9):
+    """Soft glow around the bright parts (limbs, coronas, engine glows): the
+    pixels over `threshold`, blurred wide, screened back over the picture."""
+    rgb = im.convert('RGB')
+    hi = rgb.point(lambda v: max(0, v - threshold) * 255 // (255 - threshold))
+    wide = hi.filter(ImageFilter.GaussianBlur(radius))
+    near = hi.filter(ImageFilter.GaussianBlur(radius / 3))
+    glow = ImageChops.add(wide, near, scale=1.0 / gain)
+    return ImageChops.screen(rgb, glow).convert(im.mode)
 
 
 def purple_wash(w, h, seed):
@@ -131,6 +142,7 @@ def main():
             im = Image.open(os.path.join(a.src, f)).convert('RGBA')
             bg = dark_space(*im.size, seed=sum(map(ord, name)))
             bg.alpha_composite(im)
+            bg = bloom(bg)
             dst = os.path.join(out_dir, f'{name}-3d.webp')
             bg.convert('RGB').save(dst, 'WEBP', quality=82, method=6)
             print('wrote', os.path.relpath(dst, ROOT))

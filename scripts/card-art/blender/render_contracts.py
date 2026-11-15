@@ -30,7 +30,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 import render_bernal_megastructures as K  # noqa: E402
 from render_bernal_megastructures import (  # noqa: E402
     TAU, W, H, Mats, sphere, sun, glow, principled, mat_planet, mat_clouds, mat_atmosphere,
-    habitat, cyl, box, rod)
+    habitat, cyl, box, rod, torus)
 from render_bernals import kalpana, mars_mat, srgb  # noqa: E402
 
 
@@ -227,6 +227,175 @@ def look(kind):
     return cratered(kind, [(0.3, G), (0.7, (0.7, 0.7, 0.7))])
 
 
+
+# ---- distance and glow ------------------------------------------------------------
+# A contract's art is two layers that never touch: the WORLD, built around the
+# origin and then scaled up about the camera so it sits huge and far away, and
+# the mission's CRAFT a few units from the lens. Light linking keeps each layer
+# lit (and shadowed) only by its own lamps, so a craft can never cast a shadow
+# on the planet it is visiting (user 2026-11-15: "planets ... big and glowing
+# and far off in the distance, dont cheapen it by just placing models next to
+# each other, think about framing").
+
+LIT = (-0.8, -0.05, 0.5)     # toward the sun on the planet cards (world_scene's `side`)
+
+GLOW = {
+    'earth': ((0.45, 0.7, 1.0), 2.4), 'mars': ((1.0, 0.55, 0.35), 1.4), 'venus': ((1.0, 0.85, 0.55), 2.4),
+    'jupiter': ((1.0, 0.8, 0.6), 1.8), 'saturn': ((1.0, 0.88, 0.6), 1.8), 'uranus': ((0.55, 0.95, 1.0), 2.2),
+    'neptune': ((0.35, 0.55, 1.0), 2.4), 'titan': ((1.0, 0.7, 0.3), 2.4), 'io': ((1.0, 0.9, 0.5), 1.0),
+    'moon': ((0.8, 0.85, 1.0), 0.7), 'mercury': ((0.95, 0.8, 0.7), 0.7), 'icy': ((0.7, 0.85, 1.0), 0.9),
+    'europa': ((0.85, 0.9, 1.0), 0.9), 'pluto': ((0.95, 0.85, 0.75), 0.8),
+}
+
+
+def limb_glow(name, color, strength):
+    """Glow on the BACK half of a shell around a world: hidden behind the disc,
+    it shows only past the limb, brightest at the limb and fading outward, and
+    never washes over the world's own face."""
+    m = bpy.data.materials.new(name)
+    m.use_nodes = True
+    nt = m.node_tree
+    nt.nodes.clear()
+    out = nt.nodes.new('ShaderNodeOutputMaterial')
+    lw = nt.nodes.new('ShaderNodeLayerWeight')
+    lw.inputs['Blend'].default_value = 0.5
+    r = K.ramp(nt, [(0.0, (1, 1, 1)), (0.35, (0.8, 0.8, 0.8)), (0.6, (0.18, 0.18, 0.18)), (0.92, (0, 0, 0))])
+    nt.links.new(lw.outputs['Facing'], r.inputs['Fac'])
+    geo = nt.nodes.new('ShaderNodeNewGeometry')
+    mul = nt.nodes.new('ShaderNodeMath')
+    mul.operation = 'MULTIPLY'
+    nt.links.new(r.outputs['Color'], mul.inputs[0])
+    nt.links.new(geo.outputs['Backfacing'], mul.inputs[1])
+    # brightest on the sunlit limb, a faint airglow round the night side
+    dot = nt.nodes.new('ShaderNodeVectorMath')
+    dot.operation = 'DOT_PRODUCT'
+    nt.links.new(geo.outputs['Normal'], dot.inputs[0])
+    dot.inputs[1].default_value = -Vector(LIT).normalized()   # back faces: Cycles flips the normal toward the eye
+    mr = nt.nodes.new('ShaderNodeMapRange')
+    mr.inputs['From Min'].default_value, mr.inputs['From Max'].default_value = -0.4, 0.8
+    mr.inputs['To Min'].default_value, mr.inputs['To Max'].default_value = 0.12, 1.0
+    nt.links.new(dot.outputs['Value'], mr.inputs['Value'])
+    lit = nt.nodes.new('ShaderNodeMath')
+    lit.operation = 'MULTIPLY'
+    nt.links.new(mul.outputs[0], lit.inputs[0])
+    nt.links.new(mr.outputs['Result'], lit.inputs[1])
+    mul = lit
+    tr = nt.nodes.new('ShaderNodeBsdfTransparent')
+    em = nt.nodes.new('ShaderNodeEmission')
+    em.inputs['Color'].default_value = (*color, 1)
+    em.inputs['Strength'].default_value = strength
+    mix = nt.nodes.new('ShaderNodeMixShader')
+    nt.links.new(mul.outputs[0], mix.inputs['Fac'])
+    nt.links.new(tr.outputs[0], mix.inputs[1])
+    nt.links.new(em.outputs[0], mix.inputs[2])
+    nt.links.new(mix.outputs[0], out.inputs[0])
+    return m
+
+
+def glow_shell(name, body, R, c):
+    col, st = GLOW.get(body, ((0.8, 0.85, 1.0), 0.8))
+    airless = st < 1.2
+    sh = sphere(f'{name}.glow', R * (1.14 if airless else 1.3), limb_glow(f'{name}.glowm', col, st), c, 96)
+    sh.visible_shadow = False
+    return sh
+
+
+CAM = Vector((0.0, -9.0, 0.3))
+TAN_W = 18.0 / 40.0                 # half-width of the frame in tangent units (lens 40, 600 wide)
+# kind -> (depth, zoom, where its centre lands in tangent units (x right, z up),
+# where the subject's centre sits in the world build)
+LAYOUT = {
+    'planet': (140.0, 1.4, (0.30, 0.14), (1.4, 0.0, -1.3)),
+    'asteroid': (32.0, 1.45, (0.24, 0.10), (1.2, 0.0, -0.9)),
+    'comet': (70.0, 1.15, (0.10, 0.10), (0.9, 0.0, -0.6)),
+    'sun': (400.0, 1.9, (0.42, 0.18), (1.6, 1.0, -1.6)),
+    'station': (16.0, 1.15, (0.10, 0.14), (1.1, 0.0, -0.8)),
+    'tour': (90.0, 1.2, (0.05, 0.08), None),
+}
+
+
+def world_layer(kind, p, seed):
+    """Parent everything built so far to one root, scaled about the camera so the
+    picture keeps its composition but the world sits `depth` away, then zoomed and
+    slid so the subject lands big in the upper right, partly off the card."""
+    rnd = random.Random(seed * 7 + 1)
+    depth, zoom, (tx, tz), c = LAYOUT[kind]
+    if kind == 'tour':
+        bodies = p['bodies']
+        xs = [(2.2 - i * 1.55, i * 3.0, -1.7 + i * 1.05) for i in range(len(bodies))]
+        c = tuple(sum(v[k] for v in xs) / len(xs) for k in range(3))
+    zoom *= rnd.uniform(0.9, 1.12)
+    tx += rnd.uniform(-0.06, 0.06)
+    tz += rnd.uniform(-0.05, 0.05)
+    c = Vector(c)
+    S = depth * zoom / (0.0 - CAM.y)   # the old build was framed from 9 units out
+    L = Vector((tx * depth + CAM.x - S * c.x, depth + CAM.y - S * c.y, tz * depth + CAM.z - S * c.z))
+    for o in bpy.context.scene.objects:
+        camera_only_if_glow(o)
+    objs = [o for o in bpy.context.scene.objects if o.parent is None]
+    root = link_empty('world')
+    for o in objs:
+        o.parent = root
+    root.location, root.scale = L, (S, S, S)
+    return objs
+
+
+def camera_only_if_glow(o):
+    """A glow (halo, limb shell, atmosphere, coma) is something the eye sees, not
+    a lamp: in Cycles an emitter lights its neighbours, and a shell around a
+    world would flood its face from every side and erase the terminator."""
+    if o.type != 'MESH' or not o.data.materials:
+        return
+    m = o.data.materials[0]
+    if m and m.use_nodes and not any(n.type == 'BSDF_PRINCIPLED' for n in m.node_tree.nodes):
+        if not any(k in o.name for k in ('sun', 'tail')):
+            o.visible_diffuse = o.visible_glossy = o.visible_transmission = False
+            o.visible_shadow = False
+
+
+def link_empty(name):
+    return K.link(bpy.data.objects.new(name, None))
+
+
+def backdrop_world(body, tx, tz, tr, depth=160.0, seed=1):
+    """A big world far behind a station: centred at (tx, tz) in tangent units,
+    radius tr in tangent units."""
+    c = (CAM.x + tx * depth, CAM.y + depth, CAM.z + tz * depth)
+    R = tr * depth
+    if body == 'earth':
+        from render_bernals import planet_bg
+        planet_bg('backdrop', 3.0, (0, 0, 0), land=0.535)
+        for n in ('bg.backdrop', 'bg.backdropc', 'bg.backdropa'):
+            o = bpy.data.objects[n]
+            o.scale = (R / 3.0,) * 3
+            o.location = c
+    else:
+        o = sphere('backdrop', 1.0, look(body), (0, 0, 0), 128)
+        o.scale = (R,) * 3
+        o.location = c
+    g = glow_shell('backdrop', body, 1.0, (0, 0, 0))
+    g.scale = (R,) * 3
+    g.location = c
+
+
+def collect(objs):
+    out = []
+    for o in objs:
+        out.append(o)
+        out += collect(list(o.children))
+    return out
+
+
+def link_lights(lamps, objs, name):
+    coll = bpy.data.collections.new(name)
+    for o in objs:
+        if o.type != 'LIGHT':
+            coll.objects.link(o)
+    for l in lamps:
+        l.light_linking.receiver_collection = coll
+        l.light_linking.blocker_collection = coll
+
+
 # ---- subjects --------------------------------------------------------------------
 
 def rock_body(name, r, color, seed, stretch=(1.0, 0.8, 0.7), sub=5, lump=0.35):
@@ -258,6 +427,7 @@ def world_scene(subject, seed):
     kind = subject[0]
     p = dict(subject[1]) if len(subject) > 1 else {}
     key = (-0.7, -0.9, 0.5)
+    side = LIT       # from the left and a little behind: a lit limb and a terminator
     if kind == 'planet':
         body = p.get('body', 'earth')
         R = p.get('r', 3.0)
@@ -278,6 +448,8 @@ def world_scene(subject, seed):
             ring.rotation_euler = (math.radians(18 if body == 'saturn' else 70), math.radians(-14), 0)
         for i, moon in enumerate(p.get('moons', [])):
             sphere(f'moon{i}', moon[1], look(moon[0]), moon[2], 64)
+            glow_shell(f'moon{i}', moon[0], moon[1], moon[2])
+        glow_shell('planet', body, R, c)
         if p.get('aerostat'):
             # a small balloon station riding the cloud tops, lit by its windows
             M = Mats()
@@ -285,7 +457,7 @@ def world_scene(subject, seed):
             env.scale = (1.0, 1.0, 0.55)
             cyl('aero.gondola', 0.06, 0.2, M.dark, (env.location[0], env.location[1], env.location[2] - 0.24), (0, math.radians(90), 0))
             box('aero.win', (0.18, 0.02, 0.03), M.window, (env.location[0], env.location[1] - 0.09, env.location[2] - 0.24))
-        sun(key, 4.5)
+        sun(side, 4.5)
     elif kind == 'asteroid':
         col = p.get('color', (0.42, 0.38, 0.34))
         if p.get('binary'):
@@ -302,7 +474,9 @@ def world_scene(subject, seed):
     elif kind == 'comet':
         nuc = rock_body('nucleus', 0.32, (0.3, 0.28, 0.26), seed, (1.0, 0.75, 0.7))
         place(nuc, (0.9, 0, -0.6))
-        sphere('coma', 1.2, halo('coma', (0.6, 0.82, 1.0), 0.55), (0.9, 0, -0.6), 64)
+        # nested shells: a hot core falling off smoothly into the coma
+        for j, (cr, cs) in enumerate([(0.38, 2.4), (0.8, 0.7), (1.5, 0.22)]):
+            sphere(f'coma{j}', cr, halo(f'coma{j}', (0.62, 0.84, 1.0), cs), (0.9, 0, -0.6), 64)
         nx, nz = 0.9, -0.6
         for tname, col, ang, ln, wd, st in [('dust', (1.0, 0.9, 0.7), 145, 7.5, 3.4, 1.1), ('ion', (0.45, 0.7, 1.0), 155, 9.0, 1.6, 1.6)]:
             # a plane in XZ (facing the camera on -Y), its +X end at the nucleus side
@@ -318,19 +492,13 @@ def world_scene(subject, seed):
             sphere('sun', 1.6, sun_mat('sunm', 2.2), (3.8, 3.0, -2.4), 64)
         sun((0.8, -0.5, -0.3), 4.0)
     elif kind == 'sun':
-        sphere('sun', 2.8, sun_mat('sunm', 2.2), (1.6, 1.0, -1.6), 128)
-        sphere('corona', 3.6, halo('corona', (1.0, 0.45, 0.08), 0.7, 0.1), (1.6, 1.0, -1.6), 96)
-        if p.get('probe'):
-            M = Mats()
-            box('probe.shield', (0.5, 0.06, 0.5), M.white, (-0.6, -1.5, 0.6), (0.3, 0.2, 0.5))
-            cyl('probe.body', 0.12, 0.45, M.gold, (-0.75, -1.7, 0.75), (0.3, 0.2, 0.5))
+        sphere('sun', 2.8, sun_mat('sunm', 6.0), (1.6, 1.0, -1.6), 128)
+        sphere('corona', 4.4, halo('corona', (1.0, 0.55, 0.15), 1.0, 0.1), (1.6, 1.0, -1.6), 96)
         sun((0.7, -0.5, -0.4), 3.0)
     elif kind == 'station':
         M = Mats()
         parts = kalpana(M, 0.9, seed) if p.get('kalpana') else habitat(M, 1.0, seed)
         root = K.group('station', parts, (1.1, 0, -0.8), (math.radians(65), math.radians(12), math.radians(-20)), 1.5)
-        if p.get('body'):
-            sphere('bgplanet', 2.6, look(p['body']) or mat_planet('bgp', 0.6, 0.535), (2.4, 6.0, -3.2), 96)
         sun(key, 4.5)
     elif kind == 'tour':
         # a row of worlds, nearest largest, for the flyby tours
@@ -341,14 +509,173 @@ def world_scene(subject, seed):
                 planet_bg(f'tour{i}', r, (x, i * 3.0, z), land=0.535)
             else:
                 sphere(f'tour{i}', r, look(b), (x, i * 3.0, z), 96)
+            glow_shell(f'tour{i}', b, r, (x, i * 3.0, z))
             if b == 'saturn':
                 bpy.ops.mesh.primitive_circle_add(vertices=128, radius=r * 2.1, fill_type='NGON', location=(x, i * 3.0, z))
                 ring = K.obj(f'tourring{i}')
                 ring.data.materials.append(ring_mat(f'tr{i}', (0.85, 0.78, 0.6), r * 2.1))
                 ring.rotation_euler = (math.radians(18), math.radians(-14), 0)
-        sun(key, 4.5)
-    # camera on -Y looking +Y at the origin; the subject sits right and low
-    K.camera((0, -9.0, 0.3), (0, 0, 0.3), lens=40)
+        sun(side, 4.5)
+
+
+# ---- mission hardware (by contract type) ------------------------------------------
+# Each builder makes its craft at the origin, about 1.4 units across, nose
+# toward +X, and returns its parts; `craft` groups, turns and places it in the
+# foreground, low and right, where the card's text boxes leave the art open.
+
+def cone(name, r1, r2, depth, mat, loc=(0, 0, 0), rot=(0, 0, 0), verts=32):
+    bpy.ops.mesh.primitive_cone_add(radius1=r1, radius2=r2, depth=depth, location=loc, rotation=rot, vertices=verts)
+    ob = K.obj(name)
+    ob.data.materials.append(mat)
+    bpy.ops.object.shade_smooth()
+    return ob
+
+
+def panel(name, M, loc, size, rot=(0, 0, 0)):
+    """A solar wing: dark cells in a steel frame."""
+    return [box(name, size, M.pv, loc, rot), box(name + '.f', (size[0] * 1.03, size[1] * 0.4, size[2] * 1.03), M.steel, loc, rot)]
+
+
+def bell(name, M, x, r=0.16, glow_col=(0.45, 0.7, 1.0)):
+    """An engine bell pointing -X with a plume glow."""
+    parts = [cone(name, r, r * 0.45, r * 1.4, M.dark, (x, 0, 0), (0, math.radians(90), 0))]
+    # the exhaust as a soft glow at the bell's mouth (a solid plume cone read
+    # as a second nose)
+    parts.append(sphere(name + '.glow', r * 0.55, halo(name + '.g', glow_col, 2.5), (x - r * 0.9, 0, 0), 32))
+    return parts
+
+
+def hw_capsule(M):
+    """Tourists: a crew capsule on its service module, wings out."""
+    p = [cone('cap.cone', 0.34, 0.12, 0.42, M.white, (0.55, 0, 0), (0, math.radians(90), 0)),
+         cyl('cap.sm', 0.34, 0.6, principled('sm', (0.75, 0.76, 0.8), 0.35, 0.6), (0.04, 0, 0), (0, math.radians(90), 0))]
+    for i in range(4):
+        p.append(box(f'cap.win{i}', (0.05, 0.02, 0.04), M.window, (0.5, -0.27 + i * 0.0, 0.18 - i * 0.1), (0, 0, 0)))
+    for s_ in (-1, 1):
+        p += panel(f'cap.wing{s_}', M, (0.04, s_ * 0.9, 0), (0.32, 0.03, 1.0) if False else (0.34, 1.0, 0.02))
+    p += bell('cap.bell', M, -0.36, 0.14)
+    return p
+
+
+def hw_yacht(M):
+    """Trillionaires: a long white-and-gold liner with a lit window band."""
+    hull = sphere('yacht.hull', 0.3, M.white, (0.1, 0, 0), 64)
+    hull.scale = (2.6, 1.0, 0.8)
+    p = [hull, box('yacht.trim', (1.3, 0.62, 0.03), M.gold, (0.1, 0, -0.05))]
+    for i in range(10):
+        p.append(box(f'yacht.win{i}', (0.06, 0.6, 0.035), M.window, (-0.4 + i * 0.11, 0, 0.1)))
+    p.append(box('yacht.fin', (0.3, 0.03, 0.28), M.gold, (-0.55, 0, 0.25), (0, math.radians(20), 0)))
+    p += bell('yacht.bell', M, -0.8, 0.13, (1.0, 0.75, 0.35))
+    return p
+
+
+def hw_probe(M):
+    """Science missions: a foil-wrapped bus, a big dish, an RTG on a boom."""
+    p = [box('probe.bus', (0.36, 0.36, 0.3), M.gold, (0, 0, 0)),
+         cone('probe.dish', 0.5, 0.05, 0.18, M.white, (0, 0, 0.3)),
+         cyl('probe.feed', 0.02, 0.35, M.steel, (0, 0, 0.45)),
+         rod('probe.boom', (0.15, 0, 0), (0.9, 0, -0.15), 0.015, M.steel),
+         cyl('probe.rtg', 0.06, 0.26, M.dark, (0.95, 0, -0.16), (0, math.radians(90), 0)),
+         rod('probe.mag', (-0.15, 0, 0), (-1.0, 0, 0.1), 0.01, M.steel)]
+    return p
+
+
+def hw_rover(M):
+    """Robotic research: a six-wheeled rover with a mast camera and a dish."""
+    p = [box('rover.body', (0.8, 0.5, 0.18), M.white, (0, 0, 0.22)),
+         box('rover.deck', (0.82, 0.52, 0.02), M.gold, (0, 0, 0.32)),
+         cyl('rover.mast', 0.025, 0.4, M.steel, (0.3, 0.15, 0.52)),
+         box('rover.head', (0.12, 0.08, 0.08), M.dark, (0.3, 0.15, 0.74)),
+         cone('rover.dish', 0.14, 0.02, 0.05, M.white, (-0.2, -0.1, 0.4))]
+    for i, x in enumerate((-0.32, 0.0, 0.32)):
+        for s_ in (-1, 1):
+            p.append(cyl(f'rover.w{i}{s_}', 0.11, 0.08, M.dark, (x, s_ * 0.3, 0.1), (math.radians(90), 0, 0)))
+    p += panel('rover.pv', M, (-0.2, 0, 0.36), (0.5, 0.5, 0.015))
+    return p
+
+
+def hw_lander(M):
+    """Government grants: a four-legged lander, foil body, bell below."""
+    p = [cyl('lander.body', 0.32, 0.35, M.gold, (0, 0, 0.45), verts=8, smooth=False),
+         cone('lander.top', 0.3, 0.12, 0.2, M.white, (0, 0, 0.72)),
+         cone('lander.bell', 0.14, 0.06, 0.2, M.dark, (0, 0, 0.18))]
+    for i in range(4):
+        a = TAU * i / 4 + math.radians(45)
+        foot = (math.cos(a) * 0.62, math.sin(a) * 0.62, 0.0)
+        p.append(rod(f'lander.leg{i}', (math.cos(a) * 0.25, math.sin(a) * 0.25, 0.4), foot, 0.02, M.steel))
+        p.append(cyl(f'lander.foot{i}', 0.07, 0.02, M.steel, foot))
+    return p
+
+
+def hw_warsat(M):
+    """Military: a dark armoured platform, a rail gun and a red beacon."""
+    p = [cyl('war.hull', 0.32, 0.5, M.dark, (0, 0, 0), (0, math.radians(90), 0), verts=6, smooth=False),
+         cyl('war.rail', 0.04, 1.3, M.steel, (0.75, 0, 0.05), (0, math.radians(90), 0)),
+         box('war.rail2', (1.2, 0.02, 0.02), M.copper, (0.72, 0, 0.12)),
+         sphere('war.beacon', 0.04, M.beacon, (0, 0, 0.36), 12),
+         sphere('war.sensor', 0.09, principled('lens', (0.05, 0.05, 0.07), 0.1, 0.8), (0.22, -0.28, 0), 24)]
+    for s_ in (-1, 1):
+        p += [box(f'war.pv{s_}', (0.3, 0.75, 0.02), principled('darkpv', (0.08, 0.04, 0.04), 0.3, 0.4), (-0.1, s_ * 0.7, 0))]
+    return p
+
+
+def hw_laser(M):
+    """Megaprojects: a ring of mirror segments and a glowing beam."""
+    p = []
+    for i in range(12):
+        a = TAU * i / 12
+        p.append(box(f'laser.seg{i}', (0.05, 0.28, 0.22), principled('mirror', (0.85, 0.88, 0.95), 0.05, 1.0),
+                     (0, math.cos(a) * 0.6, math.sin(a) * 0.6), (a, 0, 0)))
+    p.append(torus('laser.ring', 0.6, 0.03, M.steel, (0, 0, 0), (0, math.radians(90), 0)))
+    p.append(cyl('laser.core', 0.12, 0.4, M.copper, (0, 0, 0), (0, math.radians(90), 0)))
+    p.append(cyl('laser.beam', 0.035, 6.0, glow('beam', (1.0, 0.35, 0.25), 12.0), (3.1, 0, 0), (0, math.radians(90), 0)))
+    return p
+
+
+def hw_starship(M):
+    """Project Exodus: a long truss of spherical tanks, a habitat ring and a drive."""
+    p = [cyl('ship.spine', 0.06, 2.2, M.steel, (0, 0, 0), (0, math.radians(90), 0))]
+    for i in range(5):
+        p.append(sphere(f'ship.tank{i}', 0.16, principled('tank', (0.6, 0.62, 0.66), 0.35, 0.8), (-0.6 + i * 0.25, 0, 0.17), 32))
+        p.append(sphere(f'ship.tankb{i}', 0.16, principled('tank', (0.6, 0.62, 0.66), 0.35, 0.8), (-0.6 + i * 0.25, 0, -0.17), 32))
+    p.append(torus('ship.hab', 0.42, 0.07, M.white, (0.85, 0, 0), (0, math.radians(90), 0)))
+    for i in range(16):
+        a = TAU * i / 16
+        p.append(box(f'ship.win{i}', (0.03, 0.05, 0.03), M.window, (0.85, math.cos(a) * 0.42, math.sin(a) * 0.42)))
+    p += bell('ship.drive', M, -1.2, 0.2, (0.7, 0.85, 1.0))
+    return p
+
+
+HARDWARE = {
+    'Tourists Contract': hw_capsule, 'Avatar Tourists Contract': hw_capsule,
+    'Trillionaire Contract': hw_yacht, 'Avatar Trillionaire Contract': hw_yacht,
+    'Science Mission Contract': hw_probe, 'Robotic Research Contract': hw_rover,
+    'Government Grant Contract': hw_lander, 'Military Contract': hw_warsat,
+    'Megaproject Contract': hw_laser, 'Project Exodus Contract': hw_starship,
+}
+
+
+def craft(builder, seed, at=(0.35, -3.6, -1.05), scale=1.0):
+    rnd = random.Random(seed)
+    M = Mats()
+    parts = builder(M)
+    rot = (math.radians(rnd.uniform(-15, 15)), math.radians(rnd.uniform(-20, 10)), math.radians(rnd.uniform(15, 40)))
+    return K.group('craft', parts, at, rot, scale)
+
+
+def contract_types():
+    """card code -> printed contract type, from the card data the game reads."""
+    import json
+    root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+    data = json.load(open(os.path.join(root, 'data', 'card-data.json')))
+    out = {}
+    for tab in ('Contracts', 'Exodus Contracts'):
+        for c in data.get(tab, []):
+            for f in ('tier1', 'tier2'):
+                face = c.get(f) or {}
+                if face.get('Code'):
+                    out[face['Code']] = face.get('Contract Type')
+    return out
 
 
 # card code -> subject. ('planet', {body, r, moons, aerostat}), ('asteroid', {color, r,
@@ -412,9 +739,32 @@ def main():
     a = ap.parse_args(argv)
     os.makedirs(a.out, exist_ok=True)
     keys = [k for k in SUBJECTS if not a.only or k in a.only.split(',')]
+    types = contract_types()
     for i, code in enumerate(keys):
         K.reset(a.samples)
-        world_scene(SUBJECTS[code], seed=sum(map(ord, code)))
+        seed = sum(map(ord, code))
+        subject = SUBJECTS[code]
+        kind, p = subject[0], (dict(subject[1]) if len(subject) > 1 else {})
+        world_scene(subject, seed=seed)
+        world_layer(kind, p, seed)
+        if kind == 'station' and p.get('body'):
+            backdrop_world(p['body'], 0.42, 0.30, 0.42, seed=seed)
+        for o in bpy.context.scene.objects:
+            camera_only_if_glow(o)
+        bpy.context.scene.cycles.transparent_max_bounces = 32
+        world = collect([o for o in bpy.context.scene.objects if o.parent is None])
+        world_lamps = [o for o in world if o.type == 'LIGHT']
+        link_lights(world_lamps, world, 'world.set')
+        # The mission's own hardware in the foreground, except where the scene
+        # already IS hardware (a station card shows the station).
+        builder = HARDWARE.get(types.get(code))
+        if builder and kind != 'station':
+            root = craft(builder, seed)
+            rim_col = GLOW.get(p.get('body', ''), ((1.0, 0.85, 0.6), 0))[0] if kind == 'planet' else (1.0, 0.85, 0.6)
+            lamps = [sun((-0.6, -0.8, 0.55), 4.0), sun((0.5, -0.7, -0.1), 0.6, (0.6, 0.75, 1.0), 20),
+                     sun((0.7, 0.9, 0.25), 3.0, rim_col)]
+            link_lights(lamps, collect([root]), 'craft.set')
+        K.camera(tuple(CAM), (CAM.x, CAM.y + 10, CAM.z), lens=40)
         bpy.context.scene.render.filepath = os.path.join(a.out, f'{code}.png')
         bpy.ops.render.render(write_still=True)
         print(f'[{i + 1}/{len(keys)}] {code} {SUBJECTS[code][0]}', flush=True)
