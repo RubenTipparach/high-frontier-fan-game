@@ -387,7 +387,9 @@ export class GLSpheres {
     if (this.cv.width < S || this.cv.height < S) { this.cv.width = Math.max(this.cv.width, S); this.cv.height = Math.max(this.cv.height, S); }
     if (!sphere._gl || sphere._gl.owner !== this) this._upload(sphere);
     const H = this.cv.height; gl.viewport(0, 0, S, S);
-    gl.enable(gl.SCISSOR_TEST); gl.scissor(0, 0, S, S); gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT); gl.disable(gl.SCISSOR_TEST);
+    // clear the WHOLE canvas: the copy-out samples a pixel past this sphere's
+    // square, and a larger sphere drawn there earlier left a line along the edge
+    gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
     const u = this.u; const t = sphere.tilt, ct = Math.cos(t), st = Math.sin(t), cl = Math.cos(sphere.lean), sl = Math.sin(sphere.lean);
     // view normal -> body frame: tilt in the screen, then lean toward the viewer (as lutFor)
     const T = [[ct, st, 0], [-st, ct, 0], [0, 0, 1]], Lm = [[1, 0, 0], [0, cl, -sl], [0, sl, cl]];
