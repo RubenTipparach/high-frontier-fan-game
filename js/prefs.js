@@ -196,16 +196,24 @@ function scheduleSleigh() {
 }
 
 let _handSnowTimer = null;
+// Keep one snow layer of `count` flakes as a child of `host` (the hand panel
+// or the map, which can be rebuilt after mount).
+function ensureSnowIn(host, cls, count) {
+  if (!host || host.querySelector(`:scope > .${cls}`)) return;
+  const snow = document.createElement('div');
+  snow.className = cls;
+  snow.setAttribute('aria-hidden', 'true');
+  let flakes = '';
+  for (let i = 0; i < count; i++) flakes += '<span class="xm-flake"></span>';
+  snow.innerHTML = flakes;
+  host.appendChild(snow);
+}
 function ensureHandSnow() {
   try {
-    const hand = document.querySelector('.sandbox-hand');
-    if (!hand || hand.querySelector(':scope > .xm-hand-snow')) return;
-    const snow = document.createElement('div');
-    snow.className = 'xm-hand-snow';
-    snow.setAttribute('aria-hidden', 'true');
-    let flakes = '';
-    for (let i = 0; i < 14; i++) flakes += '<span class="xm-flake"></span>';
-    snow.innerHTML = flakes;
-    hand.appendChild(snow);
+    ensureSnowIn(document.querySelector('.sandbox-hand'), 'xm-hand-snow', 14);
+    // The in-game top bar gets the same snow at the same fall speed (user
+    // 2026-11-15). The layer hangs off the map container, over the bar's
+    // strip, so the bar itself keeps its layout.
+    ensureSnowIn(document.getElementById('browse-map'), 'xm-bar-snow', 26);
   } catch { /* ignore */ }
 }

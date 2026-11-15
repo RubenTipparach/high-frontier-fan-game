@@ -10722,7 +10722,7 @@ html.theme-holiday .sandbox-hand::before {
 }
 html.theme-holiday .main-menu-panel::before { border-radius: 12px 12px 0 0; }
 /* The sleigh layer (fixed, never in the way: no pointer events). */
-.xm-sky, .xm-sleigh-layer, .xm-hand-snow, .xm-lobby-snow { display: none; }
+.xm-sky, .xm-sleigh-layer, .xm-hand-snow, .xm-bar-snow, .xm-lobby-snow { display: none; }
 /* Snow falls only inside the hand panel, behind its cards: the layer sits at
    z-index -1 in the hand panel's own stacking context (above its background,
    below its content) and clips the flakes to the panel. Each flake is moved
@@ -10734,6 +10734,22 @@ html.theme-holiday .xm-hand-snow {
   overflow: hidden;
   pointer-events: none;
   z-index: -1;
+}
+/* Snow over the in-game top bar: a strip the bar's height at the top of the
+   map container, clipped to the bar. Flakes fall the same distance over the
+   same time as in the hand panel, so they drift past at the same speed and
+   are only seen while crossing the bar. It shares the sleigh's layer (z 1):
+   over the bar's background, under the lifted turn controls + route group. */
+html.theme-holiday .xm-bar-snow {
+  display: block;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: var(--toolbar-h, 44px);
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 1;
 }
 html.theme-holiday .xm-sky,
 html.theme-holiday .xm-sleigh-layer {
@@ -10860,6 +10876,7 @@ html.theme-holiday body:has(#view-browse.hidden) .xm-sleigh-layer { display: non
 html.battery-save .xm-sky,
 html.battery-save .xm-sleigh-layer,
 html.battery-save .xm-hand-snow,
+html.battery-save .xm-bar-snow,
 html.battery-save .xm-lobby-snow { display: none !important; }
 html.battery-save.theme-holiday .browse-map::before,
 html.battery-save.theme-holiday .browse-map::after { animation: none; }
