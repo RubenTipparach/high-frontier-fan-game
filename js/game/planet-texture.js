@@ -169,7 +169,10 @@ export class PlanetSphere {
   // `ring`: a ring definition the planet must line up with (its equator in the
   // ring plane): the axis tilts with the rings and leans toward you as far as
   // the rings are opened
-  constructor(texture, { tilt = 0.25, ambient = 0.07, atmosphere = null, cloudDrift = 1.3, ring = null } = {}) {
+  // Planets turn west to east (prograde: seen with north up, the face moves
+  // left to right); `retrograde` turns it the other way (Venus, Uranus).
+  constructor(texture, { tilt = 0.25, ambient = 0.07, atmosphere = null, cloudDrift = 1.3, ring = null, retrograde = false } = {}) {
+    this.dir = retrograde ? -1 : 1;
     if (ring) { tilt = -ring.tilt; this.lean = -Math.asin(Math.min(0.99, ring.flatten)); } else this.lean = 0.35;
     this.tex = texture; this.tilt = tilt; this.ambient = ambient; this.cloudDrift = cloudDrift;
     this.atmo = atmosphere ? atmosphere.match(/[\d.]+/g).map(Number) : null; // 'rgba(r, g, b, a)'
@@ -183,18 +186,18 @@ export class PlanetSphere {
     const { W, H, rgb, cloud } = this.tex; const px = this.img.data; px.fill(0);
     let lx = light.x, ly = -light.y; const lz = 0.55; const ll = Math.hypot(lx, ly, lz) || 1; lx /= ll; ly /= ll; const lzn = lz / ll;
     const amb = this.ambient; const d = L.data; const TAU = Math.PI * 2;
-    const atmo = this.atmo; const cs = spin * this.cloudDrift;
+    spin *= this.dir; const atmo = this.atmo; const cs = spin * this.cloudDrift;
     for (let k = 0; k < d.length; k += 7) {
       const idx = d[k], nx = d[k + 1], ny = d[k + 2], nz = d[k + 3], lat = d[k + 4], lon = d[k + 5], cov = d[k + 6];
       // bilinear: wraps in longitude, clamps at the poles
       const fy = Math.min(H - 1.001, Math.max(0, (0.5 - lat / Math.PI) * H - 0.5)); const v = fy | 0, ty = fy - v;
-      const fx = ((((lon + spin) / TAU) % 1 + 1) % 1) * W - 0.5; const x0 = Math.floor(fx), tx = fx - x0; const ua = (x0 + W) % W, ub = (x0 + 1 + W) % W;
+      const fx = ((((lon - spin) / TAU) % 1 + 1) % 1) * W - 0.5; const x0 = Math.floor(fx), tx = fx - x0; const ua = (x0 + W) % W, ub = (x0 + 1 + W) % W;
       const o00 = (v * W + ua) * 3, o01 = (v * W + ub) * 3, o10 = ((v + 1) * W + ua) * 3, o11 = ((v + 1) * W + ub) * 3;
       const w00 = (1 - tx) * (1 - ty), w01 = tx * (1 - ty), w10 = (1 - tx) * ty, w11 = tx * ty;
       let r = rgb[o00] * w00 + rgb[o01] * w01 + rgb[o10] * w10 + rgb[o11] * w11;
       let g = rgb[o00 + 1] * w00 + rgb[o01 + 1] * w01 + rgb[o10 + 1] * w10 + rgb[o11 + 1] * w11;
       let b = rgb[o00 + 2] * w00 + rgb[o01 + 2] * w01 + rgb[o10 + 2] * w10 + rgb[o11 + 2] * w11;
-      if (cloud) { const cx = ((((lon + cs) / TAU) % 1 + 1) % 1) * W - 0.5; const c0 = Math.floor(cx), ct = cx - c0; const ca = (c0 + W) % W, cb = (c0 + 1 + W) % W;
+      if (cloud) { const cx = ((((lon - cs) / TAU) % 1 + 1) % 1) * W - 0.5; const c0 = Math.floor(cx), ct = cx - c0; const ca = (c0 + W) % W, cb = (c0 + 1 + W) % W;
         const c = ((cloud[v * W + ca] * (1 - ct) + cloud[v * W + cb] * ct) * (1 - ty) + (cloud[(v + 1) * W + ca] * (1 - ct) + cloud[(v + 1) * W + cb] * ct) * ty) / 255; r += (250 - r) * c; g += (252 - g) * c; b += (255 - b) * c; }
       const ndl = nx * lx + ny * ly + nz * lzn;
       const lit = Math.max(this.tex.glow, amb + (1 - amb) * smooth(-0.08, 0.35, ndl) * (0.55 + 0.45 * Math.max(0, ndl)));

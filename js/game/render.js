@@ -3683,7 +3683,7 @@ export class MapRenderer {
       let ent = this._planetSpheres.get(id);
       if (ent && ent.texW >= texW) return ent;
       const t0 = performance.now(); const seed = site.planetSeed ?? seedOf(site.bodyKey || site.name || site.id);
-      const sphere = new PlanetSphere(makePlanetTexture(style, pal, seed, texW, texW / 2), { tilt: 0.1 + (seed % 7) * 0.06, ring: rings, atmosphere: pal.atmosphere || null });
+      const sphere = new PlanetSphere(makePlanetTexture(style, pal, seed, texW, texW / 2), { tilt: 0.1 + (seed % 7) * 0.06, ring: rings, atmosphere: pal.atmosphere || null, retrograde: pal === BODY_PALETTES.venus || pal === BODY_PALETTES.uranus } /* Venus and Uranus turn backwards */);
       ent = { sphere, texW, key: '', speed: (style === 'gas' || style === 'ice-giant' || style === 'brown' ? 0.32 : 0.16) * (0.8 + (seed % 5) * 0.1), phase: (seed % 628) / 100 };
       this._planetSpheres.set(id, ent); paintBudget -= performance.now() - t0;
       return ent;
@@ -3755,6 +3755,9 @@ export class MapRenderer {
     // a merged group. Sun + comets are handled live elsewhere.
     for (const site of this._realSites) {
       if (this._mergedSites.has(site.id)) continue;
+      // the Venus aerostat is a cloud city in Venus's own sky: its hex sits
+      // beside the Venus sphere, so it draws no second planet behind it
+      if (site.id2 === 'venus-aerostat-xity') continue;
       const vis = TYPE_VIS[site.type] || TYPE_VIS.unknown;
       if (vis.kind === 'sun' || vis.kind === 'comet') continue;
       if (vis.kind !== 'hex') continue;
