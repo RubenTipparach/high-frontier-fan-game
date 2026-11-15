@@ -35,7 +35,7 @@ body.m4-mock { background: #0b0a14; color: #ddd; padding: 16px; font-family: Int
 .m4-stat { font-size: 9px; letter-spacing: .08em; color: #c9c9cf; }
 .m4-stat strong { font-size: 17px; color: #fff; margin-right: 2px; letter-spacing: 0; }
 .m4-cyb { flex: 1; display: flex; gap: 2px; justify-content: center; }
-.m4-body { flex: 1; background-size: cover; background-position: center; padding: 6px; display: flex; flex-direction: column; gap: 5px; min-height: 160px; }
+.m4-body { flex: 1; background-size: cover; background-position: right bottom; padding: 6px; display: flex; flex-direction: column; gap: 5px; min-height: 160px; }
 .m4-box { border-radius: 6px; padding: 4px 6px; font-size: 11px; line-height: 1.25; }
 .m4-box b { display: block; font-size: 9px; letter-spacing: .12em; text-transform: uppercase; margin-bottom: 1px; }
 .m4-dest { background: rgba(0, 0, 0, .78); color: #fff; align-self: flex-start; max-width: 70%; }
@@ -54,3 +54,8 @@ body.m4-mock { background: #0b0a14; color: #ddd; padding: 16px; font-family: Int
 .m4-season-red { color: #ff6b6b; } .m4-season-yellow { color: #f5c400; } .m4-season-blue { color: #6bb6ff; }
 .m4-ability .m4-season-yellow { color: #a07a00; }
 .m4-immune { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; border: 2px solid #2fb36a; background: #111; color: #fff; font-size: 10px; vertical-align: -3px; cursor: help; }
+/* A contract with a long destination plus both ability boxes needs more than the
+   patent card's fixed 220 x 350; let it grow instead of clipping the last box. */
+.card.m4-contract { aspect-ratio: auto; height: auto; max-height: none; }
+.card.m4-contract .card-inner { height: auto; }
+.card.m4-contract .card-face { position: relative; height: auto; }
