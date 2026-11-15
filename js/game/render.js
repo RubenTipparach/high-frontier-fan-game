@@ -6,6 +6,7 @@ import { assetUrl } from '../base.js';
 import { isBatterySave, onBatterySaveChange } from '../prefs.js';
 import { isSirens, isHermes } from './online-mode.js';
 import { toLayoutPx, uiScale } from '../ui-scale.js';
+import { makePlanetTexture, PlanetSphere, PlanetRings } from './planet-texture.js';
 import { fleetLabel } from '../../data/fleet-tags.js';
 import { NODE_TAGS, spriteForTags } from '../../data/node-tags.js';
 import { serverTagLabels, tagInfo } from '../../data/node-labels.js';
@@ -270,6 +271,21 @@ const PALETTE_DEFAULTS = {
 // Pick the palette for a site by matching a known body name keyword
 // first, then falling back to the type default. Cheap substring
 // check on lowercased name; precompute once on first paint.
+// The painted, turning sphere (planet-texture.js) each HF body palette reads
+// as; a site may name its own `planetStyle` instead (the Ad Astra maps do).
+const PLANET_STYLE_BY_PALETTE = new Map(Object.entries({
+  mercury: 'rock', venus: 'venus', earth: 'earth', luna: 'rock', mars: 'mars', jupiter: 'gas', io: 'volcanic',
+  europa: 'ice', ganymede: 'rock', callisto: 'rock', saturn: 'gas', titan: 'venus', enceladus: 'ice', iapetus: 'rock',
+  uranus: 'ice-giant', neptune: 'ice-giant', pluto: 'rock', charon: 'rock', ceres: 'rock', vesta: 'rock',
+}).map(([k, v]) => [BODY_PALETTES[k], v]));
+const mq = (q) => { let m = null; return () => { try { m = m || window.matchMedia(q); return m.matches; } catch { return false; } }; };
+const REDUCED_MOTION = mq('(prefers-reduced-motion: reduce)'); // turning planets hold still
+const COARSE_POINTER = mq('(pointer: coarse)'); // a phone or tablet: fewer turning steps
+function planetStyleFor(site, pal) {
+  if (site.planetStyle) return site.planetStyle;
+  return PLANET_STYLE_BY_PALETTE.get(pal) || (pal === PALETTE_DEFAULTS.asteroid || pal === BODY_PALETTES.comet ? null : 'rock');
+}
+
 function paletteFor(site) {
   if (site._palette) return site._palette;
   const n = (site.name || '').toLowerCase();
@@ -489,6 +505,7 @@ const RING_DEFS = {
 // prefix), not its moons. Site names in the data look like
 // 'Saturn Aerostat', 'Jupiter Aerostat-XYZ' etc.
 function ringDefFor(site) {
+  if (site.ringKind) return RING_DEFS[site.ringKind] || null; // a map's own giants (Ad Astra) name their ring style
   const n = (site.name || '').toLowerCase();
   if (n.startsWith('saturn'))  return RING_DEFS.saturn;
   if (n.startsWith('jupiter')) return RING_DEFS.jupiter;
@@ -1040,7 +1057,15 @@ export class MapRenderer {
       zoneOpacity: 0.1,
       zoneCurved: true,
       zoneEditMode: false,
+      // Sol's own backdrop: the heliocentric guide rings and the animated
+      // asteroid belt. Maps of other places (e.g. the Ad Astra star map and
+      // its star systems) turn this off; Sol keeps it.
+      solDecor: true,
+      // Painted, turning body spheres (planet-texture.js), lit from the Sun. On
+      // for every map; battery-save mode keeps them painted but still.
+      texturedBodies: true,
     };
+    this._planetSpheres = new Map(); // texturedBodies: one painted sphere per body
     // Canonical zone polygons (the frozen source-of-truth data),
     // wired in from browse.js: { polys: {zone:[[{x,y}]]}, colors, order }.
     this._canonicalZones = { polys: {}, colors: {}, order: [] };
@@ -2078,7 +2103,10 @@ export class MapRenderer {
   // when `visualizeZones` is on. { polys: {zone:[[{x,y}]]}, colors,
   // order } - order is inner -> outer (drawn outer-first so inner
   // regions paint on top).
-  setCanonicalZones({ polys, colors, order } = {}) {
+  // `restart` (optional) lists zones that begin a NEW nesting (a second star's
+  // innermost zone on a binary board): their fill is not punched by the zone
+  // before them in `order`. The Sol board passes none, so it draws as before.
+  setCanonicalZones({ polys, colors, order, restart } = {}) {
     const cols = colors || {};
     const vivid = {};
     for (const z in cols) vivid[z] = vividHex(cols[z]);
@@ -2087,6 +2115,7 @@ export class MapRenderer {
       colors: cols,
       vivid,   // richer fill colours (the pale palette washes out)
       order: Array.isArray(order) ? order.slice() : [],
+      restart: new Set(Array.isArray(restart) ? restart : []),
     };
     this._invalidateStatic();
     this._scheduleDraw();
@@ -2672,7 +2701,7 @@ export class MapRenderer {
     ctx.save();
     ctx.translate(this.pan.x, this.pan.y);
     ctx.scale(eff, eff);
-    this._step('guides', () => this._drawGuides(ctx));
+    if (this.options.solDecor !== false) this._step('guides', () => this._drawGuides(ctx));
     if (this._bodiesVisible) this._step('sun/comet', () => this._drawSiteSunCometWorld(ctx));
     ctx.restore();
 
@@ -2692,7 +2721,7 @@ export class MapRenderer {
     // Delta-v edges over the planets; animated belt + cosmetic traffic +
     // the gameplay route/trail follow on top.
     this._step('edges', () => this._drawEdges(ctx));
-    this._step('belt', () => this._drawAsteroidBelt(ctx));
+    if (this.options.solDecor !== false) this._step('belt', () => this._drawAsteroidBelt(ctx));
     // Battery saver: skip the ambient chibi-ship traffic entirely. With the
     // redraw loop stopped these advance by the whole elapsed gap on each
     // on-demand repaint (e.g. a 5s snapshot poll), so they JUMP across the map
@@ -2731,7 +2760,7 @@ export class MapRenderer {
       this._drawFactoriesScreen(ctx);
       this._drawMobileCubesScreen(ctx);
       this._drawFocusedStackRingScreen(ctx);
-      this._drawLeoAnchorScreen(ctx);
+      if (this.options.solDecor !== false) this._drawLeoAnchorScreen(ctx); // LEO is a Sol-board label
       this._drawPlayerShipScreen(ctx);
       // Reset the per-frame ship hit-boxes; each ship draw routine repopulates
       // them so a tap can map a screen point back to the ship under it.
@@ -3634,6 +3663,51 @@ export class MapRenderer {
     };
 
     const palSig = (p) => `${p.light}|${p.base}|${p.dark}|${p.atmosphere || '-'}`;
+    // texturedBodies: a body with a planetStyle is painted once and turns,
+    // lit from its nearest star. Painting is budgeted per frame (~12 ms) and a
+    // body waits on its classic sphere until its turn; under 5 px on screen,
+    // or in battery-save mode, it holds still.
+    const textured = !!this.options.texturedBodies;
+    // turning advances on a step clock (phones 3 steps a second, desktops 8): the
+    // map redraws far more often than that, and a sphere repaints only on a step
+    const stepHz = COARSE_POINTER() ? 3 : 8;
+    const now = Math.floor((performance.now() / 1000) * stepHz) / stepHz; let paintBudget = 12; let animating = false; let pending = false;
+    const suns = textured ? this._realSites.filter((s) => (TYPE_VIS[s.type] || {}).kind === 'sun') : [];
+    const mkCanvas = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+    const seedOf = (str) => { let h = 2166136261; for (const ch of String(str)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); } return Math.abs(h) % 100000; };
+    const drawTextured = (site, wx, wy, haloR, pal, rings = null) => {
+      const style = planetStyleFor(site, pal); if (!style) return false;
+      const sr = Math.min(haloR * eff, cap); if (sr < 0.5) return true;
+      const sx = this.pan.x + wx * eff, sy = this.pan.y + wy * eff; const m = sr * (rings ? 2.4 : 1.6) + 40;
+      if (sx < -m || sx > hostW + m || sy < -m || sy > hostH + m) return true;
+      const id = `${site.id2 || site.id}|${style}`;
+      // painted at most 128 device px across the radius (a phone's budget); larger draws scale it up
+      const R = Math.max(2, Math.min(128, Math.round(sr * this.dpr))); const texW = R > 40 ? 192 : R > 14 ? 96 : 48;
+      let ent = this._planetSpheres.get(id);
+      if (!ent || ent.texW < texW) {
+        if (paintBudget <= 0) { pending = true; return false; } // its turn comes next frame
+        const t0 = performance.now(); const seed = site.planetSeed ?? seedOf(site.bodyKey || site.name || site.id);
+        const sphere = new PlanetSphere(makePlanetTexture(style, pal, seed, texW, texW / 2), { tilt: 0.1 + (seed % 7) * 0.06, ring: rings, atmosphere: pal.atmosphere || null });
+        ent = { sphere, texW, key: '', speed: (style === 'gas' || style === 'ice-giant' || style === 'brown' ? 0.32 : 0.16) * (0.8 + (seed % 5) * 0.1), phase: (seed % 628) / 100 };
+        this._planetSpheres.set(id, ent); paintBudget -= performance.now() - t0;
+      }
+      let sun = null, best = Infinity; for (const s of suns) { const d = (s.x - wx) ** 2 + (s.y - wy) ** 2; if (d < best) { best = d; sun = s; } }
+      const light = sun && best > 1 ? { x: sun.x - wx, y: sun.y - wy } : { x: -1, y: -1 };
+      const moving = sr >= 5 && !isBatterySave() && !REDUCED_MOTION(); if (moving) animating = true;
+      const spin = moving ? ent.phase + now * ent.speed : ent.phase;
+      const key = `${R}|${spin.toFixed(4)}|${Math.round(Math.atan2(light.y, light.x) * 20)}`;
+      if (ent.key !== key) { ent.sphere.render(R, spin, light, mkCanvas); ent.key = key; }
+      if (pal.atmosphere) { const g = ctx.createRadialGradient(sx, sy, sr * 0.85, sx, sy, sr * 1.45); g.addColorStop(0, pal.atmosphere); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(sx, sy, sr * 1.45, 0, Math.PI * 2); ctx.fill(); }
+      // rings: a painted ring plane, the half behind the planet first (planet-texture.js)
+      const rr = rings ? (ent.rings = ent.rings || new PlanetRings(rings)).render(R, light, mkCanvas) : null;
+      const rs = rr ? sr / rr.R : 0;
+      if (rr) ctx.drawImage(rr.back, sx - rr.half * rs, sy - rr.half * rs, rr.half * 2 * rs, rr.half * 2 * rs);
+      const cv = ent.sphere.canvas; const half = ((ent.sphere.R + 1) * sr) / ent.sphere.R; // the sphere is R device px; draw it at sr
+      ctx.drawImage(cv, sx - half, sy - half, half * 2, half * 2);
+      if (rr) ctx.drawImage(rr.front, sx - rr.half * rs, sy - rr.half * rs, rr.half * 2 * rs, rr.half * 2 * rs);
+      if (site.hazard) { ctx.lineWidth = 1.1; ctx.strokeStyle = '#f87171'; ctx.beginPath(); ctx.arc(sx, sy, sr, 0, Math.PI * 2); ctx.stroke(); }
+      return true;
+    };
     const sphereExtent = (p, rings) => (rings ? 2.3 : (p.atmosphere ? 1.55 : 1.12));
     const paintSphere = (pal, rings, hazard) => (c, cx, cy, r) => {
       if (rings) {
@@ -3654,6 +3728,7 @@ export class MapRenderer {
       const haloR = vis.haloR || 20;
       const pal = paletteFor(g.exemplar);
       const rings = ringDefFor(g.exemplar);
+      if (textured && drawTextured(g.exemplar, g.cx, g.cy, haloR, pal, rings)) continue;
       // Ring-bearing groups key per-group (rings differ per planet);
       // ring-free groups dedupe on palette so similar bodies share a
       // sprite.
@@ -3671,7 +3746,9 @@ export class MapRenderer {
       // Ceres punches above its dwarf-class default - shrink it 50% so
       // it doesn't dominate the belt next to Vesta / Pallas / Hygiea.
       const bodyScale = /(^|\s)ceres/i.test(site.name || '') ? 0.5 : 1;
-      const haloR = vis.haloR * bodyScale;
+      // A site may carry its own body size (haloR, world units) instead of
+      // its type's default; no Sol site sets it.
+      const haloR = (site.haloR || vis.haloR) * bodyScale;
       const pal = paletteFor(site);
       if (vis.rocky) {
         // Rocky silhouettes carry a per-site random vertex shape, so
@@ -3681,9 +3758,13 @@ export class MapRenderer {
         continue;
       }
       const rings = ringDefFor(site);
+      if (textured && drawTextured(site, site.x, site.y, haloR, pal, rings)) continue;
       const key = rings ? `ring|${site.id}` : `sph|${palSig(pal)}|${site.hazard ? 'h' : '-'}`;
       blit(key, site.x, site.y, haloR, sphereExtent(pal, rings), paintSphere(pal, rings, site.hazard));
     }
+    // turning bodies redraw about 10 times a second; unpainted ones next frame
+    // (each step redraws the whole map, so phones step 3 times a second, desktops 8)
+    if ((animating || pending) && !this._spinTimer) this._spinTimer = setTimeout(() => { this._spinTimer = null; this._scheduleDraw(); }, pending ? 16 : 1000 / stepHz);
   }
 
   // The Sun + comets, drawn live in WORLD space. Their coronas / tails
@@ -3702,12 +3783,15 @@ export class MapRenderer {
       if (this._mergedSites.has(site.id)) continue;
       const vis = TYPE_VIS[site.type] || TYPE_VIS.unknown;
       if (vis.kind === 'sun') {
-        if (!offscreen(site.x, site.y, vis.r)) {
+        // A site may carry its own sun radius (sunR, world units); maps with
+        // many stars (the Ad Astra star map) draw them smaller than Sol.
+        const sr = site.sunR || vis.r;
+        if (!offscreen(site.x, site.y, sr)) {
           let g = this._sunGrad;
-          if (!g || g.cx !== site.x || g.cy !== site.y || g.r !== vis.r) {
-            g = this._sunGrad = buildSunGrads(ctx, site.x, site.y, vis.r);
+          if (!g || g.cx !== site.x || g.cy !== site.y || g.r !== sr) {
+            g = this._sunGrad = buildSunGrads(ctx, site.x, site.y, sr);
           }
-          drawSun(ctx, site.x, site.y, vis.r, g);
+          drawSun(ctx, site.x, site.y, sr, g);
         }
         continue;
       }
@@ -5254,9 +5338,12 @@ export class MapRenderer {
       // player-coloured pill already carries the site name ("Eureka 1S"), so
       // drawing the bare name too would be redundant (two names on one site).
       const hasFactory = !!(this._factories && this._factories[site.id]);
-      if (labelAlpha > 0 && !hasFactory) {
-        ctx.globalAlpha = labelAlpha;
-        const labelOffset = vis.r + 12;
+      // A site may keep its name at every zoom (labelAlways): the Ad Astra star
+      // map keeps its well-known stars named while the rest fade in. Sol sets none.
+      const siteAlpha = site.labelAlways ? 1 : labelAlpha;
+      if (siteAlpha > 0 && !hasFactory) {
+        ctx.globalAlpha = siteAlpha;
+        const labelOffset = (vis.kind === 'sun' && site.sunR ? site.sunR : vis.r) + 12;
         ctx.font = '500 11px ui-sans-serif, system-ui, sans-serif';
         ctx.strokeStyle = 'rgba(5, 4, 16, 0.85)';
         ctx.lineWidth = 3;
@@ -5722,6 +5809,7 @@ export class MapRenderer {
       const polys = cz.polys[zone];
       if (polys && polys.length) {
         arr.push({
+          zone,
           polys,
           col: cz.colors[zone] || '#22d3ee',
           fillCol: (cz.vivid && cz.vivid[zone]) || cz.colors[zone] || '#22d3ee',
@@ -5751,7 +5839,7 @@ export class MapRenderer {
         ctx.fillStyle = arr[i].fillCol;
         ctx.beginPath();
         for (const pts of arr[i].polys) if (pts && pts.length >= 2) addPath(pts);
-        if (i > 0) for (const pts of arr[i - 1].polys) if (pts && pts.length >= 2) addPath(pts);
+        if (i > 0 && !(cz.restart && cz.restart.has(arr[i].zone))) for (const pts of arr[i - 1].polys) if (pts && pts.length >= 2) addPath(pts);
         ctx.fill('evenodd');
       }
     }
