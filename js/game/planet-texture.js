@@ -275,3 +275,85 @@ export class PlanetRings {
     return this.out;
   }
 }
+
+// ---------- the GPU path: one shared WebGL2 canvas draws each sphere with a
+// fragment shader (texture lookup, spin, the star's light, the atmosphere
+// rim), and the map copies the result in. The texture goes to the GPU once;
+// a frame is one draw call, so planets turn smoothly at the map's own frame
+// rate. When WebGL2 is missing, callers fall back to PlanetSphere.render.
+const VS = `#version 300 es
+in vec2 aPos; out vec2 vUv; void main() { vUv = aPos; gl_Position = vec4(aPos, 0.0, 1.0); }`;
+const FS = `#version 300 es
+precision highp float;
+in vec2 vUv; out vec4 o;
+uniform sampler2D uTex; uniform sampler2D uCloud;
+uniform float uHasCloud, uSpin, uCloudSpin, uAmb, uGlow, uPx, uScale;
+uniform mat3 uRot; uniform vec3 uL; uniform vec4 uAtmo;
+const float PI = 3.14159265;
+void main() {
+  vec2 p = vUv * uScale; float r2 = dot(p, p);
+  float cov = clamp((1.0 - sqrt(r2)) / uPx + 0.5, 0.0, 1.0);
+  if (cov <= 0.0) discard;
+  vec3 n = vec3(p, sqrt(max(0.0, 1.0 - r2)));
+  vec3 b = uRot * n;
+  float v = 0.5 - asin(clamp(b.y, -1.0, 1.0)) / PI; float lon = atan(b.x, b.z);
+  vec3 c = texture(uTex, vec2(fract((lon - uSpin) / (2.0 * PI)), v)).rgb;
+  if (uHasCloud > 0.5) c = mix(c, vec3(0.98, 0.99, 1.0), texture(uCloud, vec2(fract((lon - uCloudSpin) / (2.0 * PI)), v)).r);
+  float ndl = dot(n, uL);
+  float lit = max(uGlow, uAmb + (1.0 - uAmb) * smoothstep(-0.08, 0.35, ndl) * (0.55 + 0.45 * max(0.0, ndl)));
+  c *= lit;
+  if (uAtmo.a > 0.0) c = mix(c, uAtmo.rgb, clamp(pow(1.0 - n.z, 2.5) * max(0.0, ndl + 0.25) * uAtmo.a * 1.6, 0.0, 1.0));
+  o = vec4(c * cov, cov);
+}`;
+export class GLSpheres {
+  constructor(makeCanvas) {
+    this.ok = false;
+    try {
+      const cv = makeCanvas(256, 256); const gl = cv.getContext('webgl2', { premultipliedAlpha: true, alpha: true, antialias: false });
+      if (!gl) return;
+      const sh = (t, src) => { const s = gl.createShader(t); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
+      const pr = gl.createProgram(); gl.attachShader(pr, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, FS)); gl.linkProgram(pr);
+      if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(pr));
+      gl.useProgram(pr);
+      const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+      const loc = gl.getAttribLocation(pr, 'aPos'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+      this.u = {}; for (const k of ['uTex', 'uCloud', 'uHasCloud', 'uSpin', 'uCloudSpin', 'uAmb', 'uGlow', 'uPx', 'uScale', 'uRot', 'uL', 'uAtmo']) this.u[k] = gl.getUniformLocation(pr, k);
+      gl.uniform1i(this.u.uTex, 0); gl.uniform1i(this.u.uCloud, 1);
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+      this.gl = gl; this.cv = cv; this.ok = true;
+      cv.addEventListener && cv.addEventListener('webglcontextlost', () => { this.ok = false; });
+    } catch (e) { this.ok = false; }
+  }
+  // upload a texture once (the sphere keeps its GL handles)
+  _upload(sphere) {
+    const gl = this.gl; const t = sphere.tex;
+    const mk = (data, fmt, ifmt) => { const tx = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tx); gl.texImage2D(gl.TEXTURE_2D, 0, ifmt, t.W, t.H, 0, fmt, gl.UNSIGNED_BYTE, data);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE); return tx; };
+    sphere._gl = { tex: mk(new Uint8Array(t.rgb.buffer, t.rgb.byteOffset, t.rgb.length), gl.RGB, gl.RGB8), cloud: t.cloud ? mk(new Uint8Array(t.cloud.buffer, t.cloud.byteOffset, t.cloud.length), gl.RED, gl.R8) : null, owner: this };
+  }
+  // Draw `sphere` at radius R device px; returns the source rectangle to copy
+  // from this.cv ({ x, y, size }) or null on failure.
+  draw(sphere, R, spin, light) {
+    if (!this.ok) return null;
+    const gl = this.gl; R = Math.max(2, Math.min(127, Math.round(R))); const S = R * 2 + 2;
+    if (this.cv.width < S || this.cv.height < S) { this.cv.width = Math.max(this.cv.width, S); this.cv.height = Math.max(this.cv.height, S); }
+    if (!sphere._gl || sphere._gl.owner !== this) this._upload(sphere);
+    const H = this.cv.height; gl.viewport(0, 0, S, S);
+    gl.enable(gl.SCISSOR_TEST); gl.scissor(0, 0, S, S); gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT); gl.disable(gl.SCISSOR_TEST);
+    const u = this.u; const t = sphere.tilt, ct = Math.cos(t), st = Math.sin(t), cl = Math.cos(sphere.lean), sl = Math.sin(sphere.lean);
+    // view normal -> body frame: tilt in the screen, then lean toward the viewer (as lutFor)
+    const T = [[ct, st, 0], [-st, ct, 0], [0, 0, 1]], Lm = [[1, 0, 0], [0, cl, -sl], [0, sl, cl]];
+    const M = [0, 1, 2].map((i) => [0, 1, 2].map((j) => Lm[i][0] * T[0][j] + Lm[i][1] * T[1][j] + Lm[i][2] * T[2][j]));
+    gl.uniformMatrix3fv(u.uRot, false, [M[0][0], M[1][0], M[2][0], M[0][1], M[1][1], M[2][1], M[0][2], M[1][2], M[2][2]]); // column-major
+    let lx = light.x, ly = -light.y; const lz = 0.55; const ll = Math.hypot(lx, ly, lz) || 1;
+    gl.uniform3f(u.uL, lx / ll, ly / ll, lz / ll);
+    const s = spin * sphere.dir; gl.uniform1f(u.uSpin, s); gl.uniform1f(u.uCloudSpin, s * sphere.cloudDrift);
+    gl.uniform1f(u.uAmb, sphere.ambient); gl.uniform1f(u.uGlow, sphere.tex.glow || 0); gl.uniform1f(u.uPx, 1 / R); gl.uniform1f(u.uScale, (R + 1) / R);
+    const a = sphere.atmo; gl.uniform4f(u.uAtmo, a ? a[0] / 255 : 0, a ? a[1] / 255 : 0, a ? a[2] / 255 : 0, a ? a[3] : 0);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, sphere._gl.tex);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, sphere._gl.cloud || sphere._gl.tex); gl.uniform1f(u.uHasCloud, sphere._gl.cloud ? 1 : 0);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    return { x: 0, y: H - S, size: S, R };
+  }
+}

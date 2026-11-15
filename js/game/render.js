@@ -6,7 +6,7 @@ import { assetUrl } from '../base.js';
 import { isBatterySave, onBatterySaveChange } from '../prefs.js';
 import { isSirens, isHermes } from './online-mode.js';
 import { toLayoutPx, uiScale } from '../ui-scale.js';
-import { makePlanetTexture, PlanetSphere, PlanetRings } from './planet-texture.js';
+import { makePlanetTexture, PlanetSphere, PlanetRings, GLSpheres } from './planet-texture.js';
 import { fleetLabel } from '../../data/fleet-tags.js';
 import { NODE_TAGS, spriteForTags } from '../../data/node-tags.js';
 import { serverTagLabels, tagInfo } from '../../data/node-labels.js';
@@ -281,6 +281,7 @@ const PLANET_STYLE_BY_PALETTE = new Map(Object.entries({
 const mq = (q) => { let m = null; return () => { try { m = m || window.matchMedia(q); return m.matches; } catch { return false; } }; };
 const REDUCED_MOTION = mq('(prefers-reduced-motion: reduce)'); // turning planets hold still
 const COARSE_POINTER = mq('(pointer: coarse)'); // a phone or tablet: fewer turning steps
+const mkCanvasStatic = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
 function planetStyleFor(site, pal) {
   if (site.planetStyle) return site.planetStyle;
   return PLANET_STYLE_BY_PALETTE.get(pal) || (pal === PALETTE_DEFAULTS.asteroid || pal === BODY_PALETTES.comet ? null : 'rock');
@@ -3673,7 +3674,11 @@ export class MapRenderer {
     const saver = textured && isBatterySave();
     // turning advances on a step clock (phones 3 steps a second, desktops 8): the
     // map redraws far more often than that, and a sphere repaints only on a step
-    const stepHz = COARSE_POINTER() ? 3 : 8;
+    // with WebGL2 the shader draws each sphere every frame (smooth, cheap);
+    // without it the CPU path steps (phones 3 a second, desktops 8)
+    if (textured && !saver && this._glSpheres === undefined) this._glSpheres = new GLSpheres(mkCanvasStatic);
+    const glS = textured && !saver && this._glSpheres && this._glSpheres.ok ? this._glSpheres : null;
+    const stepHz = glS ? (COARSE_POINTER() ? 20 : 60) : COARSE_POINTER() ? 3 : 8;
     const now = Math.floor((performance.now() / 1000) * stepHz) / stepHz; let paintBudget = 12; let animating = false; let pending = false;
     const suns = textured ? this._realSites.filter((s) => (TYPE_VIS[s.type] || {}).kind === 'sun') : [];
     const mkCanvas = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
@@ -3711,15 +3716,16 @@ export class MapRenderer {
       const light = sun && best > 1 ? { x: sun.x - wx, y: sun.y - wy } : { x: -1, y: -1 };
       const moving = sr >= 5 && !saver && !REDUCED_MOTION(); if (moving) animating = true;
       const spin = moving ? ent.phase + now * ent.speed : ent.phase;
-      const key = `${R}|${spin.toFixed(4)}|${Math.round(Math.atan2(light.y, light.x) * 20)}`;
-      if (ent.key !== key) { ent.sphere.render(R, spin, light, mkCanvas); ent.key = key; }
+      let src = null; // the GPU draws it fresh each frame; the CPU path repaints only when it changed
+      if (glS) src = glS.draw(ent.sphere, R, spin, light);
+      if (!src) { const key = `${R}|${spin.toFixed(4)}|${Math.round(Math.atan2(light.y, light.x) * 20)}`; if (ent.key !== key) { ent.sphere.render(R, spin, light, mkCanvas); ent.key = key; } }
       if (pal.atmosphere) { const g = ctx.createRadialGradient(sx, sy, sr * 0.85, sx, sy, sr * 1.45); g.addColorStop(0, pal.atmosphere); g.addColorStop(1, 'rgba(0,0,0,0)'); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(sx, sy, sr * 1.45, 0, Math.PI * 2); ctx.fill(); }
       // rings: a painted ring plane, the half behind the planet first (planet-texture.js)
       const rr = rings ? (ent.rings = ent.rings || new PlanetRings(rings)).render(R, light, mkCanvas) : null;
       const rs = rr ? sr / rr.R : 0;
       if (rr) ctx.drawImage(rr.back, sx - rr.half * rs, sy - rr.half * rs, rr.half * 2 * rs, rr.half * 2 * rs);
-      const cv = ent.sphere.canvas; const half = ((ent.sphere.R + 1) * sr) / ent.sphere.R; // the sphere is R device px; draw it at sr
-      ctx.drawImage(cv, sx - half, sy - half, half * 2, half * 2);
+      if (src) { const half = ((src.R + 1) * sr) / src.R; ctx.drawImage(glS.cv, src.x, src.y, src.size, src.size, sx - half, sy - half, half * 2, half * 2); }
+      else { const cv = ent.sphere.canvas; const half = ((ent.sphere.R + 1) * sr) / ent.sphere.R; ctx.drawImage(cv, sx - half, sy - half, half * 2, half * 2); } // the sphere is R device px; draw it at sr
       if (rr) ctx.drawImage(rr.front, sx - rr.half * rs, sy - rr.half * rs, rr.half * 2 * rs, rr.half * 2 * rs);
       if (site.hazard) { ctx.lineWidth = 1.1; ctx.strokeStyle = '#f87171'; ctx.beginPath(); ctx.arc(sx, sy, sr, 0, Math.PI * 2); ctx.stroke(); }
       return true;
