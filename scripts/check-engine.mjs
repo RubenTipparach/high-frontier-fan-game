@@ -10725,3 +10725,15 @@ check('endgame: fulfilled VP, -1 per unpaid aqua, -3 for the blue default chit',
   assert(w2.debt === unpaid && w2.chit === -3 && w2.vp === -unpaid - 3, `unfulfilled ${JSON.stringify(w2)}`);
   return `P1 +${face.vp}; P2 -${unpaid} unpaid -3 chit`;
 });
+
+check('an Inspiration event cycles the contract decks too (K2a)', () => {
+  const st = m4Game();
+  const before = Object.fromEntries(Object.entries(st.contractDecks).map(([k, d]) => [k, d[0]]));
+  st.lastEvent = { turn: st.turn, round: st.round, dieRoll: 1, kind: 'inspiration', notes: [] };
+  resolveSunspotEvent(st, 'inspiration');
+  for (const k of Object.keys(before)) {
+    assert(st.contractDecks[k].slice(-1)[0] === before[k], `${k}: the old top did not go to the bottom`);
+    assert(st.contractDecks[k][0] !== before[k], `${k}: same top card`);
+  }
+  return 'IF, HU, EA tops sent to the bottom';
+});

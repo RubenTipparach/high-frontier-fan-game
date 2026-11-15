@@ -2785,6 +2785,16 @@ function resolveSunspotEvent(state, kind, opts = {}) {
     // event round sees exactly which cards rotated. The two M1 Terawatt decks
     // (GW thrusters + Freighters) cycle too when M1 is on, like the auction.
     const cycled = cycleMarketDecks(state);
+    // M4 (K2a): the Contract decks cycle too, top card to the bottom.
+    if (state.m4 && state.contractDecks) {
+      for (const pair of Object.keys(state.contractDecks)) {
+        const d = state.contractDecks[pair];
+        if (d.length < 2) continue;
+        const out = d.shift();
+        d.push(out);
+        cycled.push({ deck: `${CONTRACT_PAIR_NAMES[pair]} contract`, out, in: d[0] });
+      }
+    }
     for (const c of cycled) {
       // Per-deck detail lands in the clock-modal event record ONLY, not the
       // news feed: all decks collapse into the ONE Inspiration news line below

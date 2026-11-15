@@ -112,7 +112,11 @@ function renderPanel() {
   let tpLine = 'Your timepiece is in your Reserve: you may win a contract auction.';
   if (tp) {
     const f = faceOf(p, tp.contractId);
-    tpLine = tp.deadbeat
+    const tmeta = (p.contractMeta || {})[tp.contractId] || {};
+    const owed = (f.advance * (tmeta.boosted ? 1 : 2)) - (tmeta.paid | 0);
+    tpLine = tmeta.default
+      ? `<b class="m4c-late">IN DEFAULT</b>: ${esc(f.name)} can never be fulfilled. ${owed} aqua of debt left (up to ${f.lateFee} a turn); the timepiece stays out until it is repaid.`
+      : tp.deadbeat
       ? `<b class="m4c-late">LATE</b>: ${esc(f.name)} - pay its ${f.lateFee}-aqua late fee this turn or it defaults.`
       : `Timepiece on slot ${tp.slot} (${yearsFromNow(s, tp.slot)} year${yearsFromNow(s, tp.slot) === 1 ? '' : 's'} away) for ${esc(f.name)}.`;
   }
@@ -154,7 +158,9 @@ function renderPanel() {
     const act = meta.default
       ? `<div class="m4c-note m4c-late">In default: ${owed} aqua still owed (${meta.paid | 0} paid).</div>
          ${myTurn ? `<button type="button" data-act="pay" data-id="${id}" data-max="${f.lateFee}">Pay ${f.lateFee} toward the debt</button>` : ''}`
-      : (myTurn ? `<button type="button" data-act="boost" data-id="${id}">Boost to LEO (${f.mass} aqua)</button>` : '');
+      : (myTurn ? `<button type="button" data-act="boost" data-id="${id}">Boost to LEO (${f.mass} aqua)</button>` : '')
+        + (myTurn && tp && tp.contractId === id && tp.deadbeat
+          ? `<button type="button" data-act="pay" data-id="${id}" data-max="${f.lateFee}">Pay late fee (${f.lateFee})</button>` : '');
     return `<div class="m4c-item">${cardThumb(id, meta.side || 'blue')}<div class="m4c-btns">${act}</div></div>`;
   }).join('');
   const boosted = Object.keys(p.contractMeta || {}).filter((id) => !(p.contractHand || []).includes(id)).map((id) => {

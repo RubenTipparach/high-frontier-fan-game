@@ -66,6 +66,30 @@ Years: the engine already advances the Sunspot Cube one slot per turn
 (`advanceClock`), so a timepiece is stored as an absolute clock position
 (`round * 12 + turn`) and "late" is the clock passing it.
 
+## Stage 1 status (2026-11-15)
+
+LANDED, gated on `state.m4`, checked in `scripts/check-engine.mjs` and played
+end to end in a local two-seat game (recordings: auction, boost + fly + fulfill,
+late fee + default):
+
+- Data: `data/contracts.js` from the sheet; the `Destination Steps` column makes
+  52 of the 84 faces engine-checkable (`at:` / `site` filters / `enter:` /
+  `flybys:` / `liftoff` / `return`). The rest are `manual:` and refused with
+  `destination_not_yet_supported` until their module lands (Bernals, Colonies,
+  Freighters, the isobank, a few map-geometry steps).
+- 4B3 auction (`AUCTION_CONTRACT_START / BID / PASS / CLOSE`, in `state.auction`
+  as kind `contract`), 4B4 boost + `FULFILL_CONTRACT` (a Glitch Trigger),
+  4B5 `PAY_LATE_FEE` + deadbeat flip in `advanceClock` + default at END_TURN +
+  debt repayment, 4B6 default chit + decommission (4B6a), pad-explosion and
+  budget-cut immunity, Inspiration cycles the contract decks (K2a), 4E2 scoring.
+- Client: contract cards render in stacks (`js/game/contract-card.js`), the
+  Contracts panel + contract auction overlay (`js/game/contracts-ui.js`).
+
+STILL TO DO in Stage 1: the contract ABILITIES (tophat free hazard, Hazard /
+Aerobrake Ignore, Shielded, Insight, Secured, Bailout, Connections deck choice,
+"When Fulfilling" effects), negotiation of contracts (4B2g), a tie-winner picker
+in the auction overlay, and Freighter / Bernal stacks carrying a contract.
+
 ## Card data wanted (the `Contracts` tab)
 
 Same layout as the other tabs: a banner row, a header row, then TWO rows per
