@@ -397,7 +397,7 @@ export const MAP_LABELS = [
   { text: "Sol-Mars Lagrange", nx: 0.9806, ny: 0.5877, angle: -75, size: 0.0019, kind: "lagrange" },
   { text: "Sol-Mars Lagrange", nx: 0.9278, ny: 0.6134, angle: -75, size: 0.0019, kind: "lagrange" },
   { text: "Earth-Luna Lagrange", nx: 0.8833, ny: 0.6632, angle: -90, size: 0.0019, kind: "lagrange" },
-  { text: "Luna Treaty: To Claim Luna requires permission from the 1st player.", nx: 0.8972, ny: 0.6817, angle: -75, size: 0.0017, kind: "other" },
+  { text: "Luna Treaty: To Claim Luna\nrequires permission from the 1st player.", nx: 0.8972, ny: 0.6817, angle: -75, size: 0.0017, kind: "other" },
   { text: "Luna Flyby", nx: 0.8541, ny: 0.6825, angle: -75, size: 0.0019, kind: "flyby" },
   { text: "Earth-Luna Lagrange", nx: 0.9124, ny: 0.7212, angle: -90, size: 0.0019, kind: "lagrange" },
   { text: "LEO - Ceres", nx: 0.9319, ny: 0.6734, angle: -75, size: 0.0015, kind: "signpost", color: "blue", burns: "4.5", numberAt: "start" },

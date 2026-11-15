@@ -63,10 +63,10 @@ export const PLANET_STYLES = {
   },
   // cratered airless rock (Mercury / the Moon / most moons and asteroids)
   rock: (pal, s) => { const craters = Array.from({ length: 34 }, (_, i) => { const u = hash(s, i, 1, 7) * 2 - 1, th = hash(s, i, 2, 7) * Math.PI * 2, r = Math.sqrt(1 - u * u);
-      return { c: [r * Math.cos(th), u, r * Math.sin(th)], R: 0.05 + hash(s, i, 3, 7) ** 2 * 0.22 }; });
+      const R = 0.05 + hash(s, i, 3, 7) ** 2 * 0.22; return { c: [r * Math.cos(th), u, r * Math.sin(th)], R, cosLim: Math.cos(Math.min(Math.PI, R * 1.25)) }; });
     return (p) => {
       let v = fbm(p[0] * 3, p[1] * 3, p[2] * 3, s, 5); let rim = 0;
-      for (const k of craters) { const d = Math.acos(Math.max(-1, Math.min(1, p[0] * k.c[0] + p[1] * k.c[1] + p[2] * k.c[2]))) / k.R; if (d < 1.25) { if (d < 1) v -= (1 - d * d) * 0.22; rim += Math.max(0, 1 - Math.abs(d - 1) * 6) * 0.25; } }
+      for (const k of craters) { if (p[0] * k.c[0] + p[1] * k.c[1] + p[2] * k.c[2] < k.cosLim) continue; const d = Math.acos(Math.max(-1, Math.min(1, p[0] * k.c[0] + p[1] * k.c[1] + p[2] * k.c[2]))) / k.R; if (d < 1.25) { if (d < 1) v -= (1 - d * d) * 0.22; rim += Math.max(0, 1 - Math.abs(d - 1) * 6) * 0.25; } }
       const maria = smooth(0.52, 0.62, fbm(p[0] * 1.4, p[1] * 1.4, p[2] * 1.4, s + 5, 3));
       return ramp([hex(pal.dark), hex(pal.base), hex(pal.light)], clamp01(v * 1.3 - 0.15 + rim - maria * 0.18));
     }; },
@@ -109,6 +109,53 @@ export const PLANET_STYLES = {
       for (const v of vents) { const d = Math.acos(Math.max(-1, Math.min(1, p[0] * v.c[0] + p[1] * v.c[1] + p[2] * v.c[2]))) / v.R; if (d < 2.2) c = mix(c, d < 0.5 ? [40, 25, 20] : [200, 80, 30], (1 - d / 2.2) * 0.8); }
       return c;
     }; },
+  // a named body's own surface (`pal.look`), from spacecraft and telescope
+  // images: each switch adds one real feature (maria, grooves, two-tone,
+  // wisps, tiger stripes, a canyon, a giant crater, bright spots, caps, haze,
+  // a spongy surface, cantaloupe terrain, Pluto's heart, Haumea's red spot)
+  body: (pal, s) => {
+    const L = pal.look || {}; const dark = hex(pal.dark), base = hex(pal.base), light = hex(pal.light);
+    const unit = (i, k) => { const u = hash(s, i, k, 3) * 2 - 1, th = hash(s, i, k + 1, 3) * Math.PI * 2, r = Math.sqrt(1 - u * u); return [r * Math.cos(th), u, r * Math.sin(th)]; };
+    const nC = L.craters ?? 30; const cs = L.craterSize ?? 0.1;
+    const craters = Array.from({ length: nC }, (_, i) => { const R = cs * (0.25 + hash(s, i, 7, 3) ** 2 * 1.6); return { c: unit(i, 10), R, cosLim: Math.cos(Math.min(Math.PI, R * 1.25)) }; });
+    const big = L.bigCrater ? { c: unit(999, 20), R: L.bigCrater } : null;
+    const spots = Array.from({ length: L.spots || 0 }, (_, i) => ({ c: unit(500 + i, 30), R: 0.03 + hash(s, i, 9, 4) * 0.04 }));
+    const canyon = L.canyon ? unit(777, 40) : null; // the pole of the great circle a chasm runs along
+    const ang = (p, c) => Math.acos(Math.max(-1, Math.min(1, p[0] * c[0] + p[1] * c[1] + p[2] * c[2])));
+    const capC = L.capColor ? hex(L.capColor) : [236, 238, 242];
+    return (p, lat, lon) => {
+      const v = fbm(p[0] * 3, p[1] * 3, p[2] * 3, s, 5);
+      let c = ramp([dark, base, light], v * 1.2 - 0.1 + (L.lift || 0));
+      if (L.haze) c = ramp([dark, base, light], 0.55 + 0.1 * Math.sin(lat * 3.2) + 0.12 * (fbm(p[0] * 1.5, p[1] * 5, p[2] * 1.5, s, 3) - 0.5) - 0.18 * smooth(0.7, 1.4, lat));
+      if (L.maria) c = mix(c, mix(dark, base, 0.25), smooth(0.57, 0.63, fbm(p[0] * 1.3, p[1] * 1.3, p[2] * 1.3, s + 5, 4)) * L.maria); // dark lava plains, about a third of the face
+      if (L.grooves) { const region = smooth(0.42, 0.55, fbm(p[0] * 1.6, p[1] * 1.6, p[2] * 1.6, s + 13, 3)); const stripe = 0.5 + 0.5 * Math.sin((p[0] * 9 + p[2] * 7 + p[1] * 4 + fbm(p[0] * 4, p[1] * 4, p[2] * 4, s + 3, 3) * 6) * 3);
+        c = mix(c, mix(light, base, stripe * 0.5), region * L.grooves); }
+      if (L.twoTone) c = mix([38, 27, 18], c, smooth(-0.2, 0.2, p[2] + (fbm(p[0] * 3, p[1] * 3, p[2] * 3, s + 7, 3) - 0.5) * 0.5));
+      if (L.wisps) { const w = 1 - smooth(0.0, 0.035, Math.abs(vnoise(p[0] * 3.5, p[1] * 3.5, p[2] * 3.5, s + 21) - 0.5)); c = mix(c, [238, 240, 243], w * L.wisps * smooth(-0.2, 0.4, -p[0])); }
+      if (L.stripes) { const w = 1 - smooth(0.0, 0.08, Math.abs(Math.sin(lon * 2 + lat * 5 + fbm(p[0] * 3, p[1] * 3, p[2] * 3, s, 2)))); c = mix(c, [150, 200, 230], w * smooth(-0.75, -1.05, lat) * 0.85); }
+      if (canyon) { const d = Math.abs(p[0] * canyon[0] + p[1] * canyon[1] + p[2] * canyon[2]); c = mix(c, mix(dark, base, 0.3), (1 - smooth(0.0, 0.035, d)) * 0.8); }
+      if (L.cantaloupe) { const cell = 1 - smooth(0.0, 0.06, Math.abs(vnoise(p[0] * 14, p[1] * 14, p[2] * 14, s + 31) - 0.5)); c = mix(c, mix(c, [150, 160, 120], 0.35), smooth(-0.2, 0.3, lat) * 0.7); c = mix(c, mix(dark, base, 0.5), cell * 0.45 * smooth(-0.2, 0.3, lat)); }
+      if (L.sponge) { const pit = 1 - smooth(0.0, 0.12, Math.abs(vnoise(p[0] * 9, p[1] * 9, p[2] * 9, s + 41) - 0.5)); c = mix(c, [40, 30, 22], pit * 0.6); }
+      for (const k of craters) { if (p[0] * k.c[0] + p[1] * k.c[1] + p[2] * k.c[2] < k.cosLim) continue; const d = ang(p, k.c) / k.R; if (d < 1.25) { // a cheap dot test skips the far craters
+        const floor = L.craterTone === 'bright' ? mix(light, [255, 255, 255], 0.3) : mix(dark, base, 0.4);
+        if (d < 1) c = mix(c, floor, (1 - d * d) * (L.craterTone === 'bright' ? 0.7 : 0.45));
+        c = mix(c, light, Math.max(0, 1 - Math.abs(d - 1) * 7) * 0.35); } }
+      if (big) { const d = ang(p, big.c) / big.R; if (d < 1.15) { c = mix(c, mix(dark, base, 0.55), d < 1 ? 0.35 * (1 - d * d) : 0); c = mix(c, light, Math.max(0, 1 - Math.abs(d - 1) * 9) * 0.7); c = mix(c, light, Math.max(0, 1 - d / 0.12) * 0.6); } } // rim and central peak
+      for (const sp of spots) { const d = ang(p, sp.c) / sp.R; if (d < 1) c = mix(c, [250, 250, 248], (1 - d * d) * 0.95); }
+      if (L.cap === 'north' || L.cap === 'both') { const c0 = L.capLat ?? 0.95; c = mix(c, capC, smooth(c0, c0 + 0.25, lat + (v - 0.5) * 0.25)); }
+      if (L.cap === 'south' || L.cap === 'both') c = mix(c, capC, smooth(0.6, 1.0, -lat + (v - 0.5) * 0.3));
+      if (L.streaks) { const st = 1 - smooth(0, 0.05, Math.abs(Math.sin(lon * 7 + fbm(p[0] * 4, p[1] * 4, p[2] * 4, s + 51, 2) * 3))); c = mix(c, [80, 60, 55], st * smooth(-0.3, -0.8, lat) * 0.6); }
+      if (L.heart) { // Tombaugh Regio: two bright lobes and a point below; the dark red Cthulhu band on the equator beside it
+        const dirOf = (la, lo) => [Math.cos(la) * Math.cos(lo), Math.sin(la), Math.cos(la) * Math.sin(lo)];
+        const lobe = (la, lo, R) => Math.max(0, 1 - ang(p, dirOf(la, lo)) / R);
+        const h = Math.max(lobe(0.38, -0.28, 0.34), lobe(0.38, 0.28, 0.34), lobe(0.05, 0, 0.22));
+        c = mix(c, [246, 236, 220], smooth(0.05, 0.3, h) * 0.92);
+        const dl = Math.abs(Math.atan2(Math.sin(lon - 1.9), Math.cos(lon - 1.9)));
+        c = mix(c, [74, 32, 22], smooth(0.32, 0.12, Math.abs(lat + 0.05)) * smooth(1.3, 0.6, dl) * 0.85); }
+      if (L.redSpot) { const d = ang(p, [0, 0.15, 1]) / 0.35; if (d < 1) c = mix(c, [120, 50, 40], (1 - d * d) * 0.85); }
+      return c;
+    };
+  },
   // a brown dwarf: dark, banded, glowing from inside
   brown: (pal, s) => (p, lat) => {
     const turb = fbm(p[0] * 2.5, p[1] * 8, p[2] * 2.5, s, 5);
@@ -169,7 +216,10 @@ export class PlanetSphere {
   // `ring`: a ring definition the planet must line up with (its equator in the
   // ring plane): the axis tilts with the rings and leans toward you as far as
   // the rings are opened
-  constructor(texture, { tilt = 0.25, ambient = 0.07, atmosphere = null, cloudDrift = 1.3, ring = null } = {}) {
+  // Planets turn west to east (prograde: seen with north up, the face moves
+  // left to right); `retrograde` turns it the other way (Venus, Uranus).
+  constructor(texture, { tilt = 0.25, ambient = 0.07, atmosphere = null, cloudDrift = 1.3, ring = null, retrograde = false } = {}) {
+    this.dir = retrograde ? -1 : 1;
     if (ring) { tilt = -ring.tilt; this.lean = -Math.asin(Math.min(0.99, ring.flatten)); } else this.lean = 0.35;
     this.tex = texture; this.tilt = tilt; this.ambient = ambient; this.cloudDrift = cloudDrift;
     this.atmo = atmosphere ? atmosphere.match(/[\d.]+/g).map(Number) : null; // 'rgba(r, g, b, a)'
@@ -183,18 +233,18 @@ export class PlanetSphere {
     const { W, H, rgb, cloud } = this.tex; const px = this.img.data; px.fill(0);
     let lx = light.x, ly = -light.y; const lz = 0.55; const ll = Math.hypot(lx, ly, lz) || 1; lx /= ll; ly /= ll; const lzn = lz / ll;
     const amb = this.ambient; const d = L.data; const TAU = Math.PI * 2;
-    const atmo = this.atmo; const cs = spin * this.cloudDrift;
+    spin *= this.dir; const atmo = this.atmo; const cs = spin * this.cloudDrift;
     for (let k = 0; k < d.length; k += 7) {
       const idx = d[k], nx = d[k + 1], ny = d[k + 2], nz = d[k + 3], lat = d[k + 4], lon = d[k + 5], cov = d[k + 6];
       // bilinear: wraps in longitude, clamps at the poles
       const fy = Math.min(H - 1.001, Math.max(0, (0.5 - lat / Math.PI) * H - 0.5)); const v = fy | 0, ty = fy - v;
-      const fx = ((((lon + spin) / TAU) % 1 + 1) % 1) * W - 0.5; const x0 = Math.floor(fx), tx = fx - x0; const ua = (x0 + W) % W, ub = (x0 + 1 + W) % W;
+      const fx = ((((lon - spin) / TAU) % 1 + 1) % 1) * W - 0.5; const x0 = Math.floor(fx), tx = fx - x0; const ua = (x0 + W) % W, ub = (x0 + 1 + W) % W;
       const o00 = (v * W + ua) * 3, o01 = (v * W + ub) * 3, o10 = ((v + 1) * W + ua) * 3, o11 = ((v + 1) * W + ub) * 3;
       const w00 = (1 - tx) * (1 - ty), w01 = tx * (1 - ty), w10 = (1 - tx) * ty, w11 = tx * ty;
       let r = rgb[o00] * w00 + rgb[o01] * w01 + rgb[o10] * w10 + rgb[o11] * w11;
       let g = rgb[o00 + 1] * w00 + rgb[o01 + 1] * w01 + rgb[o10 + 1] * w10 + rgb[o11 + 1] * w11;
       let b = rgb[o00 + 2] * w00 + rgb[o01 + 2] * w01 + rgb[o10 + 2] * w10 + rgb[o11 + 2] * w11;
-      if (cloud) { const cx = ((((lon + cs) / TAU) % 1 + 1) % 1) * W - 0.5; const c0 = Math.floor(cx), ct = cx - c0; const ca = (c0 + W) % W, cb = (c0 + 1 + W) % W;
+      if (cloud) { const cx = ((((lon - cs) / TAU) % 1 + 1) % 1) * W - 0.5; const c0 = Math.floor(cx), ct = cx - c0; const ca = (c0 + W) % W, cb = (c0 + 1 + W) % W;
         const c = ((cloud[v * W + ca] * (1 - ct) + cloud[v * W + cb] * ct) * (1 - ty) + (cloud[(v + 1) * W + ca] * (1 - ct) + cloud[(v + 1) * W + cb] * ct) * ty) / 255; r += (250 - r) * c; g += (252 - g) * c; b += (255 - b) * c; }
       const ndl = nx * lx + ny * ly + nz * lzn;
       const lit = Math.max(this.tex.glow, amb + (1 - amb) * smooth(-0.08, 0.35, ndl) * (0.55 + 0.45 * Math.max(0, ndl)));
@@ -270,5 +320,87 @@ export class PlanetRings {
     B.ctx.putImageData(ib, 0, 0); F.ctx.putImageData(iF, 0, 0);
     this.key = key; this.out = { B, F, back: B.c, front: F.c, half, size, R: Rq };
     return this.out;
+  }
+}
+
+// ---------- the GPU path: one shared WebGL2 canvas draws each sphere with a
+// fragment shader (texture lookup, spin, the star's light, the atmosphere
+// rim), and the map copies the result in. The texture goes to the GPU once;
+// a frame is one draw call, so planets turn smoothly at the map's own frame
+// rate. When WebGL2 is missing, callers fall back to PlanetSphere.render.
+const VS = `#version 300 es
+in vec2 aPos; out vec2 vUv; void main() { vUv = aPos; gl_Position = vec4(aPos, 0.0, 1.0); }`;
+const FS = `#version 300 es
+precision highp float;
+in vec2 vUv; out vec4 o;
+uniform sampler2D uTex; uniform sampler2D uCloud;
+uniform float uHasCloud, uSpin, uCloudSpin, uAmb, uGlow, uPx, uScale;
+uniform mat3 uRot; uniform vec3 uL; uniform vec4 uAtmo;
+const float PI = 3.14159265;
+void main() {
+  vec2 p = vUv * uScale; float r2 = dot(p, p);
+  float cov = clamp((1.0 - sqrt(r2)) / uPx + 0.5, 0.0, 1.0);
+  if (cov <= 0.0) discard;
+  vec3 n = vec3(p, sqrt(max(0.0, 1.0 - r2)));
+  vec3 b = uRot * n;
+  float v = 0.5 - asin(clamp(b.y, -1.0, 1.0)) / PI; float lon = atan(b.x, b.z);
+  vec3 c = texture(uTex, vec2(fract((lon - uSpin) / (2.0 * PI)), v)).rgb;
+  if (uHasCloud > 0.5) c = mix(c, vec3(0.98, 0.99, 1.0), texture(uCloud, vec2(fract((lon - uCloudSpin) / (2.0 * PI)), v)).r);
+  float ndl = dot(n, uL);
+  float lit = max(uGlow, uAmb + (1.0 - uAmb) * smoothstep(-0.08, 0.35, ndl) * (0.55 + 0.45 * max(0.0, ndl)));
+  c *= lit;
+  if (uAtmo.a > 0.0) c = mix(c, uAtmo.rgb, clamp(pow(1.0 - n.z, 2.5) * max(0.0, ndl + 0.25) * uAtmo.a * 1.6, 0.0, 1.0));
+  o = vec4(c * cov, cov);
+}`;
+export class GLSpheres {
+  constructor(makeCanvas) {
+    this.ok = false;
+    try {
+      const cv = makeCanvas(256, 256); const gl = cv.getContext('webgl2', { premultipliedAlpha: true, alpha: true, antialias: false });
+      if (!gl) return;
+      const sh = (t, src) => { const s = gl.createShader(t); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
+      const pr = gl.createProgram(); gl.attachShader(pr, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, FS)); gl.linkProgram(pr);
+      if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(pr));
+      gl.useProgram(pr);
+      const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+      const loc = gl.getAttribLocation(pr, 'aPos'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+      this.u = {}; for (const k of ['uTex', 'uCloud', 'uHasCloud', 'uSpin', 'uCloudSpin', 'uAmb', 'uGlow', 'uPx', 'uScale', 'uRot', 'uL', 'uAtmo']) this.u[k] = gl.getUniformLocation(pr, k);
+      gl.uniform1i(this.u.uTex, 0); gl.uniform1i(this.u.uCloud, 1);
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+      this.gl = gl; this.cv = cv; this.ok = true;
+      cv.addEventListener && cv.addEventListener('webglcontextlost', () => { this.ok = false; });
+    } catch (e) { this.ok = false; }
+  }
+  // upload a texture once (the sphere keeps its GL handles)
+  _upload(sphere) {
+    const gl = this.gl; const t = sphere.tex;
+    const mk = (data, fmt, ifmt) => { const tx = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tx); gl.texImage2D(gl.TEXTURE_2D, 0, ifmt, t.W, t.H, 0, fmt, gl.UNSIGNED_BYTE, data);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE); return tx; };
+    sphere._gl = { tex: mk(new Uint8Array(t.rgb.buffer, t.rgb.byteOffset, t.rgb.length), gl.RGB, gl.RGB8), cloud: t.cloud ? mk(new Uint8Array(t.cloud.buffer, t.cloud.byteOffset, t.cloud.length), gl.RED, gl.R8) : null, owner: this };
+  }
+  // Draw `sphere` at radius R device px; returns the source rectangle to copy
+  // from this.cv ({ x, y, size }) or null on failure.
+  draw(sphere, R, spin, light) {
+    if (!this.ok) return null;
+    const gl = this.gl; R = Math.max(2, Math.min(127, Math.round(R))); const S = R * 2 + 2;
+    if (this.cv.width < S || this.cv.height < S) { this.cv.width = Math.max(this.cv.width, S); this.cv.height = Math.max(this.cv.height, S); }
+    if (!sphere._gl || sphere._gl.owner !== this) this._upload(sphere);
+    const H = this.cv.height; gl.viewport(0, 0, S, S);
+    gl.enable(gl.SCISSOR_TEST); gl.scissor(0, 0, S, S); gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT); gl.disable(gl.SCISSOR_TEST);
+    const u = this.u; const t = sphere.tilt, ct = Math.cos(t), st = Math.sin(t), cl = Math.cos(sphere.lean), sl = Math.sin(sphere.lean);
+    // view normal -> body frame: tilt in the screen, then lean toward the viewer (as lutFor)
+    const T = [[ct, st, 0], [-st, ct, 0], [0, 0, 1]], Lm = [[1, 0, 0], [0, cl, -sl], [0, sl, cl]];
+    const M = [0, 1, 2].map((i) => [0, 1, 2].map((j) => Lm[i][0] * T[0][j] + Lm[i][1] * T[1][j] + Lm[i][2] * T[2][j]));
+    gl.uniformMatrix3fv(u.uRot, false, [M[0][0], M[1][0], M[2][0], M[0][1], M[1][1], M[2][1], M[0][2], M[1][2], M[2][2]]); // column-major
+    let lx = light.x, ly = -light.y; const lz = 0.55; const ll = Math.hypot(lx, ly, lz) || 1;
+    gl.uniform3f(u.uL, lx / ll, ly / ll, lz / ll);
+    const s = spin * sphere.dir; gl.uniform1f(u.uSpin, s); gl.uniform1f(u.uCloudSpin, s * sphere.cloudDrift);
+    gl.uniform1f(u.uAmb, sphere.ambient); gl.uniform1f(u.uGlow, sphere.tex.glow || 0); gl.uniform1f(u.uPx, 1 / R); gl.uniform1f(u.uScale, (R + 1) / R);
+    const a = sphere.atmo; gl.uniform4f(u.uAtmo, a ? a[0] / 255 : 0, a ? a[1] / 255 : 0, a ? a[2] / 255 : 0, a ? a[3] : 0);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, sphere._gl.tex);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, sphere._gl.cloud || sphere._gl.tex); gl.uniform1f(u.uHasCloud, sphere._gl.cloud ? 1 : 0);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    return { x: 0, y: H - S, size: S, R };
   }
 }
