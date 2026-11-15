@@ -447,7 +447,10 @@ def world_scene(subject, seed):
             ring.data.materials.append(ring_mat('ringm', (0.85, 0.78, 0.6) if body == 'saturn' else (0.32, 0.36, 0.4), rr))
             ring.rotation_euler = (math.radians(18 if body == 'saturn' else 70), math.radians(-14), 0)
         for i, moon in enumerate(p.get('moons', [])):
-            sphere(f'moon{i}', moon[1], look(moon[0]), moon[2], 64)
+            mo = sphere(f'moon{i}', moon[1], look(moon[0]), moon[2], 64)
+            # Framing often crops the moon out; its eclipse shadow alone would
+            # read as a hole in the planet.
+            mo.visible_shadow = False
             glow_shell(f'moon{i}', moon[0], moon[1], moon[2])
         glow_shell('planet', body, R, c)
         if p.get('aerostat'):
