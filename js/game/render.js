@@ -3664,9 +3664,12 @@ export class MapRenderer {
     const palSig = (p) => `${p.light}|${p.base}|${p.dark}|${p.atmosphere || '-'}`;
     // texturedBodies: a body with a planetStyle is painted once and turns,
     // lit from its nearest star. Painting is budgeted per frame (~12 ms) and a
-    // body waits on its classic sphere until its turn; under 5 px on screen,
-    // or in battery-save mode, it holds still.
+    // body waits on its classic sphere until its turn; under 5 px on screen it
+    // holds still. BATTERY SAVE: every body is painted up front on the first
+    // draw (one texture size, no later repaints), nothing turns, and sphere
+    // sizes snap to 16 px steps so a zoom repaints a sphere only on a step.
     const textured = !!this.options.texturedBodies;
+    const saver = textured && isBatterySave();
     // turning advances on a step clock (phones 3 steps a second, desktops 8): the
     // map redraws far more often than that, and a sphere repaints only on a step
     const stepHz = COARSE_POINTER() ? 3 : 8;
@@ -3674,25 +3677,38 @@ export class MapRenderer {
     const suns = textured ? this._realSites.filter((s) => (TYPE_VIS[s.type] || {}).kind === 'sun') : [];
     const mkCanvas = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
     const seedOf = (str) => { let h = 2166136261; for (const ch of String(str)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); } return Math.abs(h) % 100000; };
+    // a body's painted sphere (its texture is the expensive part, done once)
+    const ensureEnt = (site, pal, rings, style, texW) => {
+      const id = `${site.id2 || site.id}|${style}`;
+      let ent = this._planetSpheres.get(id);
+      if (ent && ent.texW >= texW) return ent;
+      const t0 = performance.now(); const seed = site.planetSeed ?? seedOf(site.bodyKey || site.name || site.id);
+      const sphere = new PlanetSphere(makePlanetTexture(style, pal, seed, texW, texW / 2), { tilt: 0.1 + (seed % 7) * 0.06, ring: rings, atmosphere: pal.atmosphere || null });
+      ent = { sphere, texW, key: '', speed: (style === 'gas' || style === 'ice-giant' || style === 'brown' ? 0.32 : 0.16) * (0.8 + (seed % 5) * 0.1), phase: (seed % 628) / 100 };
+      this._planetSpheres.set(id, ent); paintBudget -= performance.now() - t0;
+      return ent;
+    };
+    if (saver && this._prepaintedFor !== this._realSites) { // battery save: paint everything now, once
+      this._prepaintedFor = this._realSites;
+      const one = (site) => { const pal = paletteFor(site); const st = planetStyleFor(site, pal); if (st) ensureEnt(site, pal, ringDefFor(site), st, 96); };
+      for (const g of this._bodyGroups.values()) if (g.sites.length >= 2) one(g.exemplar);
+      for (const site of this._realSites) { if (this._mergedSites.has(site.id)) continue; const vis = TYPE_VIS[site.type] || TYPE_VIS.unknown; if (vis.kind === 'hex' && !vis.rocky) one(site); }
+    }
     const drawTextured = (site, wx, wy, haloR, pal, rings = null) => {
       const style = planetStyleFor(site, pal); if (!style) return false;
       const sr = Math.min(haloR * eff, cap); if (sr < 0.5) return true;
       const sx = this.pan.x + wx * eff, sy = this.pan.y + wy * eff; const m = sr * (rings ? 2.4 : 1.6) + 40;
       if (sx < -m || sx > hostW + m || sy < -m || sy > hostH + m) return true;
-      const id = `${site.id2 || site.id}|${style}`;
       // painted at most 128 device px across the radius (a phone's budget); larger draws scale it up
-      const R = Math.max(2, Math.min(128, Math.round(sr * this.dpr))); const texW = R > 40 ? 192 : R > 14 ? 96 : 48;
-      let ent = this._planetSpheres.get(id);
-      if (!ent || ent.texW < texW) {
-        if (paintBudget <= 0) { pending = true; return false; } // its turn comes next frame
-        const t0 = performance.now(); const seed = site.planetSeed ?? seedOf(site.bodyKey || site.name || site.id);
-        const sphere = new PlanetSphere(makePlanetTexture(style, pal, seed, texW, texW / 2), { tilt: 0.1 + (seed % 7) * 0.06, ring: rings, atmosphere: pal.atmosphere || null });
-        ent = { sphere, texW, key: '', speed: (style === 'gas' || style === 'ice-giant' || style === 'brown' ? 0.32 : 0.16) * (0.8 + (seed % 5) * 0.1), phase: (seed % 628) / 100 };
-        this._planetSpheres.set(id, ent); paintBudget -= performance.now() - t0;
-      }
+      const Rd = Math.max(2, Math.min(128, Math.round(sr * this.dpr)));
+      const R = saver ? Math.min(128, Math.ceil(Rd / 16) * 16) : Rd;
+      const texW = saver ? 96 : R > 40 ? 192 : R > 14 ? 96 : 48;
+      const have = this._planetSpheres.get(`${site.id2 || site.id}|${style}`);
+      if ((!have || have.texW < texW) && paintBudget <= 0 && !saver) { pending = true; return false; } // its turn comes next frame
+      const ent = ensureEnt(site, pal, rings, style, texW);
       let sun = null, best = Infinity; for (const s of suns) { const d = (s.x - wx) ** 2 + (s.y - wy) ** 2; if (d < best) { best = d; sun = s; } }
       const light = sun && best > 1 ? { x: sun.x - wx, y: sun.y - wy } : { x: -1, y: -1 };
-      const moving = sr >= 5 && !isBatterySave() && !REDUCED_MOTION(); if (moving) animating = true;
+      const moving = sr >= 5 && !saver && !REDUCED_MOTION(); if (moving) animating = true;
       const spin = moving ? ent.phase + now * ent.speed : ent.phase;
       const key = `${R}|${spin.toFixed(4)}|${Math.round(Math.atan2(light.y, light.x) * 20)}`;
       if (ent.key !== key) { ent.sphere.render(R, spin, light, mkCanvas); ent.key = key; }
