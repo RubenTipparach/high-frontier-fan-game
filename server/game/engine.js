@@ -15905,16 +15905,18 @@ function portfolioShapes(player) {
   }
   return out;
 }
-// "At least one BEO Colony (4C2a)": ruling (2026-11-15), a Colony of yours on a
-// site outside the Earth heliocentric zone, i.e. Beyond Earth Orbit.
+// "At least one BEO Colony (4C2a)". With Module 2 that is a Bernal anchored
+// Dirtside: an anchored Bernal of yours that is NOT your Home Bernal (user
+// 2026-11-15: "BEO colony is different with m2, I believe it has to be a dirt
+// side anchored bernal").
 function hasBeoColony(state, player) {
-  return Object.entries(state.colonies || {}).some(([slug, c]) => c && c.ownerId === player.profileId
-    && (zoneOfSlug(slug) || (siteById(slug) || {}).solarZone) !== 'Earth');
+  return (player.bernals || []).some((bn) => bn && bn.anchored && !isHomeBernal(bn));
 }
 function colonistAugCount(player, colonistId) {
   return Object.values(player.augments || {}).filter((a) => a && a.colonistId === colonistId).length;
 }
-// IMPLANT (4C4): at your Anchored Bernal, place portfolio chits on Colocated
+// IMPLANT (4C4): at your Anchored Bernal (and you need a Dirtside one, the BEO
+// Colony above), place portfolio chits on Colocated
 // Colonists, optionally juggling chits off Colocated Colonists first. An
 // Industrialist Colonist there makes it a once-per-turn free action (4C4g).
 function applyImplant(state, op, player) {

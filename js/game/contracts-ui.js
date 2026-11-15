@@ -208,7 +208,9 @@ function augmentationsHtml(s, p, myTurn) {
       : (portfolio.has(sh) ? 'in your supply, ready to implant' : 'not in your portfolio');
     return `<div class="m4c-aug ${portfolio.has(sh) ? 'have' : 'lack'}">${augmentGlyph(sh, { size: 26 })}<span><b>${AUGMENTS[sh].name}</b> ${st}</span></div>`;
   }).join('');
-  const beo = Object.entries(s.colonies || {}).some(([, c]) => c && c.ownerId === p.profileId);
+  // The BEO Colony (4C2a) is, with Module 2, a Bernal anchored Dirtside: an
+  // anchored Bernal that is not the Home Bernal (the engine decides; this is the hint).
+  const beo = (p.bernals || []).filter((bn) => bn && bn.anchored).length >= 2;
   const bns = (p.bernals || []).map((bn, i) => ({ bn, i })).filter((x) => x.bn.anchored);
   let station = '<p class="muted">Implanting happens at your anchored Bernal, on the Colonists aboard it.</p>';
   if (bns.length) {
@@ -224,7 +226,7 @@ function augmentationsHtml(s, p, myTurn) {
     }).join('') : '<p class="muted">No Colonists aboard your anchored Bernal.</p>';
   }
   return `<h4>Augmentations</h4>
-    <p class="muted">Your portfolio is the cybernetics icons on your fulfilled contracts. Implant needs your anchored Bernal, a Colonist aboard it, and a Colony beyond Earth orbit${beo ? '' : ' (you have none yet)'}. One chit of each shape.</p>
+    <p class="muted">Your portfolio is the cybernetics icons on your fulfilled contracts. Implant needs your anchored Bernal, a Colonist aboard it, and a Bernal anchored Dirtside (a BEO Colony)${beo ? '' : ' (you have none yet)'}. One chit of each shape.</p>
     <div class="m4c-augs">${chips}</div>${station}`;
 }
 

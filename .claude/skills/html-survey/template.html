@@ -1,0 +1,400 @@
+<title>{{PROJECT}} Survey</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Stencil+Display:wght@600;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+/* Layout: a field briefing on sun-bleached chart paper; one column of question cards, a sticky tally bar. */
+:root {
+  --bg: #efe6d3;
+  --paper: #f8f2e5;
+  --ink: #2a2118;
+  --muted: #6e5f4c;
+  --line: #d8c9ac;
+  --brass: #94621a;
+  --brass-soft: #f0dfbd;
+  --done: #3f7a3b;
+  --done-soft: #dcebd5;
+  --sun: #c98512; --crescent: #2f8a48; --star: #c23b30; --eagle: #3b67c4;
+  --display: "Big Shoulders Stencil Display", "Arial Narrow", Impact, sans-serif;
+  --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #17120d; --paper: #211a13; --ink: #ecdfc6; --muted: #a89577; --line: #3b2f22;
+    --brass: #dcaa52; --brass-soft: #3a2b16; --done: #8cc47f; --done-soft: #1f3020;
+    --sun: #f0a92e; --crescent: #3fae5a; --star: #e0473d; --eagle: #4f7fe0;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #17120d; --paper: #211a13; --ink: #ecdfc6; --muted: #a89577; --line: #3b2f22;
+  --brass: #dcaa52; --brass-soft: #3a2b16; --done: #8cc47f; --done-soft: #1f3020;
+  --sun: #f0a92e; --crescent: #3fae5a; --star: #e0473d; --eagle: #4f7fe0;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink); font: 400 16px/1.55 var(--body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 48px;
+}
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+.wrap { max-width: 760px; margin: 0 auto; display: grid; gap: 28px; }
+header.top { padding-top: 28px; display: grid; gap: 10px; }
+.eyebrow { font: 500 12px/1 var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--brass); }
+h1 { font: 800 clamp(40px, 9vw, 64px)/0.92 var(--display); letter-spacing: 0.01em; margin: 0; text-wrap: balance; }
+.lede { margin: 0; color: var(--muted); max-width: 62ch; }
+.suits { display: flex; gap: 6px; }
+.suits span { width: 28px; height: 6px; border-radius: 3px; }
+.tally {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg);
+  padding-block: 10px; border-bottom: 1px solid var(--line);
+  display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center;
+}
+.meter { flex: 1 1 160px; height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; min-width: 120px; }
+.meter i { display: block; height: 100%; width: 0; background: var(--done); transition: width 0.3s; }
+.count { font: 500 13px/1 var(--mono); font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
+.btn {
+  font: 600 14px/1 var(--body); color: var(--ink); background: var(--paper); border: 1px solid var(--line);
+  border-radius: 8px; padding: 0 14px; min-height: 44px; cursor: pointer;
+}
+.btn:hover { border-color: var(--brass); }
+.btn:focus-visible, .opt:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+.notice { font-size: 14px; color: var(--muted); background: var(--brass-soft); border-radius: 8px; padding: 10px 12px; margin: 0; }
+.how { display: grid; gap: 6px; font-size: 15px; }
+.how p { margin: 0; }
+section.topic { display: grid; gap: 14px; }
+section.topic > h2 {
+  font: 800 30px/1 var(--display); margin: 0; display: flex; align-items: baseline; gap: 10px; text-wrap: balance;
+}
+section.topic > h2 .tag { font: 500 13px/1 var(--mono); color: var(--brass); letter-spacing: 0.1em; }
+section.topic > p { margin: 0; color: var(--muted); max-width: 64ch; }
+figure { margin: 0; display: grid; gap: 6px; }
+figure img { width: 100%; max-width: 100%; height: auto; border-radius: 8px; background: #241b14; display: block; }
+figcaption { font-size: 13px; color: var(--muted); }
+.q {
+  background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 16px;
+  display: grid; gap: 12px; min-width: 0;
+}
+.q.answered { border-color: color-mix(in srgb, var(--done) 55%, var(--line)); }
+.q-head { display: flex; gap: 10px; align-items: flex-start; }
+.qid {
+  font: 500 13px/1 var(--mono); color: var(--brass); border: 1px solid currentColor; border-radius: 6px;
+  padding: 5px 7px; flex: none; margin-top: 2px;
+}
+.q-text { margin: 0; font-weight: 500; min-width: 0; }
+.opts { display: flex; flex-wrap: wrap; gap: 8px; }
+.opt {
+  font: 400 15px/1.3 var(--body); color: var(--ink); text-align: left; background: transparent;
+  border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; min-height: 44px; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 8px; max-width: 100%;
+}
+.opt:hover { border-color: var(--brass); }
+.opt[aria-pressed="true"] { background: var(--done-soft); border-color: var(--done); font-weight: 600; }
+.opt .rec { font: 500 11px/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--brass); white-space: nowrap; }
+.why { margin: 0; font-size: 14px; color: var(--muted); }
+.why b { color: var(--ink); font-weight: 600; }
+label.note { display: grid; gap: 6px; font-size: 13px; color: var(--muted); }
+textarea {
+  font: 400 15px/1.45 var(--body); color: var(--ink); background: var(--bg); border: 1px solid var(--line);
+  border-radius: 8px; padding: 10px 12px; min-height: 64px; resize: vertical; width: 100%;
+}
+.status { font: 500 12px/1 var(--mono); color: var(--muted); min-height: 12px; }
+.status.ok { color: var(--done); }
+.status.err { color: var(--star); }
+details.decided { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; }
+details.decided summary { cursor: pointer; padding: 14px 16px; font: 800 24px/1 var(--display); min-height: 44px; }
+.dec-list { list-style: none; margin: 0; padding: 0 16px 16px; display: grid; gap: 12px; }
+.dec-list li { display: grid; gap: 4px; padding-top: 12px; border-top: 1px solid var(--line); }
+.dec-list .d-text { margin: 0; }
+.dec-list .d-where { margin: 0; font: 500 12px/1.5 var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+.dec-list .replaced { font: 500 11px/1 var(--mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--star); }
+code { font: 500 0.9em var(--mono); }
+@media (prefers-reduced-motion: reduce) { .meter i { transition: none; } }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div class="eyebrow">Owner survey · opened {{DATE}}</div>
+    <h1>{{PROJECT}} Survey</h1>
+    <div class="suits" aria-hidden="true"><span style="background:var(--sun)"></span><span style="background:var(--crescent)"></span><span style="background:var(--star)"></span><span style="background:var(--eagle)"></span></div>
+    <p class="lede">Open questions about the game, each with the option already built in. Pick an option, add a note, or leave it blank.</p>
+  </header>
+
+  <div class="tally">
+    <div class="meter" aria-hidden="true"><i id="meter"></i></div>
+    <span class="count" id="count">0 of 0 answered</span>
+    <button class="btn" id="download" type="button" hidden>Download HTML</button>
+  </div>
+
+  <div class="how">
+    <p><b>A blank answer means the recommendation is accepted.</b> Claude records it as "(recommendation accepted)", never as your words.</p>
+    <p>Answers save as you go. Tap a chosen option again to clear it.</p>
+    <p class="notice" id="mode" hidden></p>
+  </div>
+
+  <main id="sections" class="wrap" style="gap:36px"></main>
+
+  <details class="decided" id="decided">
+    <summary>Already decided</summary>
+    <ul class="dec-list" id="dec-list"></ul>
+  </details>
+</div>
+
+<script>
+// An optional picture for a section that sets `image` (a data: URI keeps the page one file).
+const ART_IMG = '';
+
+// The questions. Answers live in the db collection `answers`, one document per question id.
+const SECTIONS = [
+  { tag: 'R', name: 'Rules',
+    lead: 'One line of context for the whole section: what is built, and what waits on these answers.',
+    qs: [
+      { id: 'R1', q: 'The question, with the fact it turns on and its number.',
+        options: ['The recommended option (built this way for now)', 'Another option'], rec: 0,
+        why: 'One sentence: why the recommendation.' },
+    ] },
+];
+
+const DECIDED = [
+  // Newest first: { text: 'What was decided, with the owner\'s words', where: 'Where it landed' },
+];
+
+const ALL_QS = SECTIONS.flatMap((s) => s.qs);
+const answers = {}; // id -> { choice: number|null, text: string }
+const cards = {};   // id -> { root, opts, textarea, status }
+let db = null;
+let canWrite = true;
+const standalone = !window.claude;
+const LOCAL_KEY = '{{SLUG}}.survey.answers';
+
+function el(tag, attrs = {}, ...kids) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === 'class') n.className = v;
+    else if (k === 'text') n.textContent = v;
+    else if (k.startsWith('on')) n.addEventListener(k.slice(2), v);
+    else n.setAttribute(k, v);
+  }
+  for (const k of kids.flat()) if (k != null) n.append(k);
+  return n;
+}
+
+function render() {
+  const root = document.getElementById('sections');
+  for (const s of SECTIONS) {
+    const sec = el('section', { class: 'topic', id: 'topic-' + s.tag },
+      el('h2', {}, el('span', { class: 'tag', text: s.tag }), s.name),
+      el('p', { text: s.lead }));
+    if (s.image && ART_IMG.startsWith('data:')) {
+      sec.append(el('figure', {}, el('img', { src: ART_IMG, alt: s.image.alt, loading: 'lazy' }), el('figcaption', { text: s.image.caption })));
+    }
+    for (const q of s.qs) sec.append(questionCard(q));
+    root.append(sec);
+  }
+  const list = document.getElementById('dec-list');
+  for (const d of DECIDED) {
+    list.append(el('li', {},
+      d.replaced ? el('span', { class: 'replaced', text: 'Replaced' }) : null,
+      el('p', { class: 'd-text', text: d.text }),
+      el('p', { class: 'd-where', text: d.where })));
+  }
+}
+
+function questionCard(q) {
+  const status = el('div', { class: 'status', 'aria-live': 'polite' });
+  const opts = q.options.map((label, i) => el('button', {
+    class: 'opt', type: 'button', 'aria-pressed': 'false', id: `opt-${q.id}-${i}`,
+    onclick: () => choose(q.id, i),
+  }, el('span', { text: label }), i === q.rec ? el('span', { class: 'rec', text: 'Recommended' }) : null));
+  const textarea = el('textarea', { id: 'note-' + q.id, rows: '2', placeholder: 'Your answer in your own words (optional)' });
+  textarea.addEventListener('input', () => {
+    answers[q.id] = { ...(answers[q.id] ?? { choice: null }), text: textarea.value };
+    paint(q.id);
+    queueSave(q.id);
+  });
+  textarea.addEventListener('blur', () => flush(q.id));
+  const root = el('article', { class: 'q', id: 'q-' + q.id },
+    el('div', { class: 'q-head' }, el('span', { class: 'qid', text: q.id }), el('p', { class: 'q-text', text: q.q })),
+    el('div', { class: 'opts', role: 'group', 'aria-label': q.id + ' options' }, opts),
+    el('p', { class: 'why' }, el('b', { text: 'Why I recommend it: ' }), q.why),
+    el('label', { class: 'note', for: 'note-' + q.id }, 'Your answer or note', textarea),
+    status);
+  cards[q.id] = { root, opts, textarea, status };
+  return root;
+}
+
+function isAnswered(a) {
+  return !!a && (a.choice != null || (a.text ?? '').trim() !== '');
+}
+
+function paint(id) {
+  const a = answers[id];
+  const c = cards[id];
+  if (!c) return;
+  c.opts.forEach((b, i) => b.setAttribute('aria-pressed', String(a?.choice === i)));
+  if (document.activeElement !== c.textarea) c.textarea.value = a?.text ?? '';
+  c.root.classList.toggle('answered', isAnswered(a));
+  const n = ALL_QS.filter((q) => isAnswered(answers[q.id])).length;
+  document.getElementById('count').textContent = `${n} of ${ALL_QS.length} answered`;
+  document.getElementById('meter').style.width = `${(100 * n) / ALL_QS.length}%`;
+}
+
+function setStatus(id, text, cls = '') {
+  const s = cards[id]?.status;
+  if (!s) return;
+  s.textContent = text;
+  s.className = 'status ' + cls;
+}
+
+function choose(id, i) {
+  if (!canWrite) return;
+  const cur = answers[id] ?? { choice: null, text: '' };
+  answers[id] = { ...cur, choice: cur.choice === i ? null : i };
+  paint(id);
+  flush(id);
+}
+
+// One write per pause in typing; one write at a time per document.
+const timers = {};
+const inflight = {};
+function queueSave(id) {
+  clearTimeout(timers[id]);
+  setStatus(id, 'Editing…');
+  timers[id] = setTimeout(() => flush(id), 900);
+}
+
+async function flush(id) {
+  clearTimeout(timers[id]);
+  if (!canWrite) return;
+  if (inflight[id]) { inflight[id].again = true; return; }
+  const body = { choice: answers[id]?.choice ?? null, text: answers[id]?.text ?? '', updatedAt: new Date().toISOString() };
+  if (!db) {
+    saveLocal();
+    setStatus(id, standalone ? 'Saved in this browser' : '', standalone ? 'ok' : '');
+    return;
+  }
+  inflight[id] = { again: false };
+  setStatus(id, 'Saving…');
+  try {
+    await db.collection('answers').doc(id).set(body);
+    setStatus(id, 'Saved', 'ok');
+  } catch (e) {
+    if (e?.code === 'invalid_argument') { canWrite = false; readOnly(); }
+    setStatus(id, e?.code === 'quota_exceeded' ? 'Not saved: the survey store is full.' : 'Not saved. Try again in a moment.', 'err');
+  }
+  const again = inflight[id].again;
+  inflight[id] = null;
+  if (again) flush(id);
+}
+
+function saveLocal() {
+  try { localStorage.setItem(LOCAL_KEY, JSON.stringify(answers)); } catch (e) { /* storage blocked: answers stay on screen */ }
+}
+
+function loadLocal() {
+  try { Object.assign(answers, JSON.parse(localStorage.getItem(LOCAL_KEY) || '{}')); } catch (e) { /* nothing saved */ }
+}
+
+function readOnly() {
+  for (const c of Object.values(cards)) {
+    c.textarea.readOnly = true;
+    c.opts.forEach((b) => { b.disabled = true; });
+  }
+  showMode('You can read this survey, but only its owner can answer it.');
+}
+
+function showMode(text) {
+  const m = document.getElementById('mode');
+  m.textContent = text;
+  m.hidden = false;
+}
+
+// The download: a standalone, read-only copy of the survey with today's answers filled in.
+function snapshotHtml() {
+  const esc = (s) => String(s).replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+  const date = new Date().toISOString().slice(0, 10);
+  const rows = SECTIONS.map((s) => `<h2>${esc(s.tag)}: ${esc(s.name)}</h2>` + s.qs.map((q) => {
+    const a = answers[q.id];
+    const pick = a?.choice != null ? q.options[a.choice] : null;
+    const note = (a?.text ?? '').trim();
+    const answer = pick || note
+      ? `${pick ? `<b>${esc(pick)}</b>` : ''}${pick && note ? '. ' : ''}${note ? esc(note) : ''}`
+      : `<i>Blank: recommendation accepted (${esc(q.options[q.rec])})</i>`;
+    return `<div class="q"><p class="h"><span class="id">${esc(q.id)}</span> ${esc(q.q)}</p>`
+      + `<p class="o">Options: ${q.options.map(esc).join(' / ')}</p>`
+      + `<p class="r">Recommended: ${esc(q.options[q.rec])}. ${esc(q.why)}</p>`
+      + `<p class="a">Answer: ${answer}</p></div>`;
+  }).join('')).join('');
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">`
+    + `<title>{{PROJECT}} Survey (${date})</title><style>`
+    + `body{font:16px/1.55 system-ui,sans-serif;max-width:760px;margin:0 auto;padding:24px 16px;background:#f8f2e5;color:#2a2118}`
+    + `h1{font-size:32px;margin:0 0 4px}h2{margin:32px 0 8px;font-size:22px}.q{border-top:1px solid #d8c9ac;padding:10px 0}`
+    + `.q p{margin:4px 0}.h{font-weight:600}.id{font-family:ui-monospace,monospace;color:#94621a}.o,.r{color:#6e5f4c;font-size:14px}`
+    + `.a{background:#dcebd5;padding:6px 10px;border-radius:6px}</style></head><body>`
+    + `<h1>{{PROJECT}} Survey</h1><p>Answers as of ${date}.</p>${rows}`
+    + `<h2>Already decided</h2><ul>${DECIDED.map((d) => `<li>${d.replaced ? '<b>Replaced:</b> ' : ''}${esc(d.text)} <small>(${esc(d.where)})</small></li>`).join('')}</ul>`
+    + `</body></html>`;
+}
+
+async function setupDownload() {
+  const btn = document.getElementById('download');
+  const filename = `tactical-airsuite-survey-${new Date().toISOString().slice(0, 10)}.html`;
+  if (standalone) {
+    // Opened as a file, outside claude.ai: a plain download link works here.
+    btn.hidden = false;
+    btn.addEventListener('click', () => {
+      const url = URL.createObjectURL(new Blob([snapshotHtml()], { type: 'text/html' }));
+      const a = el('a', { href: url, download: filename });
+      document.body.append(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    });
+    return;
+  }
+  const downloads = await window.claude.use('downloads');
+  if (!downloads) return;
+  btn.hidden = false;
+  btn.addEventListener('click', async () => {
+    try {
+      await downloads.save({ filename, data: snapshotHtml() });
+    } catch (e) {
+      if (e?.code === 'unavailable' || e?.code === 'not_granted' || e?.code === 'capability_disabled') btn.hidden = true;
+    }
+  });
+}
+
+async function connect() {
+  if (standalone) {
+    loadLocal();
+    ALL_QS.forEach((q) => paint(q.id));
+    showMode('This copy is open outside claude.ai, so answers are kept in this browser only. Claude reads the answers on the survey page at claude.ai.');
+    return;
+  }
+  const [store, user] = await Promise.all([window.claude.use('db'), window.claude.use('user')]);
+  if (!store) {
+    canWrite = false;
+    readOnly();
+    showMode('Answers cannot be loaded here. Open the survey on claude.ai while signed in.');
+    return;
+  }
+  db = store;
+  if (user && (await user.can('data.write')) === false) { canWrite = false; readOnly(); }
+  db.collection('answers').onSnapshot((snap) => {
+    for (const d of snap.docs) {
+      if (!d.exists) continue;
+      const body = d.data();
+      if (inflight[d.id] || document.activeElement === cards[d.id]?.textarea) continue;
+      answers[d.id] = { choice: typeof body.choice === 'number' ? body.choice : null, text: typeof body.text === 'string' ? body.text : '' };
+      paint(d.id);
+    }
+  }, () => showMode('Live updates stopped. Reload the page to see the latest answers.'));
+}
+
+render();
+ALL_QS.forEach((q) => paint(q.id));
+connect();
+setupDownload();
+</script>

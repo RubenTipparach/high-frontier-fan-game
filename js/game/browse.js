@@ -9478,7 +9478,7 @@ function humanizeOnlineOpError(code, detail) {
     not_late: 'That contract is not late.',
     over_late_fee: `You cannot pay more than the late fee this turn${detail && detail.max != null ? ` (${detail.max} more)` : ''}.`,
     not_your_contract: 'That is not one of your contracts.',
-    needs_beo_colony: 'Implanting needs one of your Colonies beyond Earth orbit.',
+    needs_beo_colony: 'Implanting needs a BEO Colony: one of your Bernals anchored Dirtside (not your Home Bernal).',
     no_colonist_here: 'No Colonist is aboard that Bernal.',
     colonist_not_here: 'That Colonist is not aboard the Bernal.',
     not_in_portfolio: `None of your fulfilled contracts shows that cybernetics icon${detail && detail.shape ? ` (${detail.shape})` : ''}.`,

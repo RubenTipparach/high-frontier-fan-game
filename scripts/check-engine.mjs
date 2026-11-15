@@ -10739,12 +10739,15 @@ check('an Inspiration event cycles the contract decks too (K2a)', () => {
 });
 
 // ---- Module 4 Stage 2: augmentations (4C) ------------------------------------
-function augGame({ colonists = ['col_biomechs', 'col_botany_bay_convicts'], colonySite = 'ceres', contracts = ['M4N242F'] } = {}) {
+// A Home Bernal with the Colonists aboard, plus (unless `dirtside` is false) a
+// second Bernal anchored Dirtside: the M2 meaning of the BEO Colony (4C2a).
+function augGame({ colonists = ['col_biomechs', 'col_botany_bay_convicts'], dirtside = true, contracts = ['M4N242F'] } = {}) {
   const st = startedGame({ m4: true, m2: true });
   const P = currentPlayerOf(st);
   P.bernals = [{ cardId: BERNALS[0].id, figure: 'kalpana', face: 'primary', siteId: 'burn-9b26i', anchored: true, home: true,
     stack: colonists.map((id) => ({ id, kind: 'colonist', face: 'primary' })), tank: 0, wiring: {}, route: [] }];
-  if (colonySite) st.colonies[colonySite] = { ownerId: P.profileId, type: 'other' };
+  if (dirtside) P.bernals.push({ cardId: BERNALS[1].id, figure: 'stanford', face: 'primary', siteId: 'ceres', anchored: true, home: false,
+    stack: [], tank: 0, wiring: {}, route: [] });
   P.fulfilledContracts = contracts.map((code) => ({ id: conByCode(code).id, side: 'blue' }));
   return { st, P };
 }
@@ -10762,15 +10765,16 @@ check('IMPLANT puts a portfolio augmentation on a Colonist at your anchored Bern
   return r.ok ? '' : `${shape} implanted for the operation; ${other} refused (not in the portfolio)`;
 });
 
-check('IMPLANT needs a BEO Colony and an anchored Bernal with the Colonist aboard', () => {
+check('IMPLANT needs a Dirtside-anchored Bernal (the BEO Colony) and the Colonist aboard an anchored Bernal', () => {
   const shape = conByCode('M4N242F').faces.primary.cybernetics[0];
   const imp = { bernal: 0, implants: [{ colonistId: 'col_biomechs', shape, side: 2 }] };
-  let { st, P } = augGame({ colonySite: null });
+  let { st, P } = augGame({ dirtside: false });
   let r = op(st, 'IMPLANT', P.profileId, imp);
-  assert(!r.ok && r.error === 'needs_beo_colony', `no colony: ${r.error}`);
-  ({ st, P } = augGame({ colonySite: 'icarus' }));
+  assert(!r.ok && r.error === 'needs_beo_colony', `only a Home Bernal: ${r.error}`);
+  ({ st, P } = augGame({ dirtside: false }));
+  st.colonies.ceres = { ownerId: P.profileId, type: 'other' };
   r = op(st, 'IMPLANT', P.profileId, imp);
-  assert(!r.ok && r.error === 'needs_beo_colony', `an Earth-zone colony is not BEO: ${r.error}`);
+  assert(!r.ok && r.error === 'needs_beo_colony', `a colony dome is not a Dirtside Bernal: ${r.error}`);
   ({ st, P } = augGame());
   P.bernals[0].anchored = false;
   r = op(st, 'IMPLANT', P.profileId, imp);
@@ -10778,7 +10782,7 @@ check('IMPLANT needs a BEO Colony and an anchored Bernal with the Colonist aboar
   ({ st, P } = augGame());
   r = op(st, 'IMPLANT', P.profileId, { bernal: 0, implants: [{ colonistId: 'col_house_of_saud', shape, side: 2 }] });
   assert(!r.ok && r.error === 'colonist_not_here', `colonist elsewhere: ${r.error}`);
-  return 'no colony / Earth-zone colony / unanchored / absent colonist all refused';
+  return 'Home Bernal only / colony dome only / unanchored / absent colonist all refused';
 });
 
 check('one chit per shape: juggle it off one Colonist onto another', () => {

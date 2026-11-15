@@ -94,8 +94,8 @@ in the auction overlay, and Freighter / Bernal stacks carrying a contract.
 
 STARTED, gated on `state.m4 && state.m2`: the IMPLANT operation (4C4). Your
 portfolio is the cybernetics icons on your fulfilled contracts; at your anchored
-Bernal, with a Colony beyond Earth orbit (ruling: a Colony outside the Earth
-heliocentric zone is "BEO", 4C2a), place one chit of each shape on Colonists
+Bernal, with a BEO Colony (4C2a: with Module 2, a Bernal anchored Dirtside,
+i.e. an anchored Bernal that is not your Home Bernal; user 2026-11-15), place one chit of each shape on Colonists
 aboard, juggling chits between Colonists aboard first. An Industrialist Colonist
 aboard makes it a free action once a turn. A Colonist needs one augmentation to
 Promote (4C7e). Decommissioning a Colonist returns its chits. Recorded as
