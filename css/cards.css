@@ -1887,3 +1887,7 @@
 .m4c-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .m4c-controls select { background: #1d1f29; color: #fff; border: 1px solid #3a3d4c; border-radius: 6px; padding: 4px; }
 .turn-tag.turn-tag-alert { background: #6b3a12; border-color: #ffb35c; color: #fff; }
+.m4c-augs { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px; margin-bottom: 8px; }
+.m4c-aug { display: flex; align-items: center; gap: 8px; font-size: 12px; background: #1d1f29; border-radius: 8px; padding: 4px 8px; }
+.m4c-aug.lack { opacity: .5; }
+.m4c-col { background: #1d1f29; border-radius: 8px; padding: 6px 10px; margin-bottom: 6px; font-size: 13px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }

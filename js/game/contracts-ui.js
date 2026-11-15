@@ -14,7 +14,9 @@ import {
   CONTRACTS_BY_ID, CONTRACT_PAIRS, CONTRACT_PAIR_NAMES, CONTRACT_BID_MAX, contractFace,
 } from '../../data/contracts.js';
 import { renderContractCard } from './contract-card.js';
-import { isM4 } from './online-mode.js';
+import { augmentGlyph, AUGMENTS } from './contract-glyphs.js';
+import { isM4, isM2 } from './online-mode.js';
+import { COLONISTS_BY_ID } from '../../data/colonists.js';
 
 let D = null;               // deps from browse.js (snapshot readers + submitters)
 let _panelOpen = false;
@@ -179,12 +181,51 @@ function renderPanel() {
   parts.push(`<h4>In hand</h4><div class="m4c-row">${hand || '<span class="muted">none</span>'}</div>`);
   parts.push(`<h4>Boosted</h4><div class="m4c-row">${boosted || '<span class="muted">none</span>'}</div>`);
   parts.push(`<h4>Fulfilled</h4><div class="m4c-row">${fulfilled || '<span class="muted">none yet</span>'}</div>`);
+  if (s.m2) parts.push(augmentationsHtml(s, p, myTurn));
 
   el.innerHTML = `<div class="m4c-modal" role="dialog" aria-label="Contracts">
     <div class="m4c-head"><h3>📜 Contracts</h3><button type="button" class="m4c-close" aria-label="Close">✕</button></div>
     <div class="m4c-body">${parts.join('')}</div></div>`;
   el.querySelector('.m4c-close').addEventListener('click', closePanel);
   el.querySelectorAll('button[data-act]').forEach((b) => b.addEventListener('click', () => onAct(b)));
+}
+
+// ---- augmentations (4C) ------------------------------------------------------------
+const SHAPES = ['heart', 'jar', 'hexagon', 'splat', 'battery', 'triangle'];
+function portfolioOf(p) {
+  const out = new Set();
+  for (const f of (p.fulfilledContracts || [])) for (const c of ((contractFace(f.id, f.side) || {}).cybernetics || [])) out.add(c);
+  return out;
+}
+const sideText = (shape, side) => ((AUGMENTS[shape] || {}).tip || '').split(' / ')[side - 1] || '';
+function augmentationsHtml(s, p, myTurn) {
+  const portfolio = portfolioOf(p);
+  const aug = p.augments || {};
+  const colName = (id) => (COLONISTS_BY_ID[id] || {}).name || id;
+  const chips = SHAPES.map((sh) => {
+    const a = aug[sh];
+    const st = a ? `on ${esc(colName(a.colonistId))} (side ${a.side}: ${esc(sideText(sh, a.side))})`
+      : (portfolio.has(sh) ? 'in your supply, ready to implant' : 'not in your portfolio');
+    return `<div class="m4c-aug ${portfolio.has(sh) ? 'have' : 'lack'}">${augmentGlyph(sh, { size: 26 })}<span><b>${AUGMENTS[sh].name}</b> ${st}</span></div>`;
+  }).join('');
+  const beo = Object.entries(s.colonies || {}).some(([, c]) => c && c.ownerId === p.profileId);
+  const bns = (p.bernals || []).map((bn, i) => ({ bn, i })).filter((x) => x.bn.anchored);
+  let station = '<p class="muted">Implanting happens at your anchored Bernal, on the Colonists aboard it.</p>';
+  if (bns.length) {
+    const { bn, i } = bns[0];
+    const cols = (bn.stack || []).filter((sl) => COLONISTS_BY_ID[sl.id]);
+    const opts = [...portfolio].map((sh) => `<option value="${sh}">${AUGMENTS[sh].name}</option>`).join('');
+    station = cols.length ? cols.map((sl) => {
+      const mine = SHAPES.filter((sh) => aug[sh] && aug[sh].colonistId === sl.id).map((sh) => augmentGlyph(sh, { size: 22 })).join('');
+      return `<div class="m4c-col"><b>${esc(colName(sl.id))}</b> <span class="muted">${esc((COLONISTS_BY_ID[sl.id] || {}).specialty || '')}</span> ${mine}
+        ${myTurn && opts ? `<div class="m4c-controls"><select data-shape-for="${sl.id}">${opts}</select>
+          <select data-side-for="${sl.id}"><option value="2">side 2</option><option value="1">side 1</option></select>
+          <button type="button" data-act="implant" data-col="${sl.id}" data-bernal="${i}">Implant</button></div>` : ''}</div>`;
+    }).join('') : '<p class="muted">No Colonists aboard your anchored Bernal.</p>';
+  }
+  return `<h4>Augmentations</h4>
+    <p class="muted">Your portfolio is the cybernetics icons on your fulfilled contracts. Implant needs your anchored Bernal, a Colonist aboard it, and a Colony beyond Earth orbit${beo ? '' : ' (you have none yet)'}. One chit of each shape.</p>
+    <div class="m4c-augs">${chips}</div>${station}`;
 }
 
 async function onAct(b) {
@@ -196,6 +237,17 @@ async function onAct(b) {
   else if (act === 'walk') await D.submitTurnOp({ kind: 'AUCTION_CONTRACT_START', pair, abandon: true });
   else if (act === 'boost') await D.submitTurnOp({ kind: 'BOOST', cardIds: [id] });
   else if (act === 'fulfill') await D.submitTurnOp({ kind: 'FULFILL_CONTRACT', cardId: id });
+  else if (act === 'implant') {
+    const col = b.dataset.col;
+    const panel = document.getElementById('m4-contracts-panel');
+    const shape = panel.querySelector(`[data-shape-for="${col}"]`).value;
+    const side = Number(panel.querySelector(`[data-side-for="${col}"]`).value);
+    const p = me();
+    const a = p && p.augments && p.augments[shape];
+    // Juggling (4C4e): a chit already on another Colonist aboard comes off first.
+    const remove = a && a.colonistId !== col ? [shape] : [];
+    await D.submitTurnOp({ kind: 'IMPLANT', bernal: Number(b.dataset.bernal), remove, implants: [{ colonistId: col, shape, side }] });
+  }
   else if (act === 'pay') {
     const p = me();
     const owedTurn = Number(b.dataset.max) - ((p && p.lateFeePaidThisTurn) | 0);

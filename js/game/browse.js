@@ -9478,6 +9478,15 @@ function humanizeOnlineOpError(code, detail) {
     not_late: 'That contract is not late.',
     over_late_fee: `You cannot pay more than the late fee this turn${detail && detail.max != null ? ` (${detail.max} more)` : ''}.`,
     not_your_contract: 'That is not one of your contracts.',
+    needs_beo_colony: 'Implanting needs one of your Colonies beyond Earth orbit.',
+    no_colonist_here: 'No Colonist is aboard that Bernal.',
+    colonist_not_here: 'That Colonist is not aboard the Bernal.',
+    not_in_portfolio: `None of your fulfilled contracts shows that cybernetics icon${detail && detail.shape ? ` (${detail.shape})` : ''}.`,
+    chit_in_use: 'You only have one chit of that shape, and it is implanted elsewhere: juggle it off a Colonist aboard first.',
+    chit_not_colocated: 'That chit is on a Colonist who is not aboard this Bernal.',
+    parenthood_not_yet: 'The heart\'s Parenthood side is not playable yet: implant its other side.',
+    needs_augmentation: 'This Colonist needs at least one augmentation to Promote.',
+    nothing_to_implant: 'Choose an augmentation to implant.',
   };
   if (M4_ERRORS[code]) return M4_ERRORS[code];
   // Anchor refusals carry what the engine SEES (the station's recorded space,
@@ -34215,7 +34224,7 @@ const MP_LOG_ICONS = {
   AUCTION_START: '🎯', AUCTION_BID: '💰', AUCTION_PASS: '🚫',
   // M4 contracts (4B): the auction is in years, the timepiece is a clock.
   AUCTION_CONTRACT_START: '📜', AUCTION_CONTRACT_BID: '⏳', AUCTION_CONTRACT_PASS: '🚫', AUCTION_CONTRACT_CLOSE: '⏱',
-  FULFILL_CONTRACT: '🏁', PAY_LATE_FEE: '⏰',
+  FULFILL_CONTRACT: '🏁', PAY_LATE_FEE: '⏰', IMPLANT: '🦾',
   AUCTION_RESET: '↺', AUCTION_SELL: '✅',
   PICK_CREW: '🧑‍🚀', SET_SPECIES: '\u{1F9DC}', SET_FIRST_PLAYER: '🥇', FREE_CUBE: '🧊',
   END_TURN: '⏭', MOVE: '🛸', BURN: '🔥',

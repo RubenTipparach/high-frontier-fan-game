@@ -26,7 +26,7 @@ import { isAerobrakeNode, lineOfSightSites, zoneOfSlug, hazardKind, nodeBySlug a
   neighborSlugs as plannerNeighborSlugs, allSiteSlugs as plannerAllSiteSlugs } from '../server/game/planner-graph.js';
 import { BUGGY_ROAD_GROUPS } from '../data/buggy-roam.js';
 import { CREW, CREW_BY_ID } from '../data/crew.js';
-import { COLONISTS_BY_ID } from '../data/colonists.js';
+import { COLONISTS_BY_ID, COLONISTS } from '../data/colonists.js';
 import { PATENTS, PATENTS_BY_ID } from '../data/patents.js';
 import { AD_ASTRA_EXIT_SLUGS, isAdAstraExit, sunlensAt } from '../data/ad-astra.js';
 import { diffState, applyPatch, sameState } from '../server/game/state-diff.js';
@@ -10736,4 +10736,71 @@ check('an Inspiration event cycles the contract decks too (K2a)', () => {
     assert(st.contractDecks[k][0] !== before[k], `${k}: same top card`);
   }
   return 'IF, HU, EA tops sent to the bottom';
+});
+
+// ---- Module 4 Stage 2: augmentations (4C) ------------------------------------
+function augGame({ colonists = ['col_biomechs', 'col_botany_bay_convicts'], colonySite = 'ceres', contracts = ['M4N242F'] } = {}) {
+  const st = startedGame({ m4: true, m2: true });
+  const P = currentPlayerOf(st);
+  P.bernals = [{ cardId: BERNALS[0].id, figure: 'kalpana', face: 'primary', siteId: 'burn-9b26i', anchored: true, home: true,
+    stack: colonists.map((id) => ({ id, kind: 'colonist', face: 'primary' })), tank: 0, wiring: {}, route: [] }];
+  if (colonySite) st.colonies[colonySite] = { ownerId: P.profileId, type: 'other' };
+  P.fulfilledContracts = contracts.map((code) => ({ id: conByCode(code).id, side: 'blue' }));
+  return { st, P };
+}
+
+check('IMPLANT puts a portfolio augmentation on a Colonist at your anchored Bernal (4C4)', () => {
+  const { st, P } = augGame();
+  const shape = conByCode('M4N242F').faces.primary.cybernetics[0];
+  let r = op(st, 'IMPLANT', P.profileId, { bernal: 0, implants: [{ colonistId: 'col_biomechs', shape, side: 2 }] });
+  assert(r.ok, `implant: ${r.error}`);
+  const Q = pl(r.state, P.profileId);
+  assert(Q.augments[shape] && Q.augments[shape].colonistId === 'col_biomechs' && Q.opsRemaining === 0, `chit + operation spent: ${JSON.stringify(Q.augments)} ops ${Q.opsRemaining}`);
+  const other = ['heart', 'jar', 'hexagon', 'splat', 'battery', 'triangle'].find((x) => x !== shape);
+  r = op(augGame().st, 'IMPLANT', P.profileId, { bernal: 0, implants: [{ colonistId: 'col_biomechs', shape: other, side: 2 }] });
+  assert(!r.ok && r.error === 'not_in_portfolio', `outside the portfolio: ${r.error}`);
+  return r.ok ? '' : `${shape} implanted for the operation; ${other} refused (not in the portfolio)`;
+});
+
+check('IMPLANT needs a BEO Colony and an anchored Bernal with the Colonist aboard', () => {
+  const shape = conByCode('M4N242F').faces.primary.cybernetics[0];
+  const imp = { bernal: 0, implants: [{ colonistId: 'col_biomechs', shape, side: 2 }] };
+  let { st, P } = augGame({ colonySite: null });
+  let r = op(st, 'IMPLANT', P.profileId, imp);
+  assert(!r.ok && r.error === 'needs_beo_colony', `no colony: ${r.error}`);
+  ({ st, P } = augGame({ colonySite: 'icarus' }));
+  r = op(st, 'IMPLANT', P.profileId, imp);
+  assert(!r.ok && r.error === 'needs_beo_colony', `an Earth-zone colony is not BEO: ${r.error}`);
+  ({ st, P } = augGame());
+  P.bernals[0].anchored = false;
+  r = op(st, 'IMPLANT', P.profileId, imp);
+  assert(!r.ok && r.error === 'bernal_not_anchored', `unanchored: ${r.error}`);
+  ({ st, P } = augGame());
+  r = op(st, 'IMPLANT', P.profileId, { bernal: 0, implants: [{ colonistId: 'col_house_of_saud', shape, side: 2 }] });
+  assert(!r.ok && r.error === 'colonist_not_here', `colonist elsewhere: ${r.error}`);
+  return 'no colony / Earth-zone colony / unanchored / absent colonist all refused';
+});
+
+check('one chit per shape: juggle it off one Colonist onto another', () => {
+  const shape = conByCode('M4N242F').faces.primary.cybernetics[0];
+  let { st, P } = augGame();
+  let r = op(st, 'IMPLANT', P.profileId, { bernal: 0, implants: [{ colonistId: 'col_biomechs', shape, side: 2 }] });
+  st = endTurns(r.state, 2);
+  r = op(st, 'IMPLANT', P.profileId, { bernal: 0, implants: [{ colonistId: 'col_botany_bay_convicts', shape, side: 1 }] });
+  assert(!r.ok && r.error === 'chit_in_use', `second copy: ${r.error}`);
+  r = op(st, 'IMPLANT', P.profileId, { bernal: 0, remove: [shape], implants: [{ colonistId: 'col_botany_bay_convicts', shape, side: 1 }] });
+  assert(r.ok && pl(r.state, P.profileId).augments[shape].colonistId === 'col_botany_bay_convicts', `juggle: ${r.error}`);
+  return 'refused a second chit; juggled it to the other Colonist on side 1';
+});
+
+check('an Industrialist Colonist implants for free once a turn; promotion needs an augmentation (4C7e)', () => {
+  const shape = conByCode('M4N242F').faces.primary.cybernetics[0];
+  const ind = COLONISTS.find((c) => /industrialist/i.test(c.specialty || '') && c.colonistKind === 'Human');
+  let { st, P } = augGame({ colonists: [ind.id, 'col_biomechs'] });
+  let r = op(st, 'IMPLANT', P.profileId, { bernal: 0, implants: [{ colonistId: ind.id, shape, side: 2 }] });
+  assert(r.ok && pl(r.state, P.profileId).opsRemaining === 1 && /free/.test(r.log), `industrialist free: ${r.error || r.log}`);
+  ({ st, P } = augGame());
+  r = op(st, 'PROMOTE', P.profileId, { cardId: 'col_botany_bay_convicts' });
+  assert(!r.ok && r.error === 'needs_augmentation', `unaugmented promote: ${r.error}`);
+  return `${ind.name} implants free; an unaugmented Colonist cannot promote`;
 });

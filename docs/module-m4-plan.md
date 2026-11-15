@@ -90,6 +90,23 @@ Aerobrake Ignore, Shielded, Insight, Secured, Bailout, Connections deck choice,
 "When Fulfilling" effects), negotiation of contracts (4B2g), a tie-winner picker
 in the auction overlay, and Freighter / Bernal stacks carrying a contract.
 
+## Stage 2 status (2026-11-15)
+
+STARTED, gated on `state.m4 && state.m2`: the IMPLANT operation (4C4). Your
+portfolio is the cybernetics icons on your fulfilled contracts; at your anchored
+Bernal, with a Colony beyond Earth orbit (ruling: a Colony outside the Earth
+heliocentric zone is "BEO", 4C2a), place one chit of each shape on Colonists
+aboard, juggling chits between Colonists aboard first. An Industrialist Colonist
+aboard makes it a free action once a turn. A Colonist needs one augmentation to
+Promote (4C7e). Decommissioning a Colonist returns its chits. Recorded as
+`player.augments[shape] = { colonistId, side }`.
+
+STILL TO DO in Stage 2: the twelve augmentation ABILITIES (4C3, the two sides of
+each chit), the heart's Parenthood side (4C5, child chit), enterprises and
+partner enterprises (4B8), the Freighter / Bernal / GW promotion counts (4C7e),
+and drawing the chits on the colonist card itself (a new glyph on the game's
+card, so it waits for sign-off).
+
 ## Card data wanted (the `Contracts` tab)
 
 Same layout as the other tabs: a banner row, a header row, then TWO rows per

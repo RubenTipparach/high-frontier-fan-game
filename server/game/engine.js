@@ -1430,6 +1430,10 @@ function countColonists(player) {
 // colonist limit). Returns a short log phrase.
 function retireColonistId(state, player, cardId) {
   const id = String(cardId);
+  // M4 (4C4e): a Decommissioned Colonist's augmentation chits return to supply.
+  if (state && state.m4 && player && player.augments) {
+    for (const k of Object.keys(player.augments)) if (player.augments[k] && player.augments[k].colonistId === id) delete player.augments[k];
+  }
   const card = PATENTS_BY_ID[id];
   if (card && card.colonistKind === 'Robot') {
     // Post-Emancipation, a Robot counts as Human and "cannot enter a hand"
@@ -12380,6 +12384,8 @@ function applyPromote(state, op, player) {
   if (!card) return fail('not_promotable');
   if (card.type === 'colonist') {
     if (!state.m2) return fail('m2_off');
+    // M4 (4C7e): a Colonist needs at least one augmentation to Promote.
+    if (state.m4 && !colonistAugCount(player, cardId)) return fail('needs_augmentation', { need: 1 });
     let loc = null;
     for (const e of colonistLocations(player)) {
       if (e.slot.id === cardId) { loc = e; break; }
@@ -13044,6 +13050,7 @@ function applyEpicHazard(state, op, player) {
 const FUNCTIONAL = {
   INCOME: applyIncome,
   FULFILL_CONTRACT: applyFulfillContract,
+  IMPLANT: applyImplant,
   PAY_LATE_FEE: applyPayLateFee,
   FUNDRAISE: applyFundraise,
   PROMOTE: applyPromote,
@@ -13219,6 +13226,7 @@ function pickPayload(op) {
     case 'SET_WIRING': return { wiring: op.wiring, ...(op.stackId ? { stackId: op.stackId } : {}) };
     case 'SET_CARD_GROUPS': return { groups: op.groups };
     case 'FULFILL_CONTRACT': return { cardId: op.cardId };
+    case 'IMPLANT': return { bernal: op.bernal, implants: op.implants, remove: op.remove };
     case 'PAY_LATE_FEE': return { cardId: op.cardId, amount: op.amount };
     case 'CLEAR_ROUTE': return op.unit ? { unit: op.unit } : {};
     default:
@@ -13324,6 +13332,7 @@ function openTurnFor(state, player) {
     player.fundraisedThisTurn = false;
     player.contractAuctionDone = false;
     player.lateFeePaidThisTurn = 0;
+    player.implantFreeUsed = false;
     player.turnStartedLate = !!(player.timepiece && player.timepiece.deadbeat);
     if (player.rocket) player.rocket.enteredThisTurn = [];
   }
@@ -15881,6 +15890,79 @@ function contractScoring(state) {
   return out;
 }
 // ===== end Module 4 contracts ===============================================
+
+// ===== Module 4 Stage 2: augmentations (4C) ===================================
+// Gated on state.m4 AND state.m2 (colonists, Bernals and colonies are Module 2).
+// A faction owns ONE augmentation chit of each of the six cybernetics shapes
+// (4C4d), recorded as player.augments[shape] = { colonistId, side } once it is
+// implanted. Its portfolio is the cybernetics icons on its fulfilled contracts
+// (4B8d; partner enterprises are later).
+const AUG_SHAPES = ['heart', 'jar', 'hexagon', 'splat', 'battery', 'triangle'];
+function portfolioShapes(player) {
+  const out = new Set();
+  for (const f of (player.fulfilledContracts || [])) {
+    for (const s of ((contractFace(f.id, f.side) || {}).cybernetics || [])) out.add(s);
+  }
+  return out;
+}
+// "At least one BEO Colony (4C2a)": ruling (2026-11-15), a Colony of yours on a
+// site outside the Earth heliocentric zone, i.e. Beyond Earth Orbit.
+function hasBeoColony(state, player) {
+  return Object.entries(state.colonies || {}).some(([slug, c]) => c && c.ownerId === player.profileId
+    && (zoneOfSlug(slug) || (siteById(slug) || {}).solarZone) !== 'Earth');
+}
+function colonistAugCount(player, colonistId) {
+  return Object.values(player.augments || {}).filter((a) => a && a.colonistId === colonistId).length;
+}
+// IMPLANT (4C4): at your Anchored Bernal, place portfolio chits on Colocated
+// Colonists, optionally juggling chits off Colocated Colonists first. An
+// Industrialist Colonist there makes it a once-per-turn free action (4C4g).
+function applyImplant(state, op, player) {
+  if (!state.m4) return fail('not_m4');
+  if (!state.m2) return fail('m2_off');
+  const bn = (player.bernals || [])[Number(op.bernal) || 0];
+  if (!bn) return fail('no_bernal');
+  if (!bn.anchored) return fail('bernal_not_anchored');
+  if (!hasBeoColony(state, player)) return fail('needs_beo_colony');
+  const here = (bn.stack || []).filter((s) => isColonistSlot(s));
+  const ids = new Set(here.map((s) => s.id));
+  if (!ids.size) return fail('no_colonist_here');
+  const industrialist = here.some((s) => /industrialist/i.test((COLONISTS_BY_ID[s.id] || {}).specialty || ''));
+  const free = industrialist && !player.implantFreeUsed;
+  if (!free && player.opsRemaining <= 0) return fail('no_ops_left');
+  player.augments = player.augments || {};
+  const removes = Array.isArray(op.remove) ? op.remove.map(String) : [];
+  const implants = Array.isArray(op.implants) ? op.implants : [];
+  if (!removes.length && !implants.length) return fail('nothing_to_implant');
+  const parts = [];
+  for (const shape of removes) {
+    const a = player.augments[shape];
+    if (!a) return fail('no_such_chit', { shape });
+    if (!ids.has(a.colonistId)) return fail('chit_not_colocated', { shape });
+    delete player.augments[shape];
+    parts.push(`took the ${shape} chit off ${cardNameOf(a.colonistId)}`);
+  }
+  const portfolio = portfolioShapes(player);
+  for (const imp of implants) {
+    const shape = String(imp && imp.shape || '');
+    const colonistId = String(imp && imp.colonistId || '');
+    const side = Number(imp && imp.side) === 1 ? 1 : 2;
+    if (!AUG_SHAPES.includes(shape)) return fail('bad_shape');
+    if (!portfolio.has(shape)) return fail('not_in_portfolio', { shape });
+    if (!ids.has(colonistId)) return fail('colonist_not_here');
+    if (player.augments[shape]) return fail('chit_in_use', { shape, on: player.augments[shape].colonistId });
+    // The heart's Parenthood side (4C5) is not playable yet: implant side 2.
+    if (shape === 'heart' && side === 1) return fail('parenthood_not_yet');
+    player.augments[shape] = { colonistId, side };
+    parts.push(`implanted the ${shape} augmentation (side ${side}) in ${cardNameOf(colonistId)}`);
+  }
+  if (free) player.implantFreeUsed = true;
+  else player.opsRemaining -= 1;
+  const where = (siteById(bn.siteId) || {}).name || 'the Bernal';
+  return { ok: true, state, log: `${player.name} ${parts.join(' and ')} at ${where}${free ? ' (Industrialist: free)' : ''}.` };
+}
+// ===== end Module 4 augmentations ============================================
+
 
 const AUCTION = {
   AUCTION_CONTRACT_START: applyContractAuctionStart,
