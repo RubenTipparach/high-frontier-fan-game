@@ -2715,6 +2715,10 @@ export class MapRenderer {
 
     // Crisp, viewport-culled, drawn live (not scaled from the cache) so
     // node markers / hexes / labels stay sharp at every zoom level.
+    // Family / cluster names ("Flora Family", "Centaur") and the faded zone
+    // captions are background text: drawn first so every other marker and
+    // caption paints over them.
+    this._step('family-labels', () => this._drawFamilyLabelsScreen(ctx));
     this._step('waypoints', () => this._drawWaypointsScreen(ctx));
     this._step('hexes', () => this._drawSiteHexesScreen(ctx));
     this._step('labels', () => this._drawSiteLabelsScreen(ctx));
@@ -5273,7 +5277,7 @@ export class MapRenderer {
     // board prints them, at the board's own angle and relative size, so the
     // map reads like the table. Positions are normalised board coordinates,
     // the same space as the planner nodes (scaled to the 1400 x 900 view).
-    if (labelAlpha > 0 && MAP_LABELS.length) this._drawBoardLabels(ctx, eff, hostW, hostH, labelAlpha);
+    if (labelAlpha > 0 && MAP_LABELS.length) this._drawBoardLabels(ctx, eff, hostW, hostH, labelAlpha, (l) => l.kind !== 'cluster' && l.kind !== 'zone');
 
     // Exit / special node names. These Lagrange points carry a player-given
     // name (the message note, baked into NODE_TAGS.label); draw it under the
@@ -5974,7 +5978,16 @@ export class MapRenderer {
     });
   }
 
-  _drawBoardLabels(ctx, eff, hostW, hostH, alpha) {
+  _drawFamilyLabelsScreen(ctx) {
+    if (!MAP_LABELS.length) return;
+    const fadeMin = this.options.labelFadeMin;
+    const fadeMax = this.options.labelFadeMax;
+    const alpha = Math.max(0, Math.min(1, (this.zoom - fadeMin) / Math.max(0.01, fadeMax - fadeMin)));
+    if (alpha <= 0) return;
+    this._drawBoardLabels(ctx, this.zoom * this.fitScale, this.hostW, this.hostH, alpha, (l) => l.kind === 'cluster' || l.kind === 'zone');
+  }
+
+  _drawBoardLabels(ctx, eff, hostW, hostH, alpha, keep = null) {
     const VIEW_W = 1400, VIEW_H = 900;   // loadPlannerMap's view (see LEO_ANCHOR)
     const INK = {
       lagrange: '#f4a259', cluster: '#f0abfc', flyby: '#93c5fd',
@@ -5986,6 +5999,7 @@ export class MapRenderer {
     ctx.textBaseline = 'middle';
     ctx.lineJoin = 'round';
     for (const l of MAP_LABELS) {
+      if (keep && !keep(l)) continue;
       const sx = this.pan.x + l.nx * VIEW_W * eff;
       const sy = this.pan.y + l.ny * VIEW_H * eff;
       if (sx < -200 || sx > hostW + 200 || sy < -200 || sy > hostH + 200) continue;
@@ -5995,8 +6009,9 @@ export class MapRenderer {
       const italic = l.kind === 'hazard' || l.kind === 'aerobrake' || l.kind === 'lander' || l.kind === 'radbelt';
       ctx.font = `${italic ? 'italic ' : ''}600 ${px.toFixed(1)}px ui-sans-serif, system-ui, sans-serif`;
       ctx.save();
-      // Zone captions ("EARTH ZONE +0") sit behind the play at half strength.
-      ctx.globalAlpha = alpha * (l.kind === 'zone' ? 0.5 : 0.9);
+      // Zone captions ("EARTH ZONE +0") sit behind the play at half strength,
+      // family / cluster names at three quarters.
+      ctx.globalAlpha = alpha * (l.kind === 'zone' ? 0.5 : l.kind === 'cluster' ? 0.75 : 0.9);
       ctx.translate(sx, sy);
       // The board is read from both sides of the table, so some text is
       // printed upside down; on a screen, turn it to read upright.
