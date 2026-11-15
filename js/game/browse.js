@@ -247,7 +247,7 @@ import {
 // Multiplayer glue (the sandbox map, driven from a server game). These
 // are inert until mountBrowse({ online:true }) flips _online on; the
 // solo path never touches them.
-import { setOnline, isOnline, setM1, isM1, setM2, isM2, setSirens, isSirens, setFutures, isFutures,
+import { setOnline, isOnline, setM1, isM1, setM2, isM2, setM4, setSirens, isSirens, setFutures, isFutures,
   setHermes, isHermes, setAltruism, setMySpecies, mySpecies, homeLabel, homeSiteId, isMySiren } from './online-mode.js';
 import {
   buildIdMaps, hydrateFromSnapshot, toServerId, toPlannerId,
@@ -887,6 +887,7 @@ function applySnapshot(snapshot, seq) {
   // server does while the stack hydrates. Mirrors the MARKET_MODE pin below.
   setM1(!!snapshot.m1);
   setM2(!!snapshot.m2);
+  setM4(!!snapshot.m4);
   setSirens(!!snapshot.sirens);
   setHermes(!!snapshot.hermes);
   setAltruism(!!snapshot.altruism);

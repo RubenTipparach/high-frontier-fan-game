@@ -1,0 +1,94 @@
+# Module 4 (Exodus) - implementation plan
+
+Status: **admin-only preview** (user 2026-11-15). Everything M4 gates on
+`state.m4`, which only an admin can turn on at room creation. M4 requires M0
+(4A1a), so turning M4 on forces M0 on, the same way M2 forces M0.
+
+Rules sources, in order of trust:
+
+1. `reference/HF4-branching-manuals-v0.3.zip` (`HF4 - M0+M4.pdf`,
+   `HF4 - QS+M0+M1+M2+M4.pdf`): the full contract FLOW (auction, timepiece,
+   late fees, fulfillment, default). `reference/manuals/branch-module-4.md` is
+   an auto-extract of the same and is patchy.
+2. The published Module 4 rulebook for the component sections the branching
+   manuals leave out (4A2 components, 4A3 card anatomy, 4B1 decks / sides,
+   4B2a-e, 4B7, 4B8). A paraphrase is on rulespal.com; the card text itself
+   comes from the user's card data (below).
+
+## Stages
+
+| Stage | Scope |
+|---|---|
+| **1 Contracts** | decks, timepiece, contract auction, boost, fulfillment, late fees, default chit, endgame scoring, contract abilities |
+| 2 | augmentations, enterprises / partner enterprises (4B8), the portfolio, augmentation requirements for M2 promotion |
+| 3 | isotope monetization, the isobank + isobanker, gold-side upheaval (4B1b), Exodus (starship) contracts, the final starship launch |
+
+Stage 1 lands in slices, each exercised and shippable on its own:
+
+- **1a Gate.** `lobbies.m4` column, admin-only on create (server forces it off
+  for anyone else), M4 forces M0, `state.m4`, the snapshot / lobby / admin
+  chips, the create-form and solo-wizard checkboxes shown to admins only. No
+  rule yet: an M4 game plays exactly like M0 until 1b.
+- **1b Data.** A `Contracts` tab in `reference/HF4-card-data.xlsx`, imported by
+  `scripts/extract-card-data.py` like every other deck (no hand-authored card
+  stats). `createInitialState` builds the three ideology-pair decks when m4.
+  Card rendering (blue / gold face) in `js/game/card-ui.js`.
+- **1c Timepiece + contract auction.** At the end of a FUNDRAISE (4B3): if your
+  timepiece is free, pick a deck that shares an ideology with an Active Law,
+  optionally discard its top card, then start the auction or walk away.
+  Descending bids in YEARS from 10 down to 0; the lowest bid wins; the
+  initiator wins ties they are in, else picks; Marketeer always wins ties.
+  Winner puts the timepiece that many years ahead on the Sunspot Cycle, takes
+  the cash advance from the pool (minus the 1 Aqua finder's fee if the
+  initiator lost), and takes the contract into hand, outside the academia hand
+  limit. No contract auctions during War / Anarchy; no manned-contract bids
+  while holding the default chit. This EXTENDS the existing research auction
+  (`state.auction` with a contract kind and a years bid), it is not a second
+  auction system.
+- **1d Boost + fulfillment.** A contract boosts (paying its mass) on the side it
+  was auctioned on, to LEO / your Bank. Each destination step is a free action
+  when the Stack carrying it is there (or ENTERED it this turn, for "enter"
+  steps); "return" needs it back at LEO / your Bank. A step is a Glitch
+  trigger. Fulfilled: it moves to your fulfilled area, the timepiece comes
+  home, its fulfilled abilities switch on.
+- **1e Late + default.** The clock passing your timepiece flips it to deadbeat;
+  each turn pay the late fee or default (Mishap Insurance pays the first one).
+  Late fulfillment, debt repayment (advance, or twice it if never boosted),
+  the single default chit (blue / gold side), manned-contract decommission =
+  default, contracts immune to pad explosion and budget cuts.
+- **1f Scoring + abilities.** Fulfilled VP, -3 / -6 for the default chit, -1 per
+  unpaid Aqua on an unfulfilled contract. Then the contract abilities named in
+  the rules: tophat (one free hazard per turn), Hazard / Aerobrake Ignore,
+  Shielded (-2 belt and CME), Insight, Secured, Bailout, Connections, the
+  cargo-transfer ability. Each gets a check in `scripts/check-engine.mjs`.
+
+Years: the engine already advances the Sunspot Cube one slot per turn
+(`advanceClock`), so a timepiece is stored as an absolute clock position
+(`round * 12 + turn`) and "late" is the clock passing it.
+
+## Card data wanted (the `Contracts` tab)
+
+Same layout as the other tabs: a banner row, a header row, then TWO rows per
+card, the **blue** side first and the **gold** side second (the importer
+already pairs rows this way). 36 cards, 12 per ideology pair. Columns:
+
+| Column | Example / notes |
+|---|---|
+| Name | per side, as printed |
+| Ideology Pair | the two ideologies the card's deck belongs to (4A3g); blue row only |
+| Type | manned / unmanned / military (and anything else printed) |
+| Mass | |
+| Rad-Hard | |
+| Cash Advance | Aqua |
+| Late Fee | Aqua per turn |
+| VP | as printed |
+| Cybernetics | the augmentation icons (Stage 2 reads them, record them now) |
+| Tophat | yes / blank |
+| Felony | yes / blank |
+| Destination | the printed text, verbatim |
+| Destination Steps | the same route as map site names in order, one per step, separated by `;`; prefix `enter:` for an "enter" step; a final `return` for "return" (lets the engine check it without guessing from prose) |
+| When Fulfilling | ability text, verbatim |
+| Fulfilled Ability | ability text, verbatim |
+
+Also useful: a card image link per side (hf4map has the Contracts deck) so the
+art and layout can be matched.

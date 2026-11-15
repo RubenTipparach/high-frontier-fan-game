@@ -578,6 +578,11 @@ function initNewGameModal() {
   };
   document.getElementById('solo-m1')?.addEventListener('change', refreshSoloAqua);
   document.getElementById('solo-m2')?.addEventListener('change', refreshSoloAqua);
+  // M4 requires M0 (4A1a): ticking it ticks M0 (the server forces it anyway).
+  document.getElementById('solo-m4')?.addEventListener('change', (e) => {
+    const m0box = document.getElementById('solo-m0');
+    if (e.target.checked && m0box) m0box.checked = true;
+  });
   soloBtn.addEventListener('click', () => {
     if (modeSection) modeSection.classList.add('hidden');
     if (soloOpts) soloOpts.classList.remove('hidden');
@@ -772,9 +777,13 @@ function initNewGameModal() {
         : '<strong>Module 0: Politics</strong> - adds the Sol Political Assembly';
     }
     // One short note per scenario, so a host reading the picker knows what the
-    // mission IS before they start it. Module 4 (Exodus) is a long way off, so
-    // its row stays hidden for now (it keeps its `hidden` class in the markup;
-    // nothing reveals it).
+    // mission IS before they start it. Module 4 (Exodus) is an admin preview
+    // (setAdminModuleRows reveals it) and runs in the plain sandbox only, so a
+    // scenario clears and locks it.
+    {
+      const m4cb = document.getElementById('solo-m4');
+      if (m4cb) { if (ceo || scenario || tutorial) m4cb.checked = false; m4cb.disabled = ceo || scenario || tutorial; }
+    }
     document.getElementById('solo-ceo-note')?.classList.toggle('hidden', !ceo);
     document.getElementById('solo-hermes-note')?.classList.toggle('hidden', !hermes);
     document.getElementById('solo-sirens-note')?.classList.toggle('hidden', !sirens);
@@ -849,12 +858,14 @@ function initNewGameModal() {
     // still runs without M2 (the server forces it off).
     const m1 = !!document.getElementById('solo-m1')?.checked;
     const m2 = !!document.getElementById('solo-m2')?.checked;
+    // M4 (admin preview) runs in the plain sandbox only; it needs M0.
+    const m4 = !ceoSolo && !hermes && !sirens && !altruism && !!document.getElementById('solo-m4')?.checked;
     const name = document.getElementById('solo-name')?.value || '';
     soloCreate.disabled = true;
     const prev = soloCreate.textContent;
     soloCreate.textContent = 'Creating room…';
     try {
-      const r = await createSoloRoom({ name, startingAqua, economy, maxRounds, draftStart, randomDraft, quickStart, m0, m1, m2, ceoSolo, hermes, sirens, altruism });
+      const r = await createSoloRoom({ name, startingAqua, economy, maxRounds, draftStart, randomDraft, quickStart, m0: m0 || m4, m1, m2, m4, ceoSolo, hermes, sirens, altruism });
       if (r && r.ok) { close(); }
       else { toast('Could not start a solo room: ' + ((r && r.error) || 'network'), 'error'); }
     } catch (err) {
@@ -917,7 +928,16 @@ function syncAlphaBanner() {
 // their room-creation checkboxes show for every host. Kept as a function (the
 // `allowed` arg is ignored for these released rows) so a future admin-only
 // module can slot back in.
-function setAdminModuleRows(allowed) {   // eslint-disable-line no-unused-vars
+function setAdminModuleRows(allowed) {
+  // Module 4 (Exodus) is an ADMIN-ONLY preview (user 2026-11-15). Its rows show
+  // for admins only, and are cleared when hidden so a stale tick can never ride
+  // along (the server forces m4 off for anyone else regardless).
+  for (const id of ['create-m4-row', 'solo-m4-row']) {
+    const row = document.getElementById(id);
+    if (!row) continue;
+    row.classList.toggle('hidden', !allowed);
+    if (!allowed) { const cb = row.querySelector('input'); if (cb) cb.checked = false; }
+  }
   for (const id of ['create-m2-row', 'solo-m2-row']) {
     const el = document.getElementById(id);
     if (el) el.classList.remove('hidden');

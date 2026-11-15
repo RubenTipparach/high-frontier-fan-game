@@ -945,6 +945,7 @@ function lobbyRow(lobbyId) {
     m0: !!row.m0,
     m1: !!row.m1,
     m2: !!row.m2,
+    m4: !!row.m4,
     ceoSolo: !!row.ceo_solo,
     tutorial: !!row.tutorial,
     // Published variants (docs/variants-tracker.md). Admin-only for now.
@@ -1080,6 +1081,19 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // the M1 open-release pattern - the admin gate is dropped). Still experimental
   // and fixed at creation. A ceoSolo room may carry M2 too (Futures in solo).
   const m2 = body.m2 ? 1 : 0;
+  // Opt-in Module 4 (Exodus). ADMIN-ONLY preview (user 2026-11-15,
+  // docs/module-m4-plan.md): anyone else's request is forced to 0 regardless of
+  // what the client sends. M4 requires M0 (4A1a), so it turns M0 on. It does not
+  // combine with a variant yet (CEO Solitaire's own M4 rules are not wired), so
+  // that combination is refused rather than quietly narrowed.
+  const m4 = (body.m4 && profileIsAdmin(req.profile, req)) ? 1 : 0;
+  if (m4) {
+    const withVariant = VARIANT_KEYS.filter((k) => body[k]);
+    if (withVariant.length || body.ceoSolo || body.tutorial) {
+      return res.status(400).json({ error: 'm4_no_variants', detail: withVariant });
+    }
+    m0 = 1;
+  }
   // A room runs AT MOST ONE variant (see VARIANT_KEYS). Rejected rather than
   // silently narrowed: picking one for the host hands them a different game than
   // they asked for, and a client that sends two is buggy and should hear about
@@ -1215,10 +1229,10 @@ app.post('/lobbies', requireProfile, (req, res) => {
     try {
       info = db
         .prepare(
-          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, idempotency_key, starting_aqua, economy, draft_start, random_draft, quick_start, m0, m1, m2, ceo_solo, tutorial, sirens, hermes, altruism, hot_seat, hot_seat_seats)
-           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, idempotency_key, starting_aqua, economy, draft_start, random_draft, quick_start, m0, m1, m2, m4, ceo_solo, tutorial, sirens, hermes, altruism, hot_seat, hot_seat_seats)
+           VALUES (?, ?, ?, ?, ?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
-        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now, idemKey, startingAqua, economy, draftStart, randomDraft, quickStart, m0, m1, m2, ceoSolo, tutorial, sirens, hermes, altruism, hotSeat, hotSeatSeats);
+        .run(code, name, req.profile.id, maxPlayers, maxRounds, joinPolicy, now, idemKey, startingAqua, economy, draftStart, randomDraft, quickStart, m0, m1, m2, m4, ceoSolo, tutorial, sirens, hermes, altruism, hotSeat, hotSeatSeats);
       break;
     } catch (err) {
       if (err && err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
@@ -1260,6 +1274,7 @@ app.get('/lobbies', (_req, res) => {
               l.m0          AS m0,
               l.m1          AS m1,
               l.m2          AS m2,
+              l.m4          AS m4,
               l.ceo_solo    AS ceoSolo,
               l.sirens      AS sirens,
               l.hermes      AS hermes,
@@ -1305,6 +1320,7 @@ app.get('/lobbies/mine', requireProfile, (req, res) => {
               l.m0          AS m0,
               l.m1          AS m1,
               l.m2          AS m2,
+              l.m4          AS m4,
               l.ceo_solo    AS ceoSolo,
               l.sirens      AS sirens,
               l.hermes      AS hermes,
@@ -1416,7 +1432,7 @@ app.get('/lobbies/ended-public', requireProfile, (req, res) => {
               l.max_players AS maxPlayers,
               l.status,
               l.host_id     AS hostId,
-              l.m0 AS m0, l.m1 AS m1, l.m2 AS m2,
+              l.m0 AS m0, l.m1 AS m1, l.m2 AS m2, l.m4 AS m4,
               l.draft_start AS draftStart, l.random_draft AS randomDraft,
               l.quick_start AS quickStart,
               l.ceo_solo AS ceoSolo, l.sirens AS sirens, l.hermes AS hermes, l.altruism AS altruism,
@@ -1460,7 +1476,7 @@ app.get('/lobbies/ended-public', requireProfile, (req, res) => {
       hostName: row.hostName,
       memberCount: row.memberCount,
       memberNames: row.memberNames,
-      m0: row.m0, m1: row.m1, m2: row.m2,
+      m0: row.m0, m1: row.m1, m2: row.m2, m4: row.m4,
       gameId: row.gameId,
       gameStatus: row.gameStatus,
       lastActionAt: row.finishedAt || row.lastActionAt || null,
@@ -1700,6 +1716,12 @@ app.post('/lobbies/:id/settings', requireProfile, (req, res) => {
   // M2 is released (v1.3.0): any host may toggle it pre-start (a ceoSolo room may
   // carry it too - Futures in solo).
   if (body.m2 !== undefined) { sets.push('m2 = ?'); args.push(body.m2 ? 1 : 0); }
+  // M4 is an ADMIN-ONLY preview: a non-admin host's toggle is ignored. Turning
+  // it on also turns M0 on (M4 requires it, 4A1a).
+  if (body.m4 !== undefined && profileIsAdmin(req.profile, req)) {
+    sets.push('m4 = ?'); args.push(body.m4 ? 1 : 0);
+    if (body.m4 && body.m0 === undefined) { sets.push('m0 = ?'); args.push(1); }
+  }
   // CEO Solitaire is released (v1.2.0): any host may toggle it pre-start.
   if (body.ceoSolo !== undefined) { sets.push('ceo_solo = ?'); args.push(body.ceoSolo ? 1 : 0); }
   if (body.joinPolicy !== undefined) {
@@ -1735,7 +1757,7 @@ app.post('/lobbies/:id/ready', requireProfile, (req, res) => {
 app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
-  const lobby = db.prepare('SELECT host_id, status, max_rounds, starting_aqua, economy, draft_start, random_draft, quick_start, m0, m1, m2, ceo_solo, tutorial, sirens, hermes, altruism, hot_seat, hot_seat_seats FROM lobbies WHERE id = ?').get(id);
+  const lobby = db.prepare('SELECT host_id, status, max_rounds, starting_aqua, economy, draft_start, random_draft, quick_start, m0, m1, m2, m4, ceo_solo, tutorial, sirens, hermes, altruism, hot_seat, hot_seat_seats FROM lobbies WHERE id = ?').get(id);
   if (!lobby) return res.status(404).json({ error: 'not_found' });
   if (lobby.host_id !== req.profile.id) return res.status(403).json({ error: 'not_host' });
   if (lobby.status !== 'waiting') return res.status(409).json({ error: 'already_started' });
@@ -1781,6 +1803,7 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   const m0 = !!lobby.m0;
   const m1 = !!lobby.m1;
   const m2 = !!lobby.m2;
+  const m4 = !!lobby.m4;
   // CEO Solitaire forces M0 on (createInitialState enforces it too); only a
   // 1-player room can actually be the variant.
   const ceoSolo = !!lobby.ceo_solo && solo;
@@ -1796,7 +1819,7 @@ app.post('/lobbies/:id/start', requireProfile, (req, res) => {
   // the lobby row the way Sirens does.
   const hermes = !!lobby.hermes;
   const altruism = !!lobby.altruism;
-  const state = createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, quickStart, m0, m1, m2, ceoSolo, tutorial, sirens, hermes, altruism, hotSeat, hotSeatSeats });
+  const state = createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, quickStart, m0, m1, m2, m4, ceoSolo, tutorial, sirens, hermes, altruism, hotSeat, hotSeatSeats });
 
   const now = nowMs();
   const gameId = db.transaction(() => {
@@ -2317,7 +2340,7 @@ function adminGameStateView(gameId) {
     seq: st.seq, round: state.round, status: state.status, players, assembly, factories, discs,
     // Module flags, so the editor only offers module content (colonists,
     // Freighter / GW promotion) in rooms that actually run the module.
-    m0: !!state.m0, m1: !!state.m1, m2: !!state.m2,
+    m0: !!state.m0, m1: !!state.m1, m2: !!state.m2, m4: !!state.m4,
   };
 }
 // Politics-space label + colour for the admin cube manager. Ideology spaces
@@ -3107,7 +3130,7 @@ app.get('/games/public', requireProfile, (req, res) => {
               l.name        AS lobbyName,
               l.code        AS lobbyCode,
               l.max_rounds  AS maxRounds,
-              l.m0 AS m0, l.m1 AS m1, l.m2 AS m2,
+              l.m0 AS m0, l.m1 AS m1, l.m2 AS m2, l.m4 AS m4,
               l.draft_start AS draftStart, l.random_draft AS randomDraft,
               l.quick_start AS quickStart,
               l.ceo_solo AS ceoSolo, l.sirens AS sirens, l.hermes AS hermes, l.altruism AS altruism,
@@ -3384,7 +3407,7 @@ app.post('/games/:id/clone', requireProfile, (req, res) => {
       `SELECT g.id, g.seed, g.lobby_id AS lobbyId, l.name AS lobbyName, l.max_players AS maxPlayers,
               l.max_rounds AS maxRounds, l.starting_aqua AS startingAqua, l.economy,
               l.draft_start AS draftStart, l.random_draft AS randomDraft,
-              l.m0, l.m1, l.m2, l.ceo_solo AS ceoSolo, l.tutorial
+              l.m0, l.m1, l.m2, l.m4, l.ceo_solo AS ceoSolo, l.tutorial
        FROM games g JOIN lobbies l ON l.id = g.lobby_id WHERE g.id = ?`
     )
     .get(id);
@@ -3444,12 +3467,12 @@ app.post('/games/:id/clone', requireProfile, (req, res) => {
     try {
       lobbyInfo = db
         .prepare(
-          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, started_at, starting_aqua, economy, draft_start, random_draft, m0, m1, m2, ceo_solo, tutorial, hot_seat, hot_seat_seats, cloned_from_game_id)
-           VALUES (?, ?, ?, ?, ?, 'invite-only', 'started', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ?, ?)`
+          `INSERT INTO lobbies (code, name, host_id, max_players, max_rounds, join_policy, status, created_at, started_at, starting_aqua, economy, draft_start, random_draft, m0, m1, m2, m4, ceo_solo, tutorial, hot_seat, hot_seat_seats, cloned_from_game_id)
+           VALUES (?, ?, ?, ?, ?, 'invite-only', 'started', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ?, ?)`
         )
         .run(code, name, req.profile.id, src.maxPlayers, src.maxRounds, now, now,
           src.startingAqua, src.economy, src.draftStart, src.randomDraft,
-          src.m0, src.m1, src.m2, src.ceoSolo, state.players.length, id);
+          src.m0, src.m1, src.m2, src.m4, src.ceoSolo, state.players.length, id);
       break;
     } catch (err) {
       if (err && err.code === 'SQLITE_CONSTRAINT_UNIQUE') continue;
@@ -4815,7 +4838,7 @@ app.get('/admin/profiles/:id/rooms', requireAdminRead, (req, res) => {
   const rows = db.prepare(
     `SELECT l.id, l.code, l.name, l.status AS lobbyStatus, l.created_at AS createdAt,
             l.host_id AS hostId, hp.name AS hostName,
-            l.ceo_solo AS ceoSolo, l.sirens, l.hermes, l.altruism, l.m0, l.m1, l.m2,
+            l.ceo_solo AS ceoSolo, l.sirens, l.hermes, l.altruism, l.m0, l.m1, l.m2, l.m4,
             g.id AS gameId, g.status AS gameStatus,
             lm.joined_at AS joinedAt, lm.seat
        FROM lobby_members lm
@@ -4950,7 +4973,7 @@ app.get('/admin', (req, res) => {
   const LAST_ACTIVE = `COALESCE((SELECT gs.updated_at FROM game_states gs JOIN games g ON g.id = gs.game_id
                 WHERE g.lobby_id = l.id ORDER BY gs.updated_at DESC LIMIT 1), l.created_at)`;
   const ROOM_SELECT = `SELECT l.id, l.code, l.name, l.status, l.join_policy, l.max_players,
-              l.max_rounds, l.m0, l.m1, l.m2, l.ceo_solo, l.tutorial, l.sirens, l.hermes, l.altruism,
+              l.max_rounds, l.m0, l.m1, l.m2, l.m4, l.ceo_solo, l.tutorial, l.sirens, l.hermes, l.altruism,
               l.draft_start, l.random_draft, l.quick_start, l.hot_seat,
               ${LAST_ACTIVE} AS active_ms,
               p.name AS host_name,
@@ -5163,6 +5186,7 @@ app.get('/admin', (req, res) => {
     if (r.m0) mods.push('<span class="mod-chip">M0</span>');
     if (r.m1) mods.push('<span class="mod-chip">M1</span>');
     if (r.m2) mods.push('<span class="mod-chip">M2</span>');
+    if (r.m4) mods.push('<span class="mod-chip">M4</span>');
     return mods.length ? mods.join(' ') : '<span class="muted">base</span>';
   };
   // Turn cell: round X / Y plus whose turn it is, or a dash when no game yet.
@@ -6408,6 +6432,7 @@ function loadTurnLog(gid, hostId) {
     if (r.m0) tags += ' <span class="mod-chip">M0</span>';
     if (r.m1) tags += ' <span class="mod-chip">M1</span>';
     if (r.m2) tags += ' <span class="mod-chip">M2</span>';
+    if (r.m4) tags += ' <span class="mod-chip">M4</span>';
     var state = r.gameStatus ? r.gameStatus : r.lobbyStatus;
     return '<li><a class="um-room-link" href="#rooms/' + admEsc(r.code) + '"'
       + ' data-code="' + admEsc(r.code) + '">' + admEsc(r.name || '(unnamed)') + '</a>'

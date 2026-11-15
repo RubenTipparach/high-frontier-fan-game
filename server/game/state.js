@@ -275,7 +275,7 @@ function freshPlayer({ profileId, name, seat, color, aqua }) {
 
 // players: [{ profileId, name, seat }] (seat 1-based, any order).
 // maxRounds: game length (rounds = Sunspot Cube cycles); default 5.
-export function createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, quickStart, m0, m1, m2, ceoSolo, tutorial, sirens, hermes, altruism, hotSeat, hotSeatSeats } = {}) {
+export function createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, quickStart, m0, m1, m2, m4, ceoSolo, tutorial, sirens, hermes, altruism, hotSeat, hotSeatSeats } = {}) {
   // Tutorial (guided solo): a fixed-setup game seated with the human + two
   // scripted bots, running the card MARKET (for the auction economy), NO
   // modules, a deterministic deck order, and the human's opening bank of 6. Its
@@ -284,7 +284,7 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
   // module). Normalise the conflicting inputs up front.
   tutorial = !!tutorial;
   if (tutorial) {
-    m0 = false; m1 = false; m2 = false; ceoSolo = false;
+    m0 = false; m1 = false; m2 = false; m4 = false; ceoSolo = false;
     economy = 'market';
     draftStart = false; randomDraft = false;
     startingAqua = TUTORIAL_START_AQUA;
@@ -323,6 +323,12 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
   // scenario rather than Module 0 as an opt-in. A host still cannot TICK M0
   // alongside Sirens; that is refused at room creation (sirens_excludes_m0).
   if (sirens && Array.isArray(players) && players.length === 1) ceoSolo = true;
+  // Module 4 (Exodus) REQUIRES Module 0 (4A1a): contracts are auctioned off the
+  // Fundraise and their decks follow the Active Law's ideology. Admin-only
+  // preview (docs/module-m4-plan.md). CEO Solitaire's own M4 rules (4G) are not
+  // wired, so a CEO or variant game never carries it.
+  m4 = !!m4 && !ceoSolo && !sirens && !hermes && !altruism;
+  if (m4) m0 = true;
   // CEO Solitaire (V6) runs the Solitaire Sol Political Assembly, so M0 is
   // mandatory whenever the variant is on (mirrors the M2-forces-M0 rule above).
   ceoSolo = !!ceoSolo;
@@ -661,6 +667,11 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
     // Defaults false. NOTHING M2 (Bernals, Colonists, Futures) may activate
     // unless state.m2 is true.
     m2: !!m2,
+    // Module 4 (Exodus): contracts, then augmentations / enterprises, then the
+    // isobank and the starship (docs/module-m4-plan.md). ADMIN-ONLY preview,
+    // fixed at game start, defaults false. NOTHING M4 may activate unless
+    // state.m4 is true.
+    m4: !!m4,
     // Playing WITH Futures is the long game (rule 1D "d": 7 Solar Cycles). The
     // Futures LAYER (unlock on promotion, Epic Hazard, future stars + endgame
     // future scoring) activates ONLY in a 7-round M2 game; a short M2 room (5-6

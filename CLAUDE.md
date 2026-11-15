@@ -230,8 +230,17 @@ per room and carried into the game state as a boolean (`state.m0`,
   (corrected 2026-07-30). `m2` is plumbed as a structural mirror of `m1` (db
   column, `createInitialState` -> `state.m2`, client `isM2()`/`setM2()` + tags)
   but adds NO decks (unlike M1's two Terawatt decks). Both flags are still fixed
-  at room creation, default OFF, with no retroactive apply. **Rat Frontier is
-  the one feature still behind `profileIsAdmin`.**
+  at room creation, default OFF, with no retroactive apply. **Rat Frontier and
+  the M4 preview (below) are the features behind `profileIsAdmin`.**
+- **M4 (Exodus) - ADMIN-ONLY PREVIEW, in development (user 2026-11-15).**
+  `state.m4`, plumbed like `m2` (`lobbies.m4` column, `createInitialState` ->
+  `state.m4`, client `isM4()` / `setM4()`, M4 lobby tag). The create and
+  settings routes only write it for `profileIsAdmin`; everyone else is forced
+  to 0, and the create-form / solo-wizard / room-settings rows show for admins
+  only. M4 REQUIRES M0 (4A1a) and forces it on. It does not combine with a
+  variant yet (`m4_no_variants`; CEO Solitaire's own M4 rules, 4G, are not
+  wired). Stages and the contract card-data columns: `docs/module-m4-plan.md`.
+  Releasing it later follows the checklist below.
 - **Promo crew (data/crew.js#PROMO_CREW) - RELEASED to every player
   (user 2026-11-14).** No admin check (the old `promo_crew_admin_only` is
   gone) and no blanket m0+m1+m2 gate: each face needs only the modules its OWN

@@ -100,6 +100,11 @@ export function initLobby({ onShowView, onToast }) {
   // defaults the length to 7, floors it at 5, and warns that 5 / 6 rounds run
   // the colonization loop WITHOUT Futures. M0 is mandatory for M2, so checking
   // M2 auto-checks M0 (the server forces it on regardless).
+  // M4 requires M0 (4A1a): ticking it ticks M0 (the server forces it anyway).
+  document.getElementById('create-m4')?.addEventListener('change', (e) => {
+    const m0box = document.getElementById('create-m0');
+    if (e.target.checked && m0box) m0box.checked = true;
+  });
   const cM2 = document.getElementById('create-m2');
   const cRounds = document.getElementById('create-rounds');
   const cWarn = document.getElementById('create-rounds-warn');
@@ -571,6 +576,7 @@ export function moduleTagsHtml(lobby) {
   if (lobby && lobby.m0) tags.push('<span class="module-tag tag-m0">🏛 M0 Politics</span>');
   if (lobby && lobby.m1) tags.push('<span class="module-tag tag-m1">🚛 M1 Terawatt</span>');
   if (lobby && lobby.m2) tags.push('<span class="module-tag tag-m2">🔮 M2 Colonization</span>');
+  if (lobby && lobby.m4) tags.push('<span class="module-tag tag-m4">📜 M4 Exodus (preview)</span>');
   if (lobby && lobby.quickStart) tags.push('<span class="module-tag tag-draft">⚡ V1 Quick Start</span>');
   else if (lobby && lobby.draftStart) tags.push('<span class="module-tag tag-draft">🃏 Draft start</span>');
   if (lobby && lobby.randomDraft) tags.push('<span class="module-tag tag-draft">🎲 Random draft</span>');
@@ -1179,6 +1185,9 @@ async function onCreateSubmit(ev) {
   // checkboxes for every host.
   const m1 = !!document.getElementById('create-m1')?.checked;
   const m2 = !!document.getElementById('create-m2')?.checked;
+  // M4 (Exodus) is an admin preview: its row only shows for admins, and the
+  // server forces it off for anyone else. It needs M0 (sent on with it).
+  const m4 = !!document.getElementById('create-m4')?.checked;
   // Scenario: at most ONE, so it is a single picked value rather than a set of
   // booleans. Gated to admins + testers while the scenarios get more testing
   // (the server is the real gate and forces it off for anyone else, so sending
@@ -1202,7 +1211,7 @@ async function onCreateSubmit(ev) {
   if (submitBtn) submitBtn.disabled = true;
   try {
     const r = await createLobby(
-      { name, maxPlayers, maxRounds, joinPolicy, draftStart, randomDraft, quickStart, m0, m1, m2, sirens, hermes, altruism,
+      { name, maxPlayers, maxRounds, joinPolicy, draftStart, randomDraft, quickStart, m0: m0 || m4, m1, m2, m4, sirens, hermes, altruism,
         hotSeat, hotSeatSeats, idempotencyKey: _createIdemKey }, me.token
     );
     if (!r.ok) { errEl.textContent = humanizeError(r.error); return; }   // keep the key so a retry dedupes
@@ -1224,7 +1233,7 @@ async function onCreateSubmit(ev) {
 // you in it, started right away. It runs the same server-backed engine as a
 // full table, so it's the way to exercise multiplayer features alone. Needs
 // the server to allow maxPlayers=1 (it does); start only needs >=1 member.
-export async function createSoloRoom({ name = '', startingAqua = 100, economy = 'library', maxRounds = 5, draftStart = false, randomDraft = false, quickStart = false, m0 = false, m1 = false, m2 = false, ceoSolo = false, tutorial = false, hermes = false, sirens = false } = {}) {
+export async function createSoloRoom({ name = '', startingAqua = 100, economy = 'library', maxRounds = 5, draftStart = false, randomDraft = false, quickStart = false, m0 = false, m1 = false, m2 = false, m4 = false, ceoSolo = false, tutorial = false, hermes = false, sirens = false, altruism = false } = {}) {
   const me = activeProfile();
   if (!me) return { ok: false, error: 'no_profile' };
   // The player may name their solo room; blank falls back to the default label.
@@ -1253,7 +1262,7 @@ export async function createSoloRoom({ name = '', startingAqua = 100, economy = 
     { name: roomName, maxPlayers: 1,
       maxRounds: [4, 5, 6, 7].includes(Number(maxRounds)) ? Number(maxRounds) : 5,
       joinPolicy: 'invite-only', idempotencyKey: newIdemKey(),
-      startingAqua, economy, draftStart, randomDraft, quickStart, m0: (ceoFlag ? true : m0), m1: m1Flag, m2: m2Flag, ceoSolo: ceoFlag, tutorial: tutorialFlag, hermes: hermesFlag, sirens: sirensFlag },
+      startingAqua, economy, draftStart, randomDraft, quickStart, m0: (ceoFlag ? true : m0), m1: m1Flag, m2: m2Flag, m4: !!m4, ceoSolo: ceoFlag, tutorial: tutorialFlag, hermes: hermesFlag, sirens: sirensFlag, altruism: !!altruism },
     me.token,
   );
   if (!create.ok) return create;
@@ -1405,6 +1414,7 @@ function renderLobbySettings(lobby, iAmHost, me) {
     if (lobby.m0) mods.push('🏛 M0 Politics');
     if (lobby.m1) mods.push('🚛 M1 Terawatt');
     if (lobby.m2) mods.push('🔮 M2 Colonization');
+    if (lobby.m4) mods.push('📜 M4 Exodus (preview)');
     if (lobby.quickStart) mods.push('⚡ V1 Quick Start');
     else if (lobby.draftStart) mods.push('🃏 Draft start');
     if (lobby.randomDraft) mods.push('🎲 Random draft');
@@ -1460,6 +1470,9 @@ function renderLobbySettings(lobby, iAmHost, me) {
       <span><strong>Module 1: Terawatt</strong> - experimental (open playtest)</span></label>
     <label class="check-row"><input type="checkbox" id="set-m2"${lobby.m2 ? ' checked' : ''}/>
       <span><strong>Module 2: Colonization + Futures</strong> - experimental (open playtest)</span></label>
+    ${(lobby.m4 || (activeProfile() && activeProfile().isAdmin)) && !lobby.ceoSolo && !lobby.sirens && !lobby.hermes && !lobby.altruism && !lobby.tutorial ? `
+    <label class="check-row"><input type="checkbox" id="set-m4"${lobby.m4 ? ' checked' : ''}/>
+      <span><strong>Module 4: Exodus</strong> - contracts (admin preview, in development; turns on Module 0)</span></label>` : ''}
     ${lobby.hermes ? '' : `
     <div class="lobby-set-subhead">House rules</div>
     <label class="check-row"><input type="checkbox" id="set-draft"${lobby.draftStart ? ' checked' : ''}/>
@@ -1517,6 +1530,14 @@ function renderLobbySettings(lobby, iAmHost, me) {
   const setM0El = box.querySelector('#set-m0');
   if (setM0El && lobby.sirens) { setM0El.checked = false; setM0El.disabled = true; }
   setM0El?.addEventListener('change', (e) => save({ m0: e.target.checked }));
+  // M4 (admin preview): the row only renders for an admin host (or a room that
+  // already has it); the server ignores the toggle from anyone else. It needs
+  // M0, so turning it on ticks M0 too.
+  box.querySelector('#set-m4')?.addEventListener('change', (e) => {
+    const setM0 = box.querySelector('#set-m0');
+    if (e.target.checked && setM0 && !setM0.checked) { setM0.checked = true; save({ m4: true, m0: true }); return; }
+    save({ m4: e.target.checked });
+  });
   // M1 is open for playtesting: its row shows for every host.
   box.querySelector('#set-m1')?.addEventListener('change', (e) => save({ m1: e.target.checked }));
   // M2 is open for playtesting (released v1.3.0): its row shows for every host.
@@ -1807,6 +1828,7 @@ function humanizeError(code) {
     // silently corrected, so the host is told instead of quietly handed a
     // different game - which needs them to say something readable now that the
     // scenario is open to everyone.
+    m4_no_variants: 'Module 4 (Exodus) is a preview that runs in the standard game only. Clear the scenario, or turn Module 4 off.',
     sirens_excludes_m0: 'The Sirens can\'t run with Module 0 - the Sol Political Assembly is Earth\'s. Uncheck Module 0, or pick a different scenario.',
     hermes_fixes_opening: 'Hermes Fall deals its own opening - half decks with the Mass Driver near the top of the thrusters - so it can\'t also run a draft start.',
     sirens_bad_rounds: 'The Sirens run 4, 5 or 7 Solar Cycles (one per Seniority Disk). Pick one of those lengths.',
