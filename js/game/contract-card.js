@@ -1,12 +1,15 @@
-// Module 4 contract card renderer - MOCKUP (docs/mockups/m4/index.html).
-// Draws a contract face in the game's card language (css/cards.css: typebar,
-// name row, stats, body, footer) from one face of a data/card-data.js
-// Contracts / Exodus Contracts row. Not wired into js/game/card-ui.js until the
-// glyphs and layout are signed off.
+// Module 4 contract card renderer, shared by the game (card-ui.js#renderCard for
+// a contract slot, the contract panel and auction) and the review mockup
+// (docs/mockups/m4/index.html). Draws a contract face in the game's card language
+// (css/cards.css: typebar, name row, stats, body, footer) from one face of a
+// data/card-data.js Contracts / Exodus Contracts row. The art is the rendered
+// destination backdrop (Blender) with the face's own SVG foreground over it.
 import {
   ideologyPairHex, augmentGlyph, tophatGlyph, maskGlyph,
   lateFeeBadge, advanceBadge, vpBadge, mannedGlyph, abilityHtml,
-} from './glyphs.js';
+} from './contract-glyphs.js';
+import { assetUrl } from '../base.js';
+import { contractFace } from '../../data/contracts.js';
 
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
 
@@ -45,8 +48,9 @@ export function renderContractFace(face) {
   // comets are rendered, never drawn in SVG (user 2026-11-15).
   // Over it, this face's OWN foreground, drawn after its printed illustration
   // (scripts/gen-contract-craft.mjs, one SVG per face, never shared).
-  const base = `${globalThis.M4_ART_BASE ?? '../../../'}assets/cards/contracts/`;
-  const art = `url("${base}craft/${face.Code}.svg"), url("${base}${face.Code}-3d.webp")`;
+  const artUrl = (rel) => (globalThis.M4_ART_BASE != null
+    ? `${globalThis.M4_ART_BASE}assets/cards/contracts/${rel}` : assetUrl(`assets/cards/contracts/${rel}`));
+  const art = `url("${artUrl(`craft/${face.Code}.svg`)}"), url("${artUrl(`${face.Code}-3d.webp`)}")`;
   el.innerHTML = `
     <div class="card-inner"><div class="card-face">
       <div class="card-typebar m4-typebar">
@@ -74,4 +78,16 @@ export function renderContractFace(face) {
       <div class="card-footer m4-footer"><span>${SIDE_LABEL[side] || side}</span><code>${esc(face.Code)}</code></div>
     </div></div>`;
   return el;
+}
+
+// The game's contract record (data/contracts.js) on one side, as a card element.
+export function renderContractCard(cardId, side = 'blue') {
+  const f = contractFace(cardId, side);
+  if (!f) return null;
+  return renderContractFace({
+    Side: f.side, Code: f.code, Name: f.name, 'Contract Type': f.contractType, 'Ideology Pair': f.pair,
+    Manned: f.manned, Mass: f.mass, 'Rad-Hard': f.radHardness, VP: f.vp, 'Late Fee': f.lateFee,
+    Advance: f.advance, Cybernetics: f.cybernetics.join(', '), 'Title Icon': f.titleIcon,
+    Destination: f.destination, 'Fulfilled Ability': f.fulfilledAbility, 'When Fulfilling': f.whenFulfilling,
+  });
 }

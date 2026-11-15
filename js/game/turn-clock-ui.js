@@ -25,7 +25,9 @@ import { isBatterySave } from '../prefs.js';
 // bernals live in data/bernals.js, not the raw patent map, and looking them up
 // in PATENTS_BY_ID alone left the cycled bernal chips showing raw ids with dead
 // clicks (they read as "the deck didn't cycle").
-const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...BERNALS_BY_ID, ...COLONISTS_BY_ID };
+// M4 contract cards are stack slots too (only ever present in an m4 game).
+import { CONTRACTS_BY_ID } from '../../data/contracts.js';
+const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...BERNALS_BY_ID, ...COLONISTS_BY_ID, ...CONTRACTS_BY_ID };
 
 // Small attr/text escapers shared by the event-outcome chips.
 function escTc(t) {

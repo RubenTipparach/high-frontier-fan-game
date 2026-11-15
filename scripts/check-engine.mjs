@@ -31,6 +31,7 @@ import { PATENTS, PATENTS_BY_ID } from '../data/patents.js';
 import { AD_ASTRA_EXIT_SLUGS, isAdAstraExit, sunlensAt } from '../data/ad-astra.js';
 import { diffState, applyPatch, sameState } from '../server/game/state-diff.js';
 import { scorePlayer } from '../data/endgame-scoring.js';
+import { CONTRACTS, CONTRACT_PAIRS } from '../data/contracts.js';
 import { siteBySlug, nodeSizeNumber, isLanderBurnNode, isAerobrakeLandableSite, neighborSlugs, siteHasLanderBurn, allSiteSlugs, leoSlug } from '../server/game/planner-graph.js';
 import { adjacentSites, SITES } from '../data/sites.js';
 import { isAtmosphericSite } from '../data/site-categories.js';
@@ -10495,4 +10496,232 @@ check('M4 turns on M0 and stays out of variant games', () => {
     assert(g.m4 === false, `${v} game kept m4`);
   }
   return 'M4 forces M0; plain game m4 false; CEO / Hermes / Altruism / Tutorial drop it';
+});
+
+// ---- Module 4 Stage 1: contracts (4B) ----------------------------------------
+const conByCode = (code) => CONTRACTS.find((c) => c.faces.primary.code === code || c.faces.secondary.code === code);
+const op = (st, kind, who, extra = {}) => applyOperation(st, { kind, ...extra }, { profileId: who });
+// A Fundraise that names the star when the tally is tied (the test then sets the
+// law it is about directly).
+function fundraise(st, who) {
+  let r = op(st, 'FUNDRAISE', who, {});
+  for (const star of ['centrist', ...IDEOLOGY_ORDER]) {
+    if (r.ok || r.error !== 'star_choice_required') break;
+    r = op(st, 'FUNDRAISE', who, { star });
+  }
+  return r;
+}
+function m4Game() {
+  const st = startedGame({ m4: true });
+  return st;
+}
+// Put contract `code` on top of its pair deck.
+function stackDeck(st, code) {
+  const c = conByCode(code);
+  const deck = st.contractDecks[c.pair];
+  deck.splice(deck.indexOf(c.id), 1);
+  deck.unshift(c.id);
+  return c;
+}
+// Run a FUNDRAISE then win `code` at `years`: by the initiator (rivals pass) or
+// by a rival who underbids. Returns the ids of both.
+function winContract(st, code, { by = 'rival', years = 5 } = {}) {
+  const c = stackDeck(st, code);
+  const ini = currentPlayerOf(st);
+  const riv = st.players.find((p) => p.profileId !== ini.profileId);
+  let r = fundraise(st, ini.profileId);
+  assert(r.ok, `FUNDRAISE: ${r.error}`);
+  st = r.state; st.activeLawStar = CONTRACT_PAIRS[c.pair][0];
+  r = op(st, 'AUCTION_CONTRACT_START', ini.profileId, { pair: c.pair });
+  assert(r.ok, `AUCTION_CONTRACT_START: ${r.error} ${JSON.stringify(r.detail || '')}`);
+  st = r.state;
+  if (by === 'rival') {
+    r = op(st, 'AUCTION_CONTRACT_BID', riv.profileId, { years });
+    assert(r.ok, `bid: ${r.error}`); st = r.state;
+  } else {
+    if (years !== 10) { r = op(st, 'AUCTION_CONTRACT_BID', ini.profileId, { years }); assert(r.ok, `own bid: ${r.error}`); st = r.state; }
+    r = op(st, 'AUCTION_CONTRACT_PASS', riv.profileId, {});
+    assert(r.ok, `pass: ${r.error}`); st = r.state;
+  }
+  r = op(st, 'AUCTION_CONTRACT_CLOSE', ini.profileId, {});
+  assert(r.ok, `close: ${r.error}`);
+  const winner = by === 'rival' ? riv.profileId : ini.profileId;
+  return { st: r.state, c, log: r.log, ini: ini.profileId, riv: riv.profileId, winner };
+}
+const pl = (st, id) => st.players.find((p) => p.profileId === id);
+function currentPlayerOf(st) { return st.players[st.activeIndex]; }
+function endTurns(st, n) {
+  for (let i = 0; i < n; i++) {
+    const cur = currentPlayerOf(st);
+    const r = op(st, 'END_TURN', cur.profileId);
+    assert(r.ok, `END_TURN: ${r.error}`);
+    st = r.state;
+    if (st.pendingSeniority) {
+      const rr = op(st, 'PLACE_SENIORITY', st.pendingSeniority.chooserId, { place: 'freedom' });
+      assert(rr.ok, `PLACE_SENIORITY: ${rr.error}`);
+      st = rr.state;
+    }
+  }
+  return st;
+}
+
+check('M4 deals three ideology-pair contract decks; an M4-off deal is untouched', () => {
+  const on = createInitialState({ players: [{ profileId: 1, name: 'A', seat: 1 }, { profileId: 2, name: 'B', seat: 2 }], seed: 9, m4: true });
+  const m0 = createInitialState({ players: [{ profileId: 1, name: 'A', seat: 1 }, { profileId: 2, name: 'B', seat: 2 }], seed: 9, m0: true });
+  assert(Object.keys(on.contractDecks).join() === 'IF,HU,EA', 'pair decks');
+  assert(Object.values(on.contractDecks).every((d) => d.length === 12), 'twelve contracts a deck');
+  assert(JSON.stringify(on.decks) === JSON.stringify(m0.decks), 'the patent deal changed when M4 was switched on');
+  assert(!('contractDecks' in m0) && !('timepiece' in m0.players[0]), 'an M4-off game carries contract state');
+  assert(on.players.every((p) => p.timepiece === null && Array.isArray(p.contractHand)), 'timepieces start in the Reserve');
+  return '3 x 12 contracts; patent decks identical to the same M0 game';
+});
+
+check('a contract auction needs a Fundraise and a deck sharing an Active Law', () => {
+  let st = m4Game();
+  const p1 = currentPlayerOf(st);
+  let r = op(st, 'AUCTION_CONTRACT_START', p1.profileId, { pair: 'IF' });
+  assert(!r.ok && r.error === 'fundraise_first', `no fundraise: ${r.error}`);
+  r = fundraise(st, p1.profileId);
+  assert(r.ok, r.error); st = r.state;
+  st.activeLawStar = 'centrist';
+  r = op(st, 'AUCTION_CONTRACT_START', p1.profileId, { pair: 'IF' });
+  assert(!r.ok && r.error === 'deck_not_open', `centrist star: ${r.error}`);
+  st.activeLawStar = 'honor';
+  r = op(st, 'AUCTION_CONTRACT_START', p1.profileId, { pair: 'IF' });
+  assert(!r.ok && r.error === 'deck_not_open', `honor star opened IF: ${r.error}`);
+  r = op(st, 'AUCTION_CONTRACT_START', p1.profileId, { pair: 'HU' });
+  assert(r.ok && r.state.auction && r.state.auction.kind === 'contract' && r.state.auction.low === 10, `HU under honor: ${r.error}`);
+  return 'fundraise_first; centrist + honor refuse IF; honor opens HU at 10 years';
+});
+
+check('descending years: the lowest bid wins, timepiece placed, advance paid less the finder fee', () => {
+  let st = m4Game();
+  const before = Object.fromEntries(st.players.map((p) => [p.profileId, { aqua: p.aqua, hand: p.hand.length }]));
+  const { st: s2, c, log, ini, riv } = winContract(st, 'M4N228F', { years: 4 });
+  const A = pl(s2, ini), B = pl(s2, riv);
+  const aquaA = before[ini].aqua, aquaB = before[riv].aqua;
+  const b = { hand: { length: before[riv].hand } };
+  const face = c.faces.primary;
+  assert(B.timepiece && B.timepiece.contractId === c.id && B.timepiece.due === (s2.clockTicks | 0) + 4, `timepiece ${JSON.stringify(B.timepiece)}`);
+  assert(B.contractHand.includes(c.id), 'the contract goes to the winner\'s hand');
+  assert(B.aqua === aquaB + face.advance - 1, `winner aqua ${B.aqua}, want ${aquaB + face.advance - 1}`);
+  assert(A.aqua >= aquaA + 1, `the initiator gets the finder's fee (${A.aqua} vs ${aquaA})`);
+  assert(!s2.auction, 'auction closed');
+  assert(B.hand.length === b.hand.length, 'a contract ignores the patent hand (academia limit)');
+  return log;
+});
+
+check('a won contract boosts on its side and is fulfilled at its destination', () => {
+  let st = m4Game();
+  let res = winContract(st, 'M4N228F', { by: 'initiator' });
+  st = res.st;
+  const c = res.c;
+  const P = pl(st, res.winner);
+  const me = res.winner;
+  const aqua = P.aqua;
+  let r = op(st, 'BOOST', P.profileId, { cardIds: [c.id] });
+  assert(r.ok === false && r.error === 'no_ops_left', `boost after a fundraise needs next turn's op: ${r.error}`);
+  st = endTurns(st, 2);
+  r = op(st, 'BOOST', P.profileId, { cardIds: [c.id] });
+  assert(r.ok, `BOOST: ${r.error}`); st = r.state;
+  const Q = pl(st, me);
+  assert(Q.leo.some((s) => s.id === c.id && s.kind === 'contract' && s.face === 'primary'), 'boosted to LEO on the blue side');
+  assert(Q.aqua === aqua + 0 - c.faces.primary.mass || Q.aqua <= aqua, `paid its mass (${Q.aqua})`);
+  r = op(st, 'FULFILL_CONTRACT', Q.profileId, { cardId: c.id });
+  assert(!r.ok && r.error === 'not_at_destination', `fulfil from LEO: ${r.error}`);
+  // Cargo transfer it aboard the rocket (a free action), then carry it to Icarus.
+  r = op(st, 'TRANSFER', me, { cardIds: [c.id], from: 'leo', to: 'rocket' });
+  assert(r.ok, `TRANSFER LEO -> rocket: ${r.error}`); st = r.state;
+  const T = pl(st, me);
+  assert(T.rocket.stack.some((s) => s.id === c.id && s.face === 'primary') && !T.leo.some((s) => s.id === c.id), 'the contract rides the rocket on its side');
+  T.rocket.siteId = 'icarus';
+  r = op(st, 'FULFILL_CONTRACT', Q.profileId, { cardId: c.id });
+  assert(r.ok, `fulfil at Icarus: ${r.error}`);
+  const F = pl(r.state, me);
+  assert(F.fulfilledContracts.some((f) => f.id === c.id) && !F.timepiece, 'fulfilled, timepiece home');
+  assert(!F.rocket.stack.some((s) => s.id === c.id), 'off the stack');
+  return r.log;
+});
+
+check('a "& Return" contract announces the destination, then fulfils back at LEO', () => {
+  let st = m4Game();
+  const res = winContract(st, 'M4N226F', { by: 'initiator' });
+  st = res.st; const c = res.c;
+  const P = pl(st, res.winner);
+  P.contractHand = P.contractHand.filter((x) => x !== c.id);
+  P.contractMeta[c.id].boosted = true;
+  P.rocket.stack.push({ id: c.id, kind: 'contract', face: 'primary' });
+  P.rocket.siteId = 'mars-north-pole';
+  let r = op(st, 'FULFILL_CONTRACT', P.profileId, { cardId: c.id });
+  assert(r.ok && /step 1 of 2/.test(r.log), `step 1: ${r.error || r.log}`);
+  st = r.state;
+  r = op(st, 'FULFILL_CONTRACT', P.profileId, { cardId: c.id });
+  assert(!r.ok && r.error === 'not_returned', `not home yet: ${r.error}`);
+  pl(st, res.winner).rocket.siteId = null;
+  r = op(st, 'FULFILL_CONTRACT', P.profileId, { cardId: c.id });
+  assert(r.ok && pl(r.state, res.winner).fulfilledContracts.length === 1, `return: ${r.error}`);
+  return 'Mars North Pole announced, refused away from LEO, fulfilled on return';
+});
+
+check('a late contract: pay the fee each turn or default; debt repayment discards it with the chit', () => {
+  let st = m4Game();
+  const res = winContract(st, 'M4N228F', { years: 0 });
+  st = res.st; const c = res.c; const face = c.faces.primary;
+  const B = () => pl(st, res.riv);
+  // The cube passes the timepiece at the end of this year.
+  st = endTurns(st, 2);
+  assert(B().timepiece.deadbeat, `timepiece not deadbeat: ${JSON.stringify(B().timepiece)}`);
+  // B's turn: pay the full late fee -> no default.
+  st = endTurns(st, 1);
+  assert(currentPlayerOf(st).profileId === B().profileId, 'B is up');
+  B().aqua = 50;
+  let r = op(st, 'PAY_LATE_FEE', B().profileId, { cardId: c.id, amount: face.lateFee + 1 });
+  assert(!r.ok && r.error === 'over_late_fee', `overpay: ${r.error}`);
+  r = op(st, 'PAY_LATE_FEE', B().profileId, { cardId: c.id, amount: face.lateFee });
+  assert(r.ok, `pay: ${r.error}`); st = r.state;
+  st = endTurns(st, 1);
+  assert(!B().contractMeta[c.id].default, 'paid in full but defaulted');
+  // Next turn of B: pay nothing -> default.
+  st = endTurns(st, 1);
+  const r2 = op(st, 'END_TURN', B().profileId);
+  assert(r2.ok && /DEFAULTS/.test(r2.log), `default log: ${r2.log}`);
+  st = r2.state;
+  if (st.pendingSeniority) st = op(st, 'PLACE_SENIORITY', st.pendingSeniority.chooserId, { place: 'freedom' }).state;
+  assert(B().contractMeta[c.id].default && st.defaultChit && st.defaultChit.profileId === B().profileId, 'default + chit');
+  // Debt = 2x advance (never boosted). Pay it down a fee at a time.
+  const debt = face.advance * 2;
+  let guard = 0;
+  while (B().contractMeta[c.id] && guard++ < 40) {
+    if (currentPlayerOf(st).profileId !== B().profileId) { st = endTurns(st, 1); continue; }
+    B().aqua = 99;
+    const left = debt - B().contractMeta[c.id].paid;
+    const rr = op(st, 'PAY_LATE_FEE', B().profileId, { cardId: c.id, amount: Math.min(face.lateFee, left) });
+    assert(rr.ok, `repay: ${rr.error}`); st = rr.state;
+    st = endTurns(st, 1);
+  }
+  assert(!B().contractMeta[c.id] && !B().timepiece && st.defaultChit.profileId === B().profileId, 'repaid: discarded, timepiece home, chit kept');
+  assert(st.contractDecks[c.pair].slice(-1)[0] === c.id, 'discarded to the bottom of its deck');
+  return `late fee ${face.lateFee}/turn; default on non-payment; ${debt}-aqua debt repaid`;
+});
+
+check('endgame: fulfilled VP, -1 per unpaid aqua, -3 for the blue default chit', () => {
+  let st = m4Game();
+  const res = winContract(st, 'M4N228F', { by: 'initiator' });
+  st = res.st;
+  const P = pl(st, res.winner);
+  const face = res.c.faces.primary;
+  P.fulfilledContracts.push({ id: res.c.id, side: 'blue' });
+  delete P.contractMeta[res.c.id];
+  P.contractHand = [];
+  P.timepiece = null;
+  st = endTurns(st, 1);
+  const res2 = winContract(st, 'M4N231F', { by: 'initiator' });
+  st = res2.st;
+  computeFinalScores(st);
+  const rows = Object.fromEntries(st.finalScores.map((s) => [s.profileId, s.contracts]));
+  assert(rows[res.winner].vp === face.vp, `fulfilled ${JSON.stringify(rows[res.winner])}`);
+  const unpaid = res2.c.faces.primary.advance * 2;
+  const w2 = rows[res2.winner];
+  assert(w2.debt === unpaid && w2.chit === -3 && w2.vp === -unpaid - 3, `unfulfilled ${JSON.stringify(w2)}`);
+  return `P1 +${face.vp}; P2 -${unpaid} unpaid -3 chit`;
 });

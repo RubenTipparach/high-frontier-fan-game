@@ -9,6 +9,7 @@
 // secondaries render rotated 180° so the "stowed" face reads
 // upside-down when installed.
 
+import { renderContractCard } from './contract-card.js';
 import { supportIconSvg, thermBadgeSvg, hasSupportIcon, typeIconSvg, pacmanSvg } from './support-icons.js';
 import { toLayoutPx } from '../ui-scale.js';
 import { assetUrl } from '../base.js';
@@ -205,6 +206,13 @@ function fillRadStat(el, printed, cardId) {
 }
 
 export function renderCard(card, { type, supplied, onSupportClick, face, radSide, privilegeDisabled } = {}) {
+  // M4: a contract card draws in its own layout, on the side it rides on (the
+  // secondary face is the gold side, 4B1b).
+  if (card && card.type === 'contract') {
+    const side = face === 'secondary' ? 'gold' : (card.exodus ? 'exodus' : 'blue');
+    const el = renderContractCard(card.id, side);
+    if (el) return el;
+  }
   const _crewOpts = { onSupportClick, privilegeDisabled };
   const kind = type || (card.faces && card.faces.primary && card.faces.primary.role ? 'crew' : 'patent');
   const el = document.createElement('div');

@@ -46,6 +46,7 @@ import { SIREN_BUSTED_SITES } from '../../data/sirens.js';
 import { HERMES_ROUNDS, MASS_DRIVER_ID, truncateBottomHalf, massDriverIndex } from '../../data/hermes.js';
 import { isLegalAltruismRounds } from '../../data/altruism.js';
 import { makeRng, shuffle } from './rng.js';
+import { contractDeckIds } from '../../data/contracts.js';
 import { TUTORIAL_START_AQUA, TUTORIAL_BOT_IDS, TUTORIAL_BOT_NAMES, tutorialReorderDecks, freshTutorialState } from './tutorial.js';
 // (startSiteId import dropped: the rocket now opens at LEO, siteId null.)
 
@@ -153,6 +154,13 @@ function buildShuffledDecks(gen, m1 = false, m2 = false, hermes = false) {
   if (m2) for (const card of BERNALS) { if (decks[card.type]) decks[card.type].push(card.id); }
   for (const t of types) decks[t] = shuffle(gen, decks[t]);
   return decks;
+}
+
+// M4 per-player contract fields (4B). timepiece: null (in Reserve) or
+// { contractId, due, slot, deadbeat } once a contract auction is won.
+// contractMeta[cardId]: { side, paid, boosted, default, progress: { sites, done } }.
+export function m4Player() {
+  return { timepiece: null, contractHand: [], contractMeta: {}, fulfilledContracts: [] };
 }
 
 function freshPlayer({ profileId, name, seat, color, aqua }) {
@@ -455,6 +463,14 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
   // the decks so a non-M2 game's deal is byte-for-byte unchanged (the queue
   // just consumes extra RNG at the end, and only when m2 is on).
   const colonistQueue = m2 ? shuffle(gen, COLONISTS.map((c) => c.id)) : [];
+  // M4 contract decks (4B1, C4): one per ideology pair, blue side up, shuffled
+  // AFTER every other draw so an m4-off game's deal is byte-for-byte unchanged.
+  let contractDecks = null;
+  if (m4) {
+    const raw = contractDeckIds();
+    contractDecks = {};
+    for (const pair of Object.keys(raw)) contractDecks[pair] = shuffle(gen, raw[pair]);
+  }
   // Playing with Futures (M2) runs the long game (rule 1D "d.": 7 Solar
   // Cycles), so an M2 room that didn't pick a length defaults to 7 rounds.
   // V5 Hermes Fall FORCES its own length: two Seniority Disks in the centre of
@@ -528,6 +544,10 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
       aqua: startAqua,
     })
   );
+  // M4 contracts: every player's timepiece starts in their Reserve (null), with
+  // an empty contract hand (contracts ignore the academia hand limit, 4B2a, so
+  // they are NOT in `hand`) and no fulfilled contracts. Only when m4.
+  if (m4) for (const p of seated) Object.assign(p, m4Player());
 
   // Tutorial: there is NO crew draft. The player always runs the yellow Faction A
   // (United Nations Cosmonauts, the "NASA" seat) and each bot takes the crew card
@@ -672,6 +692,11 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
     // fixed at game start, defaults false. NOTHING M4 may activate unless
     // state.m4 is true.
     m4: !!m4,
+    // M4 Stage 1 (contracts, 4B): the three ideology-pair contract decks (card
+    // ids, top first) and the single default chit ({ profileId, side } once
+    // claimed). Each player's timepiece / contract hand / fulfilled contracts
+    // live on the player (m4Player below). Absent in an m4-off game.
+    ...(m4 ? { contractDecks, defaultChit: null, clockTicks: 0 } : {}),
     // Playing WITH Futures is the long game (rule 1D "d": 7 Solar Cycles). The
     // Futures LAYER (unlock on promotion, Epic Hazard, future stars + endgame
     // future scoring) activates ONLY in a 7-round M2 game; a short M2 room (5-6

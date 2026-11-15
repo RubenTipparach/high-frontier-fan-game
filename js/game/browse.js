@@ -121,6 +121,7 @@ import { futureGoalForCard, checkFutureGoal, CENTAUR_SITE_IDS, GREEK_CAMP_IDS, T
 // M2 Colonist powers (FINAO halved etc.) - the same flags the engine reads.
 import { colonistPower } from '../../data/colonist-abilities.js';
 import { openBernalStackModal, openBernalFuelTank } from './bernal-modal.js';
+import { initContractsUi, refreshContractsUi } from './contracts-ui.js';
 import { getBernalSprite } from './bernal-sprite.js';
 import { fuelTankCylinderMarkup, fuelTransferSectionMarkup } from './fuel-tank-view.js';
 // One client card-lookup: patents PLUS the M2 Bernal cards (which live in
@@ -128,7 +129,9 @@ import { fuelTankCylinderMarkup, fuelTransferSectionMarkup } from './fuel-tank-v
 // so every PATENTS_BY_ID[id] read (cardById, the library grab, auction lots,
 // hand/stack rendering, the Bernal modal) resolves a boosted/auctioned Bernal.
 // Keyed reads only; Bernals only surface in m2 games, so nothing else changes.
-const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...BERNALS_BY_ID, ...COLONISTS_BY_ID };
+// M4 contract cards are stack slots too (only ever present in an m4 game).
+import { CONTRACTS_BY_ID } from '../../data/contracts.js';
+const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...BERNALS_BY_ID, ...COLONISTS_BY_ID, ...CONTRACTS_BY_ID };
 import { renderAssemblyPanel, renderAssemblyLaws } from './assembly.js';
 import { uiIcon, cardPileBadge } from './ui-icons.js';
 import { SITE_TAGS, normaliseTag, tagDisplay } from '../../data/site-tags.js';
@@ -1099,6 +1102,8 @@ function applySnapshot(snapshot, seq) {
   }
   // Competitive auction overlay is wired separately (see the TODO hook).
   renderOnlineAuction(snapshot.auction);
+  // M4: the Contracts tag / panel and the contract auction overlay.
+  refreshContractsUi();
   // Guided tutorial: when the acquire (second) auction closes with the won part
   // now in hand, drop the Card Market pane so the player lands on the board +
   // hand to boost it (on mobile the pane covers the boost button). Tutorial
@@ -2514,6 +2519,9 @@ function maybeCloseTutorialMarket(prev, snap) {
 // off state.auction in the snapshot: appears when a lot opens, refreshes
 // on every update, clears when it resolves. Render is idempotent.
 function renderOnlineAuction(auction) {
+  // A contract lot (M4) has its own overlay (contracts-ui.js); this one is the
+  // patent auction only.
+  if (auction && auction.kind === 'contract') auction = null;
   const existing = document.getElementById('mp-auction-overlay');
   if (!auction || !_online || !gameViewVisible()) {
     if (existing) existing.remove();
@@ -9446,6 +9454,32 @@ function lunaFirstPlayerId() {
 // Op-error code -> human message for server rejections surfaced in the
 // online sandbox.
 function humanizeOnlineOpError(code, detail) {
+  // M4 contracts (4B): every refusal the contract ops can return, in table terms.
+  const M4_ERRORS = {
+    fundraise_first: 'A contract auction is the last step of a Fundraise: fundraise first.',
+    contract_auction_done: 'You already held this turn\'s contract auction.',
+    timepiece_in_use: 'Your timepiece is already on the Sunspot Cycle: fulfill or repay that contract first.',
+    contract_auction_prohibited: 'No contract auctions during War or Anarchy.',
+    deck_not_open: 'That deck shares no ideology with an Active Law.',
+    default_stigma: 'The default chit bars you from bidding on manned contracts.',
+    bid_too_high: `You must bid the same as or lower than the low bid${detail && detail.low != null ? ` (${detail.low} years)` : ''}.`,
+    bidders_pending: 'Not everyone has bid or passed yet.',
+    pick_winner: 'The bids are tied: name the winner.',
+    contract_in_default: 'That contract is in default: it can only be paid off now.',
+    contract_not_boosted: 'Boost the contract first: it has to ride a stack to its destination.',
+    not_at_destination: 'The stack carrying this contract is not at its destination.',
+    not_at_a_site: 'The stack carrying this contract is not on a site.',
+    destination_conditions: 'This site does not meet the contract\'s destination conditions.',
+    not_entered_this_turn: 'The stack has to ENTER that space this turn.',
+    not_enough_flybys: `Not enough different flyby spaces entered this turn${detail ? ` (${detail.have} of ${detail.need})` : ''}.`,
+    not_lifted_off: 'Lift off from that site first.',
+    not_returned: 'Bring the contract back to LEO to finish it.',
+    destination_not_yet_supported: `This destination step is not playable yet${detail && detail.step ? `: ${detail.step}` : ''}.`,
+    not_late: 'That contract is not late.',
+    over_late_fee: `You cannot pay more than the late fee this turn${detail && detail.max != null ? ` (${detail.max} more)` : ''}.`,
+    not_your_contract: 'That is not one of your contracts.',
+  };
+  if (M4_ERRORS[code]) return M4_ERRORS[code];
   // Anchor refusals carry what the engine SEES (the station's recorded space,
   // the factories in its Dirtside reach, and who claims them), so the message
   // can name the real blocker instead of a generic "needs a factory".
@@ -34179,6 +34213,9 @@ function paintMissionLog() {
 // falls back to a bare '·', so add new ops here when you add them.
 const MP_LOG_ICONS = {
   AUCTION_START: '🎯', AUCTION_BID: '💰', AUCTION_PASS: '🚫',
+  // M4 contracts (4B): the auction is in years, the timepiece is a clock.
+  AUCTION_CONTRACT_START: '📜', AUCTION_CONTRACT_BID: '⏳', AUCTION_CONTRACT_PASS: '🚫', AUCTION_CONTRACT_CLOSE: '⏱',
+  FULFILL_CONTRACT: '🏁', PAY_LATE_FEE: '⏰',
   AUCTION_RESET: '↺', AUCTION_SELL: '✅',
   PICK_CREW: '🧑‍🚀', SET_SPECIES: '\u{1F9DC}', SET_FIRST_PLAYER: '🥇', FREE_CUBE: '🧊',
   END_TURN: '⏭', MOVE: '🛸', BURN: '🔥',
@@ -35092,3 +35129,15 @@ export const STATS = {
   patentCount: PATENTS.length,
   milestoneCount: MILESTONES.length,
 };
+
+// M4 contracts UI (contracts-ui.js): reads the cached snapshot, routes on-turn
+// actions through submitOnlineOp and auction bids (any seat) through the
+// auction submitter, exactly like the patent auction.
+initContractsUi({
+  snapshot: () => _onlineSnapshot,
+  me: () => mySnapshotPlayer(),
+  myTurn: () => isOnlineMyTurn(),
+  submitTurnOp: (op) => submitOnlineOp(op),
+  submitAuctionOp: (op) => submitMpAuctionOp(op),
+  toast: (msg, level) => { if (_onlineToast) _onlineToast(msg, level); },
+});

@@ -3944,7 +3944,8 @@ export const CARD_DATA = {
         "Advance": 11,
         "Cybernetics": "heart",
         "Destination": "Unexplored Size 2+ Site & Return.",
-        "Fulfilled Ability": "[green circle icon: check mark over skull and crossbones] Adjacent to industrialized Sites (1/Spacecraft/Turn)."
+        "Fulfilled Ability": "[green circle icon: check mark over skull and crossbones] Adjacent to industrialized Sites (1/Spacecraft/Turn).",
+        "Destination Steps": "site unexplored size>=2 ; return"
       },
       "tier2": {
         "Name": "Home on Lagrange",
@@ -3960,7 +3961,8 @@ export const CARD_DATA = {
         "Advance": 6,
         "Cybernetics": "heart, jar",
         "Destination": "Your Anchored Bernal not in Venus/Earth/Mars zones.",
-        "Fulfilled Ability": "Connections."
+        "Fulfilled Ability": "Connections.",
+        "Destination Steps": "manual:your anchored Bernal (M2)"
       }
     },
     {
@@ -3979,7 +3981,8 @@ export const CARD_DATA = {
         "Advance": 9,
         "Cybernetics": "heart",
         "Destination": "Unexplored Synodic Site.",
-        "Fulfilled Ability": "Connections."
+        "Fulfilled Ability": "Connections.",
+        "Destination Steps": "site unexplored synodic"
       },
       "tier2": {
         "Name": "Pleasure Garden",
@@ -3995,7 +3998,8 @@ export const CARD_DATA = {
         "Advance": 8,
         "Cybernetics": "heart, jar",
         "Destination": "Any Submarine Site beyond Ceres zone.",
-        "Fulfilled Ability": "Connections."
+        "Fulfilled Ability": "Connections.",
+        "Destination Steps": "site submarine beyond=Ceres"
       }
     },
     {
@@ -4014,7 +4018,8 @@ export const CARD_DATA = {
         "Advance": 9,
         "Cybernetics": "heart",
         "Destination": "Unexplored Lunar Site & Return (2:50 [Earth]).",
-        "Fulfilled Ability": "You may prospect Luna without permission from the 1st player."
+        "Fulfilled Ability": "You may prospect Luna without permission from the 1st player.",
+        "Destination Steps": "site unexplored body=Luna ; return"
       },
       "tier2": {
         "Name": "HAVOC",
@@ -4030,7 +4035,8 @@ export const CARD_DATA = {
         "Advance": 20,
         "Cybernetics": "heart, jar",
         "Destination": "Venus Site & Return (7:00 [Venus]).",
-        "Fulfilled Ability": "[green circle icon: check mark over aerobrake icon] Venus zone."
+        "Fulfilled Ability": "[green circle icon: check mark over aerobrake icon] Venus zone.",
+        "Destination Steps": "site body=Venus ; return"
       }
     },
     {
@@ -4049,7 +4055,8 @@ export const CARD_DATA = {
         "Advance": 15,
         "Cybernetics": "heart, jar",
         "Destination": "Unexplored Mercury Site (6:30, 8:00 [Mercury]).",
-        "Fulfilled Ability": "-1 ISRU when prospecting Mercury."
+        "Fulfilled Ability": "-1 ISRU when prospecting Mercury.",
+        "Destination Steps": "site unexplored body=Mercury"
       },
       "tier2": {
         "Name": "Highest Cliff",
@@ -4066,7 +4073,8 @@ export const CARD_DATA = {
         "Cybernetics": "heart, jar, triangle",
         "Destination": "Miranda (9:30 [Uranus]).",
         "Fulfilled Ability": "Connections.",
-        "When Fulfilling": "Gain 20 Aquas."
+        "When Fulfilling": "Gain 20 Aquas.",
+        "Destination Steps": "at:miranda"
       }
     },
     {
@@ -4085,7 +4093,8 @@ export const CARD_DATA = {
         "Advance": 8,
         "Cybernetics": "heart",
         "Destination": "Enter 4 different flyby Spaces in the same Turn.",
-        "Fulfilled Ability": "[green circle icon: check mark over aerobrake icon] when entering Aerobrake Hazards leading to LEO."
+        "Fulfilled Ability": "[green circle icon: check mark over aerobrake icon] when entering Aerobrake Hazards leading to LEO.",
+        "Destination Steps": "flybys:4"
       },
       "tier2": {
         "Name": "Grand Tour",
@@ -4101,7 +4110,8 @@ export const CARD_DATA = {
         "Advance": 7,
         "Cybernetics": "heart, jar",
         "Destination": "Enter 2 flyby Spaces beyond Ceres zone in the same Turn.",
-        "Fulfilled Ability": "Bailout."
+        "Fulfilled Ability": "Bailout.",
+        "Destination Steps": "flybys:2 beyond=Ceres"
       }
     },
     {
@@ -4121,7 +4131,8 @@ export const CARD_DATA = {
         "Advance": 8,
         "Cybernetics": "jar",
         "Destination": "Site in a zone with an unclaimed glory chit.",
-        "Fulfilled Ability": "Bailout."
+        "Fulfilled Ability": "Bailout.",
+        "Destination Steps": "site glory=unclaimed"
       },
       "tier2": {
         "Name": "Fulgurite Hunt",
@@ -4138,7 +4149,8 @@ export const CARD_DATA = {
         "Advance": 11,
         "Cybernetics": "heart, jar",
         "Destination": "Triton, Io, or Ganymede Site (Neptune/Jupiter zones), & Return.",
-        "Fulfilled Ability": "Bailout."
+        "Fulfilled Ability": "Bailout.",
+        "Destination Steps": "at:triton-mahilani-plume|triton-tuenela-plantia|io-gish-bar-mons|io-loki-patera|ganymede-memphis-facula|ganymede-uruk-sulcus ; return"
       }
     },
     {
@@ -4158,7 +4170,8 @@ export const CARD_DATA = {
         "Advance": 9,
         "Cybernetics": "jar",
         "Destination": "Site Adjacent to Hazard Space & Return.",
-        "Fulfilled Ability": "Bailout."
+        "Fulfilled Ability": "Bailout.",
+        "Destination Steps": "manual:site adjacent to a Hazard space"
       },
       "tier2": {
         "Name": "Rivalry",
@@ -4176,7 +4189,8 @@ export const CARD_DATA = {
         "Cybernetics": "heart, jar",
         "Destination": "Site in farthest zone with an claimed glory chit & Return.",
         "Fulfilled Ability": "Gain 1 additional Aqua when fundraising.",
-        "Transcription Notes": "Destination printed verbatim as 'with an claimed glory chit' (likely a misprint; could be meant as 'unclaimed' or 'a claimed')."
+        "Transcription Notes": "Destination printed verbatim as 'with an claimed glory chit' (likely a misprint; could be meant as 'unclaimed' or 'a claimed').",
+        "Destination Steps": "manual:farthest zone with a claimed glory chit"
       }
     },
     {
@@ -4198,7 +4212,8 @@ export const CARD_DATA = {
         "Destination": "Chiron (12:30 [Jupiter]).",
         "Fulfilled Ability": "Bailout.",
         "When Fulfilling": "Gain 8 Aquas.",
-        "Transcription Notes": "Destination glyph after 12:30 reads clearly as the Jupiter symbol on this scan (zoomed), not Saturn."
+        "Transcription Notes": "Destination glyph after 12:30 reads clearly as the Jupiter symbol on this scan (zoomed), not Saturn.",
+        "Destination Steps": "at:chiron"
       },
       "tier2": {
         "Name": "Cen Tour",
@@ -4216,7 +4231,8 @@ export const CARD_DATA = {
         "Cybernetics": "heart, jar",
         "Destination": "Okyrhoe (10:50 [Saturn]) & Return.",
         "Fulfilled Ability": "Bailout.",
-        "When Fulfilling": "Gain 4 Aquas."
+        "When Fulfilling": "Gain 4 Aquas.",
+        "Destination Steps": "at:okyrhoe ; return"
       }
     },
     {
@@ -4236,7 +4252,8 @@ export const CARD_DATA = {
         "Advance": 10,
         "Cybernetics": "jar",
         "Destination": "Enter Solar Oberth & Return (1:50 [Mercury]).",
-        "Fulfilled Ability": "Connections."
+        "Fulfilled Ability": "Connections.",
+        "Destination Steps": "enter:burn-utoma ; return"
       },
       "tier2": {
         "Name": "Extreme Sports",
@@ -4254,7 +4271,8 @@ export const CARD_DATA = {
         "Cybernetics": "heart, jar",
         "Destination": "With Human, enter Hazard, make a Hazard Roll, and land at your Factory in the same Turn.",
         "Fulfilled Ability": "+1 VP per glory chit.",
-        "When Fulfilling": "Flip one of your glory chits on your playmat face-up."
+        "When Fulfilling": "Flip one of your glory chits on your playmat face-up.",
+        "Destination Steps": "manual:Human through a Hazard Roll to your Factory in one turn"
       }
     },
     {
@@ -4274,7 +4292,8 @@ export const CARD_DATA = {
         "Advance": 17,
         "Cybernetics": "heart, jar",
         "Destination": "Mars North Pole & Return (1:30 [Mars]).",
-        "Fulfilled Ability": "Connections."
+        "Fulfilled Ability": "Connections.",
+        "Destination Steps": "at:mars-north-pole ; return"
       },
       "tier2": {
         "Name": "ET Holy Grail",
@@ -4292,7 +4311,8 @@ export const CARD_DATA = {
         "Cybernetics": "heart, jar, splat",
         "Destination": "Bee-Zed (9:10 [Jupiter], Season Red).",
         "Fulfilled Ability": "Connections.",
-        "When Fulfilling": "If Bee-Zed is unexplored, place a Claim there."
+        "When Fulfilling": "If Bee-Zed is unexplored, place a Claim there.",
+        "Destination Steps": "at:bee-zed"
       }
     },
     {
@@ -4311,7 +4331,8 @@ export const CARD_DATA = {
         "Advance": 11,
         "Cybernetics": "battery",
         "Destination": "Unexplored Atmospheric Site.",
-        "Fulfilled Ability": "Transport."
+        "Fulfilled Ability": "Transport.",
+        "Destination Steps": "site unexplored atmospheric"
       },
       "tier2": {
         "Name": "Nuclear-Electric Airship",
@@ -4327,7 +4348,8 @@ export const CARD_DATA = {
         "Advance": 14,
         "Cybernetics": "battery, triangle",
         "Destination": "Unexplored Atmospheric Site & a different unexplored Atmospheric Site.",
-        "Fulfilled Ability": "Transport."
+        "Fulfilled Ability": "Transport.",
+        "Destination Steps": "site unexplored atmospheric ; site unexplored atmospheric different"
       }
     },
     {
@@ -4346,7 +4368,8 @@ export const CARD_DATA = {
         "Advance": 15,
         "Cybernetics": "battery, triangle",
         "Destination": "Icarus (10:00 [Earth], Season Red).",
-        "Fulfilled Ability": "Shielded."
+        "Fulfilled Ability": "Shielded.",
+        "Destination Steps": "at:icarus"
       },
       "tier2": {
         "Name": "Golden Apples of the Sun",
@@ -4362,7 +4385,8 @@ export const CARD_DATA = {
         "Advance": 12,
         "Cybernetics": "battery, triangle",
         "Destination": "Kreutz Sungrazer (9:20 [Saturn], Season Yellow).",
-        "Fulfilled Ability": "Shielded."
+        "Fulfilled Ability": "Shielded.",
+        "Destination Steps": "at:kreutz-sungrazer"
       }
     },
     {
@@ -4381,7 +4405,8 @@ export const CARD_DATA = {
         "Advance": 9,
         "Cybernetics": "triangle",
         "Destination": "Unexplored Submarine Site.",
-        "Fulfilled Ability": "Insight."
+        "Fulfilled Ability": "Insight.",
+        "Destination Steps": "site unexplored submarine"
       },
       "tier2": {
         "Name": "Goldilocks Luna Terraform",
@@ -4398,7 +4423,8 @@ export const CARD_DATA = {
         "Cybernetics": "battery, triangle",
         "Destination": "Icarus (10:00 [Earth], Season Red).",
         "Fulfilled Ability": "You do not need permission to Prospect or use Factories on Luna.",
-        "When Fulfilling": "Discard Factories & Colonies on Luna; owners receive 8 Aquas/token removed."
+        "When Fulfilling": "Discard Factories & Colonies on Luna; owners receive 8 Aquas/token removed.",
+        "Destination Steps": "at:icarus"
       }
     },
     {
@@ -4417,7 +4443,8 @@ export const CARD_DATA = {
         "Advance": 8,
         "Cybernetics": "battery",
         "Destination": "Unexplored Size 2+ Site.",
-        "Fulfilled Ability": "Insight."
+        "Fulfilled Ability": "Insight.",
+        "Destination Steps": "site unexplored size>=2"
       },
       "tier2": {
         "Name": "Amalthea Halbonaut",
@@ -4433,7 +4460,8 @@ export const CARD_DATA = {
         "Advance": 8,
         "Cybernetics": "battery, triangle",
         "Destination": "Unexplored Size 7+ Site not in Earth zone.",
-        "Fulfilled Ability": "Shielded."
+        "Fulfilled Ability": "Shielded.",
+        "Destination Steps": "site unexplored size>=7 notzone=Earth"
       }
     },
     {
@@ -4453,7 +4481,8 @@ export const CARD_DATA = {
         "Cybernetics": "battery",
         "Destination": "Unexplored Size 2+ [spectral type S] Site.",
         "Fulfilled Ability": "Insight.",
-        "Transcription Notes": "The S in the destination is a bold stand-alone spectral-type letter (no hex outline), not part of a word."
+        "Transcription Notes": "The S in the destination is a bold stand-alone spectral-type letter (no hex outline), not part of a word.",
+        "Destination Steps": "site unexplored size>=2 spectral=S"
       },
       "tier2": {
         "Name": "Solar Nebula Mafics",
@@ -4469,7 +4498,8 @@ export const CARD_DATA = {
         "Advance": 6,
         "Cybernetics": "battery, triangle",
         "Destination": "Phoebe (9:10 [Saturn]).",
-        "Fulfilled Ability": "Shielded."
+        "Fulfilled Ability": "Shielded.",
+        "Destination Steps": "at:phoebe"
       }
     },
     {
@@ -4489,7 +4519,8 @@ export const CARD_DATA = {
         "Cybernetics": "triangle",
         "Destination": "Mercury L1 to Mercury L3 in 1 Turn (7:30, 1:50 [Mercury]).",
         "Fulfilled Ability": "[black circle with white beam/play triangle icon] (Negotiable).",
-        "Transcription Notes": "Fulfilled ability is an icon only: a black disc with a white right-pointing triangle and a small arc on its right (looks like a beam-emitter / power-beaming icon), followed by '(Negotiable).'."
+        "Transcription Notes": "Fulfilled ability is an icon only: a black disc with a white right-pointing triangle and a small arc on its right (looks like a beam-emitter / power-beaming icon), followed by '(Negotiable).'.",
+        "Destination Steps": "manual:Mercury L1 to Mercury L3 in one turn"
       },
       "tier2": {
         "Name": "Daedalus Starship Research",
@@ -4506,7 +4537,8 @@ export const CARD_DATA = {
         "Cybernetics": "battery, triangle",
         "Destination": "Operational GW/TW thruster at Comet Neujmin I (11:00 [Jupiter], Season Blue).",
         "Fulfilled Ability": "Insight.",
-        "When Fulfilling": "Decommission Colocated GW/TW thruster, supports; gain 12 Aquas."
+        "When Fulfilling": "Decommission Colocated GW/TW thruster, supports; gain 12 Aquas.",
+        "Destination Steps": "manual:Operational GW/TW thruster (M1)"
       }
     },
     {
@@ -4525,7 +4557,8 @@ export const CARD_DATA = {
         "Advance": 8,
         "Cybernetics": "triangle",
         "Destination": "Unexplored Size 6+ Site, then liftoff from that Site.",
-        "Fulfilled Ability": "Acetylene rocketplane liftoff is possible from all your Factories. It is half cost (round up) if the Site is Atmospheric."
+        "Fulfilled Ability": "Acetylene rocketplane liftoff is possible from all your Factories. It is half cost (round up) if the Site is Atmospheric.",
+        "Destination Steps": "site unexplored size>=6 ; liftoff"
       },
       "tier2": {
         "Name": "Fullerene Cable Spinner",
@@ -4542,7 +4575,8 @@ export const CARD_DATA = {
         "Cybernetics": "battery, triangle",
         "Destination": "Unexplored Synodic [D in a box] Site, then Vesta (12:25 [Ceres]).",
         "Fulfilled Ability": "Insight.",
-        "Transcription Notes": "Destination has a white box with a black 'D' (spectral type D) after 'Synodic'. The glyph after 12:25 is the Ceres sickle symbol (Vesta sits in the Ceres zone)."
+        "Transcription Notes": "Destination has a white box with a black 'D' (spectral type D) after 'Synodic'. The glyph after 12:25 is the Ceres sickle symbol (Vesta sits in the Ceres zone).",
+        "Destination Steps": "site unexplored synodic spectral=D ; at:vesta"
       }
     },
     {
@@ -4561,7 +4595,8 @@ export const CARD_DATA = {
         "Advance": 15,
         "Cybernetics": "battery",
         "Destination": "Hyperion (8:45 [Saturn]).",
-        "Fulfilled Ability": "+1 flyby bonus from Radiation Belt (once/Spacecraft/Turn)."
+        "Fulfilled Ability": "+1 flyby bonus from Radiation Belt (once/Spacecraft/Turn).",
+        "Destination Steps": "at:hyperion"
       },
       "tier2": {
         "Name": "Triggered Decay Positrons",
@@ -4577,7 +4612,8 @@ export const CARD_DATA = {
         "Advance": 17,
         "Cybernetics": "battery, triangle, jar",
         "Destination": "Saturn aerostat (8:40 [Saturn]).",
-        "Fulfilled Ability": "+1 flyby bonus from Radiation Belt (twice/Spacecraft/Turn)."
+        "Fulfilled Ability": "+1 flyby bonus from Radiation Belt (twice/Spacecraft/Turn).",
+        "Destination Steps": "at:saturn-aerostat"
       }
     },
     {
@@ -4596,7 +4632,8 @@ export const CARD_DATA = {
         "Advance": 13,
         "Cybernetics": "battery, triangle",
         "Destination": "Mercury Site (6:30, 8:00 [Mercury]).",
-        "Fulfilled Ability": "Shielded."
+        "Fulfilled Ability": "Shielded.",
+        "Destination Steps": "site body=Mercury"
       },
       "tier2": {
         "Name": "Topographic Ocean",
@@ -4612,7 +4649,8 @@ export const CARD_DATA = {
         "Advance": 15,
         "Cybernetics": "battery, triangle, hexagon",
         "Destination": "Unexplored Submarine Site beyond Ceres Zone & Return.",
-        "Fulfilled Ability": "Gain 4 Aquas when any Colony is built on a Submarine Site."
+        "Fulfilled Ability": "Gain 4 Aquas when any Colony is built on a Submarine Site.",
+        "Destination Steps": "site unexplored submarine beyond=Ceres ; return"
       }
     },
     {
@@ -4632,7 +4670,8 @@ export const CARD_DATA = {
         "Cybernetics": "triangle",
         "Destination": "Operational robonaut & refinery at Busted Size 1 Site.",
         "When Fulfilling": "Remove Busted disk; prospect here at ISRU 0 w/reroll.",
-        "Transcription Notes": "This card has no FULFILLED ABILITY box (only WHEN FULFILLING)."
+        "Transcription Notes": "This card has no FULFILLED ABILITY box (only WHEN FULFILLING).",
+        "Destination Steps": "manual:Operational robonaut and refinery at a busted Size 1 site"
       },
       "tier2": {
         "Name": "Ring Industrialization",
@@ -4648,7 +4687,8 @@ export const CARD_DATA = {
         "Advance": 9,
         "Cybernetics": "battery, triangle",
         "Destination": "Using your freighter, enter Saturn flyby, & stop on crash Hazard on the same Turn.",
-        "Fulfilled Ability": "[green hazard icon: skull and crossbones with a check mark] \"ring\"; your Mobile Factories on \"ring\" Hazards are [hex C] Factories."
+        "Fulfilled Ability": "[green hazard icon: skull and crossbones with a check mark] \"ring\"; your Mobile Factories on \"ring\" Hazards are [hex C] Factories.",
+        "Destination Steps": "manual:your Freighter (M1)"
       }
     },
     {
@@ -4668,7 +4708,8 @@ export const CARD_DATA = {
         "Cybernetics": "hexagon",
         "Destination": "Unexplored Signposted (4A7d) Site.",
         "When Fulfilling": "Bust the destination Site & place up to 2 delegates in any 1 Ideology.",
-        "Transcription Notes": "This card has no FULFILLED ABILITY box (only WHEN FULFILLING)."
+        "Transcription Notes": "This card has no FULFILLED ABILITY box (only WHEN FULFILLING).",
+        "Destination Steps": "manual:Signposted site (4A7d)"
       },
       "tier2": {
         "Name": "Planetary Rail Network",
@@ -4684,7 +4725,8 @@ export const CARD_DATA = {
         "Advance": 11,
         "Cybernetics": "splat, hexagon",
         "Destination": "Your Colony connected by buggy road to any Colony.",
-        "Fulfilled Ability": "Transport."
+        "Fulfilled Ability": "Transport.",
+        "Destination Steps": "manual:Colony buggy road (M2)"
       }
     },
     {
@@ -4703,7 +4745,8 @@ export const CARD_DATA = {
         "Advance": 20,
         "Cybernetics": "splat, hexagon",
         "Destination": "Echeclus & Return (10:30 [Saturn]).",
-        "Fulfilled Ability": "Transport."
+        "Fulfilled Ability": "Transport.",
+        "Destination Steps": "manual:Echeclus is not on this map"
       },
       "tier2": {
         "Name": "Sunrise Project",
@@ -4719,7 +4762,8 @@ export const CARD_DATA = {
         "Advance": 11,
         "Cybernetics": "splat, hexagon, battery",
         "Destination": "Unexplored Atmospheric Site beyond Jupiter zone & Return.",
-        "Fulfilled Ability": "Shielded."
+        "Fulfilled Ability": "Shielded.",
+        "Destination Steps": "site unexplored atmospheric beyond=Jupiter ; return"
       }
     },
     {
@@ -4738,7 +4782,8 @@ export const CARD_DATA = {
         "Advance": 12,
         "Cybernetics": "hexagon",
         "Destination": "Hazard Space adjacent to Comet Phaethon (8:30 [Earth], Season Yellow).",
-        "Fulfilled Ability": "[green hazard icon: skull and crossbones with a check mark] \"spin\""
+        "Fulfilled Ability": "[green hazard icon: skull and crossbones with a check mark] \"spin\"",
+        "Destination Steps": "manual:Hazard space adjacent to Comet Phaethon"
       },
       "tier2": {
         "Name": "Ring Rain",
@@ -4754,7 +4799,8 @@ export const CARD_DATA = {
         "Advance": 15,
         "Cybernetics": "splat, hexagon",
         "Destination": "Rhea (8:30 [Saturn]).",
-        "Fulfilled Ability": "[green hazard icon: skull and crossbones with a check mark] \"ring\""
+        "Fulfilled Ability": "[green hazard icon: skull and crossbones with a check mark] \"ring\"",
+        "Destination Steps": "at:rhea"
       }
     },
     {
@@ -4773,7 +4819,8 @@ export const CARD_DATA = {
         "Advance": 7,
         "Cybernetics": "hexagon",
         "Destination": "Unexplored Astrobiology Site.",
-        "Fulfilled Ability": "Transport."
+        "Fulfilled Ability": "Transport.",
+        "Destination Steps": "site unexplored astrobiology"
       },
       "tier2": {
         "Name": "Subnubilar Zeppelin",
@@ -4789,7 +4836,8 @@ export const CARD_DATA = {
         "Advance": 7,
         "Cybernetics": "splat, hexagon",
         "Destination": "Any player's Colony at an Atmospheric Site not in Mars zone.",
-        "Fulfilled Ability": "Transport."
+        "Fulfilled Ability": "Transport.",
+        "Destination Steps": "manual:Colony at an Atmospheric site (M2)"
       }
     },
     {
@@ -4808,7 +4856,8 @@ export const CARD_DATA = {
         "Advance": 14,
         "Cybernetics": "splat, hexagon",
         "Destination": "Davida (11:40 [Ceres]).",
-        "Fulfilled Ability": "Secured."
+        "Fulfilled Ability": "Secured.",
+        "Destination Steps": "at:davida"
       },
       "tier2": {
         "Name": "Deep Space One",
@@ -4824,7 +4873,8 @@ export const CARD_DATA = {
         "Advance": 18,
         "Cybernetics": "splat, hexagon, heart",
         "Destination": "Sycorax (9:10 [Uranus]).",
-        "Fulfilled Ability": "Secured."
+        "Fulfilled Ability": "Secured.",
+        "Destination Steps": "at:sycorax"
       }
     },
     {
@@ -4843,7 +4893,8 @@ export const CARD_DATA = {
         "Advance": 9,
         "Cybernetics": "splat",
         "Destination": "Cruithne (4:30 [Earth]).",
-        "Fulfilled Ability": "Secured."
+        "Fulfilled Ability": "Secured.",
+        "Destination Steps": "at:cruithne"
       },
       "tier2": {
         "Name": "Classified Security Payload",
@@ -4859,7 +4910,8 @@ export const CARD_DATA = {
         "Advance": 16,
         "Cybernetics": "splat, hexagon",
         "Destination": "Comet Crommelin (9:10 [Saturn], Season Yellow).",
-        "Fulfilled Ability": "Secured."
+        "Fulfilled Ability": "Secured.",
+        "Destination Steps": "at:comet-crommelin"
       }
     },
     {
@@ -4878,7 +4930,8 @@ export const CARD_DATA = {
         "Advance": 7,
         "Cybernetics": "hexagon",
         "Destination": "Human Crew/ Colonist at Site beyond Mars zone or Size 9+.",
-        "Fulfilled Ability": "You are allowed Murder/Suicide."
+        "Fulfilled Ability": "You are allowed Murder/Suicide.",
+        "Destination Steps": "manual:Human at a site beyond Mars zone or Size 9+"
       },
       "tier2": {
         "Name": "Mercury Sunset Convoy",
@@ -4894,7 +4947,8 @@ export const CARD_DATA = {
         "Advance": 7,
         "Cybernetics": "splat, hexagon",
         "Destination": "Any player's Mercury Colony with augmented Colonist and Operational buggy robonaut.",
-        "Fulfilled Ability": "Transport."
+        "Fulfilled Ability": "Transport.",
+        "Destination Steps": "manual:Mercury Colony with augmented Colonist (M2)"
       }
     },
     {
@@ -4913,7 +4967,8 @@ export const CARD_DATA = {
         "Advance": 8,
         "Cybernetics": "splat",
         "Destination": "Unexplored Size 2+ Space Elevator Site, then liftoff from that Site.",
-        "Fulfilled Ability": "Your factory-assist landings/liftoffs at Elevator Sites treat lander burns as normal Burn Spaces."
+        "Fulfilled Ability": "Your factory-assist landings/liftoffs at Elevator Sites treat lander burns as normal Burn Spaces.",
+        "Destination Steps": "site unexplored size>=2 elevator ; liftoff"
       },
       "tier2": {
         "Name": "Skyhook",
@@ -4930,7 +4985,8 @@ export const CARD_DATA = {
         "Cybernetics": "splat, hexagon",
         "Destination": "Your Factory Site at one end of a Space Elevator icon.",
         "When Fulfilling": "Build a Space Elevator at this Site (no Hazard Roll).",
-        "Transcription Notes": "No FULFILLED ABILITY box on this card."
+        "Transcription Notes": "No FULFILLED ABILITY box on this card.",
+        "Destination Steps": "manual:Factory at a Space Elevator end (M1)"
       }
     },
     {
@@ -4949,7 +5005,8 @@ export const CARD_DATA = {
         "Advance": 10,
         "Cybernetics": "splat",
         "Destination": "Unexplored Size 2+ zero Hydration Site & Return.",
-        "Fulfilled Ability": "Secured."
+        "Fulfilled Ability": "Secured.",
+        "Destination Steps": "site unexplored size>=2 hydration=0 ; return"
       },
       "tier2": {
         "Name": "Refueling Trawler",
@@ -4966,7 +5023,8 @@ export const CARD_DATA = {
         "Cybernetics": "splat, hexagon",
         "Destination": "Aerobrake Space beyond Jupiter zone.",
         "Fulfilled Ability": "[air-eater icon: black circle with white scoop/figure and green ring + green check mark] gained. Air-eater refueling is a 1/Turn free action.",
-        "Transcription Notes": "Icon before 'gained.' is small; read as the air-eater card-property icon in a green 'gained' ring with check mark. Exact pictogram not fully legible."
+        "Transcription Notes": "Icon before 'gained.' is small; read as the air-eater card-property icon in a green 'gained' ring with check mark. Exact pictogram not fully legible.",
+        "Destination Steps": "manual:Aerobrake space beyond Jupiter zone"
       }
     },
     {
@@ -4985,7 +5043,8 @@ export const CARD_DATA = {
         "Advance": 20,
         "Cybernetics": "splat",
         "Destination": "Comet Phaethon & Return (8:30 [Earth], Season Yellow).",
-        "Fulfilled Ability": "Shielded."
+        "Fulfilled Ability": "Shielded.",
+        "Destination Steps": "at:phaethon ; return"
       },
       "tier2": {
         "Name": "Trojan Listening Posts",
@@ -5001,7 +5060,8 @@ export const CARD_DATA = {
         "Advance": 8,
         "Cybernetics": "splat, hexagon",
         "Destination": "Agamemnon/ Aeneas & Return (8:40, 11:30 [Jupiter]).",
-        "Fulfilled Ability": "Secured."
+        "Fulfilled Ability": "Secured.",
+        "Destination Steps": "manual:Agamemnon and Aeneas are not on this map"
       }
     },
     {
@@ -5021,7 +5081,8 @@ export const CARD_DATA = {
         "Cybernetics": "triangle",
         "Destination": "Comet Holmes (1:00 [Ceres], Season Red).",
         "Fulfilled Ability": "[hazard-immunity icon: green circle with skull and check mark] \"outburst\", \"ice\"",
-        "Transcription Notes": "Fulfilled ability icon is a black circle with a white skull and a green ring + green check mark (hazard immunity), followed by the quoted hazard names."
+        "Transcription Notes": "Fulfilled ability icon is a black circle with a white skull and a green ring + green check mark (hazard immunity), followed by the quoted hazard names.",
+        "Destination Steps": "at:comet-holmes"
       },
       "tier2": {
         "Name": "Cyborg Transhumans",
@@ -5038,7 +5099,8 @@ export const CARD_DATA = {
         "Cybernetics": "battery, triangle",
         "Destination": "Isobank with an augmented Colonist.",
         "When Fulfilling": "Decommission a Colocated augmented Colonist.",
-        "Transcription Notes": "No FULFILLED ABILITY box on this card."
+        "Transcription Notes": "No FULFILLED ABILITY box on this card.",
+        "Destination Steps": "manual:Isobank (Stage 3)"
       }
     },
     {
@@ -5058,7 +5120,8 @@ export const CARD_DATA = {
         "Cybernetics": "jar",
         "Destination": "Unexplored Synodic [synodic icon] Site (10:50, 1:50 [Ceres], Season Blue).",
         "Fulfilled Ability": "Secured.",
-        "Transcription Notes": "Synodic icon is a bold white U / horseshoe glyph."
+        "Transcription Notes": "Synodic icon is a bold white U / horseshoe glyph.",
+        "Destination Steps": "site unexplored synodic"
       },
       "tier2": {
         "Name": "Goo Spores",
@@ -5074,7 +5137,8 @@ export const CARD_DATA = {
         "Advance": 5,
         "Cybernetics": "heart, jar",
         "Destination": "Your augmented Colonist at a Submarine Site.",
-        "Fulfilled Ability": "Secured."
+        "Fulfilled Ability": "Secured.",
+        "Destination Steps": "manual:augmented Colonist at a Submarine site (M2)"
       }
     },
     {
@@ -5093,7 +5157,8 @@ export const CARD_DATA = {
         "Advance": 11,
         "Cybernetics": "hexagon",
         "Destination": "2 different BEO Colonies (any Players') & Return.",
-        "Fulfilled Ability": "Transport."
+        "Fulfilled Ability": "Transport.",
+        "Destination Steps": "manual:2 BEO Colonies (M2)"
       },
       "tier2": {
         "Name": "Spaceborn Political Rally",
@@ -5110,7 +5175,8 @@ export const CARD_DATA = {
         "Cybernetics": "splat, hexagon",
         "Destination": "Isobank with a spaceborn or Promoted Colonist.",
         "When Fulfilling": "Exomigrate to isobank; Discard a different Colonist.",
-        "Transcription Notes": "No FULFILLED ABILITY box on this card."
+        "Transcription Notes": "No FULFILLED ABILITY box on this card.",
+        "Destination Steps": "manual:Isobank (Stage 3)"
       }
     },
     {
@@ -5131,7 +5197,8 @@ export const CARD_DATA = {
         "Cybernetics": "heart",
         "Destination": "Any player's BEO Colony.",
         "When Fulfilling": "Owner of destination Colony suffers immediate budget cuts.",
-        "Transcription Notes": "No FULFILLED ABILITY box on this card (the art is a WANTED poster; 'REWARD: 7 AQUA' is part of the picture, not a rule)."
+        "Transcription Notes": "No FULFILLED ABILITY box on this card (the art is a WANTED poster; 'REWARD: 7 AQUA' is part of the picture, not a rule).",
+        "Destination Steps": "manual:BEO Colony (M2)"
       },
       "tier2": {
         "Name": "Refugees",
@@ -5149,7 +5216,8 @@ export const CARD_DATA = {
         "Cybernetics": "heart, jar",
         "Destination": "Isobank.",
         "When Fulfilling": "Isobanker suffers immediate budget cuts.",
-        "Transcription Notes": "No FULFILLED ABILITY box on this card."
+        "Transcription Notes": "No FULFILLED ABILITY box on this card.",
+        "Destination Steps": "manual:Isobank (Stage 3)"
       }
     },
     {
@@ -5170,7 +5238,8 @@ export const CARD_DATA = {
         "Cybernetics": "splat",
         "Destination": "Any player's BEO Colony.",
         "When Fulfilling": "Owner of destination Colony Discards 4 Aquas or the Colony.",
-        "Transcription Notes": "No FULFILLED ABILITY box on this card."
+        "Transcription Notes": "No FULFILLED ABILITY box on this card.",
+        "Destination Steps": "manual:BEO Colony (M2)"
       },
       "tier2": {
         "Name": "Chipjack",
@@ -5188,7 +5257,8 @@ export const CARD_DATA = {
         "Cybernetics": "splat, hexagon",
         "Destination": "Your Colonist Colocated with a \"target\" augmented Colonist beyond Ceres zone.",
         "Fulfilled Ability": "You may perform implant Operations at your Colonies.",
-        "When Fulfilling": "\"Target\" Colonist moves to LEO unless owner Discards 8 Aqua."
+        "When Fulfilling": "\"Target\" Colonist moves to LEO unless owner Discards 8 Aqua.",
+        "Destination Steps": "manual:target augmented Colonist (M2)"
       }
     },
     {
@@ -5207,7 +5277,8 @@ export const CARD_DATA = {
         "Advance": 14,
         "Cybernetics": "battery",
         "Destination": "Mars Site, then Sol-Mars L1 (2:05 [Mars]).",
-        "Fulfilled Ability": "Shielded."
+        "Fulfilled Ability": "Shielded.",
+        "Destination Steps": "site body=Mars ; manual:Sol-Mars L1"
       },
       "tier2": {
         "Name": "Ice Phase Research",
@@ -5223,7 +5294,8 @@ export const CARD_DATA = {
         "Advance": 10,
         "Cybernetics": "battery, triangle",
         "Destination": "Unexplored Ganymede, Quaoar, or Comet Holmes Site (9:30 [Jupiter], 10:40 [Neptune], 1:00 [Ceres]).",
-        "Fulfilled Ability": "Insight."
+        "Fulfilled Ability": "Insight.",
+        "Destination Steps": "at:ganymede-memphis-facula|ganymede-uruk-sulcus|quaoar|comet-holmes unexplored"
       }
     }
   ],
@@ -5244,7 +5316,8 @@ export const CARD_DATA = {
         "Destination": "Uranus aerostat (9:20 [Uranus]).",
         "Fulfilled Ability": "If your GW/TW thruster ends its move on an Aerobrake Hazard, that Stack gains 1 Isotope.",
         "When Fulfilling": "Gain 3 Isotopes at your Bank.",
-        "Transcription Notes": "Late Fee alarm-clock icon sits in a black box on this card (cosmetic). Duplicate scan (B_blue_12.png) matches; no differences found."
+        "Transcription Notes": "Late Fee alarm-clock icon sits in a black box on this card (cosmetic). Duplicate scan (B_blue_12.png) matches; no differences found.",
+        "Destination Steps": "at:uranus-aerostat"
       },
       "tier2": {
         "Name": "Isotope Fueling Station",
@@ -5260,7 +5333,8 @@ export const CARD_DATA = {
         "Destination": "Your Factory of your isostandard in Neptune zone.",
         "Fulfilled Ability": "After you do a factory refuel op, gain 1 Isotope at that Factory.",
         "When Fulfilling": "Gain 3 Isotopes at this Site.",
-        "Transcription Notes": "Duplicate scan (B_gold_12.png) matches; no differences found."
+        "Transcription Notes": "Duplicate scan (B_gold_12.png) matches; no differences found.",
+        "Destination Steps": "manual:isostandard Factory (Stage 3)"
       }
     },
     {
@@ -5279,7 +5353,8 @@ export const CARD_DATA = {
         "Destination": "Saturn aerostat (8:40 [Saturn]) & Return.",
         "Fulfilled Ability": "Produce your isostandard during a site refuel op at any Factory (with permission).",
         "When Fulfilling": "Gain 3 Isotopes at your Bank.",
-        "Transcription Notes": "Duplicate scan (B_blue_13.png) matches; no differences found."
+        "Transcription Notes": "Duplicate scan (B_blue_13.png) matches; no differences found.",
+        "Destination Steps": "at:saturn-aerostat ; return"
       },
       "tier2": {
         "Name": "Rival Isobank",
@@ -5295,7 +5370,8 @@ export const CARD_DATA = {
         "Destination": "Pluto or Charon Factory (9:40, 9:50 [Neptune]).",
         "Fulfilled Ability": "You may exchange 1 Isotope per Turn at your Anchored non-Home Bernal for 6 Aquas.",
         "When Fulfilling": "Gain 3 Isotopes at this Site.",
-        "Transcription Notes": "Duplicate scan (B_gold_13.png) matches; no differences found."
+        "Transcription Notes": "Duplicate scan (B_gold_13.png) matches; no differences found.",
+        "Destination Steps": "manual:Pluto or Charon Factory (Stage 3)"
       }
     },
     {
@@ -5314,7 +5390,8 @@ export const CARD_DATA = {
         "Destination": "Enter Solar Oberth, then Uranus zone Synodic Site, & Return.",
         "Fulfilled Ability": "Your GW/TW thruster receives a Bonus Pivot.",
         "When Fulfilling": "Gain 3 Isotopes at your Bank.",
-        "Transcription Notes": "Duplicate scan (B_blue_14.png) matches; no differences found."
+        "Transcription Notes": "Duplicate scan (B_blue_14.png) matches; no differences found.",
+        "Destination Steps": "manual:Solar Oberth then Uranus synodic (Stage 3)"
       },
       "tier2": {
         "Name": "TW Evaluation Committee",
@@ -5330,7 +5407,8 @@ export const CARD_DATA = {
         "Destination": "Larissa (10:10 [Neptune]).",
         "Fulfilled Ability": "You may use Claim disks as delegates.",
         "When Fulfilling": "Gain 3 Isotopes at this Site; place 2 delegates on any 1 ideology.",
-        "Transcription Notes": "Duplicate scan (B_gold_14.png) matches; no differences found."
+        "Transcription Notes": "Duplicate scan (B_gold_14.png) matches; no differences found.",
+        "Destination Steps": "at:larissa"
       }
     },
     {
@@ -5349,7 +5427,8 @@ export const CARD_DATA = {
         "Destination": "Your 2 Anchored non-Home Bernals & Return.",
         "Fulfilled Ability": "Your Bernals add to Colonist limit even when unanchored.",
         "When Fulfilling": "Gain 3 Isotopes at your Bank; you may swap your Bernal cards (move each to the other Bernal Stack).",
-        "Transcription Notes": "Late Fee alarm-clock icon sits in a black box on this card (cosmetic). Duplicate scan (B_blue_15.png) matches; no differences found."
+        "Transcription Notes": "Late Fee alarm-clock icon sits in a black box on this card (cosmetic). Duplicate scan (B_blue_15.png) matches; no differences found.",
+        "Destination Steps": "manual:2 anchored non-Home Bernals (M2)"
       },
       "tier2": {
         "Name": "Life Support Test Protocol",
@@ -5365,7 +5444,8 @@ export const CARD_DATA = {
         "Destination": "Quaoar with Promoted Bernal (10:40 [Neptune]).",
         "Fulfilled Ability": "Implant is a free action.",
         "When Fulfilling": "Gain 3 Isotopes at this Site; you may Discard a Colonist (this is not a Felony).",
-        "Transcription Notes": "Duplicate scan (B_gold_15.png) matches; no differences found."
+        "Transcription Notes": "Duplicate scan (B_gold_15.png) matches; no differences found.",
+        "Destination Steps": "manual:Quaoar with promoted Bernal (M2)"
       }
     },
     {
@@ -5384,7 +5464,8 @@ export const CARD_DATA = {
         "Destination": "Mercury Site (6:30, 8:00 [Mercury]), then enter 2 Radiation Belt Spaces in the Saturn zone or beyond & Return.",
         "Fulfilled Ability": "Your Stacks are immune to Belt/CME Rolls.",
         "When Fulfilling": "Gain 3 Isotopes at your Bank.",
-        "Transcription Notes": "Late Fee alarm-clock icon sits in a black box on this card (cosmetic). Duplicate scan (B_blue_16.png) matches; no differences found."
+        "Transcription Notes": "Late Fee alarm-clock icon sits in a black box on this card (cosmetic). Duplicate scan (B_blue_16.png) matches; no differences found.",
+        "Destination Steps": "manual:Mercury then 2 radiation belts beyond Saturn (Stage 3)"
       },
       "tier2": {
         "Name": "Warden Proving Ground",
@@ -5400,7 +5481,8 @@ export const CARD_DATA = {
         "Destination": "Teharonhiyawako (10:20 [Neptune]).",
         "Fulfilled Ability": "Your robonauts are -1 ISRU.",
         "When Fulfilling": "Gain 3 Isotopes at your Bank; Promote your freighter or you may gain a Mobile Factory at your Bank.",
-        "Transcription Notes": "Duplicate scan (B_gold_16.png) matches; no differences found."
+        "Transcription Notes": "Duplicate scan (B_gold_16.png) matches; no differences found.",
+        "Destination Steps": "at:teharoniawako"
       }
     },
     {
@@ -5419,7 +5501,8 @@ export const CARD_DATA = {
         "Destination": "Arrokoth (9:50 [Neptune]).",
         "Fulfilled Ability": "Before exomigrating, you may Discard the top card from the queue you are drawing from.",
         "When Fulfilling": "Gain 3 Isotopes at this Site.",
-        "Transcription Notes": "Late Fee alarm-clock icon sits in a black box on this card (cosmetic). Duplicate scan (B_blue_17.png) matches; no differences found."
+        "Transcription Notes": "Late Fee alarm-clock icon sits in a black box on this card (cosmetic). Duplicate scan (B_blue_17.png) matches; no differences found.",
+        "Destination Steps": "at:ultima-thule"
       },
       "tier2": {
         "Name": "Decanting Network",
@@ -5435,7 +5518,8 @@ export const CARD_DATA = {
         "Destination": "2002 TX (9:50 [Neptune]).",
         "Fulfilled Ability": "Allowed 1 extra Colonist.",
         "When Fulfilling": "Gain 3 Isotopes at this Site.",
-        "Transcription Notes": "Late Fee alarm-clock icon sits in a black box on this card (cosmetic variant of the plain clock). Duplicate scan (B_gold_17.png) matches; no differences found."
+        "Transcription Notes": "Late Fee alarm-clock icon sits in a black box on this card (cosmetic variant of the plain clock). Duplicate scan (B_gold_17.png) matches; no differences found.",
+        "Destination Steps": "at:2002tx"
       }
     }
   ],
