@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 288" width="300" height="288">
+<defs>
+  <filter id="glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  <filter id="soft" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="9"/></filter>
+  <radialGradient id="bg" cx="30%" cy="45%" r="85%"><stop offset="0%" stop-color="#0c1830"/><stop offset="100%" stop-color="#03050a"/></radialGradient><linearGradient id="hside" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d5dbe4" stop-opacity="1"/><stop offset="0.4" stop-color="#8d96a6" stop-opacity="1"/><stop offset="1" stop-color="#353b47" stop-opacity="1"/></linearGradient><radialGradient id="hface" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#3c4352" stop-opacity="1"/><stop offset="0.8" stop-color="#596274" stop-opacity="1"/><stop offset="1" stop-color="#9aa4b5" stop-opacity="1"/></radialGradient><linearGradient id="hcoil" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f6b26b" stop-opacity="1"/><stop offset="0.5" stop-color="#c2621f" stop-opacity="1"/><stop offset="1" stop-color="#7c2d12" stop-opacity="1"/></linearGradient><linearGradient id="hcoilSide" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e3954f" stop-opacity="1"/><stop offset="1" stop-color="#6b2a0e" stop-opacity="1"/></linearGradient><linearGradient id="hplume" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#dbe7ff" stop-opacity="0.95"/><stop offset="0.18" stop-color="#8fb0ff" stop-opacity="0.7"/><stop offset="0.55" stop-color="#6a52e0" stop-opacity="0.28"/><stop offset="1" stop-color="#3b1d8f" stop-opacity="0"/></linearGradient><radialGradient id="hring" cx="50%" cy="50%" r="50%"><stop offset="0.6" stop-color="#7aa0ff" stop-opacity="0"/><stop offset="0.82" stop-color="#c9dcff" stop-opacity="1"/><stop offset="0.9" stop-color="#ffffff" stop-opacity="1"/><stop offset="1" stop-color="#5b7cff" stop-opacity="0"/></radialGradient><filter id="hblur" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="7"/></filter>
+<linearGradient id="shHull" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#e3e7ee" stop-opacity="1"/><stop offset="0.45" stop-color="#9aa3b2" stop-opacity="1"/><stop offset="1" stop-color="#3b424f" stop-opacity="1"/></linearGradient><radialGradient id="shTank" cx="35%" cy="35%" r="70%"><stop offset="0" stop-color="#f4f6fa" stop-opacity="1"/><stop offset="0.55" stop-color="#a7b0be" stop-opacity="1"/><stop offset="1" stop-color="#4b5260" stop-opacity="1"/></radialGradient><linearGradient id="shRad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a4252" stop-opacity="1"/><stop offset="1" stop-color="#262c38" stop-opacity="1"/></linearGradient><linearGradient id="shPv" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1e3a8a" stop-opacity="1"/><stop offset="1" stop-color="#172554" stop-opacity="1"/></linearGradient>
+</defs>
+<!--subject-->
+  <g transform="translate(100 166) rotate(38) scale(0.68)">
+    <!-- gimbal to the ship -->
+    <g transform="translate(-52 0) rotate(-90)"><path d="M-22,0 L22,0 L14,-14 L-14,-14 Z" fill="#4b5260" stroke="#8e97a6" stroke-width="1"/><path d="M-9,-14 L-9,-150 M9,-14 L9,-150 M9,-14 L-9,-26 M-9,-26 L9,-38 M9,-38 L-9,-50 M-9,-50 L9,-62 M9,-62 L-9,-74 M-9,-74 L9,-86 M9,-86 L-9,-98 M-9,-98 L9,-110 M9,-110 L-9,-122 M-9,-122 L9,-134 M9,-134 L-9,-146 M-9,-146 L9,-150" stroke="#8e97a6" stroke-width="2" fill="none"/>
+      <rect x="-80" y="-128" width="64" height="16" fill="url(#shRad)" stroke="#6b7487" stroke-width="1"/><line x1="-69.3" y1="-128" x2="-69.3" y2="-112" stroke="#56627a" stroke-width="1"/><line x1="-58.7" y1="-128" x2="-58.7" y2="-112" stroke="#56627a" stroke-width="1"/><line x1="-48" y1="-128" x2="-48" y2="-112" stroke="#56627a" stroke-width="1"/><line x1="-37.3" y1="-128" x2="-37.3" y2="-112" stroke="#56627a" stroke-width="1"/><line x1="-26.7" y1="-128" x2="-26.7" y2="-112" stroke="#56627a" stroke-width="1"/><rect x="16" y="-128" width="64" height="16" fill="url(#shRad)" stroke="#6b7487" stroke-width="1"/><line x1="26.7" y1="-128" x2="26.7" y2="-112" stroke="#56627a" stroke-width="1"/><line x1="37.3" y1="-128" x2="37.3" y2="-112" stroke="#56627a" stroke-width="1"/><line x1="48" y1="-128" x2="48" y2="-112" stroke="#56627a" stroke-width="1"/><line x1="58.7" y1="-128" x2="58.7" y2="-112" stroke="#56627a" stroke-width="1"/><line x1="69.3" y1="-128" x2="69.3" y2="-112" stroke="#56627a" stroke-width="1"/>
+      <circle cx="0" cy="-42" r="24" fill="url(#shTank)"/><line x1="-24" y1="-42" x2="24" y2="-42" stroke="#6b7487" stroke-width="1.5"/>
+      <circle cx="0" cy="-92" r="24" fill="url(#shTank)"/><line x1="-24" y1="-92" x2="24" y2="-92" stroke="#6b7487" stroke-width="1.5"/>
+      <path d="M-16,-150 L16,-150 L12,-176 L-12,-176 Z" fill="url(#shHull)"/>
+    <path d="M-12,-176 L12,-176 Q10,-194 0,-200 Q-10,-194 -12,-176 Z" fill="url(#shHull)"/>
+    <rect x="-8" y="-172" width="16" height="5" rx="2" fill="#fde68a"/>
+    <line x1="-16" y1="-153" x2="16" y2="-153" stroke="#f97316" stroke-width="3"/><line x1="14" y1="-160" x2="32" y2="-166" stroke="#8e97a6" stroke-width="2"/>
+    <path d="M32,-178 Q42,-166 32,-154 Z" fill="#cbd2dc" stroke="#7b8494" stroke-width="1"/></g>
+    <rect x="-54" y="-8" width="16" height="16" fill="#4b5260"/>
+    <path d="M-40,-40 L-22,-30 M-40,40 L-22,30" stroke="#8e97a6" stroke-width="5"/>
+    <!-- soft plume: a wide diffuse fan, a brighter inner cone, a hot axial spike -->
+    <path d="M0,-60 Q120,-120 360,-210 L360,210 Q120,120 0,60 Z" fill="url(#hplume)" filter="url(#hblur)" opacity="0.85"/>
+    <path d="M0,-52 Q90,-60 300,-100 L300,100 Q90,60 0,52 Z" fill="url(#hplume)" filter="url(#hblur)"/>
+    <path d="M6,-6 L260,-14 L260,14 L6,6 Z" fill="#eef4ff" opacity="0.35" filter="url(#hblur)"/>
+    <!-- body: back rim, shallow side, outer coils, then the face -->
+    <ellipse cx="-22" cy="0" rx="30" ry="78" fill="#262b35"/>
+    <path d="M-22,-78 L0,-78 L0,78 L-22,78 Z" fill="url(#hside)"/>
+    <g transform="translate(23.8 61.8)">
+      <rect x="-22" y="-11" width="26" height="22" rx="3" fill="url(#hcoilSide)"/>
+      <ellipse cx="4" cy="0" rx="5" ry="11" fill="url(#hcoil)" stroke="#7c2d12" stroke-width="1"/>
+      <ellipse cx="4.5" cy="0" rx="2" ry="4.5" fill="#3b1d0e"/>
+    </g><g transform="translate(-23.8 61.8)">
+      <rect x="-22" y="-11" width="26" height="22" rx="3" fill="url(#hcoilSide)"/>
+      <ellipse cx="4" cy="0" rx="5" ry="11" fill="url(#hcoil)" stroke="#7c2d12" stroke-width="1"/>
+      <ellipse cx="4.5" cy="0" rx="2" ry="4.5" fill="#3b1d0e"/>
+    </g><g transform="translate(-23.8 -61.8)">
+      <rect x="-22" y="-11" width="26" height="22" rx="3" fill="url(#hcoilSide)"/>
+      <ellipse cx="4" cy="0" rx="5" ry="11" fill="url(#hcoil)" stroke="#7c2d12" stroke-width="1"/>
+      <ellipse cx="4.5" cy="0" rx="2" ry="4.5" fill="#3b1d0e"/>
+    </g><g transform="translate(23.8 -61.8)">
+      <rect x="-22" y="-11" width="26" height="22" rx="3" fill="url(#hcoilSide)"/>
+      <ellipse cx="4" cy="0" rx="5" ry="11" fill="url(#hcoil)" stroke="#7c2d12" stroke-width="1"/>
+      <ellipse cx="4.5" cy="0" rx="2" ry="4.5" fill="#3b1d0e"/>
+    </g>
+    <ellipse cx="0" cy="0" rx="30" ry="78" fill="url(#hface)" stroke="#b7c0cf" stroke-width="2"/>
+    <ellipse cx="1" cy="0" rx="22.2" ry="57.7" fill="none" stroke="#5b7cff" stroke-width="22" opacity="0.55" filter="url(#hblur)"/>
+    <ellipse cx="1" cy="0" rx="22.2" ry="57.7" fill="none" stroke="#9fbcff" stroke-width="10"/>
+    <ellipse cx="1" cy="0" rx="22.2" ry="57.7" fill="none" stroke="#ffffff" stroke-width="3.5"/>
+    <ellipse cx="1" cy="0" rx="15" ry="39" fill="#4a5262" stroke="#8f99ab" stroke-width="1.5"/>
+    <!-- centre-mounted hollow cathode -->
+    <rect x="1" y="-6" width="12" height="12" rx="2" fill="#a3acbc"/>
+    <circle cx="14" cy="0" r="5" fill="#eaf1ff" filter="url(#glow)"/>
+  </g>
+</svg>

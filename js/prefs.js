@@ -72,8 +72,12 @@ function halloweenSeason() {
   try { return new Date().getMonth() === 9; } catch { return false; }   // October
 }
 
+// Halloween is retired outside October: a player who switched it on keeps no
+// bats in November (user 2026-11-13, "we are out of Halloween"). In October
+// the calendar default and the player's choice apply as before.
 export function isHalloweenTheme() {
-  return _halloween == null ? halloweenSeason() : _halloween;
+  if (!halloweenSeason()) return false;
+  return _halloween == null ? true : _halloween;
 }
 
 export function setHalloweenTheme(on) {
@@ -96,4 +100,112 @@ export function applyHalloweenClass() {
       document.body.appendChild(bats);
     }
   } catch { /* no document (non-browser) */ }
+}
+
+// Holiday theme: winter cheer over the app chrome (a Santa hat on the menu
+// button, a string of twinkling lights along the top bar, light snowfall, a
+// holly sprig in the side panel's corner, snow caps on panels and a sleigh
+// that crosses the top now and then). Like Halloween it is chrome only: it
+// never touches the map, the cards, hazard colours or a seat colour. Until the
+// player chooses it is on from November 1 to January 6; the menu toggle is an
+// explicit choice that sticks.
+const HOLIDAY_KEY = 'hf.holiday';
+let _holiday = null;   // null = follow the calendar; true / false = the player's choice
+try {
+  const raw = localStorage.getItem(HOLIDAY_KEY);
+  if (raw === '1') _holiday = true;
+  else if (raw === '0') _holiday = false;
+} catch { /* localStorage unavailable */ }
+
+function holidaySeason() {
+  try {
+    const d = new Date();
+    const m = d.getMonth();
+    return m === 10 || m === 11 || (m === 0 && d.getDate() <= 6);   // Nov 1 - Jan 6
+  } catch { return false; }
+}
+
+export function isHolidayTheme() {
+  return _holiday == null ? holidaySeason() : _holiday;
+}
+
+export function setHolidayTheme(on) {
+  _holiday = !!on;
+  try { localStorage.setItem(HOLIDAY_KEY, on ? '1' : '0'); } catch { /* ignore */ }
+  applyHolidayClass();
+}
+
+// Reflect the theme onto <html> (CSS gates every piece on html.theme-holiday)
+// and make sure the snow + sleigh layer exists.
+export function applyHolidayClass() {
+  try {
+    const on = isHolidayTheme();
+    document.documentElement.classList.toggle('theme-holiday', on);
+    if (on && !document.querySelector('.xm-sleigh-layer')) {
+      // The sleigh flies behind the top bar's buttons, so it gets its own
+      // low layer.
+      const sleighLayer = document.createElement('div');
+      sleighLayer.className = 'xm-sky xm-sleigh-layer';
+      sleighLayer.setAttribute('aria-hidden', 'true');
+      sleighLayer.innerHTML = '<span class="xm-sleigh"></span>';
+      document.body.appendChild(sleighLayer);
+    }
+    // The sleigh crosses now and then: each pass is scheduled at a random
+    // moment 1 to 5 minutes after the last (user 2026-11-13).
+    if (on && !_sleighTimer) scheduleSleigh();
+    // Snow falls behind the lobby screens (user 2026-11-13); CSS shows this
+    // layer only while a lobby view is open.
+    if (on && !document.querySelector('.xm-lobby-snow')) {
+      const snow = document.createElement('div');
+      snow.className = 'xm-lobby-snow';
+      snow.setAttribute('aria-hidden', 'true');
+      let flakes = '';
+      for (let i = 0; i < 18; i++) flakes += '<span class="xm-flake"></span>';
+      snow.innerHTML = flakes;
+      // First in the page, so it paints above the page background but under
+      // the lobby view (positioned layers paint in page order).
+      document.body.prepend(snow);
+    }
+    // Snow falls only inside the hand panel (user 2026-11-13), as real
+    // flakes moved on the GPU so it stays smooth. The hand panel mounts later
+    // and can be rebuilt, so a light check keeps one snow layer in it.
+    if (on && !_handSnowTimer) {
+      ensureHandSnow();
+      _handSnowTimer = setInterval(ensureHandSnow, 1000);
+    }
+  } catch { /* no document (non-browser) */ }
+}
+
+let _sleighTimer = null;
+const SLEIGH_MIN_MS = 60 * 1000;
+const SLEIGH_MAX_MS = 5 * 60 * 1000;
+function scheduleSleigh() {
+  const wait = SLEIGH_MIN_MS + Math.random() * (SLEIGH_MAX_MS - SLEIGH_MIN_MS);
+  _sleighTimer = setTimeout(() => {
+    try {
+      const s = document.querySelector('.xm-sleigh');
+      if (s && isHolidayTheme() && !document.hidden) {
+        // Two identical keyframe sets, alternated, so each pass restarts.
+        const next = s.classList.contains('xm-fly-a') ? 'xm-fly-b' : 'xm-fly-a';
+        s.classList.remove('xm-fly-a', 'xm-fly-b');
+        s.classList.add(next);
+      }
+    } catch { /* ignore */ }
+    scheduleSleigh();
+  }, wait);
+}
+
+let _handSnowTimer = null;
+function ensureHandSnow() {
+  try {
+    const hand = document.querySelector('.sandbox-hand');
+    if (!hand || hand.querySelector(':scope > .xm-hand-snow')) return;
+    const snow = document.createElement('div');
+    snow.className = 'xm-hand-snow';
+    snow.setAttribute('aria-hidden', 'true');
+    let flakes = '';
+    for (let i = 0; i < 14; i++) flakes += '<span class="xm-flake"></span>';
+    snow.innerHTML = flakes;
+    hand.appendChild(snow);
+  } catch { /* ignore */ }
 }

@@ -1,0 +1,39 @@
+{
+  "_about": "Known rocket stacks for the game test sandbox. setup.mjs --rocket <name> --at <slug> builds one through the admin game editor (give_card, flip_card, set_water, teleport). Only mark verified after the planner accepted a route AND the server executed the MOVE with this exact stack; record where and when. `active` is the thruster switched on with SET_ACTIVE_THRUSTER: a stack without an active thruster has net thrust 0 and can only coast zero-burn legs.",
+  "plasmoid": {
+    "cards": [
+      {
+        "id": "thr_ponderomotive_vasimr",
+        "face": "secondary"
+      }
+    ],
+    "water": 6,
+    "note": "Pulsed Plasmoid: thrust 3, fuel 1, no supports. Small tank on purpose: 30 water drops net thrust to 0.",
+    "verified": "2026-11-14: LEO to Didymos (2 burns, 2 fuel steps) and Saturn hazard coasts; server MOVE ok",
+    "active": "thr_ponderomotive_vasimr"
+  },
+  "electric-sail": {
+    "cards": [
+      {
+        "id": "thr_photon_heliogyro",
+        "face": "secondary"
+      }
+    ],
+    "water": 0,
+    "note": "Electric Sail: thrust 2, no fuel, no supports. Solar.",
+    "verified": "2026-11-14: LEO to Deimos (2 burns, no fuel); server MOVE ok",
+    "active": "thr_photon_heliogyro"
+  },
+  "solar-moth": {
+    "cards": [
+      {
+        "id": "thr_re_solar_moth",
+        "face": "primary"
+      }
+    ],
+    "water": 6,
+    "note": "Re Solar Moth: thrust 3, fuel 4, no supports. Solar.",
+    "verified": "2026-11-14: LEO to Didymos (2 burns, 8 fuel steps); server MOVE ok",
+    "active": "thr_re_solar_moth"
+  }
+}

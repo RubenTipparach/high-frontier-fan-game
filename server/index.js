@@ -1131,26 +1131,24 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // already open-information, so sharing one screen leaks nothing a real table
   // does not. Fixed at creation like the rest. The seat count is clamped to the
   // supported range here so the start path can trust it.
-  // Published VARIANTS (see docs/variants-tracker.md). Gated to admins AND the
-  // curated tester allowlist while they get more testing (user 2026-07-30,
-  // tester gate added shortly after): the server FORCES each to 0 for anyone
-  // else regardless of what the client sends, the way M2's gate worked during
-  // its preview. The hidden control is only UI - THIS is the real gate. One
-  // admin lookup + one tester lookup cover both flags (do not repeat per flag).
-  const variantsAllowed = profileIsAdmin(req.profile, req) || isTester(req.profile);
+  // Published VARIANTS (see docs/variants-tracker.md). Every one is RELEASED now:
+  // each flag is read straight off the body with no admin / tester check. The
+  // admin-or-tester gate existed only for the variants still in testing, and V9
+  // The Sirens was the last of them (released 2026-11-14), so it is gone. If a
+  // new variant ships behind a gate, bring the gate back for that flag alone -
+  // see "Releasing a variant" in CLAUDE.md.
   // V9 The Sirens: play as Sirenian factions out of Cordelia instead of LEO.
   // Adds the Siren home orbits at Uranus. Independent of every module except M0,
   // which the variant excludes. Fixed at creation like the rest.
-  const sirens = (variantsAllowed && body.sirens) ? 1 : 0;
+  // RELEASED (user 2026-11-14).
+  const sirens = body.sirens ? 1 : 0;
   // V5 Hermes Fall: a cooperative mission to industrialize both hermes sites
   // before the second Seniority Disk is removed.
   //
   // RELEASED (user 2026-08-07), the same way M1, M2, CEO Solitaire and the
   // Tutorial were released before it: the flag is read straight off the body
   // with no admin / tester check, and the client shows its control to every
-  // host. V9 The Sirens above is still in testing and keeps the gate - which is
-  // the whole reason `variantsAllowed` survives. See "Releasing a variant" in
-  // CLAUDE.md for the full checklist.
+  // host. See "Releasing a variant" in CLAUDE.md for the full checklist.
   const hermes = body.hermes ? 1 : 0;
   // V4 Altruism: the base solitaire / cooperative variant the other scenarios
   // were written against. Open to every host - it is the plainest of the

@@ -9,7 +9,7 @@ import {
   adoptServerSession, markDiscordLinked, onProfileChange,
 } from './auth.js';
 import { ws } from './ws.js';
-import { isBatterySave, setBatterySave, applyBatterySaveClass, isHalloweenTheme, setHalloweenTheme, applyHalloweenClass } from './prefs.js';
+import { isBatterySave, setBatterySave, applyBatterySaveClass, isHalloweenTheme, setHalloweenTheme, applyHalloweenClass, isHolidayTheme, setHolidayTheme, applyHolidayClass } from './prefs.js';
 import {
   initLobby, refreshLobbyList, openLobby, exitToLobbyList, createSoloRoom,
   pinGlobalChatBottom,
@@ -243,6 +243,20 @@ function initBrowseButton() {
     };
     halloweenBtn.addEventListener('click', () => { setHalloweenTheme(!isHalloweenTheme()); syncHalloween(); });
     syncHalloween();
+  }
+
+  // Holiday theme toggle (js/prefs.js). Seasonal chrome only; on by default
+  // from November 1 to January 6 until the player turns it off.
+  const holidayBtn = document.getElementById('btn-holiday');
+  if (holidayBtn) {
+    const syncHoliday = () => {
+      const on = isHolidayTheme();
+      holidayBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      holidayBtn.classList.toggle('is-active', on);
+      holidayBtn.textContent = on ? '🎄 Holiday theme: On' : '🎄 Holiday theme: Off';
+    };
+    holidayBtn.addEventListener('click', () => { setHolidayTheme(!isHolidayTheme()); syncHoliday(); });
+    syncHoliday();
   }
 }
 
@@ -889,8 +903,13 @@ let _isTesterCache = false;
 // not on the list, so a signed-out or ordinary player never sees it flash
 // during boot.
 function syncAlphaBanner() {
+  // Nothing is in testing right now: V9 The Sirens, the last thing the banner
+  // named, released 2026-11-14. A banner with nothing in it would thank a
+  // tester for scouting ahead of everyone on something everyone already has,
+  // so it stays hidden. Re-enable it (and name the feature) when something new
+  // ships to testers first.
   const el = document.getElementById('alpha-tester-banner');
-  if (el) el.classList.toggle('hidden', !_isTesterCache);
+  if (el) el.classList.add('hidden');
 }
 
 // Reveal module toggles. M1 (Terawatt) and M2 (Colonization + Futures) are both
@@ -920,28 +939,22 @@ function setAdminModuleRows(allowed) {   // eslint-disable-line no-unused-vars
 // off for anyone who is neither, regardless of what the client sends, so this
 // is only the UI half of the gate.
 function syncVariantRows() {
-  const allowed = _adminAllowedCache || _testerAllowedCache;
-  // V5 Hermes Fall is RELEASED (user 2026-08-07), so the scenario GROUP is open
-  // to every host and only the still-in-testing entries inside it are hidden.
-  // The group used to be hidden wholesale, which would have taken released
-  // Hermes down with unreleased Sirens.
+  // Every scenario is RELEASED: V5 Hermes Fall (2026-08-07), V4 Altruism and,
+  // last, V9 The Sirens (2026-11-14). So the scenario group and every entry in
+  // it show for every host. When a new scenario ships behind a gate, hide just
+  // its own entry here on `_adminAllowedCache || _testerAllowedCache` - never
+  // the whole group (that took released Hermes down with unreleased Sirens).
   const variants = document.getElementById('create-variants-group');
   if (variants) variants.classList.remove('hidden');
   const label = variants && variants.querySelector('.solo-opt-label');
-  if (label) label.textContent = allowed ? 'Scenario (in testing)' : 'Scenario';
-  // Per-entry gating: a released scenario always shows, one still in testing
-  // rides the admin / tester signal. Add a row here when a scenario releases.
-  for (const el of (variants ? variants.querySelectorAll('[data-variant]') : [])) {
-    const v = el.getAttribute('data-variant');
-    if (v === 'sirens') el.classList.toggle('hidden', !allowed);
-  }
-  // The solo wizard's scenario entries mirror the same per-entry rule. They live
-  // in the existing single-choice "Solo type" group, so picking one automatically
-  // deselects CEO Solitaire / Tutorial - which is the whole point: a table runs
-  // at most one scenario.
+  if (label) label.textContent = 'Scenario';
+  for (const el of (variants ? variants.querySelectorAll('[data-variant]') : [])) el.classList.remove('hidden');
+  // The solo wizard's scenario entries mirror the same rule. They live in the
+  // existing single-choice "Solo type" group, so picking one automatically
+  // deselects CEO Solitaire / Tutorial - a table runs at most one scenario.
   document.getElementById('solo-mode-hermes')?.classList.remove('hidden');
   document.getElementById('solo-mode-altruism')?.classList.remove('hidden');
-  document.getElementById('solo-mode-sirens')?.classList.toggle('hidden', !allowed);
+  document.getElementById('solo-mode-sirens')?.classList.remove('hidden');
 }
 
 async function refreshRatAccess(profile) {
@@ -1379,6 +1392,7 @@ async function boot() {
   // Apply the saved (or OS-default) battery-saver state before the map mounts.
   applyBatterySaveClass();
   applyHalloweenClass();
+  applyHolidayClass();
   // UI scale: on very wide viewports (a 4K monitor at 100% OS scaling) zoom
   // the interface so it reads like a 1920-wide layout. Before the map mounts,
   // so the renderer sizes its canvas against the final geometry.
