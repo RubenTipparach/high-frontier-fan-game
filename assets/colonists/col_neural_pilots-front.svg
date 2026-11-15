@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 330" width="300" height="330">
+  <defs><radialGradient id="np2a-bg" cx="50%" cy="80%" r="85%"><stop offset="0%" stop-color="#ffcf9a"/><stop offset="100%" stop-color="#6a4a8a"/></radialGradient></defs>
+  <rect width="300" height="330" fill="url(#np2a-bg)"/><g>
+      <path d="M249,151.8 L84,114.4 L106,151.8 L84,189.20000000000002 Z" fill="#e8ecf2"/>
+      <path d="M249,151.8 L106,151.8 L84,189.20000000000002 Z" fill="#7a7f8a" opacity="0.5"/>
+      <path d="M183,145.20000000000002 L211.60000000000002,149.60000000000002 L183,154 Z" fill="#ff9a5a"/>
+      <ellipse cx="92.8" cy="151.8" rx="17.6" ry="8.8" fill="#ff9a5a" opacity="0.85"/>
+    </g>
+      <path d="M30,241.8 Q110,191.8 150,151.8" stroke="#ffffff" stroke-width="1.2" fill="none" opacity="0.25"/><path d="M30,229.8 Q110,191.8 150,151.8" stroke="#ffffff" stroke-width="1.2" fill="none" opacity="0.37"/><path d="M30,217.8 Q110,191.8 150,151.8" stroke="#ffffff" stroke-width="1.2" fill="none" opacity="0.49"/><path d="M30,205.8 Q110,191.8 150,151.8" stroke="#ffffff" stroke-width="1.2" fill="none" opacity="0.61"/>
+</svg>

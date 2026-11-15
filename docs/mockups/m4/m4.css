@@ -1,6 +1,7 @@
 /* Module 4 card mockup styles (docs/mockups/m4). Layered on css/cards.css so a
    contract reads as one of the game's own cards: same 220px frame, typebar,
    name row, stat row, art body and footer. Border colour = the side. */
+html:has(body.m4-mock), body.m4-mock { overflow-x: hidden !important; overflow-y: auto !important; height: auto !important; position: static !important; }
 body.m4-mock { background: #0b0a14; color: #ddd; padding: 16px; font-family: Inter, system-ui, sans-serif; }
 .m4-head h1 { font-size: 20px; margin: 0 0 6px; }
 .m4-head p { max-width: 900px; color: #aaa; font-size: 13px; }
