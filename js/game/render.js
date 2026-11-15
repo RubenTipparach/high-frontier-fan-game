@@ -281,6 +281,54 @@ const PLANET_STYLE_BY_PALETTE = new Map(Object.entries({
 const mq = (q) => { let m = null; return () => { try { m = m || window.matchMedia(q); return m.matches; } catch { return false; } }; };
 const REDUCED_MOTION = mq('(prefers-reduced-motion: reduce)'); // turning planets hold still
 const COARSE_POINTER = mq('(pointer: coarse)'); // a phone or tablet: fewer turning steps
+// Each round Sol body's own surface (planet-texture.js 'body' style), after
+// spacecraft and telescope images, so no two moons look alike. Keyed by the
+// first word of the site name. Bodies not listed keep their palette's style.
+const BODY_LOOKS = {
+  luna:      { base: '#a3a8b0', light: '#dfe2e8', dark: '#3a3d44', look: { maria: 0.95, craters: 40, craterSize: 0.05, spots: 3, lift: 0.1 } },
+  phobos:    { base: '#6b6258', light: '#9a8f80', dark: '#2a2520', look: { craters: 22, craterSize: 0.16, bigCrater: 0.35 } },
+  deimos:    { base: '#8f857a', light: '#bab0a2', dark: '#3d372f', look: { craters: 8, craterSize: 0.05, lift: 0.1 } },
+  ceres:     { base: '#7d7a74', light: '#b0aca4', dark: '#34312c', look: { craters: 40, craterSize: 0.09, spots: 3 } },
+  callisto:  { base: '#4a4036', light: '#8a7c69', dark: '#1c1814', look: { craters: 140, craterSize: 0.035, craterTone: 'bright', bigCrater: 0.4 } },
+  ganymede:  { base: '#6e6152', light: '#c9bba6', dark: '#2e2820', look: { grooves: 0.9, craters: 35, craterSize: 0.045, craterTone: 'bright', cap: 'both', capColor: '#e3e7ec' } },
+  titan:     { base: '#c98a3a', light: '#e8b062', dark: '#6a4318', atmosphere: 'rgba(255, 185, 105, 0.5)', look: { haze: true, craters: 0 } },
+  enceladus: { base: '#e8eef3', light: '#ffffff', dark: '#a7b6c4', look: { stripes: true, craters: 14, craterSize: 0.05, lift: 0.3 } },
+  mimas:     { base: '#9a9a9a', light: '#cfcfcf', dark: '#454545', look: { craters: 70, craterSize: 0.06, bigCrater: 0.48 } },
+  tethys:    { base: '#cfd2d6', light: '#f2f3f5', dark: '#7d8288', look: { craters: 35, craterSize: 0.06, bigCrater: 0.4, canyon: true, lift: 0.1 } },
+  dione:     { base: '#b9b6b2', light: '#e9e7e4', dark: '#5e5b57', look: { craters: 45, craterSize: 0.055, wisps: 0.9 } },
+  rhea:      { base: '#bdb8b2', light: '#e6e2dc', dark: '#625d57', look: { craters: 90, craterSize: 0.055, wisps: 0.35 } },
+  iapetus:   { base: '#cfc6b8', light: '#f0ebe2', dark: '#6e655a', look: { twoTone: true, craters: 40, craterSize: 0.07 } },
+  hyperion:  { base: '#b49a76', light: '#d9c4a2', dark: '#3a2c1e', look: { sponge: true, craters: 120, craterSize: 0.05 } },
+  phoebe:    { base: '#4d4741', light: '#7b736a', dark: '#1e1b18', look: { craters: 50, craterSize: 0.09 } },
+  miranda:   { base: '#a7a7a5', light: '#d5d5d2', dark: '#4e4e4c', look: { grooves: 0.8, canyon: true, craters: 20, craterSize: 0.05 } },
+  ariel:     { base: '#b3b0aa', light: '#e0ddd7', dark: '#55524c', look: { canyon: true, craters: 30, craterSize: 0.05, lift: 0.1 } },
+  umbriel:   { base: '#4e4c4a', light: '#77736f', dark: '#222120', look: { craters: 70, craterSize: 0.05, spots: 1 } },
+  titania:   { base: '#a79d93', light: '#d4c9bd', dark: '#4f4740', look: { canyon: true, craters: 45, craterSize: 0.05 } },
+  oberon:    { base: '#8e8379', light: '#bdb2a6', dark: '#3a332d', look: { craters: 70, craterSize: 0.06 } },
+  triton:    { base: '#d2b8a6', light: '#f0e3d8', dark: '#7a6255', look: { cantaloupe: true, cap: 'south', capColor: '#f2d8cf', streaks: true, craters: 4 } },
+  proteus:   { base: '#4f4b47', light: '#7a756f', dark: '#22201e', look: { craters: 30, craterSize: 0.12, bigCrater: 0.4 } },
+  nereid:    { base: '#8b8781', light: '#b8b3ab', dark: '#3d3a36', look: { craters: 20, craterSize: 0.08 } },
+  pluto:     { base: '#c9a27c', light: '#efe0c8', dark: '#5b3a23', look: { heart: true, craters: 12, craterSize: 0.05 } },
+  charon:    { base: '#8f8a85', light: '#c4beb7', dark: '#3e3a36', look: { cap: 'north', capLat: 0.7, capColor: '#7a3f2a', craters: 30, craterSize: 0.05 } },
+  nix:       { base: '#c9c9c9', light: '#f0f0f0', dark: '#6f6f6f', look: { craters: 12, craterSize: 0.08, lift: 0.2 } },
+  hydra:     { base: '#d4d4d6', light: '#f7f7f8', dark: '#7a7a7e', look: { craters: 10, craterSize: 0.08, lift: 0.25 } },
+  quaoar:    { base: '#9c6a4f', light: '#c8957a', dark: '#3e2418', look: { craters: 14, craterSize: 0.06 } },
+  sedna:     { base: '#a6452e', light: '#d16a4a', dark: '#4a1a10', look: { craters: 6, craterSize: 0.06 } },
+  haumea:    { base: '#e4e6ea', light: '#ffffff', dark: '#9aa0a8', look: { redSpot: true, craters: 6, craterSize: 0.05, lift: 0.25 } },
+};
+export { BODY_LOOKS }; // the planets preview page shows them all
+function lookFor(site) {
+  if (site.planetStyle) return null; // a map's own bodies (Ad Astra) name theirs
+  const k = ((site.name || '').toLowerCase().match(/[a-z]+/) || [''])[0];
+  const pal = BODY_LOOKS[k]; return pal ? { style: 'body', pal } : null;
+}
+// a body's painted sphere: its texture (the expensive part, done once) and how it turns
+function makePlanetEnt(site, pal, rings, style, texW) {
+  let h = 2166136261; for (const ch of String(site.bodyKey || site.name || site.id)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); }
+  const seed = site.planetSeed ?? (Math.abs(h) % 100000);
+  const sphere = new PlanetSphere(makePlanetTexture(style, pal, seed, texW, texW / 2), { tilt: 0.1 + (seed % 7) * 0.06, ring: rings, atmosphere: pal.atmosphere || null, retrograde: pal === BODY_PALETTES.venus || pal === BODY_PALETTES.uranus } /* Venus and Uranus turn backwards */);
+  return { sphere, texW, key: '', speed: (style === 'gas' || style === 'ice-giant' || style === 'brown' ? 0.32 : 0.16) * (0.8 + (seed % 5) * 0.1), phase: (seed % 628) / 100 };
+}
 const mkCanvasStatic = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
 function planetStyleFor(site, pal) {
   if (site.planetStyle) return site.planetStyle;
@@ -294,8 +342,10 @@ function paletteFor(site) {
   // synthetic node on the Venus flyby), so it must NOT take the venus palette -
   // fall through to the neutral type default.
   if (site.id2 !== 'venus-aerostat-xity') {
+    // whole words only: 'Hyperion' and 'Titan: Ontario Lacus' both contain 'io'
+    // and used to come out as Io
     for (const key of Object.keys(BODY_PALETTES)) {
-      if (n.includes(key)) { site._palette = BODY_PALETTES[key]; return site._palette; }
+      if (new RegExp(`(^|[^a-z])${key}`).test(n)) { site._palette = BODY_PALETTES[key]; return site._palette; }
     }
   }
   site._palette = PALETTE_DEFAULTS[site.type] || PALETTE_DEFAULTS.asteroid;
@@ -3645,6 +3695,22 @@ export class MapRenderer {
   // instead of re-allocated every frame. Ring-bearing planets (Saturn /
   // Jupiter / Uranus / Neptune) bake back-rings + sphere + front-rings
   // into the one sprite. Sun + comets stay live (_drawSiteSunCometWorld).
+  // Paint planet textures in idle time, about 10 ms at a stretch, then redraw
+  // once; a frame never waits on a texture.
+  _queuePlanetPaint(id, job) {
+    const q = this._paintQ || (this._paintQ = new Map());
+    if (q.has(id)) return; q.set(id, job);
+    if (this._paintIdle) return;
+    const ric = typeof requestIdleCallback === 'function' ? requestIdleCallback : (cb) => setTimeout(() => cb({ timeRemaining: () => 10 }), 30);
+    const run = (dl) => {
+      this._paintIdle = null; const t0 = performance.now();
+      for (const [k, fn] of q) { q.delete(k); try { fn(); } catch (e) { /* a bad texture keeps its classic sphere */ } if (performance.now() - t0 > 10 || (dl.timeRemaining && dl.timeRemaining() < 3)) break; }
+      this._scheduleDraw();
+      if (q.size) this._paintIdle = ric(run, { timeout: 250 });
+    };
+    this._paintIdle = ric(run, { timeout: 250 });
+  }
+
   _drawSiteHalosScreen(ctx) {
     const eff = this.zoom * this.fitScale;
     const { hostW, hostH } = this;
@@ -3686,32 +3752,35 @@ export class MapRenderer {
     // a body's painted sphere (its texture is the expensive part, done once)
     const ensureEnt = (site, pal, rings, style, texW) => {
       const id = `${site.id2 || site.id}|${style}`;
-      let ent = this._planetSpheres.get(id);
+      const ent = this._planetSpheres.get(id);
       if (ent && ent.texW >= texW) return ent;
-      const t0 = performance.now(); const seed = site.planetSeed ?? seedOf(site.bodyKey || site.name || site.id);
-      const sphere = new PlanetSphere(makePlanetTexture(style, pal, seed, texW, texW / 2), { tilt: 0.1 + (seed % 7) * 0.06, ring: rings, atmosphere: pal.atmosphere || null, retrograde: pal === BODY_PALETTES.venus || pal === BODY_PALETTES.uranus } /* Venus and Uranus turn backwards */);
-      ent = { sphere, texW, key: '', speed: (style === 'gas' || style === 'ice-giant' || style === 'brown' ? 0.32 : 0.16) * (0.8 + (seed % 5) * 0.1), phase: (seed % 628) / 100 };
-      this._planetSpheres.set(id, ent); paintBudget -= performance.now() - t0;
-      return ent;
+      const t0 = performance.now(); const made = makePlanetEnt(site, pal, rings, style, texW);
+      this._planetSpheres.set(id, made); paintBudget -= performance.now() - t0;
+      return made;
     };
     if (saver && this._prepaintedFor !== this._realSites) { // battery save: paint everything now, once
       this._prepaintedFor = this._realSites;
-      const one = (site) => { const pal = paletteFor(site); const st = planetStyleFor(site, pal); if (st) ensureEnt(site, pal, ringDefFor(site), st, 96); };
+      const one = (site) => { const lk = lookFor(site); const pal = lk ? lk.pal : paletteFor(site); const st = lk ? lk.style : planetStyleFor(site, pal); if (st) ensureEnt(site, pal, ringDefFor(site), st, 96); };
       for (const g of this._bodyGroups.values()) if (g.sites.length >= 2) one(g.exemplar);
       for (const site of this._realSites) { if (this._mergedSites.has(site.id)) continue; const vis = TYPE_VIS[site.type] || TYPE_VIS.unknown; if (vis.kind === 'hex' && !vis.rocky) one(site); }
     }
-    const drawTextured = (site, wx, wy, haloR, pal, rings = null) => {
-      const style = planetStyleFor(site, pal); if (!style) return false;
+    const drawTextured = (site, wx, wy, haloR, pal0, rings = null) => {
+      const lk = lookFor(site); const pal = lk ? lk.pal : pal0; // a named body's own look, else its palette's
+      const style = lk ? lk.style : planetStyleFor(site, pal); if (!style) return false;
       const sr = Math.min(haloR * eff, cap); if (sr < 0.5) return true;
       const sx = this.pan.x + wx * eff, sy = this.pan.y + wy * eff; const m = sr * (rings ? 2.4 : 1.6) + 40;
       if (sx < -m || sx > hostW + m || sy < -m || sy > hostH + m) return true;
       // painted at most 128 device px across the radius (a phone's budget); larger draws scale it up
       const Rd = Math.max(2, Math.min(128, Math.round(sr * this.dpr)));
       const R = saver ? Math.min(128, Math.ceil(Rd / 16) * 16) : Rd;
-      const texW = saver ? 96 : R > 40 ? 192 : R > 14 ? 96 : 48;
-      const have = this._planetSpheres.get(`${site.id2 || site.id}|${style}`);
-      if ((!have || have.texW < texW) && paintBudget <= 0 && !saver) { pending = true; return false; } // its turn comes next frame
-      const ent = ensureEnt(site, pal, rings, style, texW);
+      const texW = saver ? 96 : R > 80 ? 192 : R > 24 ? 128 : 64;
+      const id = `${site.id2 || site.id}|${style}`;
+      let ent = this._planetSpheres.get(id);
+      if (saver) ent = ensureEnt(site, pal, rings, style, texW); // painted up front on load
+      else if (!ent || ent.texW < texW) { // painted in idle time, never inside a frame; the classic sphere shows meanwhile
+        this._queuePlanetPaint(id, () => this._planetSpheres.set(id, makePlanetEnt(site, pal, rings, style, texW)));
+        if (!ent) return false;
+      }
       let sun = null, best = Infinity; for (const s of suns) { const d = (s.x - wx) ** 2 + (s.y - wy) ** 2; if (d < best) { best = d; sun = s; } }
       const light = sun && best > 1 ? { x: sun.x - wx, y: sun.y - wy } : { x: -1, y: -1 };
       const moving = sr >= 5 && !saver && !REDUCED_MOTION(); if (moving) animating = true;

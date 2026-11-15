@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sol Bodies</title>
+<style>
+  :root { --bg: #05070d; --fg: #dbe4f3; --muted: #8592a8; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 13px/1.4 system-ui, sans-serif; }
+  #g { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 6px; padding: 12px; }
+  figure { margin: 0; text-align: center; } figcaption { color: var(--muted); text-transform: capitalize; }
+</style></head><body><div id="g"></div>
+<script type="module">
+import { makePlanetTexture, PlanetSphere } from '../../../js/game/planet-texture.js';
+import { BODY_LOOKS } from '../../../js/game/render.js';
+const DPR = 2; const g = document.getElementById('g');
+const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+const seed = (str) => { let h = 2166136261; for (const ch of str) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); } return Math.abs(h) % 100000; };
+for (const [name, pal] of Object.entries(BODY_LOOKS)) {
+  const cv = mk(100 * DPR, 100 * DPR); cv.style.width = cv.style.height = '100px';
+  const sp = new PlanetSphere(makePlanetTexture('body', pal, seed(name), 192, 96), { tilt: 0.15, atmosphere: pal.atmosphere || null });
+  const img = sp.render(44 * DPR, 0.6, { x: 1, y: -0.35 }, mk);
+  cv.getContext('2d').drawImage(img, cv.width / 2 - img.width / 2, cv.height / 2 - img.height / 2);
+  const f = document.createElement('figure'); const cap = document.createElement('figcaption'); cap.textContent = name; f.append(cv, cap); g.append(f);
+}
+window.__done = true;
+</script></body></html>

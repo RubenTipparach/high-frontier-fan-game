@@ -63,10 +63,10 @@ export const PLANET_STYLES = {
   },
   // cratered airless rock (Mercury / the Moon / most moons and asteroids)
   rock: (pal, s) => { const craters = Array.from({ length: 34 }, (_, i) => { const u = hash(s, i, 1, 7) * 2 - 1, th = hash(s, i, 2, 7) * Math.PI * 2, r = Math.sqrt(1 - u * u);
-      return { c: [r * Math.cos(th), u, r * Math.sin(th)], R: 0.05 + hash(s, i, 3, 7) ** 2 * 0.22 }; });
+      const R = 0.05 + hash(s, i, 3, 7) ** 2 * 0.22; return { c: [r * Math.cos(th), u, r * Math.sin(th)], R, cosLim: Math.cos(Math.min(Math.PI, R * 1.25)) }; });
     return (p) => {
       let v = fbm(p[0] * 3, p[1] * 3, p[2] * 3, s, 5); let rim = 0;
-      for (const k of craters) { const d = Math.acos(Math.max(-1, Math.min(1, p[0] * k.c[0] + p[1] * k.c[1] + p[2] * k.c[2]))) / k.R; if (d < 1.25) { if (d < 1) v -= (1 - d * d) * 0.22; rim += Math.max(0, 1 - Math.abs(d - 1) * 6) * 0.25; } }
+      for (const k of craters) { if (p[0] * k.c[0] + p[1] * k.c[1] + p[2] * k.c[2] < k.cosLim) continue; const d = Math.acos(Math.max(-1, Math.min(1, p[0] * k.c[0] + p[1] * k.c[1] + p[2] * k.c[2]))) / k.R; if (d < 1.25) { if (d < 1) v -= (1 - d * d) * 0.22; rim += Math.max(0, 1 - Math.abs(d - 1) * 6) * 0.25; } }
       const maria = smooth(0.52, 0.62, fbm(p[0] * 1.4, p[1] * 1.4, p[2] * 1.4, s + 5, 3));
       return ramp([hex(pal.dark), hex(pal.base), hex(pal.light)], clamp01(v * 1.3 - 0.15 + rim - maria * 0.18));
     }; },
@@ -109,6 +109,53 @@ export const PLANET_STYLES = {
       for (const v of vents) { const d = Math.acos(Math.max(-1, Math.min(1, p[0] * v.c[0] + p[1] * v.c[1] + p[2] * v.c[2]))) / v.R; if (d < 2.2) c = mix(c, d < 0.5 ? [40, 25, 20] : [200, 80, 30], (1 - d / 2.2) * 0.8); }
       return c;
     }; },
+  // a named body's own surface (`pal.look`), from spacecraft and telescope
+  // images: each switch adds one real feature (maria, grooves, two-tone,
+  // wisps, tiger stripes, a canyon, a giant crater, bright spots, caps, haze,
+  // a spongy surface, cantaloupe terrain, Pluto's heart, Haumea's red spot)
+  body: (pal, s) => {
+    const L = pal.look || {}; const dark = hex(pal.dark), base = hex(pal.base), light = hex(pal.light);
+    const unit = (i, k) => { const u = hash(s, i, k, 3) * 2 - 1, th = hash(s, i, k + 1, 3) * Math.PI * 2, r = Math.sqrt(1 - u * u); return [r * Math.cos(th), u, r * Math.sin(th)]; };
+    const nC = L.craters ?? 30; const cs = L.craterSize ?? 0.1;
+    const craters = Array.from({ length: nC }, (_, i) => { const R = cs * (0.25 + hash(s, i, 7, 3) ** 2 * 1.6); return { c: unit(i, 10), R, cosLim: Math.cos(Math.min(Math.PI, R * 1.25)) }; });
+    const big = L.bigCrater ? { c: unit(999, 20), R: L.bigCrater } : null;
+    const spots = Array.from({ length: L.spots || 0 }, (_, i) => ({ c: unit(500 + i, 30), R: 0.03 + hash(s, i, 9, 4) * 0.04 }));
+    const canyon = L.canyon ? unit(777, 40) : null; // the pole of the great circle a chasm runs along
+    const ang = (p, c) => Math.acos(Math.max(-1, Math.min(1, p[0] * c[0] + p[1] * c[1] + p[2] * c[2])));
+    const capC = L.capColor ? hex(L.capColor) : [236, 238, 242];
+    return (p, lat, lon) => {
+      const v = fbm(p[0] * 3, p[1] * 3, p[2] * 3, s, 5);
+      let c = ramp([dark, base, light], v * 1.2 - 0.1 + (L.lift || 0));
+      if (L.haze) c = ramp([dark, base, light], 0.55 + 0.1 * Math.sin(lat * 3.2) + 0.12 * (fbm(p[0] * 1.5, p[1] * 5, p[2] * 1.5, s, 3) - 0.5) - 0.18 * smooth(0.7, 1.4, lat));
+      if (L.maria) c = mix(c, mix(dark, base, 0.25), smooth(0.57, 0.63, fbm(p[0] * 1.3, p[1] * 1.3, p[2] * 1.3, s + 5, 4)) * L.maria); // dark lava plains, about a third of the face
+      if (L.grooves) { const region = smooth(0.42, 0.55, fbm(p[0] * 1.6, p[1] * 1.6, p[2] * 1.6, s + 13, 3)); const stripe = 0.5 + 0.5 * Math.sin((p[0] * 9 + p[2] * 7 + p[1] * 4 + fbm(p[0] * 4, p[1] * 4, p[2] * 4, s + 3, 3) * 6) * 3);
+        c = mix(c, mix(light, base, stripe * 0.5), region * L.grooves); }
+      if (L.twoTone) c = mix([38, 27, 18], c, smooth(-0.2, 0.2, p[2] + (fbm(p[0] * 3, p[1] * 3, p[2] * 3, s + 7, 3) - 0.5) * 0.5));
+      if (L.wisps) { const w = 1 - smooth(0.0, 0.035, Math.abs(vnoise(p[0] * 3.5, p[1] * 3.5, p[2] * 3.5, s + 21) - 0.5)); c = mix(c, [238, 240, 243], w * L.wisps * smooth(-0.2, 0.4, -p[0])); }
+      if (L.stripes) { const w = 1 - smooth(0.0, 0.08, Math.abs(Math.sin(lon * 2 + lat * 5 + fbm(p[0] * 3, p[1] * 3, p[2] * 3, s, 2)))); c = mix(c, [150, 200, 230], w * smooth(-0.75, -1.05, lat) * 0.85); }
+      if (canyon) { const d = Math.abs(p[0] * canyon[0] + p[1] * canyon[1] + p[2] * canyon[2]); c = mix(c, mix(dark, base, 0.3), (1 - smooth(0.0, 0.035, d)) * 0.8); }
+      if (L.cantaloupe) { const cell = 1 - smooth(0.0, 0.06, Math.abs(vnoise(p[0] * 14, p[1] * 14, p[2] * 14, s + 31) - 0.5)); c = mix(c, mix(c, [150, 160, 120], 0.35), smooth(-0.2, 0.3, lat) * 0.7); c = mix(c, mix(dark, base, 0.5), cell * 0.45 * smooth(-0.2, 0.3, lat)); }
+      if (L.sponge) { const pit = 1 - smooth(0.0, 0.12, Math.abs(vnoise(p[0] * 9, p[1] * 9, p[2] * 9, s + 41) - 0.5)); c = mix(c, [40, 30, 22], pit * 0.6); }
+      for (const k of craters) { if (p[0] * k.c[0] + p[1] * k.c[1] + p[2] * k.c[2] < k.cosLim) continue; const d = ang(p, k.c) / k.R; if (d < 1.25) { // a cheap dot test skips the far craters
+        const floor = L.craterTone === 'bright' ? mix(light, [255, 255, 255], 0.3) : mix(dark, base, 0.4);
+        if (d < 1) c = mix(c, floor, (1 - d * d) * (L.craterTone === 'bright' ? 0.7 : 0.45));
+        c = mix(c, light, Math.max(0, 1 - Math.abs(d - 1) * 7) * 0.35); } }
+      if (big) { const d = ang(p, big.c) / big.R; if (d < 1.15) { c = mix(c, mix(dark, base, 0.55), d < 1 ? 0.35 * (1 - d * d) : 0); c = mix(c, light, Math.max(0, 1 - Math.abs(d - 1) * 9) * 0.7); c = mix(c, light, Math.max(0, 1 - d / 0.12) * 0.6); } } // rim and central peak
+      for (const sp of spots) { const d = ang(p, sp.c) / sp.R; if (d < 1) c = mix(c, [250, 250, 248], (1 - d * d) * 0.95); }
+      if (L.cap === 'north' || L.cap === 'both') { const c0 = L.capLat ?? 0.95; c = mix(c, capC, smooth(c0, c0 + 0.25, lat + (v - 0.5) * 0.25)); }
+      if (L.cap === 'south' || L.cap === 'both') c = mix(c, capC, smooth(0.6, 1.0, -lat + (v - 0.5) * 0.3));
+      if (L.streaks) { const st = 1 - smooth(0, 0.05, Math.abs(Math.sin(lon * 7 + fbm(p[0] * 4, p[1] * 4, p[2] * 4, s + 51, 2) * 3))); c = mix(c, [80, 60, 55], st * smooth(-0.3, -0.8, lat) * 0.6); }
+      if (L.heart) { // Tombaugh Regio: two bright lobes and a point below; the dark red Cthulhu band on the equator beside it
+        const dirOf = (la, lo) => [Math.cos(la) * Math.cos(lo), Math.sin(la), Math.cos(la) * Math.sin(lo)];
+        const lobe = (la, lo, R) => Math.max(0, 1 - ang(p, dirOf(la, lo)) / R);
+        const h = Math.max(lobe(0.38, -0.28, 0.34), lobe(0.38, 0.28, 0.34), lobe(0.05, 0, 0.22));
+        c = mix(c, [246, 236, 220], smooth(0.05, 0.3, h) * 0.92);
+        const dl = Math.abs(Math.atan2(Math.sin(lon - 1.9), Math.cos(lon - 1.9)));
+        c = mix(c, [74, 32, 22], smooth(0.32, 0.12, Math.abs(lat + 0.05)) * smooth(1.3, 0.6, dl) * 0.85); }
+      if (L.redSpot) { const d = ang(p, [0, 0.15, 1]) / 0.35; if (d < 1) c = mix(c, [120, 50, 40], (1 - d * d) * 0.85); }
+      return c;
+    };
+  },
   // a brown dwarf: dark, banded, glowing from inside
   brown: (pal, s) => (p, lat) => {
     const turb = fbm(p[0] * 2.5, p[1] * 8, p[2] * 2.5, s, 5);
