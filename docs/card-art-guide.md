@@ -55,6 +55,18 @@ generator's `APPROVED` set and re-run it.
 `assets/` is copied whole into the production build, so new art files need no
 build change.
 
+## Battery saver textures
+
+The SVG art carries blur and grain filters the browser re-runs whenever a card
+is drawn at a new size. Under Battery saver, `card-ui.js#cardArtUrl` serves a
+pre-rendered WebP of the same picture instead (`<name>-tex.webp` beside the
+SVG, mapped in `data/card-art-textures.js`), and flipping the toggle repaints
+cards already on screen. After `scripts/gen-card-art.mjs` (new or changed art),
+run `node scripts/rasterize-card-art.mjs` to bake the textures: it renders each
+approved SVG in Chromium at 2x and only redoes stale ones (`--force` for all).
+An SVG with no texture just keeps drawing the SVG, so a missed run never breaks
+a card.
+
 ## Text and triangle over the art (user 2026-11-13)
 
 On a `.has-bg-art` face only the thrust triangle's FILL is 50% transparent (`.tv-wedge`; its numbers and icons stay solid), and the ability
