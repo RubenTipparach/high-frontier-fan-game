@@ -148,10 +148,10 @@ export function makePlanetTexture(style, palette, seed = 1, W = 192, H = 96) {
 
 // ---------- the sphere: a per-radius lookup table, then a cheap frame
 const LUTS = new Map();
-function lutFor(R, tilt) {
-  const key = `${R}|${tilt.toFixed(2)}`; let L = LUTS.get(key); if (L) return L;
+function lutFor(R, tilt, lean = 0.35) {
+  const key = `${R}|${tilt.toFixed(2)}|${lean.toFixed(2)}`; let L = LUTS.get(key); if (L) return L;
   const size = R * 2 + 2; const n = [];
-  const ct = Math.cos(tilt), st = Math.sin(tilt); const lean = 0.35, cl = Math.cos(lean), sl = Math.sin(lean); // the axis leans in the screen and a little toward you
+  const ct = Math.cos(tilt), st = Math.sin(tilt); const cl = Math.cos(lean), sl = Math.sin(lean); // the axis leans in the screen and a little toward you
   for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
     const dx = (x + 0.5 - (R + 1)) / R, dy = (y + 0.5 - (R + 1)) / R; const d2 = dx * dx + dy * dy;
     const edge = R * (1 - Math.sqrt(d2)) + 0.5; if (edge <= 0) continue;
@@ -166,7 +166,11 @@ function lutFor(R, tilt) {
 // A body that turns. `light` is the direction toward its star in screen space
 // ({x, y}, any length; y down like the canvas); spin is radians.
 export class PlanetSphere {
-  constructor(texture, { tilt = 0.25, ambient = 0.07, atmosphere = null, cloudDrift = 1.3 } = {}) {
+  // `ring`: a ring definition the planet must line up with (its equator in the
+  // ring plane): the axis tilts with the rings and leans toward you as far as
+  // the rings are opened
+  constructor(texture, { tilt = 0.25, ambient = 0.07, atmosphere = null, cloudDrift = 1.3, ring = null } = {}) {
+    if (ring) { tilt = -ring.tilt; this.lean = -Math.asin(Math.min(0.99, ring.flatten)); } else this.lean = 0.35;
     this.tex = texture; this.tilt = tilt; this.ambient = ambient; this.cloudDrift = cloudDrift;
     this.atmo = atmosphere ? atmosphere.match(/[\d.]+/g).map(Number) : null; // 'rgba(r, g, b, a)'
     this.canvas = null; this.img = null; this.R = 0;
@@ -174,7 +178,7 @@ export class PlanetSphere {
   // Render the sphere into its own small canvas (render-to-texture) and return it.
   // makeCanvas(w, h) lets a caller supply an OffscreenCanvas or a DOM canvas.
   render(R, spin, light, makeCanvas) {
-    R = Math.max(2, Math.round(R)); const L = lutFor(R, this.tilt); const size = L.size;
+    R = Math.max(2, Math.round(R)); const L = lutFor(R, this.tilt, this.lean); const size = L.size;
     if (!this.canvas || this.R !== R) { this.canvas = makeCanvas(size, size); this.ctx = this.canvas.getContext('2d'); this.img = this.ctx.createImageData(size, size); this.R = R; }
     const { W, H, rgb, cloud } = this.tex; const px = this.img.data; px.fill(0);
     let lx = light.x, ly = -light.y; const lz = 0.55; const ll = Math.hypot(lx, ly, lz) || 1; lx /= ll; ly /= ll; const lzn = lz / ll;

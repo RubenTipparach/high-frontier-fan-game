@@ -3686,7 +3686,7 @@ export class MapRenderer {
       if (!ent || ent.texW < texW) {
         if (paintBudget <= 0) { pending = true; return false; } // its turn comes next frame
         const t0 = performance.now(); const seed = site.planetSeed ?? seedOf(site.bodyKey || site.name || site.id);
-        const sphere = new PlanetSphere(makePlanetTexture(style, pal, seed, texW, texW / 2), { tilt: rings ? 0 : 0.1 + (seed % 7) * 0.06, atmosphere: pal.atmosphere || null });
+        const sphere = new PlanetSphere(makePlanetTexture(style, pal, seed, texW, texW / 2), { tilt: 0.1 + (seed % 7) * 0.06, ring: rings, atmosphere: pal.atmosphere || null });
         ent = { sphere, texW, key: '', speed: (style === 'gas' || style === 'ice-giant' || style === 'brown' ? 0.32 : 0.16) * (0.8 + (seed % 5) * 0.1), phase: (seed % 628) / 100 };
         this._planetSpheres.set(id, ent); paintBudget -= performance.now() - t0;
       }

@@ -50,7 +50,7 @@ const items = BODIES.map(([label, style, art, seed, tilt, speed, ring]) => {
   const fig = document.createElement('figure'); const cv = mk(150 * DPR, 150 * DPR); cv.style.width = '150px'; cv.style.height = '150px';
   const cap = document.createElement('figcaption'); cap.textContent = label; fig.append(cv, cap); stage.append(fig);
   const t0 = performance.now(); const tex = makePlanetTexture(style, ART[art], seed); const ms = performance.now() - t0;
-  return { cv, ctx: cv.getContext('2d'), sphere: new PlanetSphere(tex, { tilt, atmosphere: ART[art].atmosphere || null }), rings: ring ? new PlanetRings(RINGS[ring]) : null, speed, atmo: ART[art].atmosphere, ms };
+  return { cv, ctx: cv.getContext('2d'), sphere: new PlanetSphere(tex, { tilt, ring: ring ? RINGS[ring] : null, atmosphere: ART[art].atmosphere || null }), rings: ring ? new PlanetRings(RINGS[ring]) : null, speed, atmo: ART[art].atmosphere, ms };
 });
 window.__texMs = items.map((i) => i.ms.toFixed(1));
 let last = performance.now(), frames = 0, acc = 0; const params = new URLSearchParams(location.search); const fixedT = params.has('t') ? +params.get('t') : null;
