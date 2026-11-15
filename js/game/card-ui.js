@@ -36,6 +36,31 @@ import { COLONIST_ART_IDS } from '../../data/colonist-art.js';
 // thrust triangle). Only approved entries render; a preview harness can set
 // globalThis.HF_CARD_ART_PREVIEW = true to see pending art.
 import { CARD_ART } from '../../data/card-art.js';
+// Battery saver draws each SVG card art from a pre-rendered WebP texture
+// (scripts/rasterize-card-art.mjs) instead: the SVGs carry blur and grain
+// filters the browser re-runs every time a card is drawn.
+import { CARD_ART_TEXTURES } from '../../data/card-art-textures.js';
+import { isBatterySave, onBatterySaveChange } from '../prefs.js';
+
+// The url() for a piece of card art: its texture under Battery saver (when one
+// was rendered), otherwise the SVG itself.
+function cardArtUrl(src) {
+  const tex = isBatterySave() && CARD_ART_TEXTURES[src];
+  return `url("${assetUrl(tex || src)}")`;
+}
+// Paint card art onto an element and remember its source, so flipping Battery
+// saver can repaint cards already on screen (below) without re-rendering them.
+function setCardArt(el, src) {
+  el.dataset.artSrc = src;
+  el.style.backgroundImage = cardArtUrl(src);
+}
+onBatterySaveChange(() => {
+  try {
+    for (const el of document.querySelectorAll('[data-art-src]')) {
+      el.style.backgroundImage = cardArtUrl(el.dataset.artSrc);
+    }
+  } catch { /* no document (non-browser) */ }
+});
 
 // Spectral type -> { glyph, fill, ink }. Used for the per-card
 // spectral hex. Falls back to 'unknown' for anything unmapped.
@@ -327,7 +352,7 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
     // side, so the art is drawn to read either way up.
     const radArt = CARD_ART[card.id] && CARD_ART[card.id][sideName];
     if (radArt && (radArt.approved || globalThis.HF_CARD_ART_PREVIEW)) {
-      radFace.style.backgroundImage = `url("${assetUrl(radArt.src)}")`;
+      setCardArt(radFace, radArt.src);
       radFace.classList.add('has-bg-art');
     }
     return radFace;
@@ -426,7 +451,7 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
     const artSide = card.srcId && card.face ? card.face : sideName;
     const crewArt = CARD_ART[artId] && CARD_ART[artId][artSide];
     if (crewArt && (crewArt.approved || globalThis.HF_CARD_ART_PREVIEW)) {
-      face.style.backgroundImage = `url("${assetUrl(crewArt.src)}")`;
+      setCardArt(face, crewArt.src);
       face.classList.add('has-bg-art', 'is-crew-art');
     }
     return face;
@@ -540,7 +565,7 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
   if (patentArt && (patentArt.approved || globalThis.HF_CARD_ART_PREVIEW)) {
     const body = face.querySelector('.card-body');
     if (body) {
-      body.style.backgroundImage = `url("${assetUrl(patentArt.src)}")`;
+      setCardArt(body, patentArt.src);
       face.classList.add('has-bg-art');
     }
   }
