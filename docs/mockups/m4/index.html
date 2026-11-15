@@ -78,11 +78,7 @@ if (!only || only === 'exodus') {
 if (!only || only === 'colonists') {
   const grid = section('colonists', 'Spaceborn and Robot colonists', 'Rendered by the game\'s own colonist card code: white front, purple promoted back.');
   let rows = CARD_DATA['Spaceborn Colonists']; if (limit) rows = rows.slice(0, limit);
-  for (const row0 of rows) {
-    // A fractional fuel cost is printed as "1/2"; the card renderer wants a number.
-    const frac = (v) => (typeof v === 'string' && /^\d+\/\d+$/.test(v)) ? Number(v.split('/')[0]) / Number(v.split('/')[1]) : v;
-    const row = { ...row0, tier1: { ...row0.tier1, 'Fuel Consumption': frac(row0.tier1['Fuel Consumption']) },
-      tier2: { ...row0.tier2, 'Fuel Consumption': frac(row0.tier2['Fuel Consumption']) } };
+  for (const row of rows) {
     const c = buildPatent('Colonists', row);
     c.specialty = row.Specialty; c.colonistKind = row.Type;
     c.spectralType = row['Spectral Type'] && row['Spectral Type'] !== 'n/a' ? row['Spectral Type'] : null;
