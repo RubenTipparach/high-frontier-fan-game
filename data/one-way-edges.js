@@ -9,7 +9,10 @@
 export const ONE_WAY_ARROWS = [
   ["burn-dkywy", "lag-5kd7m"],
   ["dec-6906q", "lag-5pmg4"],
+  ["dec-88pxv", "dec-bui3k"],
+  ["dec-aalld", "dec-88pxv"],
   ["dec-blxll", "lag-60v7l"],
+  ["dec-bui3k", "titan-ontario-lacus"],
   ["dec-ek0ud", "lag-6r4sx"],
   ["dec-jm8u8", "lag-n7yan"],
   ["dec-js39g", "dec-6906q"],

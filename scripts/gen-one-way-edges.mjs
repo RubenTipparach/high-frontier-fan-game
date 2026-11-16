@@ -44,6 +44,15 @@ for (const a in edgeLabels) {
     arrows.push([sa, sb]);
   }
 }
+// BOARD ARROWS THE PLANNER JSON LACKS (data/one-way-overrides.json): printed
+// one-way arrows checked by eye against the board, e.g. the Titan reprint
+// correction (Titan Aerostat -> parachute space -> Ontario Lacus). Each entry is
+// [from, to] in id2 slugs.
+for (const [a, b] of JSON.parse(readFileSync(resolve(root, 'data/one-way-overrides.json'), 'utf8'))) {
+  const key = a + '>' + b;
+  if (!seen.has(key)) { seen.add(key); arrows.push([a, b]); }
+}
+
 // FILL CHAIN GAPS. The board prints a one-way move as a dotted, arrowed line
 // that can run through several spaces, but the planner JSON sometimes labels
 // only its first and last hops (e.g. the green line below Saturn: arrows into

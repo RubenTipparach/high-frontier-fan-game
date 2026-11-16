@@ -40,6 +40,7 @@ import { makeRefId, normalizeSiteName } from '../../data/planner-ids.js';
 import { SITE_NAME_ALIASES, aliasSiteName } from '../../data/site-name-aliases.js';
 import { classifyBody } from '../../data/body-class.js';
 import { NODE_TAGS } from '../../data/node-tags.js';
+import { NODE_TYPE_OVERRIDES } from '../../data/node-type-overrides.js';
 import { ONE_WAY_ARROWS } from '../../data/one-way-edges.js';
 import { aerobrakeLandableSet } from '../../data/aerobrake-landing.js';
 const LOCAL_SITE_BY_NAME = new Map();
@@ -97,7 +98,10 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
   // don't get in the way.
   const sites = [];
   for (const [id, p] of Object.entries(raw.points || {})) {
-    const rawType = p.type || 'unknown';
+    // The slug comes from the planner's own type; a curated override (a board
+    // reprint correction) can then change what the node IS, keeping its slug.
+    const id2 = makeRefId(p, p.type || 'unknown');
+    const rawType = NODE_TYPE_OVERRIDES[id2] || p.type || 'unknown';
     const type = rawType === 'site' ? classifyBody(p.siteName) : rawType;
     // Pull Excel-derived flags for real sites: astrobiology /
     // submarine / aerobrakes count etc. Falls back through the
@@ -129,7 +133,6 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
     // with a trailing counter further down. The upstream `id`
     // (random float key from the vendor JSON) stays as the
     // canonical lookup key so byId / edge data still works.
-    const id2 = makeRefId(p, rawType);
     sites.push({
       id,
       id2,
