@@ -1,5 +1,8 @@
 # Module 4 (Exodus) - implementation plan
 
+Handoff for the next session: `docs/m4-handoff.md` (state, next work, open
+questions, how to test locally).
+
 Status: **admin-only preview** (user 2026-11-15). Everything M4 gates on
 `state.m4`, which only an admin can turn on at room creation. M4 requires M0
 (4A1a), so turning M4 on forces M0 on, the same way M2 forces M0.
