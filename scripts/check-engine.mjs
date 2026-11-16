@@ -10752,6 +10752,93 @@ function augGame({ colonists = ['col_biomechs', 'col_botany_bay_convicts'], dirt
   return { st, P };
 }
 
+// Put a won contract aboard the rocket as if boosted + transferred.
+function contractAboard(st, who, cardId) {
+  const P = pl(st, who);
+  P.contractHand = P.contractHand.filter((x) => x !== cardId);
+  P.contractMeta[cardId].boosted = true;
+  P.rocket.stack.push({ id: cardId, kind: 'contract', face: 'primary' });
+  return P;
+}
+
+check('decommissioning a contract returns it to the contract hand: unmanned reboostable, manned in default (4B6a)', () => {
+  // Unmanned (Solar Observatory): back in hand, not default, no chit, boostable again.
+  let res = winContract(m4Game(), 'M4N228F', { by: 'initiator' });
+  let st = res.st; const sun = res.c.id; const me = res.winner;
+  contractAboard(st, me, sun);
+  let r = op(st, 'DECOMMISSION', me, { from: 'rocket', cardIds: [sun] });
+  assert(r.ok, `DECOMMISSION: ${r.error}`);
+  let P = pl(r.state, me);
+  assert(P.contractHand.includes(sun) && !(P.hand || []).includes(sun), `contract went to ${JSON.stringify({ ch: P.contractHand, hand: P.hand })}`);
+  assert(!P.contractMeta[sun].default && !r.state.defaultChit, 'an unmanned decommission is not a default');
+  st = endTurns(r.state, 2);
+  r = op(st, 'BOOST', me, { cardIds: [sun] });
+  assert(r.ok, `second-chance BOOST: ${r.error}`);
+  // Manned (Mars Polar Walk): back in hand sideways, in default, chit claimed, no reboost.
+  res = winContract(m4Game(), 'M4N226F', { by: 'initiator' });
+  st = res.st; const walk = res.c.id; const me2 = res.winner;
+  contractAboard(st, me2, walk);
+  r = op(st, 'DECOMMISSION', me2, { from: 'rocket', cardIds: [walk] });
+  assert(r.ok, `DECOMMISSION manned: ${r.error}`);
+  P = pl(r.state, me2);
+  assert(P.contractHand.includes(walk) && P.contractMeta[walk].default, 'a manned decommission is a default contract');
+  assert(r.state.defaultChit && r.state.defaultChit.profileId === me2, 'the default chit was not claimed');
+  st = endTurns(r.state, 2);
+  r = op(st, 'BOOST', me2, { cardIds: [walk] });
+  assert(!r.ok && r.error === 'contract_in_default', `a default contract re-boosted: ${r.error}`);
+  return 'unmanned back in hand and re-boosted; manned in default with the chit, boost refused';
+});
+
+check('a lost rocket sends its contract back to the contract hand (4B6a)', () => {
+  // A stack left parked on an aerobrake rolls at turn end and burns up on a 1.
+  const CHUTE = 'lag-p5ep5';
+  assert(isAerobrakeNode(CHUTE), `${CHUTE} is not an aerobrake`);
+  let lost = null;
+  for (let cursor = 0; cursor < 60 && !lost; cursor += 1) {
+    const res = winContract(m4Game(), 'M4N228F', { by: 'initiator' });
+    const st = res.st; const me = res.winner;
+    const P = contractAboard(st, me, res.c.id);
+    P.rocket.siteId = CHUTE;
+    st.rng.cursor = cursor;
+    // The roll comes at the start of the holder's next turn.
+    const after = endTurns(st, 2);
+    if (!pl(after, me).rocket.stack.length) lost = { r: { state: after }, me, id: res.c.id };
+  }
+  assert(lost, 'no die roll burned the parked stack up in 60 tries');
+  const P = pl(lost.r.state, lost.me);
+  assert(P.contractHand.includes(lost.id) && !(P.hand || []).includes(lost.id), `after the crash: ${JSON.stringify({ ch: P.contractHand, hand: P.hand })}`);
+  assert(!P.contractMeta[lost.id].default, 'an unmanned contract lost with its stack is not a default');
+  return 'a stack burned up on an aerobrake returns its contract to the contract hand';
+});
+
+check('a contract can only be abandoned during Anarchy, never a military one (4B7d)', () => {
+  let res = winContract(m4Game(), 'M4N228F', { by: 'initiator' });
+  let st = res.st; const id = res.c.id; const me = res.winner;
+  let r = op(st, 'ABANDON_CONTRACT', me, { cardId: id });
+  assert(!r.ok && r.error === 'abandon_needs_anarchy', `abandoned outside Anarchy: ${r.error}`);
+  // Away from LEO / a Bernal it stays, even in Anarchy.
+  st.anarchy = true;
+  contractAboard(st, me, id);
+  pl(st, me).rocket.siteId = 'ceres';
+  r = op(st, 'ABANDON_CONTRACT', me, { cardId: id });
+  assert(!r.ok && r.error === 'abandon_at_leo_or_bernal', `abandoned at Ceres: ${r.error}`);
+  // Back at LEO (or in hand) it goes: deck bottom, timepiece home, debt forgiven, chit claimed.
+  pl(st, me).rocket.siteId = null;
+  const before = pl(st, me).aqua;
+  r = op(st, 'ABANDON_CONTRACT', me, { cardId: id });
+  assert(r.ok, `ABANDON at LEO: ${r.error}`);
+  const P = pl(r.state, me);
+  assert(!P.timepiece && !P.contractMeta[id] && !P.rocket.stack.some((s) => s.id === id), 'still held after abandoning');
+  assert(r.state.contractDecks[res.c.pair].slice(-1)[0] === id, 'not at the bottom of its deck');
+  assert(r.state.defaultChit && r.state.defaultChit.profileId === me && P.aqua === before, 'chit / aqua wrong');
+  // Military contracts can't be abandoned.
+  res = winContract(m4Game(), 'M4N241F', { by: 'initiator' });
+  res.st.anarchy = true;
+  r = op(res.st, 'ABANDON_CONTRACT', res.winner, { cardId: res.c.id });
+  assert(!r.ok && r.error === 'military_contract_cannot_abandon', `military abandoned: ${r.error}`);
+  return r.error + '; ' + 'abandoned at LEO during Anarchy with the chit, refused elsewhere';
+});
+
 check('IMPLANT puts a portfolio augmentation on a Colonist at your anchored Bernal (4C4)', () => {
   const { st, P } = augGame();
   const shape = conByCode('M4N242F').faces.primary.cybernetics[0];
@@ -10808,3 +10895,11 @@ check('an Industrialist Colonist implants for free once a turn; promotion needs 
   assert(!r.ok && r.error === 'needs_augmentation', `unaugmented promote: ${r.error}`);
   return `${ind.name} implants free; an unaugmented Colonist cannot promote`;
 });
+
+// The smoke verdict above runs before the checks added below it; this one
+// covers every check in the file.
+if (failures) {
+  console.error(`\nengine checks FAILED (${failures})`);
+  process.exit(1);
+}
+console.log('\nall engine checks passed');

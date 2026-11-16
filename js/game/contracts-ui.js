@@ -152,19 +152,9 @@ function renderPanel() {
       : 'A Fundraise ends by letting you auction one contract.');
   parts.push(`<h4>Contract decks</h4><p class="muted">${auctionNote}</p><div class="m4c-decks">${decks}</div>`);
 
-  // Hand, boosted, fulfilled
-  const hand = (p.contractHand || []).map((id) => {
-    const meta = (p.contractMeta || {})[id] || {};
-    const f = faceOf(p, id);
-    const owed = meta.default ? (f.advance * (meta.boosted ? 1 : 2)) - (meta.paid | 0) : 0;
-    const act = meta.default
-      ? `<div class="m4c-note m4c-late">In default: ${owed} aqua still owed (${meta.paid | 0} paid).</div>
-         ${myTurn ? `<button type="button" data-act="pay" data-id="${id}" data-max="${f.lateFee}">Pay ${f.lateFee} toward the debt</button>` : ''}`
-      : (myTurn ? `<button type="button" data-act="boost" data-id="${id}">Boost to LEO (${f.mass} aqua)</button>` : '')
-        + (myTurn && tp && tp.contractId === id && tp.deadbeat
-          ? `<button type="button" data-act="pay" data-id="${id}" data-max="${f.lateFee}">Pay late fee (${f.lateFee})</button>` : '');
-    return `<div class="m4c-item">${cardThumb(id, meta.side || 'blue')}<div class="m4c-btns">${act}</div></div>`;
-  }).join('');
+  // Contracts in hand live in the Hand area (4B3h: a won contract is a Hand
+  // Card), so the panel only points there; boosted and fulfilled ones are here.
+  const inHand = (p.contractHand || []).length;
   const boosted = Object.keys(p.contractMeta || {}).filter((id) => !(p.contractHand || []).includes(id)).map((id) => {
     const meta = p.contractMeta[id];
     const f = faceOf(p, id);
@@ -175,10 +165,13 @@ function renderPanel() {
     return `<div class="m4c-item">${cardThumb(id, meta.side)}
       <div class="m4c-note">${esc(where)} - step ${meta.progress ? meta.progress.done : 0} of ${f.steps.length}. ${stepLine}</div>
       <div class="m4c-btns">${myTurn ? `<button type="button" data-act="fulfill" data-id="${id}">Fulfill here</button>` : ''}
-      ${myTurn && late ? `<button type="button" data-act="pay" data-id="${id}" data-max="${f.lateFee}">Pay late fee (${f.lateFee})</button>` : ''}</div></div>`;
+      ${myTurn && late ? `<button type="button" data-act="pay" data-id="${id}" data-max="${f.lateFee}">Pay late fee (${f.lateFee})</button>` : ''}
+      ${myTurn && abandonBlock(s, p, id) === null ? `<button type="button" data-act="abandon" data-id="${id}">Abandon (Anarchy)</button>` : ''}</div></div>`;
   }).join('');
   const fulfilled = (p.fulfilledContracts || []).map((x) => `<div class="m4c-item">${cardThumb(x.id, x.side)}</div>`).join('');
-  parts.push(`<h4>In hand</h4><div class="m4c-row">${hand || '<span class="muted">none</span>'}</div>`);
+  parts.push(`<h4>In hand</h4><p class="muted">${inHand
+    ? `${inHand} contract${inHand === 1 ? '' : 's'} in your Hand (the Hand area below the map): boost, pay toward or abandon ${inHand === 1 ? 'it' : 'them'} there.`
+    : 'none'}</p>`);
   parts.push(`<h4>Boosted</h4><div class="m4c-row">${boosted || '<span class="muted">none</span>'}</div>`);
   parts.push(`<h4>Fulfilled</h4><div class="m4c-row">${fulfilled || '<span class="muted">none yet</span>'}</div>`);
   if (s.m2) parts.push(augmentationsHtml(s, p, myTurn));
@@ -250,14 +243,53 @@ async function onAct(b) {
     const remove = a && a.colonistId !== col ? [shape] : [];
     await D.submitTurnOp({ kind: 'IMPLANT', bernal: Number(b.dataset.bernal), remove, implants: [{ colonistId: col, shape, side }] });
   }
-  else if (act === 'pay') {
-    const p = me();
-    const owedTurn = Number(b.dataset.max) - ((p && p.lateFeePaidThisTurn) | 0);
-    if (owedTurn <= 0) { D.toast('You have paid this turn\'s late fee.', 'info'); return; }
-    await D.submitTurnOp({ kind: 'PAY_LATE_FEE', cardId: id, amount: owedTurn });
-  }
+  else if (act === 'pay') await payContractFee(id);
+  else if (act === 'abandon') await abandonContract(id);
   if (act === 'auction' || act === 'discard-auction') closePanel();
   else if (_panelOpen) renderPanel();
+}
+
+// ---- hand-card actions (shared with the Hand area in browse.js) --------------------
+// Why a contract can't be abandoned right now, or null when it can (4B7d: only
+// during Anarchy / War, never a military contract; the game also checks it is in
+// hand, at LEO or at an anchored Bernal).
+export function abandonBlock(s, p, id) {
+  s = s || snap(); p = p || me();
+  if (!s || !s.m4 || !p || !(p.contractMeta || {})[id]) return 'not yours';
+  if (/military/i.test((faceOf(p, id) || {}).contractType || '')) return 'A military contract can never be abandoned.';
+  if (!(s.anarchy || s.war)) return 'A contract can only be abandoned during Anarchy.';
+  return null;
+}
+// Is this contract late (deadbeat timepiece) or in default? Then a fee is due.
+export function contractFeeDue(id) {
+  const p = me();
+  if (!p) return false;
+  const meta = (p.contractMeta || {})[id] || {};
+  const tp = p.timepiece;
+  return !!(meta.default || (tp && tp.contractId === id && tp.deadbeat));
+}
+export async function payContractFee(id) {
+  const p = me();
+  const f = p && faceOf(p, id);
+  if (!f) return;
+  const owedTurn = f.lateFee - ((p.lateFeePaidThisTurn) | 0);
+  if (owedTurn <= 0) { D.toast('You have paid this turn\'s late fee.', 'info'); return; }
+  await D.submitTurnOp({ kind: 'PAY_LATE_FEE', cardId: id, amount: Math.min(owedTurn, p.aqua | 0) || owedTurn });
+}
+export async function abandonContract(id) {
+  const p = me();
+  const why = abandonBlock(null, p, id);
+  if (why) { D.toast(why, 'info'); return; }
+  const meta = (p.contractMeta || {})[id] || {};
+  const f = faceOf(p, id);
+  const ok = await D.confirm({
+    title: '🗑 Abandon contract',
+    body: `Abandon <strong>${esc(f.name)}</strong>? It goes to the bottom of its deck and your timepiece comes home. `
+      + 'You pay no late fee and owe nothing back, but you take the default chit '
+      + `(<strong>${meta.side === 'gold' ? '-6' : '-3'} VP</strong> at game end).`,
+    yes: '🗑 Abandon', no: 'Keep it',
+  });
+  if (ok) await D.submitTurnOp({ kind: 'ABANDON_CONTRACT', cardId: id });
 }
 
 // ---- the auction overlay ----------------------------------------------------------

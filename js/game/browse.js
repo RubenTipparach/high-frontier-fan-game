@@ -121,7 +121,7 @@ import { futureGoalForCard, checkFutureGoal, CENTAUR_SITE_IDS, GREEK_CAMP_IDS, T
 // M2 Colonist powers (FINAO halved etc.) - the same flags the engine reads.
 import { colonistPower } from '../../data/colonist-abilities.js';
 import { openBernalStackModal, openBernalFuelTank } from './bernal-modal.js';
-import { initContractsUi, refreshContractsUi } from './contracts-ui.js';
+import { initContractsUi, refreshContractsUi, abandonBlock, contractFeeDue, payContractFee, abandonContract } from './contracts-ui.js';
 import { getBernalSprite } from './bernal-sprite.js';
 import { fuelTankCylinderMarkup, fuelTransferSectionMarkup } from './fuel-tank-view.js';
 // One client card-lookup: patents PLUS the M2 Bernal cards (which live in
@@ -9478,6 +9478,9 @@ function humanizeOnlineOpError(code, detail) {
     not_late: 'That contract is not late.',
     over_late_fee: `You cannot pay more than the late fee this turn${detail && detail.max != null ? ` (${detail.max} more)` : ''}.`,
     not_your_contract: 'That is not one of your contracts.',
+    abandon_needs_anarchy: 'A contract can only be abandoned during Anarchy.',
+    abandon_at_leo_or_bernal: 'Bring the contract back to LEO or to an anchored Bernal to abandon it (or abandon it from your hand).',
+    military_contract_cannot_abandon: 'A military contract can never be abandoned.',
     needs_beo_colony: 'Implanting needs a BEO Colony: one of your Bernals anchored Dirtside (not your Home Bernal).',
     no_colonist_here: 'No Colonist is aboard that Bernal.',
     colonist_not_here: 'That Colonist is not aboard the Bernal.',
@@ -10442,6 +10445,26 @@ function wireHandStrip() {
       bq.disabled = c.default;
       bq.addEventListener('click', (ev) => { ev.stopPropagation(); if (!c.default) toggleBoostMark(c.id); });
       quick.appendChild(bq);
+      // Late or in default: pay toward the fee / debt (4B5b, 4B5e).
+      if (contractFeeDue(c.id)) {
+        const pq = document.createElement('button');
+        pq.type = 'button'; pq.className = 'hand-q q-pay'; pq.textContent = '💸';
+        pq.title = c.default ? 'Pay toward the debt (up to the late fee this turn)' : 'Pay this turn\'s late fee';
+        pq.addEventListener('click', (ev) => { ev.stopPropagation(); if (isOnlineMyTurn()) payContractFee(c.id); else setStatus('Wait for your turn.'); });
+        quick.appendChild(pq);
+      }
+      // A contract can't be discarded, only abandoned during Anarchy (4B7d).
+      const abandonWhy = abandonBlock(null, null, c.id);
+      const aq = document.createElement('button');
+      aq.type = 'button'; aq.className = 'hand-q q-discard'; aq.textContent = '🗑';
+      aq.title = abandonWhy || 'Abandon (Anarchy): back to its deck, no fees owed, you take the default chit';
+      if (abandonWhy) aq.classList.add('is-blocked');
+      aq.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        if (abandonWhy) { setStatus(abandonWhy); return; }
+        if (isOnlineMyTurn()) abandonContract(c.id); else setStatus('Wait for your turn.');
+      });
+      quick.appendChild(aq);
       wrap.appendChild(quick);
       const viewBtn = document.createElement('button');
       viewBtn.type = 'button'; viewBtn.className = 'hand-view-btn'; viewBtn.textContent = 'View';
@@ -34282,7 +34305,7 @@ const MP_LOG_ICONS = {
   AUCTION_START: '🎯', AUCTION_BID: '💰', AUCTION_PASS: '🚫',
   // M4 contracts (4B): the auction is in years, the timepiece is a clock.
   AUCTION_CONTRACT_START: '📜', AUCTION_CONTRACT_BID: '⏳', AUCTION_CONTRACT_PASS: '🚫', AUCTION_CONTRACT_CLOSE: '⏱',
-  FULFILL_CONTRACT: '🏁', PAY_LATE_FEE: '⏰', IMPLANT: '🦾',
+  FULFILL_CONTRACT: '🏁', PAY_LATE_FEE: '⏰', IMPLANT: '🦾', ABANDON_CONTRACT: '🗑',
   AUCTION_RESET: '↺', AUCTION_SELL: '✅',
   PICK_CREW: '🧑‍🚀', SET_SPECIES: '\u{1F9DC}', SET_FIRST_PLAYER: '🥇', FREE_CUBE: '🧊',
   END_TURN: '⏭', MOVE: '🛸', BURN: '🔥',
@@ -35207,4 +35230,5 @@ initContractsUi({
   submitTurnOp: (op) => submitOnlineOp(op),
   submitAuctionOp: (op) => submitMpAuctionOp(op),
   toast: (msg, level) => { if (_onlineToast) _onlineToast(msg, level); },
+  confirm: (opts) => confirmModal(opts),
 });

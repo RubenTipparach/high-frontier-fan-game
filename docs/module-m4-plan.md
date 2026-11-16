@@ -89,7 +89,19 @@ late fee + default):
   `getHandSlots()` (hand limit, Free Market, ET Produce) and reads through
   `hand.js#getContractHandSlots()`, since it ignores the academia hand limit,
   pad explosions and budget cuts (4B2a,c). A default contract lies sideways in
-  the hand (4B4d) and can't be boost-marked.
+  the hand (4B4d) and can't be boost-marked. The Contracts panel no longer
+  lists in-hand contracts; their actions (boost, pay, abandon) sit on the card
+  in the Hand area.
+- 4B6a everywhere a contract leaves a stack involuntarily or by Decommission:
+  the DECOMMISSION op, a destroyed rocket (hazard, parked aerobrake), a lost
+  Freighter all route through `decommissionSlotTo`, so the contract returns to
+  the contract hand (unmanned: upright, boostable again; manned: default).
+- Discarding (user ruling 2026-11-16: "contract cannot be discarded unless in
+  anarchy"): the only discard is 4B7d Abandonment, `ABANDON_CONTRACT`, legal
+  only during Anarchy / War and never for a military contract. It works on a
+  contract in hand, at LEO, or at any player's anchored Bernal: Discard to the
+  deck bottom, timepiece home, no late fee or repayment, claim the default
+  chit. (Reading: the hand counts as "at LEO" since your Bank is in LEO, 4A7a.)
 
 STILL TO DO in Stage 1: the contract ABILITIES (tophat free hazard, Hazard /
 Aerobrake Ignore, Shielded, Insight, Secured, Bailout, Connections deck choice,

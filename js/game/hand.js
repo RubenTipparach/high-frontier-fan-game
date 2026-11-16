@@ -105,7 +105,7 @@ let _contracts = [];
 export function hydrateHand(ids = [], contracts = []) {
   const next = Array.isArray(ids) ? [...ids] : [];
   const nextC = Array.isArray(contracts) ? contracts.filter((c) => c && c.id)
-    .map((c) => ({ id: c.id, side: c.side || 'blue', default: !!c.default })) : [];
+    .map((c) => ({ id: c.id, side: c.side || 'blue', default: !!c.default, late: !!c.late, anarchy: !!c.anarchy })) : [];
   const handChanged = next.length !== _hand.length
     || next.some((id, i) => id !== _hand[i])
     || JSON.stringify(nextC) !== JSON.stringify(_contracts);

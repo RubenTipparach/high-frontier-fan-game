@@ -3937,6 +3937,8 @@ function loseFreighter(state, player) {
     // back (see decommissionSlotTo). Pushing its `fuel_N` id into the hand was
     // how a phantom card got there and blocked the owner out of auctions.
     if (isFuelCardSlot(s)) { fuelLost += Math.max(0, Math.floor(Number(s.amount) || 0)); continue; }
+    // M4 (4B6a): a contract aboard goes back to the contract hand.
+    if (state.m4 && CONTRACTS_BY_ID[s.id]) { decommissionSlotTo(state, player, s); returned.push(CONTRACTS_BY_ID[s.id].name); continue; }
     player.hand.push(s.id);
     returned.push((PATENTS_BY_ID[s.id] && PATENTS_BY_ID[s.id].name) || s.id);
   }
@@ -9381,7 +9383,10 @@ function applyDecommission(state, op, player) {
       continue;
     }
     src.splice(idx, 1);
-    player.hand.push(id);
+    // M4 (4B6a): a contract goes back to the contract hand, not the patent hand
+    // (unmanned: a second chance to boost; manned: default, sideways).
+    if (state.m4 && CONTRACTS_BY_ID[id]) decommissionSlotTo(state, player, slot);
+    else player.hand.push(id);
     if (player.rocket.activeThrusterId === id) player.rocket.activeThrusterId = null;
     if (player.rocket.activeProspectorId === id) player.rocket.activeProspectorId = null;
     returned++;
@@ -13050,6 +13055,7 @@ function applyEpicHazard(state, op, player) {
 const FUNCTIONAL = {
   INCOME: applyIncome,
   FULFILL_CONTRACT: applyFulfillContract,
+  ABANDON_CONTRACT: applyAbandonContract,
   IMPLANT: applyImplant,
   PAY_LATE_FEE: applyPayLateFee,
   FUNDRAISE: applyFundraise,
@@ -13226,6 +13232,7 @@ function pickPayload(op) {
     case 'SET_WIRING': return { wiring: op.wiring, ...(op.stackId ? { stackId: op.stackId } : {}) };
     case 'SET_CARD_GROUPS': return { groups: op.groups };
     case 'FULFILL_CONTRACT': return { cardId: op.cardId };
+    case 'ABANDON_CONTRACT': return { cardId: op.cardId };
     case 'IMPLANT': return { bernal: op.bernal, implants: op.implants, remove: op.remove };
     case 'PAY_LATE_FEE': return { cardId: op.cardId, amount: op.amount };
     case 'CLEAR_ROUTE': return op.unit ? { unit: op.unit } : {};
@@ -15824,6 +15831,46 @@ function applyPayLateFee(state, op, player) {
   meta.paid += amount;
   let log = `${player.name} paid ${amount} aqua toward ${face.name} (${meta.paid} of ${contractDebt(player, cardId)} paid).`;
   log += maybeRepayDebt(state, player, cardId);
+  return { ok: true, state, log };
+}
+
+// ABANDON_CONTRACT (4B7d): a contract can only be Discarded during Anarchy (or
+// War) - user ruling 2026-11-16, "contract cannot be discarded unless in
+// anarchy". A non-military contract in your hand, or carried to LEO or to any
+// player's anchored Bernal, is Discarded to the bottom of its deck WITHOUT
+// paying late fees or the advance back; the timepiece comes home and you take
+// the default chit. A free action, like any discard (G6).
+function applyAbandonContract(state, op, player) {
+  if (!state.m4) return fail('not_m4');
+  if (!(state.anarchy || state.war)) return fail('abandon_needs_anarchy');
+  const cardId = String(op.cardId || '');
+  const meta = contractMetaOf(player, cardId);
+  const face = contractFaceOf(player, cardId);
+  if (!meta || !face) return fail('not_your_contract');
+  if (/military/i.test(face.contractType || '')) return fail('military_contract_cannot_abandon');
+  const anchoredBernalAt = (siteId) => siteId != null && state.players.some((pl) =>
+    (pl.bernals || []).some((bn) => bn && bn.anchored && bn.siteId === siteId));
+  let where = null;
+  if ((player.contractHand || []).includes(cardId)) where = 'from the hand';
+  else {
+    const loc = findContractSlot(state, player, cardId);
+    if (loc && loc.where.atLeo) where = 'at LEO';
+    else if (loc && loc.label === 'rocket' && anchoredBernalAt(player.rocket.siteId)) where = 'at an anchored Bernal';
+    else {
+      for (const bn of (player.bernals || [])) {
+        const i = bn && bn.anchored ? (bn.stack || []).findIndex((sl) => sl.id === cardId) : -1;
+        if (i >= 0) { bn.stack.splice(i, 1); where = 'at an anchored Bernal'; break; }
+      }
+    }
+  }
+  if (!where) return fail('abandon_at_leo_or_bernal');
+  const owed = Math.max(0, contractDebt(player, cardId) - (meta.paid | 0));
+  claimDefaultChit(state, player, cardId);
+  discardContractToDeck(state, player, cardId);
+  if (player.rocket && player.rocket.stack) recallIfEmpty(player);
+  const log = `${player.name} abandoned the ${face.name} contract ${where} during ${state.war ? 'War' : 'Anarchy'}`
+    + `: it goes to the bottom of its deck${owed ? ` (${owed} aqua of debt forgiven)` : ''}, the timepiece comes home,`
+    + ` and ${player.name} takes the default chit (${state.defaultChit.side === 'gold' ? '-6' : '-3'} VP).`;
   return { ok: true, state, log };
 }
 

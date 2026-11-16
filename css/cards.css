@@ -1899,3 +1899,4 @@
    dropped so it lies along the bottom of the 280px slot (270 wide, 169 tall). */
 .hand-slot.is-contract.is-default .card.m4-contract { transform: translate(0, 280px) rotate(-90deg) scale(0.77); }
 .hand-slot.is-contract.is-default { width: 270px; }
+.hand-slot .hand-q.is-blocked { opacity: .4; }

@@ -115,7 +115,12 @@ export function hydrateFromSnapshot(snapshot, myId, maps) {
   // M4: contracts are Hand cards too (4B3h), on the side they were won on.
   const cMeta = (me && me.contractMeta) || {};
   hydrateHand((me && me.hand) || [], (snapshot.m4 && me && Array.isArray(me.contractHand))
-    ? me.contractHand.map((id) => ({ id, side: (cMeta[id] && cMeta[id].side) || 'blue', default: !!(cMeta[id] && cMeta[id].default) }))
+    ? me.contractHand.map((id) => ({
+      id, side: (cMeta[id] && cMeta[id].side) || 'blue', default: !!(cMeta[id] && cMeta[id].default),
+      // Carried so the hand repaints when a fee falls due or Anarchy starts / ends.
+      late: !!(me.timepiece && me.timepiece.contractId === id && me.timepiece.deadbeat),
+      anarchy: !!(snapshot.anarchy || snapshot.war),
+    }))
     : []);
 
   // Outposts are keyed by letter; translate the site each one sits on.
