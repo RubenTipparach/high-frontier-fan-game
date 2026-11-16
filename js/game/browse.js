@@ -27,7 +27,7 @@ import {
 } from './solo.js';
 import { PATENTS, PATENTS_BY_ID as _PATENTS_BY_ID, PATENT_TYPES, patentsByType, radiatorRadHardness, isExpansionType } from '../../data/patents.js';
 import {
-  getHandSlots, isInHand, addToHand, removeFromHandAt, removeFromHand,
+  getHandSlots, getContractHandSlots, isInHand, addToHand, removeFromHandAt, removeFromHand,
   clearHand, onHandChange,
   isBoostMarked, getBoostMarked, toggleBoostMark, clearBoostMarks,
   setBoostScope,
@@ -121,6 +121,7 @@ import { futureGoalForCard, checkFutureGoal, CENTAUR_SITE_IDS, GREEK_CAMP_IDS, T
 // M2 Colonist powers (FINAO halved etc.) - the same flags the engine reads.
 import { colonistPower } from '../../data/colonist-abilities.js';
 import { openBernalStackModal, openBernalFuelTank } from './bernal-modal.js';
+import { initContractsUi, refreshContractsUi, abandonBlock, contractFeeDue, payContractFee, abandonContract } from './contracts-ui.js';
 import { getBernalSprite } from './bernal-sprite.js';
 import { fuelTankCylinderMarkup, fuelTransferSectionMarkup } from './fuel-tank-view.js';
 // One client card-lookup: patents PLUS the M2 Bernal cards (which live in
@@ -128,7 +129,9 @@ import { fuelTankCylinderMarkup, fuelTransferSectionMarkup } from './fuel-tank-v
 // so every PATENTS_BY_ID[id] read (cardById, the library grab, auction lots,
 // hand/stack rendering, the Bernal modal) resolves a boosted/auctioned Bernal.
 // Keyed reads only; Bernals only surface in m2 games, so nothing else changes.
-const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...BERNALS_BY_ID, ...COLONISTS_BY_ID };
+// M4 contract cards are stack slots too (only ever present in an m4 game).
+import { CONTRACTS_BY_ID } from '../../data/contracts.js';
+const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...BERNALS_BY_ID, ...COLONISTS_BY_ID, ...CONTRACTS_BY_ID };
 import { renderAssemblyPanel, renderAssemblyLaws } from './assembly.js';
 import { uiIcon, cardPileBadge } from './ui-icons.js';
 import { SITE_TAGS, normaliseTag, tagDisplay } from '../../data/site-tags.js';
@@ -247,7 +250,7 @@ import {
 // Multiplayer glue (the sandbox map, driven from a server game). These
 // are inert until mountBrowse({ online:true }) flips _online on; the
 // solo path never touches them.
-import { setOnline, isOnline, setM1, isM1, setM2, isM2, setSirens, isSirens, setFutures, isFutures,
+import { setOnline, isOnline, setM1, isM1, setM2, isM2, setM4, setSirens, isSirens, setFutures, isFutures,
   setHermes, isHermes, setAltruism, setMySpecies, mySpecies, homeLabel, homeSiteId, isMySiren } from './online-mode.js';
 import {
   buildIdMaps, hydrateFromSnapshot, toServerId, toPlannerId,
@@ -887,6 +890,7 @@ function applySnapshot(snapshot, seq) {
   // server does while the stack hydrates. Mirrors the MARKET_MODE pin below.
   setM1(!!snapshot.m1);
   setM2(!!snapshot.m2);
+  setM4(!!snapshot.m4);
   setSirens(!!snapshot.sirens);
   setHermes(!!snapshot.hermes);
   setAltruism(!!snapshot.altruism);
@@ -1098,6 +1102,8 @@ function applySnapshot(snapshot, seq) {
   }
   // Competitive auction overlay is wired separately (see the TODO hook).
   renderOnlineAuction(snapshot.auction);
+  // M4: the Contracts tag / panel and the contract auction overlay.
+  refreshContractsUi();
   // Guided tutorial: when the acquire (second) auction closes with the won part
   // now in hand, drop the Card Market pane so the player lands on the board +
   // hand to boost it (on mobile the pane covers the boost button). Tutorial
@@ -2513,6 +2519,9 @@ function maybeCloseTutorialMarket(prev, snap) {
 // off state.auction in the snapshot: appears when a lot opens, refreshes
 // on every update, clears when it resolves. Render is idempotent.
 function renderOnlineAuction(auction) {
+  // A contract lot (M4) has its own overlay (contracts-ui.js); this one is the
+  // patent auction only.
+  if (auction && auction.kind === 'contract') auction = null;
   const existing = document.getElementById('mp-auction-overlay');
   if (!auction || !_online || !gameViewVisible()) {
     if (existing) existing.remove();
@@ -9445,6 +9454,44 @@ function lunaFirstPlayerId() {
 // Op-error code -> human message for server rejections surfaced in the
 // online sandbox.
 function humanizeOnlineOpError(code, detail) {
+  // M4 contracts (4B): every refusal the contract ops can return, in table terms.
+  const M4_ERRORS = {
+    fundraise_first: 'A contract auction is the last step of a Fundraise: fundraise first.',
+    contract_auction_done: 'You already held this turn\'s contract auction.',
+    timepiece_in_use: 'Your timepiece is already on the Sunspot Cycle: fulfill or repay that contract first.',
+    contract_auction_prohibited: 'No contract auctions during War or Anarchy.',
+    deck_not_open: 'That deck shares no ideology with an Active Law.',
+    default_stigma: 'The default chit bars you from bidding on manned contracts.',
+    bid_too_high: `You must bid the same as or lower than the low bid${detail && detail.low != null ? ` (${detail.low} years)` : ''}.`,
+    bidders_pending: 'Not everyone has bid or passed yet.',
+    pick_winner: 'The bids are tied: name the winner.',
+    contract_in_default: 'That contract is in default: it can only be paid off now.',
+    contract_not_boosted: 'Boost the contract first: it has to ride a stack to its destination.',
+    not_at_destination: 'The stack carrying this contract is not at its destination.',
+    not_at_a_site: 'The stack carrying this contract is not on a site.',
+    destination_conditions: 'This site does not meet the contract\'s destination conditions.',
+    not_entered_this_turn: 'The stack has to ENTER that space this turn.',
+    not_enough_flybys: `Not enough different flyby spaces entered this turn${detail ? ` (${detail.have} of ${detail.need})` : ''}.`,
+    not_lifted_off: 'Lift off from that site first.',
+    not_returned: 'Bring the contract back to LEO to finish it.',
+    destination_not_yet_supported: `This destination step is not playable yet${detail && detail.step ? `: ${detail.step}` : ''}.`,
+    not_late: 'That contract is not late.',
+    over_late_fee: `You cannot pay more than the late fee this turn${detail && detail.max != null ? ` (${detail.max} more)` : ''}.`,
+    not_your_contract: 'That is not one of your contracts.',
+    abandon_needs_anarchy: 'A contract can only be abandoned during Anarchy.',
+    abandon_at_leo_or_bernal: 'Bring the contract back to LEO or to an anchored Bernal to abandon it (or abandon it from your hand).',
+    military_contract_cannot_abandon: 'A military contract can never be abandoned.',
+    needs_beo_colony: 'Implanting needs a BEO Colony: one of your Bernals anchored Dirtside (not your Home Bernal).',
+    no_colonist_here: 'No Colonist is aboard that Bernal.',
+    colonist_not_here: 'That Colonist is not aboard the Bernal.',
+    not_in_portfolio: `None of your fulfilled contracts shows that cybernetics icon${detail && detail.shape ? ` (${detail.shape})` : ''}.`,
+    chit_in_use: 'You only have one chit of that shape, and it is implanted elsewhere: juggle it off a Colonist aboard first.',
+    chit_not_colocated: 'That chit is on a Colonist who is not aboard this Bernal.',
+    parenthood_not_yet: 'The heart\'s Parenthood side is not playable yet: implant its other side.',
+    needs_augmentation: 'This Colonist needs at least one augmentation to Promote.',
+    nothing_to_implant: 'Choose an augmentation to implant.',
+  };
+  if (M4_ERRORS[code]) return M4_ERRORS[code];
   // Anchor refusals carry what the engine SEES (the station's recorded space,
   // the factories in its Dirtside reach, and who claims them), so the message
   // can name the real blocker instead of a generic "needs a factory".
@@ -10272,9 +10319,11 @@ function wireHandStrip() {
 
   const repaintHand = () => {
     const slots = getHandSlots();
+    const contracts = getContractHandSlots();
     host.innerHTML = '';
     if (countEl) countEl.textContent =
-      `${slots.length} card${slots.length === 1 ? '' : 's'}`;
+      `${slots.length} card${slots.length === 1 ? '' : 's'}`
+      + (contracts.length ? ` + ${contracts.length} contract${contracts.length === 1 ? '' : 's'}` : '');
     slots.forEach((id, idx) => {
       const card = lookup(id);
       if (!card) return;
@@ -10367,6 +10416,76 @@ function wireHandStrip() {
           if (!wasSelected) wrap.classList.add('is-selected');
         } else {
           openCardModal(card, kindOf(id), idx, { nav: { siblings: stackSiblings(slots), index: idx } });
+        }
+      });
+      host.appendChild(wrap);
+    });
+    // M4 contracts are Hand cards (4B3h), drawn after the patents on the side
+    // they were won on. They don't count toward the academia hand limit, so the
+    // count reads "N cards + M contracts". A default contract lies sideways in
+    // the hand (4B4d) and can never be boosted again.
+    contracts.forEach((c) => {
+      const card = lookup(c.id);
+      if (!card) return;
+      const face = c.side === 'gold' ? 'secondary' : 'primary';
+      const wrap = document.createElement('div');
+      wrap.className = 'hand-slot is-contract' + (c.default ? ' is-default' : '');
+      if (isBoostMarked(c.id)) wrap.classList.add('is-boost-marked');
+      wrap.appendChild(renderCard(card, { face }));
+      const sideName = c.side === 'gold' ? 'gold' : (card.exodus ? 'exodus' : 'blue');
+      wrap.title = c.default
+        ? `${card.name}: in default. It can never be fulfilled; pay off its advance to discard it.`
+        : `${card.name} (${sideName} side). Contracts don't count toward your hand limit.`;
+      const quick = document.createElement('div');
+      quick.className = 'hand-quick-actions';
+      const boostTip = c.default ? 'A contract in default can never be boosted again'
+        : (isBoostMarked(c.id) ? 'Unmark boost' : 'Mark for boost');
+      const bq = document.createElement('button');
+      bq.type = 'button'; bq.className = 'hand-q q-boost'; bq.textContent = '🚀'; bq.title = boostTip;
+      bq.disabled = c.default;
+      bq.addEventListener('click', (ev) => { ev.stopPropagation(); if (!c.default) toggleBoostMark(c.id); });
+      quick.appendChild(bq);
+      // Late or in default: pay toward the fee / debt (4B5b, 4B5e).
+      if (contractFeeDue(c.id)) {
+        const pq = document.createElement('button');
+        pq.type = 'button'; pq.className = 'hand-q q-pay'; pq.textContent = '💸';
+        pq.title = c.default ? 'Pay toward the debt (up to the late fee this turn)' : 'Pay this turn\'s late fee';
+        pq.addEventListener('click', (ev) => { ev.stopPropagation(); if (isOnlineMyTurn()) payContractFee(c.id); else setStatus('Wait for your turn.'); });
+        quick.appendChild(pq);
+      }
+      // A contract can't be discarded, only abandoned during Anarchy (4B7d).
+      const abandonWhy = abandonBlock(null, null, c.id);
+      const aq = document.createElement('button');
+      aq.type = 'button'; aq.className = 'hand-q q-discard'; aq.textContent = '🗑';
+      aq.title = abandonWhy || 'Abandon (Anarchy): back to its deck, no fees owed, you take the default chit';
+      if (abandonWhy) aq.classList.add('is-blocked');
+      aq.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        if (abandonWhy) { setStatus(abandonWhy); return; }
+        if (isOnlineMyTurn()) abandonContract(c.id); else setStatus('Wait for your turn.');
+      });
+      quick.appendChild(aq);
+      wrap.appendChild(quick);
+      const viewBtn = document.createElement('button');
+      viewBtn.type = 'button'; viewBtn.className = 'hand-view-btn'; viewBtn.textContent = 'View';
+      viewBtn.addEventListener('click', (ev) => { ev.stopPropagation(); openCardModal(card, 'patent', -1, { face, readOnly: true }); });
+      wrap.appendChild(viewBtn);
+      if (!c.default) {
+        const boostBtn = document.createElement('button');
+        boostBtn.type = 'button'; boostBtn.className = 'hand-boost-btn';
+        boostBtn.textContent = isBoostMarked(c.id) ? 'Unmark' : 'Boost';
+        boostBtn.title = boostTip;
+        boostBtn.addEventListener('click', (ev) => { ev.stopPropagation(); toggleBoostMark(c.id); });
+        wrap.appendChild(boostBtn);
+      }
+      wrap.addEventListener('click', (ev) => {
+        if (ev.target.closest('.hand-q, .hand-view-btn, .hand-boost-btn')) return;
+        if (isTouchDevice()) {
+          const wasSelected = wrap.classList.contains('is-selected');
+          host.querySelectorAll('.hand-slot.is-selected').forEach((s) => s.classList.remove('is-selected'));
+          if (!wasSelected) wrap.classList.add('is-selected');
+        } else {
+          openCardModal(card, 'patent', -1, { face, readOnly: true });
         }
       });
       host.appendChild(wrap);
@@ -22607,6 +22726,12 @@ function confirmModal({ title, body, yes = 'OK', no = 'Cancel' }) {
 // side changes its mass (light = the base, heavy is heavier), so the side is
 // passed through. Mirror of the server's boostMass in engine.js.
 function boostMassOf(card, radSide) {
+  // M4: a contract weighs what its side says (the gold side can differ).
+  if (card && card.type === 'contract') {
+    const held = getContractHandSlots().find((c) => c.id === card.id);
+    const f = card.faces && card.faces[held && held.side === 'gold' ? 'secondary' : 'primary'];
+    return ((f && f.mass) != null ? f.mass : card.mass) | 0;
+  }
   if (card && card.type === 'radiator') {
     const f = card.faces && card.faces.primary;
     const side = radSide === 'light' ? 'light' : 'heavy';
@@ -34178,6 +34303,9 @@ function paintMissionLog() {
 // falls back to a bare '·', so add new ops here when you add them.
 const MP_LOG_ICONS = {
   AUCTION_START: '🎯', AUCTION_BID: '💰', AUCTION_PASS: '🚫',
+  // M4 contracts (4B): the auction is in years, the timepiece is a clock.
+  AUCTION_CONTRACT_START: '📜', AUCTION_CONTRACT_BID: '⏳', AUCTION_CONTRACT_PASS: '🚫', AUCTION_CONTRACT_CLOSE: '⏱',
+  FULFILL_CONTRACT: '🏁', PAY_LATE_FEE: '⏰', IMPLANT: '🦾', ABANDON_CONTRACT: '🗑',
   AUCTION_RESET: '↺', AUCTION_SELL: '✅',
   PICK_CREW: '🧑‍🚀', SET_SPECIES: '\u{1F9DC}', SET_FIRST_PLAYER: '🥇', FREE_CUBE: '🧊',
   END_TURN: '⏭', MOVE: '🛸', BURN: '🔥',
@@ -35091,3 +35219,16 @@ export const STATS = {
   patentCount: PATENTS.length,
   milestoneCount: MILESTONES.length,
 };
+
+// M4 contracts UI (contracts-ui.js): reads the cached snapshot, routes on-turn
+// actions through submitOnlineOp and auction bids (any seat) through the
+// auction submitter, exactly like the patent auction.
+initContractsUi({
+  snapshot: () => _onlineSnapshot,
+  me: () => mySnapshotPlayer(),
+  myTurn: () => isOnlineMyTurn(),
+  submitTurnOp: (op) => submitOnlineOp(op),
+  submitAuctionOp: (op) => submitMpAuctionOp(op),
+  toast: (msg, level) => { if (_onlineToast) _onlineToast(msg, level); },
+  confirm: (opts) => confirmModal(opts),
+});

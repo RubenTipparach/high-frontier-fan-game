@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>M4 Card Mockup</title>
+<link rel="stylesheet" href="../../../css/style.css">
+<link rel="stylesheet" href="../../../css/cards.css">
+<link rel="stylesheet" href="./m4.css">
+</head>
+<body class="m4-mock">
+<header class="m4-head">
+  <h1>Module 4 (Exodus) cards - mockup</h1>
+  <p>Data from <code>reference/HF4-card-data.xlsx</code> (Contracts, Exodus Contracts, Spaceborn Colonists tabs) via
+  <code>data/card-data.js</code>. Glyphs in <code>glyphs.js</code> are new and await sign-off; hover any icon for its tooltip.
+  Contract art is rendered in Blender (<code>scripts/card-art/blender/render_contracts.py</code>), not the printed illustration.</p>
+  <nav id="nav"></nav>
+</header>
+<section id="legend" class="m4-section"><h2>Glyphs</h2><div class="m4-legend" id="legend-row"></div></section>
+<main id="out"></main>
+<div id="tip" class="m4-tip" hidden></div>
+<script type="module">
+import { CARD_DATA } from '../../../data/card-data.js';
+import { buildPatent } from '../../../data/patents.js';
+import { renderCard } from '../../../js/game/card-ui.js';
+import { renderContractFace } from '../../../js/game/contract-card.js';
+import * as G from '../../../js/game/contract-glyphs.js';
+
+const out = document.getElementById('out');
+const nav = document.getElementById('nav');
+const params = new URLSearchParams(location.search);
+const only = params.get('only');            // deck filter for screenshots: IF | HU | EA | exodus | colonists
+const limit = Number(params.get('limit') || 0);
+
+// Legend: every new glyph once, with its tooltip text shown underneath.
+const legend = document.getElementById('legend-row');
+const legendItems = [
+  ['Ideology pair I/F', G.ideologyPairHex('IF')], ['Ideology pair H/U', G.ideologyPairHex('HU')], ['Ideology pair E/A', G.ideologyPairHex('EA')],
+  ['Top hat', G.tophatGlyph({ size: 30 })], ['Mask', G.maskGlyph({ size: 30 })],
+  ...Object.keys(G.AUGMENTS).map((k) => [`${G.AUGMENTS[k].name}`, G.augmentGlyph(k, { size: 30 })]),
+  ['Late fee', G.lateFeeBadge(3, { size: 32 })], ['Advance', G.advanceBadge(12, { size: 30 })],
+  ['VP', G.vpBadge(4, { size: 32 })], ['Manned', G.mannedGlyph({ size: 30 })],
+  ['Spaceborn', G.spacebornGlyph({ size: 30 })],
+];
+for (const [label, svg] of legendItems) {
+  const d = document.createElement('div'); d.className = 'm4-legend-item';
+  d.innerHTML = `<div class="m4-legend-icon m4-dark">${svg}</div><div class="m4-legend-label">${label}</div>`;
+  legend.appendChild(d);
+}
+
+function section(id, title, blurb) {
+  const s = document.createElement('section'); s.className = 'm4-section'; s.id = id;
+  s.innerHTML = `<h2>${title}</h2>${blurb ? `<p class="m4-blurb">${blurb}</p>` : ''}<div class="m4-grid"></div>`;
+  out.appendChild(s);
+  const a = document.createElement('a'); a.href = `#${id}`; a.textContent = title; nav.appendChild(a);
+  return s.querySelector('.m4-grid');
+}
+// With a reference folder (M4_REF_BASE, the review artifact only: the scans are
+// the publisher's art and are not in the repo) each new face sits beside the
+// printed original it was drawn from.
+const REF = globalThis.M4_REF_BASE || params.get('ref');
+function original(code) {
+  if (!REF || !code) return null;
+  const fig = document.createElement('figure'); fig.className = 'm4-orig';
+  fig.innerHTML = `<img src="${REF}${code}.webp" alt="" loading="lazy"><figcaption>Original</figcaption>`;
+  return fig;
+}
+function sideBySide(wrap, pairs) {
+  for (const [code, el] of pairs) { const o = original(code); if (o) wrap.append(o); wrap.append(el); }
+  if (REF) wrap.classList.add('with-orig');
+}
+function pairOf(card) {
+  const wrap = document.createElement('div'); wrap.className = 'm4-pair';
+  sideBySide(wrap, [[card.tier1.Code, renderContractFace(card.tier1)], [card.tier2.Code, renderContractFace(card.tier2)]]);
+  return wrap;
+}
+
+const decks = [
+  ['IF', 'Individuality / Freedom deck', 'Tourists, Trillionaire and their Avatar contracts.'],
+  ['HU', 'Honor / Unity deck', 'Science Mission, Megaproject and Robotic Research contracts.'],
+  ['EA', 'Equality / Authority deck', 'Military, Government Grant and Avatar contracts.'],
+];
+for (const [pair, title, blurb] of decks) {
+  if (only && only !== pair) continue;
+  const grid = section(`deck-${pair}`, title, `${blurb} Each card: blue side, then its gold side.`);
+  let cards = CARD_DATA.Contracts.filter((c) => c.tier1['Ideology Pair'] === pair);
+  if (limit) cards = cards.slice(0, limit);
+  for (const c of cards) grid.appendChild(pairOf(c));
+}
+if (!only || only === 'exodus') {
+  const grid = section('exodus', 'Project Exodus contracts', 'Locked under the isobank token until it is founded (Stage 3).');
+  let cards = CARD_DATA['Exodus Contracts']; if (limit) cards = cards.slice(0, limit);
+  for (const c of cards) grid.appendChild(pairOf(c));
+}
+if (!only || only === 'colonists') {
+  const grid = section('colonists', 'Spaceborn and Robot colonists', 'Rendered by the game\'s own colonist card code: white front, purple promoted back.');
+  let rows = CARD_DATA['Spaceborn Colonists']; if (limit) rows = rows.slice(0, limit);
+  for (const row of rows) {
+    const c = buildPatent('Colonists', row);
+    c.specialty = row.Specialty; c.colonistKind = row.Type;
+    c.spectralType = row['Spectral Type'] && row['Spectral Type'] !== 'n/a' ? row['Spectral Type'] : null;
+    const wrap = document.createElement('div'); wrap.className = 'm4-pair';
+    const faces = [renderCard(c, { face: 'primary' }), renderCard(c, { face: 'secondary' })];
+    if (row.tier1.Spaceborn) {
+      for (const el of faces) {
+        el.querySelectorAll('.card-face').forEach((f) => {
+          const host = f.querySelector('.card-thrust') || f.querySelector('.card-spectral');
+          if (!host) return;
+          host.classList.add('m4-sb-host');
+          host.insertAdjacentHTML('beforeend', G.spacebornGlyph());
+        });
+      }
+    }
+    sideBySide(wrap, [[row.tier1.Code, faces[0]], [row.tier2.Code, faces[1]]]);
+    grid.appendChild(wrap);
+  }
+}
+
+// Minimal tooltip so the mockup works standalone (the game has its own).
+const tip = document.getElementById('tip');
+document.addEventListener('mouseover', (e) => {
+  const t = e.target.closest('[data-tip]');
+  if (!t) { tip.hidden = true; return; }
+  tip.textContent = t.getAttribute('data-tip'); tip.hidden = false;
+  const r = t.getBoundingClientRect();
+  tip.style.left = `${Math.min(window.innerWidth - 300, r.left)}px`; tip.style.top = `${r.bottom + window.scrollY + 6}px`;
+});
+window.__ready = true;
+</script>
+</body></html>

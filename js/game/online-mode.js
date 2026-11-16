@@ -23,6 +23,13 @@ let _m2 = false;
 export function isM2() { return _m2; }
 export function setM2(on) { _m2 = !!on; }
 
+// Shared flag: is M4 (Exodus) active in the current online game? Mirrors the
+// server's state.m4 (an admin-only preview, docs/module-m4-plan.md) so client
+// modules can gate M4 affordances the same way the engine does.
+let _m4 = false;
+export function isM4() { return _m4; }
+export function setM4(on) { _m4 = !!on; }
+
 // Shared flag: is SIRENS mode (V9) active in the current online game? Players
 // are Sirenian factions homed at Cordelia rather than LEO. Mirrors the server's
 // state.sirens so client affordances gate exactly the way the engine does.

@@ -26,11 +26,12 @@ import { isAerobrakeNode, lineOfSightSites, zoneOfSlug, hazardKind, nodeBySlug a
   neighborSlugs as plannerNeighborSlugs, allSiteSlugs as plannerAllSiteSlugs } from '../server/game/planner-graph.js';
 import { BUGGY_ROAD_GROUPS } from '../data/buggy-roam.js';
 import { CREW, CREW_BY_ID } from '../data/crew.js';
-import { COLONISTS_BY_ID } from '../data/colonists.js';
+import { COLONISTS_BY_ID, COLONISTS } from '../data/colonists.js';
 import { PATENTS, PATENTS_BY_ID } from '../data/patents.js';
 import { AD_ASTRA_EXIT_SLUGS, isAdAstraExit, sunlensAt } from '../data/ad-astra.js';
 import { diffState, applyPatch, sameState } from '../server/game/state-diff.js';
 import { scorePlayer } from '../data/endgame-scoring.js';
+import { CONTRACTS, CONTRACT_PAIRS } from '../data/contracts.js';
 import { siteBySlug, nodeSizeNumber, isLanderBurnNode, isAerobrakeLandableSite, neighborSlugs, siteHasLanderBurn, allSiteSlugs, leoSlug } from '../server/game/planner-graph.js';
 import { adjacentSites, SITES } from '../data/sites.js';
 import { isAtmosphericSite } from '../data/site-categories.js';
@@ -10479,3 +10480,426 @@ check('a strong rocket takes a safe factory-assist liftoff to skip the first-spa
   assert(theirs.spent === probe.spent, `an opponent's Factory should not be borrowed for it, spent ${theirs.spent}: ${theirs.log}`);
   return `${strong.id}: no factory ${probe.spent} aqua; own factory ${plain.spent}; + Powersat ${ps.spent}; opponent's factory ${theirs.spent}`;
 });
+
+// Module 4 (Exodus) preview gate (docs/module-m4-plan.md): M4 requires M0
+// (4A1a), so it turns the Assembly on; it does not combine with a variant yet
+// (CEO Solitaire's own M4 rules are not wired), so a variant game drops it; and
+// a room without it carries m4 false.
+check('M4 turns on M0 and stays out of variant games', () => {
+  const mk = (opts) => createInitialState({ players: [{ profileId: 1, name: 'A', seat: 1 }, { profileId: 2, name: 'B', seat: 2 }], seed: 7, ...opts });
+  const on = mk({ m4: true });
+  assert(on.m4 === true && on.m0 === true && on.assembly, `M4 game: m4=${on.m4} m0=${on.m0}`);
+  const off = mk({});
+  assert(off.m4 === false, `plain game m4=${off.m4}`);
+  for (const v of ['ceoSolo', 'hermes', 'altruism', 'tutorial']) {
+    const g = mk({ m4: true, [v]: true });
+    assert(g.m4 === false, `${v} game kept m4`);
+  }
+  return 'M4 forces M0; plain game m4 false; CEO / Hermes / Altruism / Tutorial drop it';
+});
+
+// ---- Module 4 Stage 1: contracts (4B) ----------------------------------------
+const conByCode = (code) => CONTRACTS.find((c) => c.faces.primary.code === code || c.faces.secondary.code === code);
+const op = (st, kind, who, extra = {}) => applyOperation(st, { kind, ...extra }, { profileId: who });
+// A Fundraise that names the star when the tally is tied (the test then sets the
+// law it is about directly).
+function fundraise(st, who) {
+  let r = op(st, 'FUNDRAISE', who, {});
+  for (const star of ['centrist', ...IDEOLOGY_ORDER]) {
+    if (r.ok || r.error !== 'star_choice_required') break;
+    r = op(st, 'FUNDRAISE', who, { star });
+  }
+  return r;
+}
+function m4Game() {
+  const st = startedGame({ m4: true });
+  return st;
+}
+// Put contract `code` on top of its pair deck.
+function stackDeck(st, code) {
+  const c = conByCode(code);
+  const deck = st.contractDecks[c.pair];
+  deck.splice(deck.indexOf(c.id), 1);
+  deck.unshift(c.id);
+  return c;
+}
+// Run a FUNDRAISE then win `code` at `years`: by the initiator (rivals pass) or
+// by a rival who underbids. Returns the ids of both.
+function winContract(st, code, { by = 'rival', years = 5 } = {}) {
+  const c = stackDeck(st, code);
+  const ini = currentPlayerOf(st);
+  const riv = st.players.find((p) => p.profileId !== ini.profileId);
+  let r = fundraise(st, ini.profileId);
+  assert(r.ok, `FUNDRAISE: ${r.error}`);
+  st = r.state; st.activeLawStar = CONTRACT_PAIRS[c.pair][0];
+  r = op(st, 'AUCTION_CONTRACT_START', ini.profileId, { pair: c.pair });
+  assert(r.ok, `AUCTION_CONTRACT_START: ${r.error} ${JSON.stringify(r.detail || '')}`);
+  st = r.state;
+  if (by === 'rival') {
+    r = op(st, 'AUCTION_CONTRACT_BID', riv.profileId, { years });
+    assert(r.ok, `bid: ${r.error}`); st = r.state;
+  } else {
+    if (years !== 10) { r = op(st, 'AUCTION_CONTRACT_BID', ini.profileId, { years }); assert(r.ok, `own bid: ${r.error}`); st = r.state; }
+    r = op(st, 'AUCTION_CONTRACT_PASS', riv.profileId, {});
+    assert(r.ok, `pass: ${r.error}`); st = r.state;
+  }
+  r = op(st, 'AUCTION_CONTRACT_CLOSE', ini.profileId, {});
+  assert(r.ok, `close: ${r.error}`);
+  const winner = by === 'rival' ? riv.profileId : ini.profileId;
+  return { st: r.state, c, log: r.log, ini: ini.profileId, riv: riv.profileId, winner };
+}
+const pl = (st, id) => st.players.find((p) => p.profileId === id);
+function currentPlayerOf(st) { return st.players[st.activeIndex]; }
+function endTurns(st, n) {
+  for (let i = 0; i < n; i++) {
+    const cur = currentPlayerOf(st);
+    const r = op(st, 'END_TURN', cur.profileId);
+    assert(r.ok, `END_TURN: ${r.error}`);
+    st = r.state;
+    if (st.pendingSeniority) {
+      const rr = op(st, 'PLACE_SENIORITY', st.pendingSeniority.chooserId, { place: 'freedom' });
+      assert(rr.ok, `PLACE_SENIORITY: ${rr.error}`);
+      st = rr.state;
+    }
+  }
+  return st;
+}
+
+check('M4 deals three ideology-pair contract decks; an M4-off deal is untouched', () => {
+  const on = createInitialState({ players: [{ profileId: 1, name: 'A', seat: 1 }, { profileId: 2, name: 'B', seat: 2 }], seed: 9, m4: true });
+  const m0 = createInitialState({ players: [{ profileId: 1, name: 'A', seat: 1 }, { profileId: 2, name: 'B', seat: 2 }], seed: 9, m0: true });
+  assert(Object.keys(on.contractDecks).join() === 'IF,HU,EA', 'pair decks');
+  assert(Object.values(on.contractDecks).every((d) => d.length === 12), 'twelve contracts a deck');
+  assert(JSON.stringify(on.decks) === JSON.stringify(m0.decks), 'the patent deal changed when M4 was switched on');
+  assert(!('contractDecks' in m0) && !('timepiece' in m0.players[0]), 'an M4-off game carries contract state');
+  assert(on.players.every((p) => p.timepiece === null && Array.isArray(p.contractHand)), 'timepieces start in the Reserve');
+  return '3 x 12 contracts; patent decks identical to the same M0 game';
+});
+
+check('a contract auction needs a Fundraise and a deck sharing an Active Law', () => {
+  let st = m4Game();
+  const p1 = currentPlayerOf(st);
+  let r = op(st, 'AUCTION_CONTRACT_START', p1.profileId, { pair: 'IF' });
+  assert(!r.ok && r.error === 'fundraise_first', `no fundraise: ${r.error}`);
+  r = fundraise(st, p1.profileId);
+  assert(r.ok, r.error); st = r.state;
+  st.activeLawStar = 'centrist';
+  r = op(st, 'AUCTION_CONTRACT_START', p1.profileId, { pair: 'IF' });
+  assert(!r.ok && r.error === 'deck_not_open', `centrist star: ${r.error}`);
+  st.activeLawStar = 'honor';
+  r = op(st, 'AUCTION_CONTRACT_START', p1.profileId, { pair: 'IF' });
+  assert(!r.ok && r.error === 'deck_not_open', `honor star opened IF: ${r.error}`);
+  r = op(st, 'AUCTION_CONTRACT_START', p1.profileId, { pair: 'HU' });
+  assert(r.ok && r.state.auction && r.state.auction.kind === 'contract' && r.state.auction.low === 10, `HU under honor: ${r.error}`);
+  return 'fundraise_first; centrist + honor refuse IF; honor opens HU at 10 years';
+});
+
+check('descending years: the lowest bid wins, timepiece placed, advance paid less the finder fee', () => {
+  let st = m4Game();
+  const before = Object.fromEntries(st.players.map((p) => [p.profileId, { aqua: p.aqua, hand: p.hand.length }]));
+  const { st: s2, c, log, ini, riv } = winContract(st, 'M4N228F', { years: 4 });
+  const A = pl(s2, ini), B = pl(s2, riv);
+  const aquaA = before[ini].aqua, aquaB = before[riv].aqua;
+  const b = { hand: { length: before[riv].hand } };
+  const face = c.faces.primary;
+  assert(B.timepiece && B.timepiece.contractId === c.id && B.timepiece.due === (s2.clockTicks | 0) + 4, `timepiece ${JSON.stringify(B.timepiece)}`);
+  assert(B.contractHand.includes(c.id), 'the contract goes to the winner\'s hand');
+  assert(B.aqua === aquaB + face.advance - 1, `winner aqua ${B.aqua}, want ${aquaB + face.advance - 1}`);
+  assert(A.aqua >= aquaA + 1, `the initiator gets the finder's fee (${A.aqua} vs ${aquaA})`);
+  assert(!s2.auction, 'auction closed');
+  assert(B.hand.length === b.hand.length, 'a contract ignores the patent hand (academia limit)');
+  return log;
+});
+
+check('a won contract boosts on its side and is fulfilled at its destination', () => {
+  let st = m4Game();
+  let res = winContract(st, 'M4N228F', { by: 'initiator' });
+  st = res.st;
+  const c = res.c;
+  const P = pl(st, res.winner);
+  const me = res.winner;
+  const aqua = P.aqua;
+  let r = op(st, 'BOOST', P.profileId, { cardIds: [c.id] });
+  assert(r.ok === false && r.error === 'no_ops_left', `boost after a fundraise needs next turn's op: ${r.error}`);
+  st = endTurns(st, 2);
+  r = op(st, 'BOOST', P.profileId, { cardIds: [c.id] });
+  assert(r.ok, `BOOST: ${r.error}`); st = r.state;
+  const Q = pl(st, me);
+  assert(Q.leo.some((s) => s.id === c.id && s.kind === 'contract' && s.face === 'primary'), 'boosted to LEO on the blue side');
+  assert(Q.aqua === aqua + 0 - c.faces.primary.mass || Q.aqua <= aqua, `paid its mass (${Q.aqua})`);
+  r = op(st, 'FULFILL_CONTRACT', Q.profileId, { cardId: c.id });
+  assert(!r.ok && r.error === 'not_at_destination', `fulfil from LEO: ${r.error}`);
+  // Cargo transfer it aboard the rocket (a free action), then carry it to Icarus.
+  r = op(st, 'TRANSFER', me, { cardIds: [c.id], from: 'leo', to: 'rocket' });
+  assert(r.ok, `TRANSFER LEO -> rocket: ${r.error}`); st = r.state;
+  const T = pl(st, me);
+  assert(T.rocket.stack.some((s) => s.id === c.id && s.face === 'primary') && !T.leo.some((s) => s.id === c.id), 'the contract rides the rocket on its side');
+  T.rocket.siteId = 'icarus';
+  r = op(st, 'FULFILL_CONTRACT', Q.profileId, { cardId: c.id });
+  assert(r.ok, `fulfil at Icarus: ${r.error}`);
+  const F = pl(r.state, me);
+  assert(F.fulfilledContracts.some((f) => f.id === c.id) && !F.timepiece, 'fulfilled, timepiece home');
+  assert(!F.rocket.stack.some((s) => s.id === c.id), 'off the stack');
+  return r.log;
+});
+
+check('a "& Return" contract announces the destination, then fulfils back at LEO', () => {
+  let st = m4Game();
+  const res = winContract(st, 'M4N226F', { by: 'initiator' });
+  st = res.st; const c = res.c;
+  const P = pl(st, res.winner);
+  P.contractHand = P.contractHand.filter((x) => x !== c.id);
+  P.contractMeta[c.id].boosted = true;
+  P.rocket.stack.push({ id: c.id, kind: 'contract', face: 'primary' });
+  P.rocket.siteId = 'mars-north-pole';
+  let r = op(st, 'FULFILL_CONTRACT', P.profileId, { cardId: c.id });
+  assert(r.ok && /step 1 of 2/.test(r.log), `step 1: ${r.error || r.log}`);
+  st = r.state;
+  r = op(st, 'FULFILL_CONTRACT', P.profileId, { cardId: c.id });
+  assert(!r.ok && r.error === 'not_returned', `not home yet: ${r.error}`);
+  pl(st, res.winner).rocket.siteId = null;
+  r = op(st, 'FULFILL_CONTRACT', P.profileId, { cardId: c.id });
+  assert(r.ok && pl(r.state, res.winner).fulfilledContracts.length === 1, `return: ${r.error}`);
+  return 'Mars North Pole announced, refused away from LEO, fulfilled on return';
+});
+
+check('a late contract: pay the fee each turn or default; debt repayment discards it with the chit', () => {
+  let st = m4Game();
+  const res = winContract(st, 'M4N228F', { years: 0 });
+  st = res.st; const c = res.c; const face = c.faces.primary;
+  const B = () => pl(st, res.riv);
+  // The cube passes the timepiece at the end of this year.
+  st = endTurns(st, 2);
+  assert(B().timepiece.deadbeat, `timepiece not deadbeat: ${JSON.stringify(B().timepiece)}`);
+  // B's turn: pay the full late fee -> no default.
+  st = endTurns(st, 1);
+  assert(currentPlayerOf(st).profileId === B().profileId, 'B is up');
+  B().aqua = 50;
+  let r = op(st, 'PAY_LATE_FEE', B().profileId, { cardId: c.id, amount: face.lateFee + 1 });
+  assert(!r.ok && r.error === 'over_late_fee', `overpay: ${r.error}`);
+  r = op(st, 'PAY_LATE_FEE', B().profileId, { cardId: c.id, amount: face.lateFee });
+  assert(r.ok, `pay: ${r.error}`); st = r.state;
+  st = endTurns(st, 1);
+  assert(!B().contractMeta[c.id].default, 'paid in full but defaulted');
+  // Next turn of B: pay nothing -> default.
+  st = endTurns(st, 1);
+  const r2 = op(st, 'END_TURN', B().profileId);
+  assert(r2.ok && /DEFAULTS/.test(r2.log), `default log: ${r2.log}`);
+  st = r2.state;
+  if (st.pendingSeniority) st = op(st, 'PLACE_SENIORITY', st.pendingSeniority.chooserId, { place: 'freedom' }).state;
+  assert(B().contractMeta[c.id].default && st.defaultChit && st.defaultChit.profileId === B().profileId, 'default + chit');
+  // Debt = 2x advance (never boosted). Pay it down a fee at a time.
+  const debt = face.advance * 2;
+  let guard = 0;
+  while (B().contractMeta[c.id] && guard++ < 40) {
+    if (currentPlayerOf(st).profileId !== B().profileId) { st = endTurns(st, 1); continue; }
+    B().aqua = 99;
+    const left = debt - B().contractMeta[c.id].paid;
+    const rr = op(st, 'PAY_LATE_FEE', B().profileId, { cardId: c.id, amount: Math.min(face.lateFee, left) });
+    assert(rr.ok, `repay: ${rr.error}`); st = rr.state;
+    st = endTurns(st, 1);
+  }
+  assert(!B().contractMeta[c.id] && !B().timepiece && st.defaultChit.profileId === B().profileId, 'repaid: discarded, timepiece home, chit kept');
+  assert(st.contractDecks[c.pair].slice(-1)[0] === c.id, 'discarded to the bottom of its deck');
+  return `late fee ${face.lateFee}/turn; default on non-payment; ${debt}-aqua debt repaid`;
+});
+
+check('endgame: fulfilled VP, -1 per unpaid aqua, -3 for the blue default chit', () => {
+  let st = m4Game();
+  const res = winContract(st, 'M4N228F', { by: 'initiator' });
+  st = res.st;
+  const P = pl(st, res.winner);
+  const face = res.c.faces.primary;
+  P.fulfilledContracts.push({ id: res.c.id, side: 'blue' });
+  delete P.contractMeta[res.c.id];
+  P.contractHand = [];
+  P.timepiece = null;
+  st = endTurns(st, 1);
+  const res2 = winContract(st, 'M4N231F', { by: 'initiator' });
+  st = res2.st;
+  computeFinalScores(st);
+  const rows = Object.fromEntries(st.finalScores.map((s) => [s.profileId, s.contracts]));
+  assert(rows[res.winner].vp === face.vp, `fulfilled ${JSON.stringify(rows[res.winner])}`);
+  const unpaid = res2.c.faces.primary.advance * 2;
+  const w2 = rows[res2.winner];
+  assert(w2.debt === unpaid && w2.chit === -3 && w2.vp === -unpaid - 3, `unfulfilled ${JSON.stringify(w2)}`);
+  return `P1 +${face.vp}; P2 -${unpaid} unpaid -3 chit`;
+});
+
+check('an Inspiration event cycles the contract decks too (K2a)', () => {
+  const st = m4Game();
+  const before = Object.fromEntries(Object.entries(st.contractDecks).map(([k, d]) => [k, d[0]]));
+  st.lastEvent = { turn: st.turn, round: st.round, dieRoll: 1, kind: 'inspiration', notes: [] };
+  resolveSunspotEvent(st, 'inspiration');
+  for (const k of Object.keys(before)) {
+    assert(st.contractDecks[k].slice(-1)[0] === before[k], `${k}: the old top did not go to the bottom`);
+    assert(st.contractDecks[k][0] !== before[k], `${k}: same top card`);
+  }
+  return 'IF, HU, EA tops sent to the bottom';
+});
+
+// ---- Module 4 Stage 2: augmentations (4C) ------------------------------------
+// A Home Bernal with the Colonists aboard, plus (unless `dirtside` is false) a
+// second Bernal anchored Dirtside: the M2 meaning of the BEO Colony (4C2a).
+function augGame({ colonists = ['col_biomechs', 'col_botany_bay_convicts'], dirtside = true, contracts = ['M4N242F'] } = {}) {
+  const st = startedGame({ m4: true, m2: true });
+  const P = currentPlayerOf(st);
+  P.bernals = [{ cardId: BERNALS[0].id, figure: 'kalpana', face: 'primary', siteId: 'burn-9b26i', anchored: true, home: true,
+    stack: colonists.map((id) => ({ id, kind: 'colonist', face: 'primary' })), tank: 0, wiring: {}, route: [] }];
+  if (dirtside) P.bernals.push({ cardId: BERNALS[1].id, figure: 'stanford', face: 'primary', siteId: 'ceres', anchored: true, home: false,
+    stack: [], tank: 0, wiring: {}, route: [] });
+  P.fulfilledContracts = contracts.map((code) => ({ id: conByCode(code).id, side: 'blue' }));
+  return { st, P };
+}
+
+// Put a won contract aboard the rocket as if boosted + transferred.
+function contractAboard(st, who, cardId) {
+  const P = pl(st, who);
+  P.contractHand = P.contractHand.filter((x) => x !== cardId);
+  P.contractMeta[cardId].boosted = true;
+  P.rocket.stack.push({ id: cardId, kind: 'contract', face: 'primary' });
+  return P;
+}
+
+check('decommissioning a contract returns it to the contract hand: unmanned reboostable, manned in default (4B6a)', () => {
+  // Unmanned (Solar Observatory): back in hand, not default, no chit, boostable again.
+  let res = winContract(m4Game(), 'M4N228F', { by: 'initiator' });
+  let st = res.st; const sun = res.c.id; const me = res.winner;
+  contractAboard(st, me, sun);
+  let r = op(st, 'DECOMMISSION', me, { from: 'rocket', cardIds: [sun] });
+  assert(r.ok, `DECOMMISSION: ${r.error}`);
+  let P = pl(r.state, me);
+  assert(P.contractHand.includes(sun) && !(P.hand || []).includes(sun), `contract went to ${JSON.stringify({ ch: P.contractHand, hand: P.hand })}`);
+  assert(!P.contractMeta[sun].default && !r.state.defaultChit, 'an unmanned decommission is not a default');
+  st = endTurns(r.state, 2);
+  r = op(st, 'BOOST', me, { cardIds: [sun] });
+  assert(r.ok, `second-chance BOOST: ${r.error}`);
+  // Manned (Mars Polar Walk): back in hand sideways, in default, chit claimed, no reboost.
+  res = winContract(m4Game(), 'M4N226F', { by: 'initiator' });
+  st = res.st; const walk = res.c.id; const me2 = res.winner;
+  contractAboard(st, me2, walk);
+  r = op(st, 'DECOMMISSION', me2, { from: 'rocket', cardIds: [walk] });
+  assert(r.ok, `DECOMMISSION manned: ${r.error}`);
+  P = pl(r.state, me2);
+  assert(P.contractHand.includes(walk) && P.contractMeta[walk].default, 'a manned decommission is a default contract');
+  assert(r.state.defaultChit && r.state.defaultChit.profileId === me2, 'the default chit was not claimed');
+  st = endTurns(r.state, 2);
+  r = op(st, 'BOOST', me2, { cardIds: [walk] });
+  assert(!r.ok && r.error === 'contract_in_default', `a default contract re-boosted: ${r.error}`);
+  return 'unmanned back in hand and re-boosted; manned in default with the chit, boost refused';
+});
+
+check('a lost rocket sends its contract back to the contract hand (4B6a)', () => {
+  // A stack left parked on an aerobrake rolls at turn end and burns up on a 1.
+  const CHUTE = 'lag-p5ep5';
+  assert(isAerobrakeNode(CHUTE), `${CHUTE} is not an aerobrake`);
+  let lost = null;
+  for (let cursor = 0; cursor < 60 && !lost; cursor += 1) {
+    const res = winContract(m4Game(), 'M4N228F', { by: 'initiator' });
+    const st = res.st; const me = res.winner;
+    const P = contractAboard(st, me, res.c.id);
+    P.rocket.siteId = CHUTE;
+    st.rng.cursor = cursor;
+    // The roll comes at the start of the holder's next turn.
+    const after = endTurns(st, 2);
+    if (!pl(after, me).rocket.stack.length) lost = { r: { state: after }, me, id: res.c.id };
+  }
+  assert(lost, 'no die roll burned the parked stack up in 60 tries');
+  const P = pl(lost.r.state, lost.me);
+  assert(P.contractHand.includes(lost.id) && !(P.hand || []).includes(lost.id), `after the crash: ${JSON.stringify({ ch: P.contractHand, hand: P.hand })}`);
+  assert(!P.contractMeta[lost.id].default, 'an unmanned contract lost with its stack is not a default');
+  return 'a stack burned up on an aerobrake returns its contract to the contract hand';
+});
+
+check('a contract can only be abandoned during Anarchy, never a military one (4B7d)', () => {
+  let res = winContract(m4Game(), 'M4N228F', { by: 'initiator' });
+  let st = res.st; const id = res.c.id; const me = res.winner;
+  let r = op(st, 'ABANDON_CONTRACT', me, { cardId: id });
+  assert(!r.ok && r.error === 'abandon_needs_anarchy', `abandoned outside Anarchy: ${r.error}`);
+  // Away from LEO / a Bernal it stays, even in Anarchy.
+  st.anarchy = true;
+  contractAboard(st, me, id);
+  pl(st, me).rocket.siteId = 'ceres';
+  r = op(st, 'ABANDON_CONTRACT', me, { cardId: id });
+  assert(!r.ok && r.error === 'abandon_at_leo_or_bernal', `abandoned at Ceres: ${r.error}`);
+  // Back at LEO (or in hand) it goes: deck bottom, timepiece home, debt forgiven, chit claimed.
+  pl(st, me).rocket.siteId = null;
+  const before = pl(st, me).aqua;
+  r = op(st, 'ABANDON_CONTRACT', me, { cardId: id });
+  assert(r.ok, `ABANDON at LEO: ${r.error}`);
+  const P = pl(r.state, me);
+  assert(!P.timepiece && !P.contractMeta[id] && !P.rocket.stack.some((s) => s.id === id), 'still held after abandoning');
+  assert(r.state.contractDecks[res.c.pair].slice(-1)[0] === id, 'not at the bottom of its deck');
+  assert(r.state.defaultChit && r.state.defaultChit.profileId === me && P.aqua === before, 'chit / aqua wrong');
+  // Military contracts can't be abandoned.
+  res = winContract(m4Game(), 'M4N241F', { by: 'initiator' });
+  res.st.anarchy = true;
+  r = op(res.st, 'ABANDON_CONTRACT', res.winner, { cardId: res.c.id });
+  assert(!r.ok && r.error === 'military_contract_cannot_abandon', `military abandoned: ${r.error}`);
+  return r.error + '; ' + 'abandoned at LEO during Anarchy with the chit, refused elsewhere';
+});
+
+check('IMPLANT puts a portfolio augmentation on a Colonist at your anchored Bernal (4C4)', () => {
+  const { st, P } = augGame();
+  const shape = conByCode('M4N242F').faces.primary.cybernetics[0];
+  let r = op(st, 'IMPLANT', P.profileId, { bernal: 0, implants: [{ colonistId: 'col_biomechs', shape, side: 2 }] });
+  assert(r.ok, `implant: ${r.error}`);
+  const Q = pl(r.state, P.profileId);
+  assert(Q.augments[shape] && Q.augments[shape].colonistId === 'col_biomechs' && Q.opsRemaining === 0, `chit + operation spent: ${JSON.stringify(Q.augments)} ops ${Q.opsRemaining}`);
+  const other = ['heart', 'jar', 'hexagon', 'splat', 'battery', 'triangle'].find((x) => x !== shape);
+  r = op(augGame().st, 'IMPLANT', P.profileId, { bernal: 0, implants: [{ colonistId: 'col_biomechs', shape: other, side: 2 }] });
+  assert(!r.ok && r.error === 'not_in_portfolio', `outside the portfolio: ${r.error}`);
+  return r.ok ? '' : `${shape} implanted for the operation; ${other} refused (not in the portfolio)`;
+});
+
+check('IMPLANT needs a Dirtside-anchored Bernal (the BEO Colony) and the Colonist aboard an anchored Bernal', () => {
+  const shape = conByCode('M4N242F').faces.primary.cybernetics[0];
+  const imp = { bernal: 0, implants: [{ colonistId: 'col_biomechs', shape, side: 2 }] };
+  let { st, P } = augGame({ dirtside: false });
+  let r = op(st, 'IMPLANT', P.profileId, imp);
+  assert(!r.ok && r.error === 'needs_beo_colony', `only a Home Bernal: ${r.error}`);
+  ({ st, P } = augGame({ dirtside: false }));
+  st.colonies.ceres = { ownerId: P.profileId, type: 'other' };
+  r = op(st, 'IMPLANT', P.profileId, imp);
+  assert(!r.ok && r.error === 'needs_beo_colony', `a colony dome is not a Dirtside Bernal: ${r.error}`);
+  ({ st, P } = augGame());
+  P.bernals[0].anchored = false;
+  r = op(st, 'IMPLANT', P.profileId, imp);
+  assert(!r.ok && r.error === 'bernal_not_anchored', `unanchored: ${r.error}`);
+  ({ st, P } = augGame());
+  r = op(st, 'IMPLANT', P.profileId, { bernal: 0, implants: [{ colonistId: 'col_house_of_saud', shape, side: 2 }] });
+  assert(!r.ok && r.error === 'colonist_not_here', `colonist elsewhere: ${r.error}`);
+  return 'Home Bernal only / colony dome only / unanchored / absent colonist all refused';
+});
+
+check('one chit per shape: juggle it off one Colonist onto another', () => {
+  const shape = conByCode('M4N242F').faces.primary.cybernetics[0];
+  let { st, P } = augGame();
+  let r = op(st, 'IMPLANT', P.profileId, { bernal: 0, implants: [{ colonistId: 'col_biomechs', shape, side: 2 }] });
+  st = endTurns(r.state, 2);
+  r = op(st, 'IMPLANT', P.profileId, { bernal: 0, implants: [{ colonistId: 'col_botany_bay_convicts', shape, side: 1 }] });
+  assert(!r.ok && r.error === 'chit_in_use', `second copy: ${r.error}`);
+  r = op(st, 'IMPLANT', P.profileId, { bernal: 0, remove: [shape], implants: [{ colonistId: 'col_botany_bay_convicts', shape, side: 1 }] });
+  assert(r.ok && pl(r.state, P.profileId).augments[shape].colonistId === 'col_botany_bay_convicts', `juggle: ${r.error}`);
+  return 'refused a second chit; juggled it to the other Colonist on side 1';
+});
+
+check('an Industrialist Colonist implants for free once a turn; promotion needs an augmentation (4C7e)', () => {
+  const shape = conByCode('M4N242F').faces.primary.cybernetics[0];
+  const ind = COLONISTS.find((c) => /industrialist/i.test(c.specialty || '') && c.colonistKind === 'Human');
+  let { st, P } = augGame({ colonists: [ind.id, 'col_biomechs'] });
+  let r = op(st, 'IMPLANT', P.profileId, { bernal: 0, implants: [{ colonistId: ind.id, shape, side: 2 }] });
+  assert(r.ok && pl(r.state, P.profileId).opsRemaining === 1 && /free/.test(r.log), `industrialist free: ${r.error || r.log}`);
+  ({ st, P } = augGame());
+  r = op(st, 'PROMOTE', P.profileId, { cardId: 'col_botany_bay_convicts' });
+  assert(!r.ok && r.error === 'needs_augmentation', `unaugmented promote: ${r.error}`);
+  return `${ind.name} implants free; an unaugmented Colonist cannot promote`;
+});
+
+// The smoke verdict above runs before the checks added below it; this one
+// covers every check in the file.
+if (failures) {
+  console.error(`\nengine checks FAILED (${failures})`);
+  process.exit(1);
+}
+console.log('\nall engine checks passed');

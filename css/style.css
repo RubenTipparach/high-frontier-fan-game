@@ -1380,6 +1380,7 @@ body.in-lobby .main-menu-fab { display: none; }
 .module-tag.tag-m0 { background: rgba(120,140,220,0.16); color: #cdd6ff; border-color: #3a4a7a; }
 .module-tag.tag-m1 { background: rgba(56,189,248,0.16); color: #bfe9ff; border-color: #2a6f8a; }
 .module-tag.tag-m2 { background: rgba(167,139,250,0.16); color: #e6dcff; border-color: #6d5a9a; }
+.module-tag.tag-m4 { background: rgba(251,191,36,0.14); color: #fde9b0; border-color: #8a6d2a; }
 .module-tag.tag-draft { background: rgba(200,160,80,0.16); color: #f0d9a8; border-color: #7a6326; }
 .module-tag.tag-ceo { background: rgba(251,191,36,0.18); color: #ffe9a8; border-color: #8a6c1e; }
 .module-tag.tag-hot-seat { background: rgba(56,189,248,0.16); color: #bae6fd; border-color: #1e6a8a; }

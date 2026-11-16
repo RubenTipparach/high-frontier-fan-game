@@ -1808,3 +1808,95 @@
   text-transform: uppercase;
   color: #a7a2c0;
 }
+
+
+/* ---- Module 4 contract cards (js/game/contract-card.js) ----
+   A contract reads as one of the game's own cards: same frame, typebar, name
+   row, stat row, art body and footer. Border colour = the side (blue / gold /
+   Project Exodus). Only ever drawn in an M4 game (and the M4 mockup). */
+/* ---- The contract card ---- */
+.card.m4-contract { --side: #3e9ad6; }
+.card.m4-contract.side-gold { --side: #d8b90c; }
+.card.m4-contract.side-exodus { --side: #b9a0d8; }
+.m4-contract .card-inner { border: 6px solid var(--side); border-radius: 10px; overflow: hidden; background: #18181d; }
+.m4-contract .card-face { background: #18181d; color: #f2f2f2; display: flex; flex-direction: column; min-height: 340px; }
+.m4-typebar { display: grid; grid-template-columns: 26px 1fr 40px; align-items: center; gap: 4px;
+  background: linear-gradient(#3a3a40, #232328); color: #fff; padding: 3px 5px; min-height: 40px; }
+.m4-type { text-align: center; font-size: 13px; font-weight: 700; letter-spacing: .02em; line-height: 1.05; }
+.m4-type small { display: block; font-size: 10px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: #c9c9cf; }
+.m4-title-left, .m4-title-right { display: flex; align-items: center; justify-content: center; }
+.m4-contract .card-name-row { background: #2b2b31; border-bottom: 1px solid #44444b; }
+.m4-contract .card-name { color: #fff; }
+.m4-stats { display: flex; align-items: center; gap: 5px; padding: 5px 7px; background: #111; white-space: nowrap; }
+.m4-stats .m4-aug { width: 17px; height: 17px; }
+.m4-stat { font-size: 9px; letter-spacing: .08em; color: #c9c9cf; }
+.m4-stat strong { font-size: 17px; color: #fff; margin-right: 2px; letter-spacing: 0; }
+.m4-cyb { flex: 1; display: flex; gap: 2px; justify-content: center; }
+.m4-body { flex: 1; background-size: cover; background-position: right bottom; padding: 6px; display: flex; flex-direction: column; gap: 5px; min-height: 160px; }
+.m4-box { border-radius: 6px; padding: 4px 6px; font-size: 11px; line-height: 1.25; }
+.m4-box b { display: block; font-size: 9px; letter-spacing: .12em; text-transform: uppercase; margin-bottom: 1px; }
+.m4-dest { background: rgba(0, 0, 0, .78); color: #fff; align-self: flex-start; max-width: 70%; }
+.m4-ability { background: rgba(0, 0, 0, .72); color: #fff; text-align: center; font-size: 11.5px; }
+.m4-when { background: rgba(0, 0, 0, .72); color: #fff; align-self: flex-start; max-width: 75%; margin-top: auto; }
+.m4-money { display: flex; align-items: center; justify-content: space-between; padding: 4px 7px; background: #111; }
+.m4-pay { display: flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; }
+.m4-footer { display: flex; justify-content: space-between; align-items: center; font-size: 10px; color: #999; background: #232328; padding: 3px 7px; }
+.m4-footer code { font-size: 9px; color: #777; }
+.m4-kw { text-decoration: underline dotted; cursor: help; font-weight: 700; }
+.m4-body-glyph { font-weight: 700; color: #ffd36b; }
+.m4-hexchip { display: inline-block; background: #111; color: #fff; font-size: 9px; font-weight: 800; padding: 0 3px; clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%); }
+.m4-inline-icon { color: #2fb36a; cursor: help; }
+.m4-season { font-weight: 700; }
+.m4-season-red { color: #ff6b6b; } .m4-season-yellow { color: #f5c400; } .m4-season-blue { color: #6bb6ff; }
+.m4-immune { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; border: 2px solid #2fb36a; background: #111; color: #fff; font-size: 10px; vertical-align: -3px; cursor: help; }
+/* A contract with a long destination plus both ability boxes needs more than the
+   patent card's fixed 220 x 350; let it grow instead of clipping the last box. */
+.card.m4-contract { aspect-ratio: auto; height: auto; max-height: none; }
+.card.m4-contract .card-inner { height: auto; }
+.card.m4-contract .card-face { position: relative; height: auto; }
+.m4-body.has-craft { background-size: 100% auto, cover; background-position: center bottom, right bottom; background-repeat: no-repeat; }
+
+/* ---- Module 4 contracts panel + contract auction (js/game/contracts-ui.js) ---- */
+.m4c-overlay { position: fixed; inset: 0; z-index: 60; background: rgba(4, 6, 14, .66); display: flex;
+  align-items: center; justify-content: center; padding: 12px; }
+.m4c-modal { background: #15161d; color: #e8e8ee; border: 1px solid #3a3d4c; border-radius: 12px; width: min(980px, 100%);
+  max-height: calc(var(--vhpx, 1vh) * 92); display: flex; flex-direction: column; box-shadow: 0 12px 40px rgba(0, 0, 0, .6); }
+.m4c-head { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid #2c2e3a; }
+.m4c-head h3 { margin: 0; font-size: 17px; flex: 1; }
+.m4c-close { background: none; border: 0; color: #aaa; font-size: 18px; cursor: pointer; }
+.m4c-body { overflow-y: auto; padding: 10px 14px 16px; }
+.m4c-body h4 { margin: 16px 0 6px; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: #cfd6e6; }
+.m4c-status { display: grid; gap: 4px; font-size: 13px; background: #1d1f29; border-radius: 8px; padding: 8px 10px; }
+.m4c-late { color: #ff7a6b; font-weight: 700; }
+.m4c-decks, .m4c-row { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
+.m4c-deck { display: flex; flex-direction: column; gap: 6px; width: 230px; }
+.m4c-deck.closed .card { opacity: .55; }
+.m4c-deck-head { display: flex; flex-wrap: wrap; gap: 6px; font-size: 12px; align-items: baseline; }
+.m4c-law { color: #8fd18f; font-size: 11px; }
+.m4c-deck.closed .m4c-law { color: #888; }
+.m4c-item { display: flex; flex-direction: column; gap: 6px; width: 230px; }
+.m4c-note { font-size: 12px; color: #c9c9cf; }
+.m4c-btns { display: flex; flex-wrap: wrap; gap: 6px; }
+.m4c-btns button, .m4c-controls button { background: #2c5fa8; color: #fff; border: 0; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 12px; }
+.m4c-btns button:disabled, .m4c-controls button:disabled { opacity: .45; cursor: not-allowed; }
+.m4c-auction .m4c-modal { width: min(640px, 100%); }
+.m4c-auction-body { display: flex; flex-wrap: wrap; gap: 16px; padding: 12px 14px 16px; overflow-y: auto; }
+.m4c-side { flex: 1; min-width: 220px; font-size: 13px; }
+.m4c-low { font-size: 15px; }
+.m4c-bids { margin: 0 0 8px; padding-left: 18px; }
+.m4c-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.m4c-controls select { background: #1d1f29; color: #fff; border: 1px solid #3a3d4c; border-radius: 6px; padding: 4px; }
+.turn-tag.turn-tag-alert { background: #6b3a12; border-color: #ffb35c; color: #fff; }
+.m4c-augs { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px; margin-bottom: 8px; }
+.m4c-aug { display: flex; align-items: center; gap: 8px; font-size: 12px; background: #1d1f29; border-radius: 8px; padding: 4px 8px; }
+.m4c-aug.lack { opacity: .5; }
+.m4c-col { background: #1d1f29; border-radius: 8px; padding: 6px 10px; margin-bottom: 6px; font-size: 13px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+/* M4 contracts in the hand strip: same box as a patent hand card. A default
+   contract lies sideways in the hand (4B4d). */
+.hand-slot .card.m4-contract { height: 350px; max-height: 350px; overflow: hidden; }
+/* Same 0.77 hand scale, turned a quarter left about the top-left corner, then
+   dropped so it lies along the bottom of the 280px slot (270 wide, 169 tall). */
+.hand-slot.is-contract.is-default .card.m4-contract { transform: translate(0, 280px) rotate(-90deg) scale(0.77); }
+.hand-slot.is-contract.is-default { width: 270px; }
+.hand-slot .hand-q.is-blocked { opacity: .4; }

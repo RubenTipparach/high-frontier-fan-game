@@ -456,6 +456,11 @@ ensureColumn('lobbies', 'm1', 'm1 INTEGER NOT NULL DEFAULT 0');
 // ever writes 1 when the host passes the admin gate (profileIsAdmin); a non-admin
 // request is forced to 0. NOTHING M2 may activate unless state.m2 is true.
 ensureColumn('lobbies', 'm2', 'm2 INTEGER NOT NULL DEFAULT 0');
+// m4: opt-in Module 4 (Exodus). ADMIN-ONLY preview (user 2026-11-15): the
+// create route only writes 1 for an admin (profileIsAdmin); everyone else is
+// forced to 0. Requires M0 (forced on at start). NOTHING M4 may activate unless
+// state.m4 is true. See docs/module-m4-plan.md.
+ensureColumn('lobbies', 'm4', 'm4 INTEGER NOT NULL DEFAULT 0');
 // ceo_solo: opt-in CEO Solitaire variant (V6). ADMIN-PREVIEW only for now, so a
 // non-admin request is forced to 0 (same gate as m2). 0 = off, the default for
 // every legacy + normal room. CEO Solitaire forces M0 on at start (the variant

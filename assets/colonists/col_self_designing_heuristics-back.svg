@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 330" width="300" height="330">
+  <defs><radialGradient id="sh2-bg" cx="50%" cy="44%" r="80%">
+      <stop offset="0%" stop-color="#655ca8"/>
+      <stop offset="100%" stop-color="#652d91"/>
+    </radialGradient></defs>
+  <rect width="300" height="330" fill="url(#sh2-bg)"/><circle cx="222.9" cy="55.6" r="1.8" fill="#eef0ff" opacity="0.45"/><circle cx="134.7" cy="188.4" r="0.9" fill="#eef0ff" opacity="0.53"/><circle cx="48.9" cy="173.1" r="1.8" fill="#eef0ff" opacity="0.34"/><circle cx="217.5" cy="91.4" r="1.8" fill="#eef0ff" opacity="0.52"/><circle cx="181.1" cy="85.6" r="0.9" fill="#eef0ff" opacity="0.47"/><circle cx="36.1" cy="323.0" r="0.9" fill="#eef0ff" opacity="0.29"/><circle cx="100.9" cy="188.2" r="0.9" fill="#eef0ff" opacity="0.26"/><circle cx="183.1" cy="7.3" r="0.9" fill="#eef0ff" opacity="0.64"/><circle cx="245.5" cy="20.6" r="0.9" fill="#eef0ff" opacity="0.43"/><circle cx="73.3" cy="236.2" r="1.8" fill="#eef0ff" opacity="0.44"/>
+      <path d="M60,111.80000000000001 l40,40 m0,-40 l-40,40" stroke="#ff8fc8" stroke-width="10" stroke-linecap="round"/>
+      <path d="M190,91.80000000000001 v50 m-25,-25 h50" stroke="#ffffff" stroke-width="10" stroke-linecap="round"/>
+      <rect x="120" y="181.8" width="60" height="60" fill="none" stroke="#8fe0ff" stroke-width="8"/>
+      <circle cx="150" cy="51.80000000000001" r="14" fill="#e6d6ff"/>
+</svg>

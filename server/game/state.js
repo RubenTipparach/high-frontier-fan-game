@@ -46,6 +46,7 @@ import { SIREN_BUSTED_SITES } from '../../data/sirens.js';
 import { HERMES_ROUNDS, MASS_DRIVER_ID, truncateBottomHalf, massDriverIndex } from '../../data/hermes.js';
 import { isLegalAltruismRounds } from '../../data/altruism.js';
 import { makeRng, shuffle } from './rng.js';
+import { contractDeckIds } from '../../data/contracts.js';
 import { TUTORIAL_START_AQUA, TUTORIAL_BOT_IDS, TUTORIAL_BOT_NAMES, tutorialReorderDecks, freshTutorialState } from './tutorial.js';
 // (startSiteId import dropped: the rocket now opens at LEO, siteId null.)
 
@@ -153,6 +154,13 @@ function buildShuffledDecks(gen, m1 = false, m2 = false, hermes = false) {
   if (m2) for (const card of BERNALS) { if (decks[card.type]) decks[card.type].push(card.id); }
   for (const t of types) decks[t] = shuffle(gen, decks[t]);
   return decks;
+}
+
+// M4 per-player contract fields (4B). timepiece: null (in Reserve) or
+// { contractId, due, slot, deadbeat } once a contract auction is won.
+// contractMeta[cardId]: { side, paid, boosted, default, progress: { sites, done } }.
+export function m4Player() {
+  return { timepiece: null, contractHand: [], contractMeta: {}, fulfilledContracts: [] };
 }
 
 function freshPlayer({ profileId, name, seat, color, aqua }) {
@@ -275,7 +283,7 @@ function freshPlayer({ profileId, name, seat, color, aqua }) {
 
 // players: [{ profileId, name, seat }] (seat 1-based, any order).
 // maxRounds: game length (rounds = Sunspot Cube cycles); default 5.
-export function createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, quickStart, m0, m1, m2, ceoSolo, tutorial, sirens, hermes, altruism, hotSeat, hotSeatSeats } = {}) {
+export function createInitialState({ players, seed, maxRounds, startingAqua, economy, draftStart, randomDraft, quickStart, m0, m1, m2, m4, ceoSolo, tutorial, sirens, hermes, altruism, hotSeat, hotSeatSeats } = {}) {
   // Tutorial (guided solo): a fixed-setup game seated with the human + two
   // scripted bots, running the card MARKET (for the auction economy), NO
   // modules, a deterministic deck order, and the human's opening bank of 6. Its
@@ -284,7 +292,7 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
   // module). Normalise the conflicting inputs up front.
   tutorial = !!tutorial;
   if (tutorial) {
-    m0 = false; m1 = false; m2 = false; ceoSolo = false;
+    m0 = false; m1 = false; m2 = false; m4 = false; ceoSolo = false;
     economy = 'market';
     draftStart = false; randomDraft = false;
     startingAqua = TUTORIAL_START_AQUA;
@@ -323,6 +331,12 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
   // scenario rather than Module 0 as an opt-in. A host still cannot TICK M0
   // alongside Sirens; that is refused at room creation (sirens_excludes_m0).
   if (sirens && Array.isArray(players) && players.length === 1) ceoSolo = true;
+  // Module 4 (Exodus) REQUIRES Module 0 (4A1a): contracts are auctioned off the
+  // Fundraise and their decks follow the Active Law's ideology. Admin-only
+  // preview (docs/module-m4-plan.md). CEO Solitaire's own M4 rules (4G) are not
+  // wired, so a CEO or variant game never carries it.
+  m4 = !!m4 && !ceoSolo && !sirens && !hermes && !altruism;
+  if (m4) m0 = true;
   // CEO Solitaire (V6) runs the Solitaire Sol Political Assembly, so M0 is
   // mandatory whenever the variant is on (mirrors the M2-forces-M0 rule above).
   ceoSolo = !!ceoSolo;
@@ -449,6 +463,14 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
   // the decks so a non-M2 game's deal is byte-for-byte unchanged (the queue
   // just consumes extra RNG at the end, and only when m2 is on).
   const colonistQueue = m2 ? shuffle(gen, COLONISTS.map((c) => c.id)) : [];
+  // M4 contract decks (4B1, C4): one per ideology pair, blue side up, shuffled
+  // AFTER every other draw so an m4-off game's deal is byte-for-byte unchanged.
+  let contractDecks = null;
+  if (m4) {
+    const raw = contractDeckIds();
+    contractDecks = {};
+    for (const pair of Object.keys(raw)) contractDecks[pair] = shuffle(gen, raw[pair]);
+  }
   // Playing with Futures (M2) runs the long game (rule 1D "d.": 7 Solar
   // Cycles), so an M2 room that didn't pick a length defaults to 7 rounds.
   // V5 Hermes Fall FORCES its own length: two Seniority Disks in the centre of
@@ -522,6 +544,10 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
       aqua: startAqua,
     })
   );
+  // M4 contracts: every player's timepiece starts in their Reserve (null), with
+  // an empty contract hand (contracts ignore the academia hand limit, 4B2a, so
+  // they are NOT in `hand`) and no fulfilled contracts. Only when m4.
+  if (m4) for (const p of seated) Object.assign(p, m4Player());
 
   // Tutorial: there is NO crew draft. The player always runs the yellow Faction A
   // (United Nations Cosmonauts, the "NASA" seat) and each bot takes the crew card
@@ -661,6 +687,16 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
     // Defaults false. NOTHING M2 (Bernals, Colonists, Futures) may activate
     // unless state.m2 is true.
     m2: !!m2,
+    // Module 4 (Exodus): contracts, then augmentations / enterprises, then the
+    // isobank and the starship (docs/module-m4-plan.md). ADMIN-ONLY preview,
+    // fixed at game start, defaults false. NOTHING M4 may activate unless
+    // state.m4 is true.
+    m4: !!m4,
+    // M4 Stage 1 (contracts, 4B): the three ideology-pair contract decks (card
+    // ids, top first) and the single default chit ({ profileId, side } once
+    // claimed). Each player's timepiece / contract hand / fulfilled contracts
+    // live on the player (m4Player below). Absent in an m4-off game.
+    ...(m4 ? { contractDecks, defaultChit: null, clockTicks: 0 } : {}),
     // Playing WITH Futures is the long game (rule 1D "d": 7 Solar Cycles). The
     // Futures LAYER (unlock on promotion, Epic Hazard, future stars + endgame
     // future scoring) activates ONLY in a 7-round M2 game; a short M2 room (5-6

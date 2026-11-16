@@ -35,7 +35,12 @@ import { COLONISTS_BY_ID } from '../../data/colonists.js';
 // through m2-gated paths (the m2 deck / the colonist queue), so a non-m2 game
 // never queries one; the merged map is just a lookup, it activates nothing.
 // Used for every PATENTS_BY_ID[id] read below.
-const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...BERNALS_BY_ID, ...COLONISTS_BY_ID };
+// M4 contract cards ride the same lookup (a boosted contract is a stack slot
+// with a mass); they only ever enter play through m4-gated paths.
+import {
+  CONTRACTS_BY_ID, CONTRACT_PAIRS, CONTRACT_PAIR_NAMES, CONTRACT_BID_MAX, contractFace, sideFace, stepSatisfied,
+} from '../../data/contracts.js';
+const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...BERNALS_BY_ID, ...COLONISTS_BY_ID, ...CONTRACTS_BY_ID };
 import { resolveSupportChain, unmetRequirements, openCycleChainCard } from '../../data/support-chain.js';
 import { CREW_BY_ID, PROMO_CREW } from '../../data/crew.js';
 const PROMO_CREW_IDS = new Set(PROMO_CREW.map((c) => c.id));
@@ -63,7 +68,7 @@ import { hazardFlavorOf } from '../../data/hazard-flavors.js';
 import { SOLAR_ZONE_INFO, adjacentSites } from '../../data/sites.js';
 // Site location classes (astrobiology / submarine / atmospheric / elevator),
 // shared with the client (colony types + promotion colonies + futures).
-import { colonyClassOfSite, isAtmosphericSite, isAerostatSiteId } from '../../data/site-categories.js';
+import { colonyClassOfSite, isAtmosphericSite, isAerostatSiteId, isSubmarineSite, isAstrobiologySite, isSpaceElevatorSite } from '../../data/site-categories.js';
 // M2 Futures: the structured goals behind each purple face's printed Future
 // text (requirement checklists, star VP, endgame re-checks, standing effects).
 import { futureGoalForCard, checkFutureGoal, SYNODIC_SITE_IDS, SYNODIC_COMET_IDS } from '../../data/future-goals.js';
@@ -1135,6 +1140,8 @@ function advanceClock(state) {
   const seasonBefore = seasonForSlot(state.turn);
   state.turn = (state.turn + 1) % SLOTS;
   if (state.turn === NEW_ROUND_SLOT) state.round += 1;
+  // M4: a timepiece the cube just passed flips to deadbeat (4B5a).
+  contractClockTick(state);
 
   // Kreutz Sungrazer solar close pass: the comet swings past the sun as season
   // yellow ends, and everything standing on it is decommissioned - except the
@@ -1188,6 +1195,10 @@ function advanceClock(state) {
 // the one-shot "anarchy lifted" notice when the cube exits season blue.
 function clockEventLog(state) {
   let log = '';
+  if (state.contractClockNote) {
+    log += ' ' + state.contractClockNote;
+    delete state.contractClockNote;
+  }
   if (state.anarchyLifted) {
     delete state.anarchyLifted;
     log += ' The cube left season blue; faction privileges resume.';
@@ -1419,6 +1430,10 @@ function countColonists(player) {
 // colonist limit). Returns a short log phrase.
 function retireColonistId(state, player, cardId) {
   const id = String(cardId);
+  // M4 (4C4e): a Decommissioned Colonist's augmentation chits return to supply.
+  if (state && state.m4 && player && player.augments) {
+    for (const k of Object.keys(player.augments)) if (player.augments[k] && player.augments[k].colonistId === id) delete player.augments[k];
+  }
   const card = PATENTS_BY_ID[id];
   if (card && card.colonistKind === 'Robot') {
     // Post-Emancipation, a Robot counts as Human and "cannot enter a hand"
@@ -1460,6 +1475,16 @@ function decommissionSlotTo(state, player, slot) {
   // applyDecommission has always had this rule inline; it lives here now so
   // every path that decommissions a slot obeys it.
   if (isFuelCardSlot(slot)) return null;
+  // M4 (4B6a): a decommissioned contract goes back to the CONTRACT hand. An
+  // unmanned one gets a second chance to boost; a manned one is in default
+  // (sideways, never fulfillable) and its owner claims the default chit.
+  if (state && state.m4 && CONTRACTS_BY_ID[slot.id]) {
+    (player.contractHand = player.contractHand || []).push(slot.id);
+    const meta = contractMetaOf(player, slot.id);
+    const face = contractFaceOf(player, slot.id);
+    if (meta && face && face.manned) { meta.default = true; claimDefaultChit(state, player, slot.id); }
+    return null;
+  }
   (player.hand = player.hand || []).push(slot.id);
   return null;
 }
@@ -2023,7 +2048,9 @@ function applyBluePlanetFinao(state, player) {
 // but not Cargo Transfer; the definition points at a glossary that is not among
 // the extracted text here, so this rests on the user's reading of it. A transfer
 // is performed by BOTH ends, so each glitched end rolls - see glitchActorsFor.
-const GLITCH_TRIGGER_OPS = new Set(['SITE_REFUEL', 'INDUSTRIALIZE', 'ANCHOR_BERNAL', 'TRANSFER']);
+// FULFILL_CONTRACT: contract fulfillment, intermediate steps included, is a
+// Glitch Trigger (4B4e).
+const GLITCH_TRIGGER_OPS = new Set(['SITE_REFUEL', 'INDUSTRIALIZE', 'ANCHOR_BERNAL', 'TRANSFER', 'FULFILL_CONTRACT']);
 
 // Core Glitch Roll mechanics (rule G-glossary: a glitched stack that performs
 // a Glitch Trigger rolls 1d6; every colocated card whose rad-hardness EXACTLY
@@ -2530,6 +2557,8 @@ function glitchTargetFor(state, p) {
 // White-Side component is. Only a White-Side component card on the pad is
 // exposed.
 function padExplosionImmune(s) {
+  // 4B2c: contracts are immune to pad explosions.
+  if (s && CONTRACTS_BY_ID[s.id]) return true;
   if (isCrewSlot(s) || !!s.promoted || isColonistSlot(s)) return true;
   const face = s && s.face;
   const c0 = s && PATENTS_BY_ID[s.id];
@@ -2760,6 +2789,16 @@ function resolveSunspotEvent(state, kind, opts = {}) {
     // event round sees exactly which cards rotated. The two M1 Terawatt decks
     // (GW thrusters + Freighters) cycle too when M1 is on, like the auction.
     const cycled = cycleMarketDecks(state);
+    // M4 (K2a): the Contract decks cycle too, top card to the bottom.
+    if (state.m4 && state.contractDecks) {
+      for (const pair of Object.keys(state.contractDecks)) {
+        const d = state.contractDecks[pair];
+        if (d.length < 2) continue;
+        const out = d.shift();
+        d.push(out);
+        cycled.push({ deck: `${CONTRACT_PAIR_NAMES[pair]} contract`, out, in: d[0] });
+      }
+    }
     for (const c of cycled) {
       // Per-deck detail lands in the clock-modal event record ONLY, not the
       // news feed: all decks collapse into the ONE Inspiration news line below
@@ -3898,6 +3937,8 @@ function loseFreighter(state, player) {
     // back (see decommissionSlotTo). Pushing its `fuel_N` id into the hand was
     // how a phantom card got there and blocked the owner out of auctions.
     if (isFuelCardSlot(s)) { fuelLost += Math.max(0, Math.floor(Number(s.amount) || 0)); continue; }
+    // M4 (4B6a): a contract aboard goes back to the contract hand.
+    if (state.m4 && CONTRACTS_BY_ID[s.id]) { decommissionSlotTo(state, player, s); returned.push(CONTRACTS_BY_ID[s.id].name); continue; }
     player.hand.push(s.id);
     returned.push((PATENTS_BY_ID[s.id] && PATENTS_BY_ID[s.id].name) || s.id);
   }
@@ -6301,8 +6342,15 @@ function applyBoost(state, op, player) {
     }
     return fail('no_ops_left');
   }
-  // Every id must currently be in the hand.
+  // Every id must currently be in the hand (M4: or the contract hand - a
+  // contract boosts like any card, 4B4a, but never once it is in default).
+  const isContract = (id) => !!(state.m4 && CONTRACTS_BY_ID[id] && (player.contractHand || []).includes(id));
   for (const id of ids) {
+    if (isContract(id)) {
+      const meta = contractMetaOf(player, id);
+      if (!meta || meta.default) return fail('contract_in_default');
+      continue;
+    }
     if (player.hand.indexOf(id) < 0) return fail('not_in_hand');
   }
   // GW thrusters and Freighters can't be boosted (1A5d): they return to play
@@ -6342,7 +6390,9 @@ function applyBoost(state, op, player) {
   let cost = 0;
   // Default to the light side (matches the slot assignment below) so the
   // charge and the locked side never disagree.
-  for (const id of ids) cost += boostMass(id, radSides[id] === 'heavy' ? 'heavy' : 'light');
+  for (const id of ids) {
+    cost += isContract(id) ? contractFaceOf(player, id).mass : boostMass(id, radSides[id] === 'heavy' ? 'heavy' : 'light');
+  }
   // Boosting to an anchored Bernal re-prices the whole boost (doubled / waived /
   // free) instead of the flat LEO mass cost.
   if (destBernal) cost = bernalBoostCost(cost, destBernal, PATENTS_BY_ID[destBernal.cardId]);
@@ -6383,6 +6433,16 @@ function applyBoost(state, op, player) {
   // that sends none still works.
   const boostFigures = (op.figures && typeof op.figures === 'object') ? op.figures : {};
   for (const id of ids) {
+    if (isContract(id)) {
+      // Side matters (4B2b): it boosts on the side it was auctioned on.
+      const meta = contractMetaOf(player, id);
+      player.contractHand.splice(player.contractHand.indexOf(id), 1);
+      meta.boosted = true;
+      const cslot = { id, kind: 'contract', face: sideFace(meta.side) };
+      if (destBernal) { destBernal.stack = destBernal.stack || []; destBernal.stack.push(cslot); }
+      else player.leo.push(cslot);
+      continue;
+    }
     const idx = player.hand.indexOf(id);
     if (idx >= 0) player.hand.splice(idx, 1);
     const card = PATENTS_BY_ID[id];
@@ -9323,7 +9383,10 @@ function applyDecommission(state, op, player) {
       continue;
     }
     src.splice(idx, 1);
-    player.hand.push(id);
+    // M4 (4B6a): a contract goes back to the contract hand, not the patent hand
+    // (unmanned: a second chance to boost; manned: default, sideways).
+    if (state.m4 && CONTRACTS_BY_ID[id]) decommissionSlotTo(state, player, slot);
+    else player.hand.push(id);
     if (player.rocket.activeThrusterId === id) player.rocket.activeThrusterId = null;
     if (player.rocket.activeProspectorId === id) player.rocket.activeProspectorId = null;
     returned++;
@@ -10958,6 +11021,8 @@ function applyFundraise(state, op, player) {
   }
   if (moveFrom) parts.push(`moved a delegate ${placeName(moveFrom)} -> ${placeName(moveTo)}`);
   const did = parts.length ? parts.join(' and ') : 'took income';
+  // M4 (4B3): the Fundraise's final step may open a contract auction.
+  if (state.m4) player.fundraisedThisTurn = true;
   const starNote = starMoved
     ? ` The active-law star moves to ${newStar === 'centrist' ? 'the center' : placeName(newStar)}.`
     : '';
@@ -12324,6 +12389,8 @@ function applyPromote(state, op, player) {
   if (!card) return fail('not_promotable');
   if (card.type === 'colonist') {
     if (!state.m2) return fail('m2_off');
+    // M4 (4C7e): a Colonist needs at least one augmentation to Promote.
+    if (state.m4 && !colonistAugCount(player, cardId)) return fail('needs_augmentation', { need: 1 });
     let loc = null;
     for (const e of colonistLocations(player)) {
       if (e.slot.id === cardId) { loc = e; break; }
@@ -12987,6 +13054,10 @@ function applyEpicHazard(state, op, player) {
 // dispatcher (not the handler) maintains turnActions / turnRedo.
 const FUNCTIONAL = {
   INCOME: applyIncome,
+  FULFILL_CONTRACT: applyFulfillContract,
+  ABANDON_CONTRACT: applyAbandonContract,
+  IMPLANT: applyImplant,
+  PAY_LATE_FEE: applyPayLateFee,
   FUNDRAISE: applyFundraise,
   PROMOTE: applyPromote,
   SWAP_BIG_CUBE: applySwapBigCube,
@@ -13160,6 +13231,10 @@ function pickPayload(op) {
     case 'SET_ROUTE': return { segments: op.segments, ...(op.unit ? { unit: op.unit } : {}) };
     case 'SET_WIRING': return { wiring: op.wiring, ...(op.stackId ? { stackId: op.stackId } : {}) };
     case 'SET_CARD_GROUPS': return { groups: op.groups };
+    case 'FULFILL_CONTRACT': return { cardId: op.cardId };
+    case 'ABANDON_CONTRACT': return { cardId: op.cardId };
+    case 'IMPLANT': return { bernal: op.bernal, implants: op.implants, remove: op.remove };
+    case 'PAY_LATE_FEE': return { cardId: op.cardId, amount: op.amount };
     case 'CLEAR_ROUTE': return op.unit ? { unit: op.unit } : {};
     default:
       // Reaching here means an op rides the per-turn undo stack (this function is
@@ -13257,6 +13332,17 @@ function rebuildFromBase(baseState, actions, report = null) {
 function openTurnFor(state, player) {
   player.opsRemaining = OPS_PER_TURN;
   player.movesRemaining = MOVES_PER_TURN;
+  // M4 contracts: per-turn ledgers (the Fundraise that unlocks a contract
+  // auction, the late fee paid this turn, whether this turn began late, and the
+  // spaces the rocket entered for "enter" destinations).
+  if (state.m4) {
+    player.fundraisedThisTurn = false;
+    player.contractAuctionDone = false;
+    player.lateFeePaidThisTurn = 0;
+    player.implantFreeUsed = false;
+    player.turnStartedLate = !!(player.timepiece && player.timepiece.deadbeat);
+    if (player.rocket) player.rocket.enteredThisTurn = [];
+  }
   // M1: the Freighter is a second independent mover - it gets its own one move
   // per turn, separate from the rocket's. Only consumable while a freighter is
   // in play; harmless to refill otherwise.
@@ -13679,6 +13765,8 @@ function applyEndTurn(state, _op, player) {
     log = `${player.name} passed and took income (+${INCOME_AQUA} aqua; bank ${player.aqua}).`;
   }
   log += bluePlanetNote;
+  // M4: a turn that began late and left the late fee unpaid defaults (4B5d).
+  log += contractEndTurnCheck(state, player);
 
   // V9 Sirens: First Contact / Heroism / Technology Trade all resolve here,
   // because all three trigger on ENDING the turn colocated with the other
@@ -14060,6 +14148,9 @@ function computeFinalScores(state) {
   }
   const allFactories = allFactoriesForScoring(state);
   const firstIdx = state.firstPlayerIndex || 0;
+  // M4 contracts (4E2): resolved once, before the per-player rows (an
+  // unfulfilled contract claims the default chit as part of scoring).
+  const contractRows = contractScoring(state);
   const scores = state.players.map((p, idx) => {
     const cubeVp = m0 ? playerDelegatesPlaced(asm, p.profileId) : 0;
     const awardVp = (m0 && winnerKey) ? ideologyAwardVp(state, p, winnerKey) : 0;
@@ -14094,7 +14185,8 @@ function computeFinalScores(state) {
       factoryVp: b.factoryCount, colonyVp: b.colonyVp, gloryVp, futuresVp, bernalVp,
       bernalRows: bernalBd.rows,
       futureStars: (p.futureStars || []).map((s) => ({ key: s.key, vp: s.vp, endgame: !!s.endgame, scoredVp: s.scoredVp | 0, dynamic: typeof (futureGoalForCard(s.cardId) || {}).endgameVp === 'function', endgameVpLabel: (futureGoalForCard(s.cardId) || {}).endgameVpLabel || null })),
-      total: b.total, aqua: p.aqua | 0,
+      contracts: contractRows[p.profileId] || null,
+      total: b.total + ((contractRows[p.profileId] || {}).vp || 0), aqua: p.aqua | 0,
     };
   });
   const ranked = [...scores].sort((a, b) => b.total - a.total || b.aqua - a.aqua);
@@ -14987,6 +15079,16 @@ function allBiddersActed(state) {
 export function auctionWaitingOn(state) {
   const a = state && state.auction;
   if (!a || !Array.isArray(state.players)) return [];
+  // M4 contract lot: waiting on every rival who may bid and has not answered
+  // the current low, then on the initiator to close it.
+  if (a.kind === 'contract') {
+    if (contractAuctionSettled(state)) {
+      const auc = state.players.find((p) => p.profileId === a.auctioneerId);
+      return auc ? [auc] : [];
+    }
+    return state.players.filter((p) => p.profileId !== a.auctioneerId
+      && !(a.acted || []).includes(p.profileId) && !contractBidBlock(state, p, a.cardId));
+  }
   if (a.awaiting === 'auctioneer' || allBiddersActed(state)) {
     const auc = state.players.find((p) => p.profileId === a.auctioneerId);
     return auc ? [auc] : [];
@@ -15448,7 +15550,474 @@ function applyAuctionReset(state, op, ctx) {
   };
 }
 
+// ===== Module 4 Stage 1: contracts (4B) ======================================
+// Everything here gates on state.m4 (zero bleed-through). Rules: 4B3 contract
+// auction, 4B4 fulfillment, 4B5 late penalties, 4B6 default chit, 4E2 scoring.
+// The card data (sides, advance, late fee, VP, destination steps) is
+// data/contracts.js, built from the spreadsheet.
+
+// Absolute Sunspot clock: one tick per year (lap). A timepiece stores the tick
+// it is due on; "late" is the cube moving PAST it (4B5).
+const clockNow = (state) => state.clockTicks | 0;
+const contractMetaOf = (player, cardId) => (player.contractMeta || {})[cardId] || null;
+function contractFaceOf(player, cardId) {
+  const meta = contractMetaOf(player, cardId);
+  return contractFace(cardId, meta ? meta.side : 'blue');
+}
+// The debt a late / default contract carries: its cash advance, doubled if it
+// was never boosted (4B5e).
+function contractDebt(player, cardId) {
+  const meta = contractMetaOf(player, cardId);
+  const face = contractFaceOf(player, cardId);
+  if (!meta || !face) return 0;
+  return face.advance * (meta.boosted ? 1 : 2);
+}
+// Pair decks a player may auction from: sharing an ideology with a law in force
+// (4B3c). Unity can switch several laws on at once.
+function contractPairsOpenTo(state, player) {
+  return Object.keys(CONTRACT_PAIRS).filter((pair) => CONTRACT_PAIRS[pair].some((k) => playerCanUseLaw(state, player, k)));
+}
+// May this player bid on this contract? Timepiece in the Reserve (4B3b), and the
+// default chit bars manned contracts (4B2d / 4B6c).
+function contractBidBlock(state, player, cardId) {
+  if (player.timepiece) return 'timepiece_in_use';
+  const face = contractFace(cardId, 'blue');
+  if (face && face.manned && state.defaultChit && state.defaultChit.profileId === player.profileId) return 'default_stigma';
+  return null;
+}
+// Every stack location a contract card can sit in, with where that stack is.
+function findContractSlot(state, player, cardId) {
+  const inLeo = (player.leo || []).findIndex((s) => s.id === cardId);
+  if (inLeo >= 0) return { arr: player.leo, idx: inLeo, where: { siteId: null, atLeo: true, entered: [] }, label: 'LEO' };
+  const st = (player.rocket && player.rocket.stack) || [];
+  const inRocket = st.findIndex((s) => s.id === cardId);
+  if (inRocket >= 0) {
+    const atLeo = rocketAtLeo(state, player);
+    return {
+      arr: st, idx: inRocket, label: 'rocket',
+      where: { siteId: atLeo ? null : player.rocket.siteId, atLeo, entered: player.rocket.enteredThisTurn || [] },
+    };
+  }
+  return null;
+}
+function contractCtx(state) {
+  return {
+    site: (id) => siteById(id),
+    size: (site) => nodeSizeNumber(site.id),
+    unexplored: (id) => !state.discs[id] && !state.factories[id],
+    gloryUnclaimed: (zone) => !zoneChitTaken(state, zone),
+    atmospheric: (id) => isAtmosphericSite(id),
+    submarine: (id) => isSubmarineSite(id),
+    astrobiology: (id) => isAstrobiologySite(id),
+    elevator: (id) => isSpaceElevatorSite(id),
+    synodic: (id) => SYNODIC_SITE_IDS.includes(id),
+    nodeZone: (n) => zoneOfSlug(n),
+  };
+}
+// Claim the single default chit on the side of the contract that caused it.
+function claimDefaultChit(state, player, cardId) {
+  const meta = contractMetaOf(player, cardId);
+  state.defaultChit = { profileId: player.profileId, side: meta && meta.side === 'gold' ? 'gold' : 'blue' };
+}
+// Take a contract off whatever it is on (hand or a stack).
+function pullContract(state, player, cardId) {
+  const h = (player.contractHand || []).indexOf(cardId);
+  if (h >= 0) { player.contractHand.splice(h, 1); return true; }
+  const loc = findContractSlot(state, player, cardId);
+  if (loc) { loc.arr.splice(loc.idx, 1); return true; }
+  return false;
+}
+// Discard a contract to the bottom of its deck (an unfulfilled discard).
+function discardContractToDeck(state, player, cardId) {
+  pullContract(state, player, cardId);
+  const c = CONTRACTS_BY_ID[cardId];
+  if (c && state.contractDecks && state.contractDecks[c.pair]) state.contractDecks[c.pair].push(cardId);
+  delete player.contractMeta[cardId];
+  if (player.timepiece && player.timepiece.contractId === cardId) player.timepiece = null;
+}
+// Debt repayment (4B5e): payments reach the debt -> Discard with payments,
+// timepiece home, and the default chit is claimed.
+function maybeRepayDebt(state, player, cardId) {
+  const meta = contractMetaOf(player, cardId);
+  if (!meta || meta.paid < contractDebt(player, cardId)) return '';
+  const face = contractFaceOf(player, cardId);
+  claimDefaultChit(state, player, cardId);
+  discardContractToDeck(state, player, cardId);
+  return ` ${player.name} paid off the ${face ? face.name : cardId} advance: the contract is discarded and ${player.name} takes the default chit.`;
+}
+
+// AUCTION_CONTRACT_START (4B3): the final step of a Fundraise. Pick a pair deck
+// sharing an ideology with an Active Law, optionally discard its top card, then
+// auction the top card (or walk away with `abandon`).
+function applyContractAuctionStart(state, op, ctx) {
+  if (!state.m4) return fail('not_m4');
+  if (state.auction) return fail('auction_in_progress');
+  const player = currentPlayer(state);
+  if (!player || player.profileId !== ctx.profileId) return fail('not_your_turn');
+  if (!player.fundraisedThisTurn) return fail('fundraise_first');
+  if (player.contractAuctionDone) return fail('contract_auction_done');
+  if (player.timepiece) return fail('timepiece_in_use');
+  if (state.anarchy || state.war) return fail('contract_auction_prohibited');
+  const pair = String(op.pair || '');
+  if (!CONTRACT_PAIRS[pair]) return fail('bad_deck');
+  if (!contractPairsOpenTo(state, player).includes(pair)) return fail('deck_not_open', { open: contractPairsOpenTo(state, player) });
+  const deck = state.contractDecks[pair];
+  if (!deck || !deck.length) return fail('deck_empty');
+  player.contractAuctionDone = true;
+  state.turnActions = [];
+  state.turnRedo = [];
+  let log = '';
+  if (op.discardTop) {
+    const top = deck.shift();
+    deck.push(top);
+    log += `${player.name} sent ${(CONTRACTS_BY_ID[top] || {}).name || top} to the bottom of the ${CONTRACT_PAIR_NAMES[pair]} contracts. `;
+  }
+  if (op.abandon) return { ok: true, state, log: `${log}${player.name} looked over the ${CONTRACT_PAIR_NAMES[pair]} contracts and walked away.` };
+  const cardId = deck.shift();
+  const face = contractFace(cardId, 'blue');
+  state.auction = {
+    kind: 'contract', pair, cardId, side: 'blue',
+    auctioneerId: player.profileId,
+    // The initiator must open at 10 years (4B3f); lower is better for nobody but
+    // the winner, so the lowest bid wins.
+    bids: { [player.profileId]: CONTRACT_BID_MAX }, low: CONTRACT_BID_MAX,
+    passed: [], acted: [player.profileId],
+  };
+  // Nobody else may bid (every rival's timepiece is out, or none are seated):
+  // the initiator wins at 10 years unopposed.
+  const rivals = state.players.filter((p) => p.profileId !== player.profileId && !contractBidBlock(state, p, cardId));
+  log += `${player.name} put the ${face.name} contract up for auction at ${CONTRACT_BID_MAX} years`
+    + ` (advance ${face.advance} aqua, late fee ${face.lateFee}, ${face.vp} VP).`;
+  if (!rivals.length) {
+    const res = resolveContractAuction(state, player.profileId);
+    return { ok: true, state, log: `${log} No rival can bid.${res}` };
+  }
+  return { ok: true, state, log };
+}
+function applyContractAuctionBid(state, op, ctx) {
+  const a = state.auction;
+  if (!a || a.kind !== 'contract') return fail('no_auction');
+  const bidder = playerByProfile(state, ctx.profileId);
+  if (!bidder) return fail('not_a_player');
+  const block = contractBidBlock(state, bidder, a.cardId);
+  if (block) return fail(block);
+  const years = Number(op.years);
+  if (!Number.isInteger(years) || years < 0 || years > CONTRACT_BID_MAX) return fail('bad_amount');
+  // You must bid the same or lower than every other bidder (4B3f).
+  if (years > a.low) return fail('bid_too_high', { low: a.low });
+  const lower = years < a.low;
+  a.bids[bidder.profileId] = years;
+  a.low = years;
+  a.passed = a.passed.filter((id) => id !== bidder.profileId);
+  // A strictly lower bid puts everyone else back on the clock.
+  a.acted = lower ? [bidder.profileId] : [...new Set([...a.acted, bidder.profileId])];
+  return { ok: true, state, log: `${bidder.name} ${lower ? 'bid' : 'matched'} ${years} year${years === 1 ? '' : 's'} on ${contractFace(a.cardId, 'blue').name}.` };
+}
+function applyContractAuctionPass(state, op, ctx) {
+  const a = state.auction;
+  if (!a || a.kind !== 'contract') return fail('no_auction');
+  if (ctx.profileId === a.auctioneerId) return fail('auctioneer_cannot_pass');
+  const p = playerByProfile(state, ctx.profileId);
+  if (!p) return fail('not_a_player');
+  if (!a.passed.includes(p.profileId)) a.passed.push(p.profileId);
+  if (!a.acted.includes(p.profileId)) a.acted.push(p.profileId);
+  return { ok: true, state, log: `${p.name} passed on ${contractFace(a.cardId, 'blue').name}.` };
+}
+// Everyone who CAN bid has bid or passed at the current low.
+function contractAuctionSettled(state) {
+  const a = state.auction;
+  return state.players.every((p) => p.profileId === a.auctioneerId
+    || contractBidBlock(state, p, a.cardId) || a.acted.includes(p.profileId));
+}
+function applyContractAuctionClose(state, op, ctx) {
+  const a = state.auction;
+  if (!a || a.kind !== 'contract') return fail('no_auction');
+  if (ctx.profileId !== a.auctioneerId) return fail('not_auctioneer');
+  if (!contractAuctionSettled(state)) return fail('bidders_pending');
+  // Bid keys are object keys (strings); map them back to the seated players.
+  const tiedPlayers = state.players.filter((p) => a.bids[p.profileId] === a.low);
+  const tied = tiedPlayers.map((p) => p.profileId);
+  // Ties (4B3g): a Marketeer always wins; else the initiator wins any tie they
+  // are in; else the initiator names the winner among the tied.
+  const marketeer = tiedPlayers.find((p) => hasPrivilege(state, p, 'MARKETEER'));
+  let winnerId;
+  if (marketeer) winnerId = marketeer.profileId;
+  else if (tied.includes(a.auctioneerId)) winnerId = a.auctioneerId;
+  else if (op.winnerId != null && tied.some((id) => String(id) === String(op.winnerId))) winnerId = tied.find((id) => String(id) === String(op.winnerId));
+  else if (tied.length === 1) winnerId = tied[0];
+  else return fail('pick_winner', { tied });
+  return { ok: true, state, log: resolveContractAuction(state, winnerId).trim() };
+}
+// The 3-step win (4B3h) plus the finder's fee (4B3i).
+function resolveContractAuction(state, winnerId) {
+  const a = state.auction;
+  const winner = playerByProfile(state, winnerId);
+  const face = contractFace(a.cardId, a.side);
+  const years = a.bids[winnerId];
+  winner.timepiece = { contractId: a.cardId, due: clockNow(state) + years, slot: (state.turn + years) % SLOTS, deadbeat: false };
+  let advance = face.advance;
+  let fee = '';
+  if (winnerId !== a.auctioneerId && advance > 0) {
+    const initiator = playerByProfile(state, a.auctioneerId);
+    advance -= 1;
+    initiator.aqua = (initiator.aqua | 0) + 1;
+    fee = ` ${initiator.name} takes 1 aqua finder's fee.`;
+  }
+  winner.aqua = (winner.aqua | 0) + advance;
+  winner.contractHand = winner.contractHand || [];
+  winner.contractHand.push(a.cardId);
+  winner.contractMeta = winner.contractMeta || {};
+  winner.contractMeta[a.cardId] = { side: a.side, paid: 0, boosted: false, default: false, progress: { sites: [], done: 0 } };
+  state.auction = null;
+  return ` ${winner.name} won ${face.name} at ${years} year${years === 1 ? '' : 's'}: timepiece due at slot ${winner.timepiece.slot}, ${advance} aqua cash advance.${fee}`;
+}
+
+// FULFILL_CONTRACT (4B4): a free action. Announces every destination step the
+// carrying stack satisfies right now, in order; the last one fulfills it.
+function applyFulfillContract(state, op, player) {
+  if (!state.m4) return fail('not_m4');
+  const cardId = String(op.cardId || '');
+  const meta = contractMetaOf(player, cardId);
+  const face = contractFaceOf(player, cardId);
+  if (!meta || !face) return fail('not_your_contract');
+  if (meta.default) return fail('contract_in_default');
+  const loc = findContractSlot(state, player, cardId);
+  if (!loc) return fail('contract_not_boosted');
+  const ctx = contractCtx(state);
+  const done = [];
+  let why = null;
+  while (meta.progress.done < face.steps.length) {
+    const step = face.steps[meta.progress.done];
+    const r = stepSatisfied(step, loc.where, meta.progress, ctx);
+    if (!r.ok) { why = r; break; }
+    meta.progress.sites.push(r.siteId || null);
+    meta.progress.done += 1;
+    done.push(step);
+  }
+  if (!done.length) return fail(why ? why.why : 'not_at_destination', why && why.detail ? why.detail : undefined);
+  const steps = face.steps.length;
+  if (meta.progress.done < steps) {
+    return { ok: true, state, log: `${player.name} announced step ${meta.progress.done} of ${steps} of ${face.name}${loc.where.siteId ? ` at ${(siteById(loc.where.siteId) || {}).name || loc.where.siteId}` : ''}.` };
+  }
+  // Fulfilled (4B4f): off the stack into the fulfilled splay, timepiece home,
+  // any late-fee payments discarded.
+  loc.arr.splice(loc.idx, 1);
+  player.fulfilledContracts = player.fulfilledContracts || [];
+  player.fulfilledContracts.push({ id: cardId, side: meta.side, round: state.round });
+  const late = !!(player.timepiece && player.timepiece.contractId === cardId && player.timepiece.deadbeat);
+  if (player.timepiece && player.timepiece.contractId === cardId) player.timepiece = null;
+  delete player.contractMeta[cardId];
+  const ability = face.fulfilledAbility ? ` Fulfilled ability: ${face.fulfilledAbility}` : '';
+  return { ok: true, state, log: `${player.name} fulfilled ${face.name}${late ? ' (late)' : ''} for ${face.vp} VP.${ability}` };
+}
+
+// PAY_LATE_FEE (4B5b): a free action, up to the contract's late fee per turn,
+// placed on the contract. Also how a default contract's debt is paid down.
+function applyPayLateFee(state, op, player) {
+  if (!state.m4) return fail('not_m4');
+  const cardId = String(op.cardId || (player.timepiece && player.timepiece.contractId) || '');
+  const meta = contractMetaOf(player, cardId);
+  const face = contractFaceOf(player, cardId);
+  if (!meta || !face) return fail('not_your_contract');
+  const late = player.timepiece && player.timepiece.contractId === cardId && player.timepiece.deadbeat;
+  if (!late && !meta.default) return fail('not_late');
+  const amount = Number(op.amount);
+  if (!Number.isInteger(amount) || amount <= 0) return fail('bad_amount');
+  const paidNow = player.lateFeePaidThisTurn | 0;
+  if (paidNow + amount > face.lateFee) return fail('over_late_fee', { max: face.lateFee - paidNow });
+  if (amount > (player.aqua | 0)) return fail('insufficient_aqua');
+  player.aqua -= amount;
+  player.lateFeePaidThisTurn = paidNow + amount;
+  meta.paid += amount;
+  let log = `${player.name} paid ${amount} aqua toward ${face.name} (${meta.paid} of ${contractDebt(player, cardId)} paid).`;
+  log += maybeRepayDebt(state, player, cardId);
+  return { ok: true, state, log };
+}
+
+// ABANDON_CONTRACT (4B7d): a contract can only be Discarded during Anarchy (or
+// War) - user ruling 2026-11-16, "contract cannot be discarded unless in
+// anarchy". A non-military contract in your hand, or carried to LEO or to any
+// player's anchored Bernal, is Discarded to the bottom of its deck WITHOUT
+// paying late fees or the advance back; the timepiece comes home and you take
+// the default chit. A free action, like any discard (G6).
+function applyAbandonContract(state, op, player) {
+  if (!state.m4) return fail('not_m4');
+  if (!(state.anarchy || state.war)) return fail('abandon_needs_anarchy');
+  const cardId = String(op.cardId || '');
+  const meta = contractMetaOf(player, cardId);
+  const face = contractFaceOf(player, cardId);
+  if (!meta || !face) return fail('not_your_contract');
+  if (/military/i.test(face.contractType || '')) return fail('military_contract_cannot_abandon');
+  const anchoredBernalAt = (siteId) => siteId != null && state.players.some((pl) =>
+    (pl.bernals || []).some((bn) => bn && bn.anchored && bn.siteId === siteId));
+  let where = null;
+  if ((player.contractHand || []).includes(cardId)) where = 'from the hand';
+  else {
+    const loc = findContractSlot(state, player, cardId);
+    if (loc && loc.where.atLeo) where = 'at LEO';
+    else if (loc && loc.label === 'rocket' && anchoredBernalAt(player.rocket.siteId)) where = 'at an anchored Bernal';
+    else {
+      for (const bn of (player.bernals || [])) {
+        const i = bn && bn.anchored ? (bn.stack || []).findIndex((sl) => sl.id === cardId) : -1;
+        if (i >= 0) { bn.stack.splice(i, 1); where = 'at an anchored Bernal'; break; }
+      }
+    }
+  }
+  if (!where) return fail('abandon_at_leo_or_bernal');
+  const owed = Math.max(0, contractDebt(player, cardId) - (meta.paid | 0));
+  claimDefaultChit(state, player, cardId);
+  discardContractToDeck(state, player, cardId);
+  if (player.rocket && player.rocket.stack) recallIfEmpty(player);
+  const log = `${player.name} abandoned the ${face.name} contract ${where} during ${state.war ? 'War' : 'Anarchy'}`
+    + `: it goes to the bottom of its deck${owed ? ` (${owed} aqua of debt forgiven)` : ''}, the timepiece comes home,`
+    + ` and ${player.name} takes the default chit (${state.defaultChit.side === 'gold' ? '-6' : '-3'} VP).`;
+  return { ok: true, state, log };
+}
+
+// The clock passing a timepiece flips it to deadbeat (4B5a). Mishap Insurance
+// (centrist law) pays the first late fee from the pool.
+function contractClockTick(state) {
+  if (!state.m4) return;
+  state.clockTicks = (state.clockTicks | 0) + 1;
+  const notes = [];
+  for (const p of state.players) {
+    const tp = p.timepiece;
+    if (!tp || tp.deadbeat || clockNow(state) <= tp.due) continue;
+    tp.deadbeat = true;
+    const face = contractFaceOf(p, tp.contractId);
+    const meta = contractMetaOf(p, tp.contractId);
+    notes.push(`${p.name}'s ${face ? face.name : 'contract'} is LATE: pay the ${face ? face.lateFee : 0}-aqua late fee each turn or default.`);
+    if (meta && lawInForce(state, 'centrist')) {
+      meta.paid += face.lateFee;
+      meta.insuredTurn = true;
+      notes.push(`Mishap Insurance pays ${p.name}'s first late fee.`);
+    }
+  }
+  if (notes.length) state.contractClockNote = notes.join(' ');
+}
+// End of a turn that began late: an unpaid late fee is a default (4B5d).
+function contractEndTurnCheck(state, player) {
+  if (!state.m4) return '';
+  const tp = player.timepiece;
+  if (!tp || !tp.deadbeat || !player.turnStartedLate) return '';
+  const meta = contractMetaOf(player, tp.contractId);
+  const face = contractFaceOf(player, tp.contractId);
+  if (!meta || !face || meta.default) return '';
+  if (meta.insuredTurn) { meta.insuredTurn = false; return ''; }
+  if ((player.lateFeePaidThisTurn | 0) >= face.lateFee) return '';
+  meta.default = true;
+  // A default contract goes to Hand sideways (retaining its aqua) and can never
+  // be fulfilled; the timepiece stays until the debt is repaid.
+  if (pullContract(state, player, tp.contractId)) player.contractHand.push(tp.contractId);
+  claimDefaultChit(state, player, tp.contractId);
+  return ` ${player.name} did not pay the ${face.name} late fee: the contract DEFAULTS and ${player.name} takes the default chit.`;
+}
+// Endgame (4E2): fulfilled VP; -1 per unpaid aqua on an unfulfilled contract
+// (which then claims the default chit, most debt last); -3 / -6 for the chit.
+function contractScoring(state) {
+  const out = {};
+  if (!state.m4) return out;
+  const unpaid = [];
+  for (const p of state.players) {
+    const fulfilled = (p.fulfilledContracts || []).reduce((sum, f) => sum + ((contractFace(f.id, f.side) || {}).vp || 0), 0);
+    let debt = 0;
+    for (const id of Object.keys(p.contractMeta || {})) debt += Math.max(0, contractDebt(p, id) - (p.contractMeta[id].paid | 0));
+    out[p.profileId] = { fulfilled, debt, chit: 0 };
+    if (Object.keys(p.contractMeta || {}).length) unpaid.push({ p, debt });
+  }
+  unpaid.sort((x, y) => x.debt - y.debt);
+  for (const { p } of unpaid) {
+    const first = Object.keys(p.contractMeta)[0];
+    if (first) claimDefaultChit(state, p, first);
+  }
+  if (state.defaultChit && out[state.defaultChit.profileId]) {
+    out[state.defaultChit.profileId].chit = state.defaultChit.side === 'gold' ? -6 : -3;
+  }
+  for (const id of Object.keys(out)) out[id].vp = out[id].fulfilled - out[id].debt + out[id].chit;
+  return out;
+}
+// ===== end Module 4 contracts ===============================================
+
+// ===== Module 4 Stage 2: augmentations (4C) ===================================
+// Gated on state.m4 AND state.m2 (colonists, Bernals and colonies are Module 2).
+// A faction owns ONE augmentation chit of each of the six cybernetics shapes
+// (4C4d), recorded as player.augments[shape] = { colonistId, side } once it is
+// implanted. Its portfolio is the cybernetics icons on its fulfilled contracts
+// (4B8d; partner enterprises are later).
+const AUG_SHAPES = ['heart', 'jar', 'hexagon', 'splat', 'battery', 'triangle'];
+function portfolioShapes(player) {
+  const out = new Set();
+  for (const f of (player.fulfilledContracts || [])) {
+    for (const s of ((contractFace(f.id, f.side) || {}).cybernetics || [])) out.add(s);
+  }
+  return out;
+}
+// "At least one BEO Colony (4C2a)". With Module 2 that is a Bernal anchored
+// Dirtside: an anchored Bernal of yours that is NOT your Home Bernal (user
+// 2026-11-15: "BEO colony is different with m2, I believe it has to be a dirt
+// side anchored bernal").
+function hasBeoColony(state, player) {
+  return (player.bernals || []).some((bn) => bn && bn.anchored && !isHomeBernal(bn));
+}
+function colonistAugCount(player, colonistId) {
+  return Object.values(player.augments || {}).filter((a) => a && a.colonistId === colonistId).length;
+}
+// IMPLANT (4C4): at your Anchored Bernal (and you need a Dirtside one, the BEO
+// Colony above), place portfolio chits on Colocated
+// Colonists, optionally juggling chits off Colocated Colonists first. An
+// Industrialist Colonist there makes it a once-per-turn free action (4C4g).
+function applyImplant(state, op, player) {
+  if (!state.m4) return fail('not_m4');
+  if (!state.m2) return fail('m2_off');
+  const bn = (player.bernals || [])[Number(op.bernal) || 0];
+  if (!bn) return fail('no_bernal');
+  if (!bn.anchored) return fail('bernal_not_anchored');
+  if (!hasBeoColony(state, player)) return fail('needs_beo_colony');
+  const here = (bn.stack || []).filter((s) => isColonistSlot(s));
+  const ids = new Set(here.map((s) => s.id));
+  if (!ids.size) return fail('no_colonist_here');
+  const industrialist = here.some((s) => /industrialist/i.test((COLONISTS_BY_ID[s.id] || {}).specialty || ''));
+  const free = industrialist && !player.implantFreeUsed;
+  if (!free && player.opsRemaining <= 0) return fail('no_ops_left');
+  player.augments = player.augments || {};
+  const removes = Array.isArray(op.remove) ? op.remove.map(String) : [];
+  const implants = Array.isArray(op.implants) ? op.implants : [];
+  if (!removes.length && !implants.length) return fail('nothing_to_implant');
+  const parts = [];
+  for (const shape of removes) {
+    const a = player.augments[shape];
+    if (!a) return fail('no_such_chit', { shape });
+    if (!ids.has(a.colonistId)) return fail('chit_not_colocated', { shape });
+    delete player.augments[shape];
+    parts.push(`took the ${shape} chit off ${cardNameOf(a.colonistId)}`);
+  }
+  const portfolio = portfolioShapes(player);
+  for (const imp of implants) {
+    const shape = String(imp && imp.shape || '');
+    const colonistId = String(imp && imp.colonistId || '');
+    const side = Number(imp && imp.side) === 1 ? 1 : 2;
+    if (!AUG_SHAPES.includes(shape)) return fail('bad_shape');
+    if (!portfolio.has(shape)) return fail('not_in_portfolio', { shape });
+    if (!ids.has(colonistId)) return fail('colonist_not_here');
+    if (player.augments[shape]) return fail('chit_in_use', { shape, on: player.augments[shape].colonistId });
+    // The heart's Parenthood side (4C5) is not playable yet: implant side 2.
+    if (shape === 'heart' && side === 1) return fail('parenthood_not_yet');
+    player.augments[shape] = { colonistId, side };
+    parts.push(`implanted the ${shape} augmentation (side ${side}) in ${cardNameOf(colonistId)}`);
+  }
+  if (free) player.implantFreeUsed = true;
+  else player.opsRemaining -= 1;
+  const where = (siteById(bn.siteId) || {}).name || 'the Bernal';
+  return { ok: true, state, log: `${player.name} ${parts.join(' and ')} at ${where}${free ? ' (Industrialist: free)' : ''}.` };
+}
+// ===== end Module 4 augmentations ============================================
+
+
 const AUCTION = {
+  AUCTION_CONTRACT_START: applyContractAuctionStart,
+  AUCTION_CONTRACT_BID: applyContractAuctionBid,
+  AUCTION_CONTRACT_PASS: applyContractAuctionPass,
+  AUCTION_CONTRACT_CLOSE: applyContractAuctionClose,
   AUCTION_START: applyAuctionStart,
   AUCTION_BID: applyAuctionBid,
   AUCTION_PASS: applyAuctionPass,
@@ -16727,6 +17296,12 @@ export function applyOperation(prevState, op, ctx) {
     const cursorBefore = state.rng.cursor;
     const res = FUNCTIONAL[op.kind](state, op, player);
     if (!res.ok) return res;
+    // M4: the rocket remembers every space it entered this turn, for contract
+    // "enter" / flyby destination steps (4B4b Pass Through).
+    if (res.state.m4 && op.kind === 'MOVE' && !op.unit && !op.debug && Array.isArray(op.segments)) {
+      const r = playerByProfile(res.state, player.profileId).rocket;
+      r.enteredThisTurn = [...(r.enteredThisTurn || []), ...op.segments.map((sg) => String(sg.to))];
+    }
     // Settlement notes a handler queued mid-op (Power Brokers' FINAO rebate).
     if (res.state && res.state.__opNotes) {
       if (res.state.__opNotes.length) res.log = (res.log ? res.log + ' ' : '') + res.state.__opNotes.join(' ');
