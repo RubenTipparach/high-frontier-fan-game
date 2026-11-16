@@ -60,7 +60,12 @@ const svg = (body, rot = 0) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox=
 `;
 // A suited figure, feet at (x, y), `s` = scale (about 50 px tall at 1).
 function figure(x, y, s = 1, { suit = 'url(#white)', visor = '#d9a531', pose = 'stand', pack = true } = {}) {
+  // A suited astronaut, feet on (x, y), about 54 units tall at s = 1: helmet
+  // with a gold visor, life-support pack, jointed arms and legs, gloves, boots.
   const S = (v) => f(v * s);
+  const X = (dx) => f(x + dx * s);
+  const Y = (dy) => f(y - dy * s);
+  const INK = '#283041';
   const arms = {
     stand: [[-9, 30, -12, 16], [9, 30, 12, 16]],
     wave: [[-9, 30, -12, 16], [9, 30, 17, 42]],
@@ -70,14 +75,40 @@ function figure(x, y, s = 1, { suit = 'url(#white)', visor = '#d9a531', pose = '
     hold: [[-9, 30, 4, 22], [9, 30, 14, 24]],
   }[pose] || [[-9, 30, -12, 16], [9, 30, 12, 16]];
   const legs = pose === 'walk' ? [[-4, 18, -12, 0], [4, 18, 9, 0]] : pose === 'kneel' ? [[-4, 18, -14, 8], [4, 18, 8, 0]] : [[-4, 18, -5, 0], [4, 18, 5, 0]];
-  const L = (a) => `<line x1="${x + S(a[0])}" y1="${y - S(a[1])}" x2="${x + S(a[2])}" y2="${y - S(a[3])}" stroke="${suit}" stroke-width="${S(7)}" stroke-linecap="round"/>`;
-  return `<g>${pack ? box(x - S(12), y - S(40), S(24), S(20), 'url(#metal)', S(3)) : ''}
-    ${legs.map(L).join('')}
-    <rect x="${x - S(9)}" y="${y - S(38)}" width="${S(18)}" height="${S(22)}" rx="${S(5)}" fill="${suit}"/>
-    ${arms.map(L).join('')}
-    <circle cx="${x}" cy="${y - S(44)}" r="${S(8)}" fill="${suit}"/>
-    <ellipse cx="${x + S(1.5)}" cy="${y - S(44)}" rx="${S(5.5)}" ry="${S(4.5)}" fill="${visor}"/>
-    <ellipse cx="${x - S(1)}" cy="${y - S(46)}" rx="${S(2)}" ry="${S(1.2)}" fill="#fff" opacity="0.8"/></g>`;
+  // A limb bends at its middle joint, away from the body's centre line.
+  const limb = ([ax, ay, bx, by], w, bend) => {
+    const mx = (ax + bx) / 2, my = (ay + by) / 2;
+    const len = Math.hypot(bx - ax, by - ay) || 1;
+    const side = (mx >= 0 ? 1 : -1) * bend;
+    const jx = mx + ((by - ay) / len) * side, jy = my - ((bx - ax) / len) * side;
+    const d = `M${X(ax)} ${Y(ay)} Q${X(jx)} ${Y(jy)} ${X(bx)} ${Y(by)}`;
+    return { d, jx, jy, bx, by,
+      svg: `<path d="${d}" fill="none" stroke="${INK}" stroke-width="${S(w + 1.8)}" stroke-linecap="round"/>`
+        + `<path d="${d}" fill="none" stroke="${suit}" stroke-width="${S(w)}" stroke-linecap="round"/>`
+        + `<circle cx="${X((ax + 2 * jx + bx) / 4)}" cy="${Y((ay + 2 * jy + by) / 4)}" r="${S(w * 0.42)}" fill="none" stroke="#9aa3b2" stroke-width="${S(0.9)}"/>` };
+  };
+  const legSvg = legs.map((l) => {
+    const L = limb(l, 7.4, 1.6);
+    return L.svg + `<rect x="${X(l[2] - 4.6)}" y="${Y(l[3] + 1.4)}" width="${S(9.2)}" height="${S(4.2)}" rx="${S(1.6)}" fill="#5b6475" stroke="${INK}" stroke-width="${S(0.8)}"/>`;
+  }).join('');
+  const armSvg = arms.map((a) => {
+    const A = limb(a, 6, 2.6);
+    return A.svg + `<circle cx="${X(a[2])}" cy="${Y(a[3])}" r="${S(3.3)}" fill="#c9ced8" stroke="${INK}" stroke-width="${S(0.8)}"/>`;
+  }).join('');
+  const packSvg = pack ? `<rect x="${X(-13)}" y="${Y(42)}" width="${S(26)}" height="${S(23)}" rx="${S(4)}" fill="url(#metal)" stroke="${INK}" stroke-width="${S(0.9)}"/>`
+    + `<rect x="${X(-11)}" y="${Y(45)}" width="${S(5)}" height="${S(4)}" rx="${S(1)}" fill="#8c94a2" stroke="${INK}" stroke-width="${S(0.6)}"/>` : '';
+  return `<g>${packSvg}${legSvg}
+    <rect x="${X(-9.5)}" y="${Y(39)}" width="${S(19)}" height="${S(23)}" rx="${S(6)}" fill="${suit}" stroke="${INK}" stroke-width="${S(1)}"/>
+    <path d="M${X(4)} ${Y(38.4)} Q${X(9.5)} ${Y(36)} ${X(9.5)} ${Y(30)} L${X(9.5)} ${Y(22)} Q${X(9.5)} ${Y(16.6)} ${X(4)} ${Y(16.6)} Z" fill="#000" opacity="0.14"/>
+    <line x1="${X(-9)}" y1="${Y(19.5)}" x2="${X(9)}" y2="${Y(19.5)}" stroke="#9aa3b2" stroke-width="${S(1.6)}"/>
+    <rect x="${X(-5.5)}" y="${Y(33)}" width="${S(11)}" height="${S(6.5)}" rx="${S(1.2)}" fill="#e6e9ef" stroke="${INK}" stroke-width="${S(0.6)}"/>
+    ${[[-3, '#e05252'], [0, '#ffd36b'], [3, '#4ea1ff']].map(([dx, c]) => `<circle cx="${X(dx)}" cy="${Y(29.8)}" r="${S(0.95)}" fill="${c}"/>`).join('')}
+    ${armSvg}
+    <ellipse cx="${X(0)}" cy="${Y(37.6)}" rx="${S(6.4)}" ry="${S(2.2)}" fill="#9aa3b2" stroke="${INK}" stroke-width="${S(0.7)}"/>
+    <circle cx="${X(0)}" cy="${Y(45)}" r="${S(8.8)}" fill="${suit}" stroke="${INK}" stroke-width="${S(1)}"/>
+    <ellipse cx="${X(1.2)}" cy="${Y(45)}" rx="${S(6.2)}" ry="${S(5.2)}" fill="${visor}" stroke="${INK}" stroke-width="${S(0.7)}"/>
+    <path d="M${X(-4.4)} ${Y(44)} Q${X(-3.6)} ${Y(49)} ${X(1)} ${Y(49.4)}" fill="none" stroke="#fff" stroke-width="${S(1.3)}" stroke-linecap="round" opacity="0.85"/>
+    <path d="M${X(-3)} ${Y(41.6)} Q${X(1.2)} ${Y(39.2)} ${X(6.6)} ${Y(42.6)}" fill="none" stroke="#000" stroke-width="${S(1.4)}" opacity="0.22"/></g>`;
 }
 const stars = (n, seed) => Array.from({ length: n }, (_, i) => {
   const a = Math.sin(seed * 31 + i * 12.9898) * 43758.5453, b = Math.sin(seed * 17 + i * 78.233) * 12345.678;
