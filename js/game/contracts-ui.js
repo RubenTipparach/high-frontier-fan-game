@@ -95,7 +95,7 @@ function timepieceMarkers(s, skipId) {
     title: `@${q.name}'s timepiece${q.timepiece.deadbeat ? ' (late)' : `: ${yearsFromNow(s, q.timepiece.slot)} years left`}`,
   }));
 }
-const turnLine = (s) => `Turn ${(s.turn | 0) + 1} \u00b7 round ${s.round || 1}`;
+const turnLine = (s) => `Turn ${(s.turn | 0) + 1}`;
 
 // The Contracts panel's own dial: your timepiece on its deadline, a band from
 // the Cube to it, and everyone else's timepieces.
@@ -103,15 +103,15 @@ function panelDial(s, p) {
   const tp = p.timepiece;
   const turn = s.turn | 0;
   const markers = timepieceMarkers(s, p.profileId);
-  let center = [turnLine(s), 'Your timepiece is', 'in your Reserve'];
+  let center = [turnLine(s), 'Timepiece', 'in Reserve'];
   let band = null;
   if (tp) {
     const slot = ((tp.slot % SLOTS) + SLOTS) % SLOTS;
     const left = yearsFromNow(s, tp.slot);
     markers.push({ slot, svg: timepieceDialGlyph({ color: p.color || '#e5e7eb', size: DIAL_GLYPH, deadbeat: !!tp.deadbeat }), title: 'Your timepiece' });
-    if (tp.deadbeat) center = [turnLine(s), 'LATE', 'pay the late fee'];
+    if (tp.deadbeat) center = [turnLine(s), 'LATE'];
     else {
-      center = [turnLine(s), `${left} year${left === 1 ? '' : 's'} left`, `due at turn ${slot + 1}`];
+      center = [turnLine(s), `${left} yr left`];
       if (left > 0) band = { from: (turn + 1) % SLOTS, to: slot, color: '#fbbf24' };
     }
   }
@@ -153,19 +153,19 @@ function renderPanel() {
   const tp = p.timepiece;
   const parts = [];
   // Timepiece + default chit
-  let tpLine = 'Your timepiece is in your Reserve: you may win a contract auction.';
+  let tpLine = 'Timepiece in Reserve.';
   if (tp) {
     const f = faceOf(p, tp.contractId);
     const tmeta = (p.contractMeta || {})[tp.contractId] || {};
     const owed = (f.advance * (tmeta.boosted ? 1 : 2)) - (tmeta.paid | 0);
     tpLine = tmeta.default
-      ? `<b class="m4c-late">IN DEFAULT</b>: ${esc(f.name)} can never be fulfilled. ${owed} aqua of debt left (up to ${f.lateFee} a turn); the timepiece stays out until it is repaid.`
+      ? `<b class="m4c-late">DEFAULT</b> ${esc(f.name)}: ${owed} aqua owed.`
       : tp.deadbeat
-      ? `<b class="m4c-late">LATE</b>: ${esc(f.name)} - pay its ${f.lateFee}-aqua late fee this turn or it defaults.`
-      : `Timepiece on slot ${tp.slot} (${yearsFromNow(s, tp.slot)} year${yearsFromNow(s, tp.slot) === 1 ? '' : 's'} away) for ${esc(f.name)}.`;
+      ? `<b class="m4c-late">LATE</b> ${esc(f.name)}: ${f.lateFee} aqua due.`
+      : `${esc(f.name)}: ${yearsFromNow(s, tp.slot)} yr left.`;
   }
   const chit = s.defaultChit
-    ? `Default chit: ${esc(nameOf(s.defaultChit.profileId))} (${s.defaultChit.side} side, ${s.defaultChit.side === 'gold' ? -6 : -3} VP).`
+    ? `Default chit: ${esc(nameOf(s.defaultChit.profileId))} (${s.defaultChit.side === 'gold' ? -6 : -3} VP).`
     : 'Default chit: unclaimed.';
   parts.push(`<div class="m4c-status-row">${panelDial(s, p)}<div class="m4c-status"><div>⏱ ${tpLine}</div><div>🏷 ${chit}</div></div></div>`);
 
@@ -188,14 +188,12 @@ function renderPanel() {
     return `<div class="m4c-deck ${open ? 'open' : 'closed'}">
       <div class="m4c-deck-head"><b>${CONTRACT_PAIR_NAMES[pair]}</b>
         <span>${deck.length} left</span>
-        <span class="m4c-law">${byLaw ? 'shares the Active Law' : byConnections ? 'open through your Connections' : 'no Active Law here'}</span></div>
+        <span class="m4c-law">${byLaw ? 'Active Law' : byConnections ? 'Connections' : ''}</span></div>
       ${top ? cardThumb(top, 'blue') : '<div class="muted">empty</div>'}${btns}</div>`;
   }).join('');
   const auctionNote = auctionOpen
-    ? 'Your Fundraise lets you auction one contract from a deck that shares an ideology with an Active Law.'
-    : (tp ? 'Your timepiece is out: no contract auctions until this contract is fulfilled or repaid.'
-      : 'A Fundraise ends by letting you auction one contract.');
-  parts.push(`<h4>Contract decks</h4><p class="muted">${auctionNote}</p><div class="m4c-decks">${decks}</div>`);
+    ? '' : (tp ? 'Timepiece out.' : '');
+  parts.push(`<h4>Contract decks</h4>${auctionNote ? `<p class="muted">${auctionNote}</p>` : ''}<div class="m4c-decks">${decks}</div>`);
 
   // Contracts in hand live in the Hand area (4B3h: a won contract is a Hand
   // Card), so the panel only points there; boosted and fulfilled ones are here.
@@ -215,7 +213,7 @@ function renderPanel() {
   }).join('');
   const fulfilled = (p.fulfilledContracts || []).map((x) => `<div class="m4c-item">${cardThumb(x.id, x.side)}</div>`).join('');
   parts.push(`<h4>In hand</h4><p class="muted">${inHand
-    ? `${inHand} contract${inHand === 1 ? '' : 's'} in your Hand (the Hand area below the map): boost, pay toward or abandon ${inHand === 1 ? 'it' : 'them'} there.`
+    ? `${inHand} in your Hand.`
     : 'none'}</p>`);
   parts.push(`<h4>Boosted</h4><div class="m4c-row">${boosted || '<span class="muted">none</span>'}</div>`);
   parts.push(`<h4>Fulfilled</h4><div class="m4c-row">${fulfilled || '<span class="muted">none yet</span>'}</div>`);
@@ -353,9 +351,9 @@ export function renderContractAuction(a) {
   const face = contractFace(a.cardId, a.side || 'blue');
   const myId = p && p.profileId;
   const iAmAuctioneer = myId === a.auctioneerId;
-  const blocked = p && (p.timepiece ? 'Your timepiece is out: you cannot bid.'
-    : (face.manned && s.defaultChit && s.defaultChit.profileId === myId ? 'The default chit bars you from manned contracts.' : null));
-  const bids = Object.entries(a.bids || {}).map(([id, y]) => `<li><span class="player-name" style="--player-color:${esc((playerById(Number(id)) || {}).color || '')}">@${esc(nameOf(Number(id)))}</span> ${y} year${y === 1 ? '' : 's'}</li>`).join('');
+  const blocked = p && (p.timepiece ? 'Timepiece out.'
+    : (face.manned && s.defaultChit && s.defaultChit.profileId === myId ? 'Default chit: no manned bids.' : null));
+  const bids = Object.entries(a.bids || {}).map(([id, y]) => `<li><span class="player-name" style="--player-color:${esc((playerById(Number(id)) || {}).color || '')}">@${esc(nameOf(Number(id)))}</span> ${y} yr</li>`).join('');
   const waiting = (s.players || []).filter((q) => q.profileId !== a.auctioneerId && !(a.acted || []).includes(q.profileId)
     && !q.timepiece && !(face.manned && s.defaultChit && s.defaultChit.profileId === q.profileId));
   const settled = !waiting.length;
@@ -378,18 +376,18 @@ export function renderContractAuction(a) {
     turn, markers,
     band: _yearsDraft > 0 ? { from: (turn + 1) % SLOTS, to: slotFor(_yearsDraft), color: '#34d399' } : null,
     pick: canBid ? { from: turn, to: slotFor(a.low), title: (slot) => { const y = ((slot - turn) + SLOTS) % SLOTS; return `Bid ${y} year${y === 1 ? '' : 's'} (due turn ${slot + 1})`; } } : null,
-    center: [turnLine(s), `Low bid: ${a.low} year${a.low === 1 ? '' : 's'}`, canBid ? `Yours: ${_yearsDraft} year${_yearsDraft === 1 ? '' : 's'}` : ''],
+    center: [turnLine(s), `Low ${a.low}`, canBid ? `You ${_yearsDraft}` : ''],
   });
-  const opts = Array.from({ length: a.low + 1 }, (_, y) => `<option value="${y}" ${y === _yearsDraft ? 'selected' : ''}>${y} year${y === 1 ? '' : 's'}</option>`).join('');
+  const opts = Array.from({ length: a.low + 1 }, (_, y) => `<option value="${y}" ${y === _yearsDraft ? 'selected' : ''}>${y} yr</option>`).join('');
   let controls = '';
   if (blocked) controls = `<p class="muted">${blocked}</p>`;
   else {
-    controls = `<label>Your bid <select id="m4c-years">${opts}</select></label>
-      <button type="button" data-act="bid">Bid ${_yearsDraft} year${_yearsDraft === 1 ? '' : 's'}</button>
+    controls = `<select id="m4c-years" aria-label="Your bid in years">${opts}</select>
+      <button type="button" data-act="bid">Bid ${_yearsDraft}</button>
       ${iAmAuctioneer ? '' : '<button type="button" data-act="pass">Pass</button>'}`;
   }
   if (iAmAuctioneer) {
-    controls += `<div class="m4c-btns"><button type="button" data-act="close" ${settled ? '' : 'disabled'}>Close the auction</button></div>`;
+    controls += `<div class="m4c-btns"><button type="button" data-act="close" ${settled ? '' : 'disabled'}>Close</button></div>`;
   }
   el.innerHTML = `<div class="m4c-modal" role="dialog" aria-label="Contract auction">
     <div class="m4c-head"><h3>📜 Contract auction</h3><span class="muted">${CONTRACT_PAIR_NAMES[a.pair] || ''}</span></div>
@@ -397,11 +395,8 @@ export function renderContractAuction(a) {
       <div class="m4c-auction-card">${cardThumb(a.cardId, a.side || 'blue')}</div>
       <div class="m4c-dial m4c-auction-dial">${dial}</div>
       <div class="m4c-side">
-        <p>Set your timepiece on the Sunspot Cycle: each slot from the Cube is one <b>year</b> to the deadline, from ${CONTRACT_BID_MAX} down to 0. The <b>lowest</b> bid wins; ${esc(nameOf(a.auctioneerId))} wins ties.${canBid ? ' Tap a slot on the dial to set your bid.' : ''}</p>
-        <p class="m4c-low">Low bid: <b>${a.low} year${a.low === 1 ? '' : 's'}</b></p>
         <ul class="m4c-bids">${bids}</ul>
-        <p class="muted">${settled ? `Waiting on ${esc(nameOf(a.auctioneerId))} to close.` : `Waiting on ${waiting.map((q) => '@' + esc(q.name)).join(', ')}.`}</p>
-        <p class="muted">Winner: timepiece that many years ahead, ${face.advance} aqua advance${'' } (1 less if not the initiator).</p>
+        <p class="muted">${settled ? `${esc(nameOf(a.auctioneerId))} to close` : `Waiting: ${waiting.map((q) => '@' + esc(q.name)).join(', ')}`}</p>
         <div class="m4c-controls">${controls}</div>
       </div></div></div>`;
   const sel = el.querySelector('#m4c-years');
