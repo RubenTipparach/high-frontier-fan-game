@@ -34,6 +34,7 @@ import { scorePlayer } from '../data/endgame-scoring.js';
 import { CONTRACTS, CONTRACT_PAIRS } from '../data/contracts.js';
 import { siteBySlug, nodeSizeNumber, isLanderBurnNode, isAerobrakeLandableSite, neighborSlugs, siteHasLanderBurn, allSiteSlugs, leoSlug } from '../server/game/planner-graph.js';
 import { adjacentSites, SITES } from '../data/sites.js';
+import { NODE_LABELS } from '../data/map-labels.js';
 import { isAtmosphericSite } from '../data/site-categories.js';
 
 import { SIREN_BUSTED_SITES, splitDeckForSoloSpecies, SIREN_SOLO_SPECTRALS } from '../data/sirens.js';
@@ -10894,6 +10895,231 @@ check('an Industrialist Colonist implants for free once a turn; promotion needs 
   r = op(st, 'PROMOTE', P.profileId, { cardId: 'col_botany_bay_convicts' });
   assert(!r.ok && r.error === 'needs_augmentation', `unaugmented promote: ${r.error}`);
   return `${ind.name} implants free; an unaugmented Colonist cannot promote`;
+});
+
+// ---- Module 4 Stage 1: contract abilities (4B2e/f) ----------------------------
+// Each ability is read off the printed "Fulfilled Ability" text
+// (data/contracts.js#parseFulfilledAbility), counted from the player's
+// FULFILLED contracts, and inert outside M4.
+const conFace = (pred) => {
+  for (const c of CONTRACTS) {
+    for (const side of ['blue', 'gold']) {
+      const f = c.faces[side === 'gold' ? 'secondary' : 'primary'];
+      if (pred(f)) return { id: c.id, side, face: f };
+    }
+  }
+  return null;
+};
+const fulfilledWith = (p, ...cs) => { p.fulfilledContracts = cs.map((c) => ({ id: c.id, side: c.side, round: 1 })); };
+
+check('contract abilities are read off the printed Fulfilled Ability text', () => {
+  const count = {};
+  for (const c of CONTRACTS) for (const f of [c.faces.primary, c.faces.secondary]) {
+    for (const k of Object.keys(f.abilities || {})) count[k] = (count[k] || 0) + 1;
+  }
+  for (const [k, n] of Object.entries({ shielded: 8, bailout: 6, secured: 8, insight: 6, connections: 7 })) {
+    assert(count[k] === n, `${k}: ${count[k]} faces, expected ${n}`);
+  }
+  const spin = conFace((f) => f.name === 'Spin Control');
+  assert(JSON.stringify(spin.face.abilities.hazardIgnore) === '["spin"]', `Spin Control: ${JSON.stringify(spin.face.abilities)}`);
+  const cliff = conFace((f) => f.name === 'Highest Cliff');
+  assert(cliff.face.onFulfill.gainAqua === 20, `Highest Cliff: ${JSON.stringify(cliff.face.onFulfill)}`);
+  const tophats = CONTRACTS.reduce((n, c) => n + [c.faces.primary, c.faces.secondary].filter((f) => f.tophat).length, 0);
+  assert(tophats === 10, `tophat faces: ${tophats}`);
+  return Object.entries(count).map(([k, n]) => `${k} ${n}`).join(', ');
+});
+
+check('Shielded takes 2 off a real Belt Roll; the same card does nothing outside M4', () => {
+  const radiator = PATENTS.find((c) => c.type === 'radiator');
+  const shield = conFace((f) => f.abilities && f.abilities.shielded);
+  const moveIntoBelt = ({ m4, shielded }, cursor) => {
+    const st = startedGame({ seats: 2, ...(m4 ? { m4: true } : {}) });
+    st.rng.cursor = cursor;
+    const me = st.players[0];
+    st.activeIndex = 0;
+    if (shielded) fulfilledWith(me, shield);
+    me.rocket.siteId = 'burn-ue3lc';
+    me.rocket.stack = [
+      { id: thruster.id, kind: 'patent', face: 'primary' },
+      { id: radiator.id, kind: 'patent', face: 'primary', radSide: 'light' },
+      ...supportsFor(thruster).filter((sl) => sl.id !== radiator.id),
+    ];
+    me.rocket.activeThrusterId = thruster.id;
+    me.rocket.tank = 12;
+    return applyOperation(st, { kind: 'MOVE', segments: [{ from: 'burn-ue3lc', to: 'rad-rttd0', burns: 1, turn: 1 }] }, { profileId: me.profileId });
+  };
+  const held = (r) => (r.state.players[0].rocket.stack || []).some((s) => s.id === radiator.id);
+  let cursor = -1;
+  for (let c = 0; c < 400; c++) {
+    const r = moveIntoBelt({ m4: true, shielded: false }, c);
+    if (r.ok && !held(r)) { cursor = c; break; }
+  }
+  assert(cursor >= 0, 'no belt roll in 400 cursors took the radiator');
+  const plain = moveIntoBelt({ m4: true, shielded: false }, cursor);
+  const sh = moveIntoBelt({ m4: true, shielded: true }, cursor);
+  const off = moveIntoBelt({ m4: false, shielded: true }, cursor);
+  for (const [n, r] of [['plain', plain], ['shielded', sh], ['off', off]]) assert(r.ok, `${n} move refused: ${r.error}`);
+  assert(!held(plain), 'the plain ship kept its radiator, so this proves nothing');
+  assert(held(sh), `Shielded did not soften the belt: ${sh.log}`);
+  assert(/Shielded contract: -2/.test(sh.log), `the log does not name the shield: ${sh.log}`);
+  assert(!held(off), 'a Shielded contract worked in an M4-off game');
+  return `${shield.face.name} saved the radiator at cursor ${cursor}`;
+});
+
+check('Bailout makes a player immune to Budget Cuts; outside M4 it does not', () => {
+  const bail = conFace((f) => f.abilities && f.abilities.bailout);
+  const cut = (m4) => {
+    const st = startedGame({ seats: 2, ...(m4 ? { m4: true } : {}) });
+    st.players[0].hand = [PATENTS[0].id];
+    st.players[1].hand = [PATENTS[1].id];
+    fulfilledWith(st.players[0], bail);
+    st.lastEvent = { kind: 'budget_cuts', notes: [] };
+    resolveSunspotEvent(st, 'budget_cuts');
+    return st;
+  };
+  const on = cut(true);
+  const waiting = (on.pendingEvent && on.pendingEvent.waiting) || [];
+  assert(!waiting.includes(on.players[0].profileId), `the Bailout holder still owes a discard: ${JSON.stringify(waiting)}`);
+  assert(waiting.includes(on.players[1].profileId), 'the rival was spared too');
+  const off = cut(false);
+  assert(((off.pendingEvent && off.pendingEvent.waiting) || []).includes(off.players[0].profileId), 'Bailout worked outside M4');
+  return `${bail.face.name}: holder spared, rival discards`;
+});
+
+check('Secured: a Claim cannot be jumped from its holder during Anarchy', () => {
+  const sec = conFace((f) => f.abilities && f.abilities.secured);
+  const crew = CREW[0];
+  const jump = (secured) => {
+    const st = startedGame({ seats: 2, m4: true });
+    const [a, b] = st.players;
+    st.activeIndex = 0;
+    st.anarchy = true;
+    const site = SITES.find((x) => x.type === 'asteroid');
+    st.discs[site.id] = { ownerId: b.profileId, outcome: 'success' };
+    a.rocket.siteId = site.id;
+    a.rocket.stack = [{ id: crew.id, kind: 'crew', face: 'primary' }];
+    if (secured) fulfilledWith(b, sec);
+    return applyOperation(st, { kind: 'CLAIM_JUMP', siteId: site.id }, { profileId: a.profileId });
+  };
+  const open = jump(false);
+  assert(open.ok, `the control jump was refused: ${open.error}`);
+  const safe = jump(true);
+  assert(!safe.ok && safe.error === 'target_secured', `jumped a Secured claim: ${safe.ok ? safe.log : safe.error}`);
+  return `${sec.face.name} protects the claim; the control is jumped`;
+});
+
+check('a "Gain N Aquas" When Fulfilling effect pays on fulfilment; Rivalry adds a fundraise Aqua', () => {
+  const st0 = startedGame({ seats: 2, m4: true });
+  const riv = conFace((f) => f.abilities && f.abilities.fundraiseAqua);
+  const me = currentPlayerOf(st0);
+  fulfilledWith(me, riv);
+  const before = me.aqua | 0;
+  const r = fundraise(st0, me.profileId);
+  assert(r.ok, `fundraise: ${r.error}`);
+  const gained = (pl(r.state, me.profileId).aqua | 0) - before;
+  assert(gained === 2 && /from a fulfilled contract/.test(r.log), `Rivalry fundraise gained ${gained}: ${r.log}`);
+  return `${riv.face.name}: fundraise +${gained}`;
+});
+
+check('Connections opens a contract deck where you hold a delegate', () => {
+  const con = conFace((f) => f.abilities && f.abilities.connections);
+  const start = (connections) => {
+    let st = startedGame({ seats: 2, m4: true });
+    const me = currentPlayerOf(st);
+    if (connections) fulfilledWith(me, con);
+    const r = fundraise(st, me.profileId);
+    assert(r.ok, `fundraise: ${r.error}`);
+    st = r.state;
+    st.activeLawStar = 'individuality';            // IF is open by law; HU is not
+    st.assembly.delegates = { honor: { [me.profileId]: 1 } };
+    return applyOperation(st, { kind: 'AUCTION_CONTRACT_START', pair: 'HU', abandon: true }, { profileId: me.profileId });
+  };
+  const ctl = start(false);
+  assert(!ctl.ok && ctl.error === 'deck_not_open', `HU opened without Connections: ${ctl.error || ctl.log}`);
+  const conn = start(true);
+  assert(conn.ok, `Connections did not open HU: ${conn.error} ${JSON.stringify(conn.detail || '')}`);
+  return `${con.face.name}: Honor / Unity opens through the Honor delegate`;
+});
+
+check('Insight sends one patent deck top card to the bottom before the auction', () => {
+  const ins = conFace((f) => f.abilities && f.abilities.insight);
+  const st = startedGame({ seats: 2, m4: true });
+  const me = currentPlayerOf(st);
+  me.hand = [];
+  const top = st.decks.reactor[0];
+  const refused = applyOperation(st, { kind: 'AUCTION_START', deckType: 'thruster', insightDeck: 'reactor' }, { profileId: me.profileId });
+  assert(!refused.ok && refused.error === 'no_insight', `Insight without the contract: ${refused.error || 'accepted'}`);
+  fulfilledWith(me, ins);
+  const r = applyOperation(st, { kind: 'AUCTION_START', deckType: 'thruster', insightDeck: 'reactor' }, { profileId: me.profileId });
+  assert(r.ok, `AUCTION_START with Insight: ${r.error}`);
+  const deck = r.state.decks.reactor;
+  assert(deck[deck.length - 1] === top && deck[0] !== top, 'the reactor top card did not go to the bottom');
+  assert(/Insight/.test(r.log), `log: ${r.log}`);
+  // The two-step form: INSIGHT announces the auction and cycles a deck, the turn
+  // cannot end until the auction starts, and it is once per turn.
+  const st2 = startedGame({ seats: 2, m4: true });
+  const me2 = currentPlayerOf(st2);
+  me2.hand = [];
+  fulfilledWith(me2, ins);
+  const top2 = st2.decks.radiator[0];
+  let s2 = applyOperation(st2, { kind: 'INSIGHT', deckType: 'radiator' }, { profileId: me2.profileId });
+  assert(s2.ok && s2.state.decks.radiator[0] !== top2, `INSIGHT: ${s2.error}`);
+  const end = applyOperation(s2.state, { kind: 'END_TURN' }, { profileId: me2.profileId });
+  assert(!end.ok && end.error === 'insight_auction_due', `ended the turn with the auction unstarted: ${end.error || 'accepted'}`);
+  const again = applyOperation(s2.state, { kind: 'INSIGHT', deckType: 'reactor' }, { profileId: me2.profileId });
+  assert(!again.ok && again.error === 'insight_used', `a second Insight: ${again.error || 'accepted'}`);
+  const undo = applyOperation(s2.state, { kind: 'UNDO' }, { profileId: me2.profileId });
+  assert(!undo.ok, 'Insight was undone after revealing the next card');
+  s2 = applyOperation(s2.state, { kind: 'AUCTION_START', deckType: 'radiator' }, { profileId: me2.profileId });
+  assert(s2.ok && !pl(s2.state, me2.profileId).insightPending, `auction after Insight: ${s2.error}`);
+  return `${ins.face.name}: ${PATENTS_BY_ID[top].name} went under; the two-step form commits the turn to its auction`;
+});
+
+check('Hazard Ignore passes the quoted hazards; the tophat enters one hazard free per turn', () => {
+  const RING = Object.keys(NODE_LABELS).find((k) => k.startsWith('lag-') && /\bring\b/i.test(NODE_LABELS[k]) && hazardKind(k) === 'skull');
+  const PLAIN = 'lag-olko7';
+  assert(RING && hazardKind(PLAIN) === 'skull', `test hazards: ${RING} / ${hazardKind(PLAIN)}`);
+  const ring = conFace((f) => f.abilities && (f.abilities.hazardIgnore || []).includes('ring'));
+  const tophat = conFace((f) => f.tophat);
+  const fly = ({ m4 = true, ignore = false, hat = false, to = RING }) => {
+    const st = startedGame({ seats: 2, ...(m4 ? { m4: true } : {}) });
+    const me = st.players[0];
+    st.activeIndex = 0;
+    me.aqua = 20;
+    me.rocket.siteId = null;
+    me.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }, ...supportsFor(thruster)];
+    me.rocket.activeThrusterId = thruster.id;
+    me.rocket.tank = 12;
+    if (ignore) fulfilledWith(me, ring);
+    if (hat) {
+      me.rocket.stack.push({ id: tophat.id, kind: 'contract', face: tophat.side === 'gold' ? 'secondary' : 'primary' });
+      me.contractMeta = { [tophat.id]: { side: tophat.side, paid: 0, boosted: true, default: false, progress: { sites: [], done: 0 } } };
+    }
+    return applyOperation(st, { kind: 'MOVE', hazardPay: true, segments: [{ from: null, to, burns: 0, turn: 1 }] }, { profileId: me.profileId });
+  };
+  const rollsOf = (r) => (r.state.players[0].rocket.lastMove || {}).rolls || [];
+  const ctl = fly({});
+  assert(ctl.ok && ctl.state.players[0].aqua < 20, `control paid no FINAO: ${ctl.error || ctl.log}`);
+  const ig = fly({ ignore: true });
+  assert(ig.ok && ig.state.players[0].aqua === 20 && rollsOf(ig).some((x) => x.slug === RING && x.contractIgnore), `ring not ignored: ${ig.error || ig.log}`);
+  const plainIg = fly({ ignore: true, to: PLAIN });
+  assert(plainIg.ok && plainIg.state.players[0].aqua < 20, 'Hazard Ignore "ring" passed a hazard with no ring in it');
+  const offIg = fly({ m4: false, ignore: true });
+  assert(offIg.ok && offIg.state.players[0].aqua < 20, 'Hazard Ignore worked outside M4');
+  const hat = fly({ hat: true, to: PLAIN });
+  assert(hat.ok && hat.state.players[0].aqua === 20 && rollsOf(hat).some((x) => x.tophat), `tophat: ${hat.error || hat.log}`);
+  assert(hat.state.players[0].tophatUsed && hat.state.players[0].tophatUsed.rocket, 'tophat use not recorded');
+  // A tophat contract in default has its abilities off (4B6b).
+  const st = startedGame({ seats: 2, m4: true });
+  const me = st.players[0];
+  st.activeIndex = 0; me.aqua = 20; me.rocket.siteId = null; me.rocket.tank = 12;
+  me.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }, ...supportsFor(thruster),
+    { id: tophat.id, kind: 'contract', face: tophat.side === 'gold' ? 'secondary' : 'primary' }];
+  me.rocket.activeThrusterId = thruster.id;
+  me.contractMeta = { [tophat.id]: { side: tophat.side, paid: 0, boosted: true, default: true, progress: { sites: [], done: 0 } } };
+  const def = applyOperation(st, { kind: 'MOVE', hazardPay: true, segments: [{ from: null, to: PLAIN, burns: 0, turn: 1 }] }, { profileId: me.profileId });
+  assert(def.ok && def.state.players[0].aqua < 20, `a defaulted tophat still waived the hazard: ${def.error || def.log}`);
+  return `${ring.face.name} passes "${NODE_LABELS[RING]}"; ${tophat.face.name} carries the ship through "${NODE_LABELS[PLAIN]}" free`;
 });
 
 // The smoke verdict above runs before the checks added below it; this one

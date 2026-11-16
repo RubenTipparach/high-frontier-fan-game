@@ -130,13 +130,13 @@ import { fuelTankCylinderMarkup, fuelTransferSectionMarkup } from './fuel-tank-v
 // hand/stack rendering, the Bernal modal) resolves a boosted/auctioned Bernal.
 // Keyed reads only; Bernals only surface in m2 games, so nothing else changes.
 // M4 contract cards are stack slots too (only ever present in an m4 game).
-import { CONTRACTS_BY_ID } from '../../data/contracts.js';
+import { CONTRACTS_BY_ID, contractFace } from '../../data/contracts.js';
 const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...BERNALS_BY_ID, ...COLONISTS_BY_ID, ...CONTRACTS_BY_ID };
 import { renderAssemblyPanel, renderAssemblyLaws } from './assembly.js';
 import { uiIcon, cardPileBadge } from './ui-icons.js';
 import { SITE_TAGS, normaliseTag, tagDisplay } from '../../data/site-tags.js';
 import { NODE_TAGS } from '../../data/node-tags.js';
-import { hazardFlavorOf } from '../../data/hazard-flavors.js';
+import { hazardFlavorOf, hazardCaptionMentions } from '../../data/hazard-flavors.js';
 import { NODE_LABELS, MAP_LABELS } from '../../data/map-labels.js';
 import { routeFlewAerobrake } from '../../data/lander-burn.js';
 import { nodeSeason, seasonEntryBlocked } from '../../data/season-gate.js';
@@ -250,7 +250,7 @@ import {
 // Multiplayer glue (the sandbox map, driven from a server game). These
 // are inert until mountBrowse({ online:true }) flips _online on; the
 // solo path never touches them.
-import { setOnline, isOnline, setM1, isM1, setM2, isM2, setM4, setSirens, isSirens, setFutures, isFutures,
+import { setOnline, isOnline, setM1, isM1, setM2, isM2, setM4, isM4, setSirens, isSirens, setFutures, isFutures,
   setHermes, isHermes, setAltruism, setMySpecies, mySpecies, homeLabel, homeSiteId, isMySiren } from './online-mode.js';
 import {
   buildIdMaps, hydrateFromSnapshot, toServerId, toPlannerId,
@@ -9460,7 +9460,12 @@ function humanizeOnlineOpError(code, detail) {
     contract_auction_done: 'You already held this turn\'s contract auction.',
     timepiece_in_use: 'Your timepiece is already on the Sunspot Cycle: fulfill or repay that contract first.',
     contract_auction_prohibited: 'No contract auctions during War or Anarchy.',
-    deck_not_open: 'That deck shares no ideology with an Active Law.',
+    deck_not_open: 'That deck shares no ideology with an Active Law (nor, with Connections, with one of your delegates).',
+    target_secured: 'That player holds a Secured contract: immune to Felonies during Anarchy.',
+    no_insight: 'Insight comes from a fulfilled contract with the Insight ability.',
+    insight_used: 'You already used Insight this turn.',
+    insight_auction_due: 'Insight announced a research auction: start it before ending your turn.',
+    insight_not_in_grants: 'Insight does not work with Research Grants: auction a card instead.',
     default_stigma: 'The default chit bars you from bidding on manned contracts.',
     bid_too_high: `You must bid the same as or lower than the low bid${detail && detail.low != null ? ` (${detail.low} years)` : ''}.`,
     bidders_pending: 'Not everyone has bid or passed yet.',
@@ -19368,12 +19373,37 @@ function routeHazards(segments) {
 // share an arrival and split the route at the boundaries between them.
 // `liftoffAssist` / `landingAssist` are null or {site, glyph, label},
 // already gated by the caller (needsRoll, not colony-waived).
-function buildOrderedHazardItems({ turn1Segs, hz, curSite, safeAeroOnline, liftoffAssist, landingAssist, liftoffAssistActive, chaosImmune = false, cavitationFree = false }) {
+// The hazard words a player's fulfilled M4 contracts ignore (4B2f), mirror of
+// the engine's contractIgnoreWords. Null outside M4.
+function contractIgnoreWordsOf(p) {
+  if (!isM4() || !p) return null;
+  const skull = new Set(); const aero = new Set();
+  for (const f of (p.fulfilledContracts || [])) {
+    const face = contractFace(f.id, f.side);
+    const ab = (face && face.abilities) || {};
+    for (const w of (ab.hazardIgnore || [])) skull.add(w);
+    for (const w of (ab.aerobrakeIgnore || [])) aero.add(w);
+  }
+  return (skull.size || aero.size) ? { skull: [...skull], aero: [...aero] } : null;
+}
+// M4 tophat (4B2e), mirror of the engine's stackHasActiveTophat: the rocket
+// carries a tophat contract that is not in default, and has not used it this turn.
+function rocketTophatFree(p) {
+  if (!isM4() || !p || !p.rocket || (p.tophatUsed && p.tophatUsed.rocket)) return false;
+  return (p.rocket.stack || []).some((slot) => {
+    if (!slot || slot.kind !== 'contract') return false;
+    const meta = (p.contractMeta || {})[slot.id];
+    const face = contractFace(slot.id, (meta && meta.side) || slot.face || 'blue');
+    return !!(face && face.tophat && !(meta && meta.default));
+  });
+}
+function buildOrderedHazardItems({ turn1Segs, hz, curSite, safeAeroOnline, liftoffAssist, landingAssist, liftoffAssistActive, chaosImmune = false, cavitationFree = false, ignoreWords = null, tophatFree = false }) {
   const items = [];
   // Promo crew waivers, mirrored so the pay / roll checklist lines up with the
   // hazards that actually roll: POWER SERIES CHAOS MODEL passes every geyser /
   // ring / spin / wind hazard, CAVITATION ENGINEERS the turn's first aerobrake.
   let cavitationLeft = !!cavitationFree;
+  let tophatLeft = !!tophatFree;
   if (liftoffAssist) items.push({ ...liftoffAssist, segIndex: 0 });
   // H6c Crash Hazard: a factory-assist liftoff ignores the hazard on the FIRST
   // space it moves into (turn1Segs[0].to). Mirror of the server; the assist's own
@@ -19386,11 +19416,15 @@ function buildOrderedHazardItems({ turn1Segs, hz, curSite, safeAeroOnline, lifto
     if (h.site.type === 'radhaz') continue;
     if (safeAeroOnline && h.aero) continue;
     if (chaosImmune && hazardFlavorOf(plannerIdToSlug(h.site.id))) continue;
+    // M4 Hazard / Aerobrake Ignore contracts (4B2f), mirrored from the engine.
+    if (ignoreWords && hazardCaptionMentions(plannerIdToSlug(h.site.id), h.aero ? ignoreWords.aero : ignoreWords.skull, [h.aero ? 'aero' : 'skull'])) continue;
     if (cavitationLeft && h.aero && turn1Segs.some((sg) => sg.to === h.site.id)) { cavitationLeft = false; continue; }
     if (crashSpaceId && h.site.id === crashSpaceId && !isLanderBurnNodeClient(plannerIdToSlug(h.site.id))) continue;
     if (liftoffColonyWaives(curSite, h.site)) continue;
     const segIndex = turn1Segs.findIndex((s) => s.to === h.site.id);
     if (segIndex < 0) continue;
+    // M4 tophat (4B2e): the first hazard left is entered safely, free.
+    if (tophatLeft) { tophatLeft = false; continue; }
     items.push({ site: h.site, glyph: h.glyph, label: h.label, aero: !!h.aero, segIndex });
   }
   if (landingAssist) items.push({ ...landingAssist, segIndex: turn1Segs.length - 1 });
@@ -27408,6 +27442,8 @@ async function moveRocket() {
       liftoffAssistActive: !!liftG.assist,
       chaosImmune: playerHasPrivilege(meHz, 'POWER_SERIES_CHAOS_MODEL'),
       cavitationFree: playerHasPrivilege(meHz, 'CAVITATION_ENGINEERS') && !(meHz && meHz.cavitationUsed),
+      ignoreWords: contractIgnoreWordsOf(meHz),
+      tophatFree: rocketTophatFree(meHz),
     });
     let hazardPay = false;
     let hazardChoices = null;
@@ -31999,8 +32035,17 @@ function doAuctionCard(card) {
   // player who holds the Equality law (active or lobbied this turn) may skip the
   // auction and take the deck top straight to Hand for 1 aqua. CEO Solitaire runs
   // Subsidized Research instead (priced through ceoTakePricing above).
-  const researchGrants = online && !ceoSolo && iCanUseLaw('equality');
+  // M4 Insight (4B2f): announce the auction, send one deck top to the bottom,
+  // then choose any top card. Not with Research Grants.
+  const meIns = online ? mySnapshotPlayer() : null;
+  const insightPending = !!(meIns && meIns.insightPending);
+  const insight = !!(online && isM4() && meIns && !meIns.insightUsed && (meIns.fulfilledContracts || [])
+    .some((f) => { const fc = contractFace(f.id, f.side); return !!(fc && fc.abilities && fc.abilities.insight); }));
+  const researchGrants = online && !ceoSolo && iCanUseLaw('equality') && !insightPending;
   openAuctionConfirmModal({
+    insight,
+    insightPending,
+    onInsight: () => submitOnlineOp({ kind: 'INSIGHT', deckType: card.type }),
     card,
     mode,
     ceoSolo,
@@ -34305,7 +34350,7 @@ const MP_LOG_ICONS = {
   AUCTION_START: '🎯', AUCTION_BID: '💰', AUCTION_PASS: '🚫',
   // M4 contracts (4B): the auction is in years, the timepiece is a clock.
   AUCTION_CONTRACT_START: '📜', AUCTION_CONTRACT_BID: '⏳', AUCTION_CONTRACT_PASS: '🚫', AUCTION_CONTRACT_CLOSE: '⏱',
-  FULFILL_CONTRACT: '🏁', PAY_LATE_FEE: '⏰', IMPLANT: '🦾', ABANDON_CONTRACT: '🗑',
+  FULFILL_CONTRACT: '🏁', PAY_LATE_FEE: '⏰', IMPLANT: '🦾', ABANDON_CONTRACT: '🗑', INSIGHT: '🔎',
   AUCTION_RESET: '↺', AUCTION_SELL: '✅',
   PICK_CREW: '🧑‍🚀', SET_SPECIES: '\u{1F9DC}', SET_FIRST_PLAYER: '🥇', FREE_CUBE: '🧊',
   END_TURN: '⏭', MOVE: '🛸', BURN: '🔥',

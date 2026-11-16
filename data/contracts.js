@@ -66,6 +66,41 @@ export function parseSteps(text) {
   });
 }
 
+// Contract abilities (4B2e/f), read off the printed "Fulfilled Ability" text so
+// no card is special-cased in code. Returns an object of the abilities the
+// engine understands; anything it cannot read yet is left out (the text still
+// shows on the card).
+//   shielded / bailout / secured / insight / connections / transport : true
+//   hazardIgnore / aerobrakeIgnore : [quoted hazard words]   (4B2f)
+//   fundraiseAqua : N   ("Gain N additional Aqua when fundraising")
+export function parseFulfilledAbility(text) {
+  const t = String(text || '').trim();
+  const ab = {};
+  const named = t.replace(/\.$/, '').trim().toLowerCase();
+  for (const k of ['shielded', 'bailout', 'secured', 'insight', 'connections', 'transport']) {
+    if (named === k) ab[k] = true;
+  }
+  const icon = t.match(/^\[([^\]]*)\]\s*(.*)$/);
+  if (icon) {
+    const tag = icon[1].toLowerCase();
+    const quoted = [...icon[2].matchAll(/"([^"]+)"/g)].map((m) => m[1].toLowerCase());
+    const aero = /aerobrake/.test(tag);
+    if (quoted.length && (aero || /skull/.test(tag))) ab[aero ? 'aerobrakeIgnore' : 'hazardIgnore'] = [...new Set(quoted)];
+  }
+  const fr = t.match(/^Gain (\d+) additional Aquas? when fundraising/i);
+  if (fr) ab.fundraiseAqua = Number(fr[1]);
+  return ab;
+}
+// "When Fulfilling" effects (4B4f) the engine can enact, read off the text.
+//   gainAqua : N   ("Gain N Aquas.")
+export function parseWhenFulfilling(text) {
+  const t = String(text || '').trim();
+  const fx = {};
+  const g = t.match(/^Gain (\d+) Aquas?\.?$/i);
+  if (g) fx.gainAqua = Number(g[1]);
+  return fx;
+}
+
 function buildFace(row, pair, exodus) {
   if (!row) return null;
   return {
@@ -88,6 +123,8 @@ function buildFace(row, pair, exodus) {
     steps: parseSteps(row['Destination Steps']),
     fulfilledAbility: row['Fulfilled Ability'] || '',
     whenFulfilling: row['When Fulfilling'] || '',
+    abilities: parseFulfilledAbility(row['Fulfilled Ability']),
+    onFulfill: parseWhenFulfilling(row['When Fulfilling']),
     properties: [],
     requires: [],
     supplies: [],

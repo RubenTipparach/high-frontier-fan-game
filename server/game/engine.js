@@ -64,7 +64,7 @@ import { scorePlayer, freeMarketBlackSideValue } from '../../data/endgame-scorin
 // engine reads them so the liftoff/landing gate uses the FINAL net thrust,
 // not the printed base value.
 import { weightClassForMass, freighterNetThrust } from '../../data/net-thrust-track.js';
-import { hazardFlavorOf } from '../../data/hazard-flavors.js';
+import { hazardFlavorOf, hazardCaptionMentions } from '../../data/hazard-flavors.js';
 import { SOLAR_ZONE_INFO, adjacentSites } from '../../data/sites.js';
 // Site location classes (astrobiology / submarine / atmospheric / elevator),
 // shared with the client (colony types + promotion colonies + futures).
@@ -1572,6 +1572,23 @@ function noAerobrakeFail(state, slots, hopNodes) {
 // Does the player hold an in-play colonist granting a GLOBAL power flag
 // (glitch-free stacks, FINAO halved, doubled free market, ...)? Location-
 // conditioned flags (sizeRollMod) use colonistSizeRollModAt instead.
+// Module 4 contract abilities (4B2e/f) the player's FULFILLED contracts grant
+// (data/contracts.js#parseFulfilledAbility reads them off the printed text). A
+// fulfilled contract is never in default, so every one counts. Returns the
+// number of copies (Shielded is cumulative), 0 outside M4.
+function contractAbilityCount(state, player, key) {
+  if (!state || !state.m4 || !player) return 0;
+  let n = 0;
+  for (const f of (player.fulfilledContracts || [])) {
+    const face = contractFace(f.id, f.side);
+    const v = face && face.abilities && face.abilities[key];
+    if (v) n += (typeof v === 'number' ? v : 1);
+  }
+  return n;
+}
+// Shielded (4B2f): -2 to Belt & CME Rolls to your Stacks, per copy.
+const contractShield = (state, player) => 2 * contractAbilityCount(state, player, 'shielded');
+
 function playerHasColonistPower(state, player, key) {
   if (!state.m2) return false;
   for (const e of colonistLocations(player)) {
@@ -1784,12 +1801,16 @@ function factionPrivilegesLocked(state, player) {
   if (!state || !state.m2) return false;
   return !(player && (player.bernals || []).some((bn) => bn && bn.anchored && isHomeBernal(bn)));
 }
+function keepsPrivilegeInAnarchy(state, player) {
+  return playerHasColonistPower(state, player, 'privilegeInAnarchy')
+    || contractAbilityCount(state, player, 'secured') > 0;
+}
 function privilegeOf(state, player) {
   if (!player || !player.faction) return null;
   if (factionPrivilegesLocked(state, player)) return null;
-  // Eugenic Pilgrims (colonist power): the faction privilege is not lost in
-  // Anarchy.
-  if (state && state.anarchy && !playerHasColonistPower(state, player, 'privilegeInAnarchy')) return null;
+  // Eugenic Pilgrims (colonist power) and the Secured contract ability (4B2f):
+  // the faction privilege is not lost in Anarchy.
+  if (state && state.anarchy && !keepsPrivilegeInAnarchy(state, player)) return null;
   const card = CREW_BY_ID[player.faction.cardId];
   const face = card && card.faces && card.faces[player.faction.face];
   return face ? privKey(face.bonus) : null;
@@ -1800,7 +1821,7 @@ function secondFacePrivilege(state, player) {
   if (!player || !player.faction) return null;
   if (!playerHasColonistPower(state, player, 'bothCrewFaces')) return null;
   if (factionPrivilegesLocked(state, player)) return null;
-  if (state && state.anarchy && !playerHasColonistPower(state, player, 'privilegeInAnarchy')) return null;
+  if (state && state.anarchy && !keepsPrivilegeInAnarchy(state, player)) return null;
   const card = CREW_BY_ID[player.faction.cardId];
   const other = player.faction.face === 'primary' ? 'secondary' : 'primary';
   const face = card && card.faces && card.faces[other];
@@ -1984,6 +2005,35 @@ const HELIOCENTRICITY_CREW_ID = 'crew_heliocentricity';
 // POWER SERIES CHAOS MODEL (Heliocentricity, black): "Immune to Hazards
 // mentioning geysers, rings, spin, and winds." The hazard's printed flavour
 // lives in data/hazard-flavors.js.
+// Hazard Ignore / Aerobrake Ignore contract abilities (4B2f): a fulfilled
+// contract names hazard words in quotes; Crash (skull) or Aerobrake hazards
+// whose board caption mentions one are ignored.
+function contractIgnoreWords(state, player, key) {
+  if (!state || !state.m4 || !player) return [];
+  const out = new Set();
+  for (const f of (player.fulfilledContracts || [])) {
+    const face = contractFace(f.id, f.side);
+    for (const w of ((face && face.abilities && face.abilities[key]) || [])) out.add(w);
+  }
+  return [...out];
+}
+// Tophat (4B2e): a Stack containing a tophat contract (not in default, 4B6b)
+// can safely enter 1 Hazard per Turn without paying FINAO.
+function stackHasActiveTophat(state, player, stack) {
+  if (!state || !state.m4 || !player) return false;
+  return (stack || []).some((slot) => {
+    if (!slot || slot.kind !== 'contract') return false;
+    const meta = (player.contractMeta || {})[slot.id];
+    const face = contractFace(slot.id, (meta && meta.side) || slot.face || 'blue');
+    return !!(face && face.tophat && !(meta && meta.default));
+  });
+}
+function contractIgnoresHazard(state, player, slug) {
+  const k = hazardKind(slug);
+  if (k === 'skull') return hazardCaptionMentions(slug, contractIgnoreWords(state, player, 'hazardIgnore'), ['skull']);
+  if (k === 'aero') return hazardCaptionMentions(slug, contractIgnoreWords(state, player, 'aerobrakeIgnore'), ['aero']);
+  return false;
+}
 function chaosModelImmune(state, player, slug) {
   return !!hazardFlavorOf(slug) && hasPrivilege(state, player, 'POWER_SERIES_CHAOS_MODEL');
 }
@@ -2635,7 +2685,7 @@ function applyFlareToPlayer(state, p, flare, notesArr) {
     const info = SOLAR_ZONE_INFO[zone];
     const mod = info ? info.solar : 0;
     if (mod === null) return slots;
-    const hit = flare + mod;
+    const hit = flare + mod - contractShield(state, p);
     if (hit <= 0) return slots;
     const survivors = [];
     for (const slot of slots) {
@@ -2995,7 +3045,7 @@ function resolveSunspotEvent(state, kind, opts = {}) {
       .map((p) => p.profileId);
     for (const p of state.players) {
       if ((p.hand || []).length > 0 && !waiting.includes(p.profileId)) {
-        notes.detail(`Budget Cuts: ${p.name} is immune (Home Bernal ability).`);
+        notes.detail(`Budget Cuts: ${p.name} is immune (${contractAbilityCount(state, p, 'bailout') ? 'Bailout contract' : 'Home Bernal ability'}).`);
       }
     }
     if (!waiting.length) {
@@ -3289,7 +3339,10 @@ function describeHazardRolls(rolls) {
   const tourTail = toured
     ? ` Tourism Cycler: ${toured} radiation belt${toured === 1 ? '' : 's'} crossed with no roll.`
     : '';
-  return (parts.length ? ` [${parts.join('; ')}]` : '') + tourTail;
+  // Shielded contracts (4B2f) took 2 off every belt roll per copy.
+  const sh = (rolls || []).find((r) => r && r.kind === 'rad' && r.d6 != null && r.shielded);
+  const shieldTail = sh ? ` Shielded: -${sh.shielded} on each belt roll.` : '';
+  return (parts.length ? ` [${parts.join('; ')}]` : '') + tourTail + shieldTail;
 }
 
 // Does a (normalized) face carry the solar capability badge? Mirror of
@@ -4370,6 +4423,7 @@ function applyMoveFreighter(state, op, player) {
   const frColonyWaived = [];
   for (const slug of generic) {
     if (chaosModelImmune(state, player, slug)) { frColonyWaived.push(slug); continue; }
+    if (contractIgnoresHazard(state, player, slug)) { frColonyWaived.push(slug); continue; }
     if (frCrashSpace && slug === frCrashSpace && !isLanderBurnNode(slug)) { frCrashIgnored.push(slug); continue; }
     if (liftoffColonyWaives(state, from, slug)) { frColonyWaived.push(slug); continue; }
     rollItems.push({ slug, kind: hazardKind(slug) });
@@ -4452,18 +4506,19 @@ function applyMoveFreighter(state, op, player) {
     // rolls (applyFlareToPlayer sweeps the rocket stack and never touches a
     // Freighter), so skipping the roll skips both.
     const frImmune = unitBeltImmune(fr);
+    const frShield = contractShield(state, player);
     const frCanFail = rad.some((slug) => {
       const flareBonus = (slug === dest) ? 0 : seasonBonus;
-      return (6 + flareBonus - frThrust) > frRad;
+      return (6 + flareBonus - frThrust - frShield) > frRad;
     });
     if (frGlitchFree || frImmune || !frCanFail) {
       for (const slug of rad) rolls.push({ slug, kind: 'rad', bypassed: true, radHard: frRad, thrust: frThrust });
     } else for (const slug of rad) {
       const flareBonus = (slug === dest) ? 0 : seasonBonus;
       const d6 = gen.d6();
-      const radVal = Math.max(0, d6 + flareBonus - frThrust);
+      const radVal = Math.max(0, d6 + flareBonus - frThrust - frShield);
       const radFail = radVal > frRad;
-      rolls.push({ slug, kind: 'rad', d6, fail: radFail, radHard: frRad, thrust: frThrust, seasonBonus: flareBonus });
+      rolls.push({ slug, kind: 'rad', d6, fail: radFail, radHard: frRad, thrust: frThrust, seasonBonus: flareBonus, ...(frShield ? { shielded: frShield } : {}) });
       if (radFail) {
         if (playerHasColonistPower(state, player, 'glitchFree')) continue;   // glitch-free stacks
         if (fr.glitched) { destroyed = true; haltSlug = slug; break; }
@@ -4771,8 +4826,9 @@ function applyMoveBernal(state, op, player) {
     // WEAKEST card out-hardens the worst possible result has nothing at stake.
     const bnGlitchFree = playerHasColonistPower(state, player, 'glitchFree');
     const bnWeakest = unitRadHardness(bn, player, state);
+    const bnShield = contractShield(state, player);
     const worstPossible = Math.max(0, ...rad.map((slug) =>
-      6 + ((slug === dest) ? 0 : seasonBonus) - bnThrustForRad));
+      6 + ((slug === dest) ? 0 : seasonBonus) - bnThrustForRad - bnShield));
     const bnCanFail = rad.length > 0 && worstPossible > bnWeakest;
     if (bnGlitchFree || !bnCanFail) {
       for (const slug of rad) rolls.push({ slug, kind: 'rad', bypassed: true, radHard: bnWeakest });
@@ -4784,9 +4840,9 @@ function applyMoveBernal(state, op, player) {
         // still take it.
         const flareBonus = (slug === dest) ? 0 : seasonBonus;
         const d6 = gen.d6();
-        const radVal = Math.max(0, d6 + flareBonus - bnThrustForRad);
+        const radVal = Math.max(0, d6 + flareBonus - bnThrustForRad - bnShield);
         if (radVal > worst) worst = radVal;
-        rolls.push({ slug, kind: 'rad', d6, rad: radVal, thrust: bnThrustForRad, seasonBonus: flareBonus });
+        rolls.push({ slug, kind: 'rad', d6, rad: radVal, thrust: bnThrustForRad, seasonBonus: flareBonus, ...(bnShield ? { shielded: bnShield } : {}) });
       }
       // The guided tutorial never loses a card to a belt (the rolls still play).
       if (worst > 0 && !state.tutorial) {
@@ -5724,6 +5780,11 @@ function applyMove(state, op, player) {
   const crashIgnoredSlugs = []; // H6c: first-space hazard ignored on a factory-assist liftoff
   const chaosSlugs = [];        // POWER SERIES CHAOS MODEL: geyser / ring / spin / wind hazards
   const cavitationSlugs = [];   // CAVITATION ENGINEERS: the turn's one ignored aerobrake
+  const contractIgnoredSlugs = []; // M4 Hazard Ignore contract abilities (4B2f)
+  // M4 tophat (4B2e): the turn's first remaining hazard is entered safely, free.
+  const tophatFree = !(player.tophatUsed && player.tophatUsed.rocket)
+    && stackHasActiveTophat(state, player, player.rocket.stack);
+  let tophatSlug = null;
   // H6c Crash Hazard: the FIRST space moved into with a factory-assist liftoff
   // has its hazard IGNORED. Only the immediate liftoff-leg node (arrivals[0]),
   // and only when the liftoff actually uses factory-assist (liftG.assist). The
@@ -5737,6 +5798,7 @@ function applyMove(state, op, player) {
     // aerobrake hazards with no roll; skull hazards still roll.
     if (k === 'aero' && safeAero) { safeAeroSlugs.push(slug); continue; }
     if (chaosModelImmune(state, player, slug)) { chaosSlugs.push(slug); continue; }
+    if (contractIgnoresHazard(state, player, slug)) { contractIgnoredSlugs.push(slug); continue; }
     if (k === 'aero' && cavitationIgnores(state, player)) { cavitationSlugs.push(slug); continue; }
     // Factory-assist liftoff ignores the hazard on the first space entered
     // (H6c) - but NEVER when that space is a lander burn (or half-lander burn).
@@ -5749,6 +5811,7 @@ function applyMove(state, op, player) {
     // A factory-with-colony makes the launch pad safe: liftoff-leg skull /
     // aero hazards adjacent to the colony pass with no roll.
     if (liftoffColonyWaives(state, from, slug)) { colonyWaivedSlugs.push(slug); continue; }
+    if (tophatFree && !tophatSlug) { tophatSlug = slug; continue; }
     rollItems.push({ slug, kind: k });
   }
   if (landG.needsRoll) rollItems.push({ slug: dest, kind: 'assist', phase: 'landing' });
@@ -5805,6 +5868,11 @@ function applyMove(state, op, player) {
   for (const slug of safeAeroSlugs) rolls.push({ slug, kind: 'aero', safe: true });
   for (const slug of chaosSlugs) rolls.push({ slug, kind: hazardKind(slug), safe: true, chaosModel: true });
   for (const slug of cavitationSlugs) rolls.push({ slug, kind: 'aero', safe: true, cavitation: true });
+  for (const slug of contractIgnoredSlugs) rolls.push({ slug, kind: hazardKind(slug), safe: true, contractIgnore: true });
+  if (tophatSlug) {
+    rolls.push({ slug: tophatSlug, kind: hazardKind(tophatSlug), safe: true, tophat: true });
+    player.tophatUsed = { ...(player.tophatUsed || {}), rocket: true };
+  }
   for (const slug of colonyWaivedSlugs) rolls.push({ slug, kind: hazardKind(slug), safe: true });
   for (const slug of crashIgnoredSlugs) rolls.push({ slug, kind: hazardKind(slug), safe: true });
   for (const slug of radWaived) rolls.push({ slug, kind: 'rad', bypassed: true, tourismCycler: true });
@@ -5841,7 +5909,7 @@ function applyMove(state, op, player) {
   if (rad.length) {
     if (thrust > RAD_BYPASS_THRUST) {
       for (const slug of rad) rolls.push({ slug, kind: 'rad', bypassed: true, thrust });
-    } else if (!someCardAtRadRisk(player, player.rocket.stack, thrust, state)) {
+    } else if (!someCardAtRadRisk(player, player.rocket.stack, thrust + contractShield(state, player), state)) {
       // Nothing in the stack can be lost regardless of the roll (every rad-
       // sensitive card out-hardens the worst possible result), so skip the roll:
       // no die is spent, so the move stays UNDOABLE. (User: bypass the rad roll +
@@ -5959,8 +6027,10 @@ function applyMove(state, op, player) {
     // per hazard node, not once for the move.
     const rocketeers = zoneOfSlug(slug) === 'Earth'
       && hasPrivilege(state, player, 'ROCKETEERS') ? 2 : 0;
-    const radVal = Math.max(0, d6 - thrust - rocketeers);
-    rolls.push({ slug, kind: 'rad', d6, rad: radVal, thrust, ...(rocketeers ? { rocketeers } : {}) });
+    // Shielded contracts (4B2f): -2 per copy.
+    const shielded = contractShield(state, player);
+    const radVal = Math.max(0, d6 - thrust - rocketeers - shielded);
+    rolls.push({ slug, kind: 'rad', d6, rad: radVal, thrust, ...(rocketeers ? { rocketeers } : {}), ...(shielded ? { shielded } : {}) });
     // The guided tutorial never decommissions or degrades a card to a
     // radiation belt roll - the rolls play, but the ship rides through
     // unscathed. (User 2026-07-10.)
@@ -6164,6 +6234,13 @@ function applyMove(state, op, player) {
       : `${player.name} burned ${stepsSpent} fuel steps over ${burnWord} from ${originName} to ${destName}.`);
   if (chaosSlugs.length) log += ` Power Series Chaos Model: ${chaosSlugs.length} geyser / ring / spin / wind hazard${chaosSlugs.length === 1 ? '' : 's'} passed with no roll.`;
   if (cavitationSlugs.length) log += ' Cavitation Engineers: the aerobrake was ignored (once per turn).';
+  if (contractIgnoredSlugs.length) log += ` Hazard Ignore contract: ${contractIgnoredSlugs.length} hazard${contractIgnoredSlugs.length === 1 ? '' : 's'} passed with no roll.`;
+  if (tophatSlug) log += ' Tophat contract: one hazard entered safely, no FINAO (once per turn).';
+  // Shielded (4B2f): named whenever a belt was crossed, rolled or not (with the
+  // shield a soft stack can be out of reach of any roll, so none is made).
+  if (rolls.some((r) => r && r.kind === 'rad' && !r.tourismCycler) && contractShield(state, player)) {
+    log += ` Shielded contract: -${contractShield(state, player)} on each belt roll.`;
+  }
   if (haltedShort) {
     const planned = (siteById(plannedDest) || {}).name || plannedDest;
     log += ` A radiation belt knocked out the thruster, so the ship `
@@ -9171,6 +9248,8 @@ function isHomeBernal(bn) {
 // (Bernals only exist in M2 games; the flag check keeps the zero-bleed rule
 // explicit).
 function immuneToBudgetCuts(state, player) {
+  // Bailout contract ability (4B2f): immune to budget cuts.
+  if (contractAbilityCount(state, player, 'bailout')) return true;
   if (!state.m2) return false;
   for (const bn of ((player && player.bernals) || [])) {
     if (!bn || !isHomeBernal(bn)) continue;
@@ -9423,6 +9502,9 @@ function applyClaimJump(state, op, player) {
   if (!actorCrewAtSite(state, siteId, player.profileId)) return fail('felony_needs_human');
   if (opposingHumanAtSite(state, siteId, player.profileId)) return fail('claim_defended');
   const prev = state.players.find((p) => p.profileId === disc.ownerId);
+  // Secured contract ability (4B2f): during Anarchy the holder is immune to
+  // Felonies, so their Claims cannot be jumped.
+  if (prev && state.anarchy && contractAbilityCount(state, prev, 'secured')) return fail('target_secured');
   disc.ownerId = player.profileId;
   const log = `${player.name} claim-jumped ${site.name}${prev ? ` from ${prev.name}` : ''} (Felony).`;
   pushNews(state, '\u{1F5FD}', log);
@@ -10978,7 +11060,10 @@ function applyFundraise(state, op, player) {
   // hauled home and claimed still counts (the old code counted only carried
   // chits, so a player whose chits were all claimed fundraised for +0).
   const honor = playerCanUseLaw(state, player, 'honor');
-  const gain = honor ? gloryChitCount(player) : INCOME_AQUA;
+  // Rivalry-style contract ability (4B2f): "Gain N additional Aqua when
+  // fundraising", per fulfilled copy.
+  const contractExtra = contractAbilityCount(state, player, 'fundraiseAqua');
+  const gain = (honor ? gloryChitCount(player) : INCOME_AQUA) + contractExtra;
   player.aqua = (player.aqua | 0) + gain;
   player.opsRemaining -= 1;
   // Vote tally (the final step): move the active-law star onto the winner. One
@@ -11028,7 +11113,7 @@ function applyFundraise(state, op, player) {
     : '';
   return {
     ok: true, state,
-    log: `${player.name} fundraised - ${did}, +${gain} aqua${honor ? ' (Honor: per glory chit)' : ''}.${op.arbiterDouble ? ' As Arbiter, their delegates counted twice in the vote tally.' : ''}${starNote}${martial}`,
+    log: `${player.name} fundraised - ${did}, +${gain} aqua${honor ? ' (Honor: per glory chit)' : ''}${contractExtra ? ` (+${contractExtra} from a fulfilled contract)` : ''}.${op.arbiterDouble ? ' As Arbiter, their delegates counted twice in the vote tally.' : ''}${starNote}${martial}`,
   };
 }
 
@@ -13057,6 +13142,7 @@ const FUNCTIONAL = {
   FULFILL_CONTRACT: applyFulfillContract,
   ABANDON_CONTRACT: applyAbandonContract,
   IMPLANT: applyImplant,
+  INSIGHT: applyInsight,
   PAY_LATE_FEE: applyPayLateFee,
   FUNDRAISE: applyFundraise,
   PROMOTE: applyPromote,
@@ -13367,6 +13453,9 @@ function openTurnFor(state, player) {
   player.thermalLabsUsed = false;
   player.shuttlesUsed = false;
   player.cavitationUsed = false;
+  if (player.tophatUsed) delete player.tophatUsed;   // M4 tophat: once per turn
+  delete player.insightUsed;                          // M4 Insight: once per auction turn
+  delete player.insightPending;
   player.wsbCoastUsed = false;
   player.arbiterTallied = false;
   player.emissaryLaws = [];
@@ -13719,6 +13808,8 @@ function noteSirenUranianLanding(state, player) {
 }
 
 function applyEndTurn(state, _op, player) {
+  // M4 Insight: the research auction it announced must be started this turn.
+  if (player.insightPending) return fail('insight_auction_due');
   if (mustExomigrate(state, player)) return fail('must_exomigrate');
   // BLUE PLANET: settle the coming aerobrake hazard now, before the turn passes.
   let bluePlanetNote = '';
@@ -15168,6 +15259,31 @@ function applyTradePort(state, op, player) {
   };
 }
 
+// INSIGHT (M4 contract ability, 4B2f): "after announcing a research auction
+// (I2), you may initially choose one patent deck and move its top card to the
+// bottom of its deck. Then choose any top card to auction." Announcing commits
+// you: the turn cannot end until AUCTION_START runs. It reveals the next card,
+// so it cannot be undone. Not during Research Grants (O5e). op = { deckType }.
+function applyInsight(state, op, player) {
+  if (!contractAbilityCount(state, player, 'insight')) return fail('no_insight');
+  if (state.auction) return fail('auction_in_progress');
+  if (player.insightPending || player.insightUsed) return fail('insight_used');
+  if (player.opsRemaining <= 0) return fail('no_ops_left');
+  const type = String(op.deckType || '');
+  const decks = [...DECK_TYPES, ...(state.m1 ? M1_DECK_TYPES : []), ...(state.m2 ? M2_DECK_TYPES : [])];
+  if (!decks.includes(type)) return fail('bad_deck');
+  const deck = decksFor(state, player)[type];
+  if (!deck || !deck.length) return fail('deck_empty');
+  const moved = deck.shift();
+  deck.push(moved);
+  player.insightPending = true;
+  player.insightUsed = true;
+  return {
+    ok: true, state, noUndo: true,
+    log: `${player.name} announced a research auction and used Insight: ${(PATENTS_BY_ID[moved] || {}).name || moved} went to the bottom of the ${type} deck.`,
+  };
+}
+
 function applyAuctionStart(state, op, ctx) {
   if (state.auction) return fail('auction_in_progress');
   const player = currentPlayer(state);
@@ -15192,6 +15308,24 @@ function applyAuctionStart(state, op, ctx) {
   // Under a Sirens species split you auction from YOUR OWN library; the other
   // species' decks are not yours to put up (V9b).
   const myDecks = decksFor(state, player);
+  // Insight contract ability (4B2f): after announcing the auction, first send
+  // the top card of any one patent deck to its bottom, then pick the lot. Not
+  // during Research Grants (O5e).
+  let insightNote = '';
+  if (player.insightPending && op.useEquality) return fail('insight_not_in_grants');
+  if (op.insightDeck != null) {
+    if (player.insightPending || player.insightUsed) return fail('insight_used');
+    if (!contractAbilityCount(state, player, 'insight')) return fail('no_insight');
+    if (op.useEquality && playerCanUseLaw(state, player, 'equality')) return fail('insight_not_in_grants');
+    const iType = String(op.insightDeck);
+    if (!auctionableDecks.includes(iType)) return fail('bad_deck');
+    const iDeck = myDecks[iType];
+    if (!iDeck || !iDeck.length) return fail('deck_empty');
+    const moved = iDeck.shift();
+    iDeck.push(moved);
+    player.insightUsed = true;
+    insightNote = `${player.name} used Insight to send ${(PATENTS_BY_ID[moved] || {}).name || moved} to the bottom of the ${iType} deck. `;
+  }
   const deck = myDecks[deckType];
   if (!deck || !deck.length) return fail('deck_empty');
   // Can't initiate a research auction for a card type you're already at the
@@ -15259,9 +15393,10 @@ function applyAuctionStart(state, op, ctx) {
     state.turnRedo = [];
     const tc = PATENTS_BY_ID[cardId];
     const bonusTail = bonusIds.length ? ` plus ${bonusIds.length} bonus support${bonusIds.length === 1 ? '' : 's'}` : '';
+    delete player.insightPending;
     return {
       ok: true, state,
-      log: `${player.name} took ${tc ? tc.name : cardId} from the ${deckType} deck${bonusTail} for ${cost} aqua${dealTail}.`,
+      log: `${insightNote}${player.name} took ${tc ? tc.name : cardId} from the ${deckType} deck${bonusTail} for ${cost} aqua${dealTail}.`,
     };
   }
 
@@ -15323,7 +15458,8 @@ function applyAuctionStart(state, op, ctx) {
   // auctioneer's phase, so the "Keep (no bids)" button is live immediately.
   recomputeAuction(state);
   const card = PATENTS_BY_ID[cardId];
-  return { ok: true, state, log: `${player.name} put ${card ? card.name : cardId} up for auction.` };
+  delete player.insightPending;
+  return { ok: true, state, log: `${insightNote}${player.name} put ${card ? card.name : cardId} up for auction.` };
 }
 
 function applyAuctionBid(state, op, ctx) {
@@ -15575,7 +15711,12 @@ function contractDebt(player, cardId) {
 // Pair decks a player may auction from: sharing an ideology with a law in force
 // (4B3c). Unity can switch several laws on at once.
 function contractPairsOpenTo(state, player) {
-  return Object.keys(CONTRACT_PAIRS).filter((pair) => CONTRACT_PAIRS[pair].some((k) => playerCanUseLaw(state, player, k)));
+  // Connections contract ability (4B2f): also any deck where you have a
+  // delegate in one of its two ideologies.
+  const connections = contractAbilityCount(state, player, 'connections') > 0;
+  const asm = connections ? assemblyOf(state) : null;
+  return Object.keys(CONTRACT_PAIRS).filter((pair) => CONTRACT_PAIRS[pair].some((k) => playerCanUseLaw(state, player, k)
+    || (connections && playerDelegatesInPlace(asm, k, player.profileId) > 0)));
 }
 // May this player bid on this contract? Timepiece in the Reserve (4B3b), and the
 // default chit bars manned contracts (4B2d / 4B6c).
@@ -15807,8 +15948,17 @@ function applyFulfillContract(state, op, player) {
   const late = !!(player.timepiece && player.timepiece.contractId === cardId && player.timepiece.deadbeat);
   if (player.timepiece && player.timepiece.contractId === cardId) player.timepiece = null;
   delete player.contractMeta[cardId];
+  // "When Fulfilling" effects (4B4f), enacted as free actions.
+  let when = '';
+  const fx = face.onFulfill || {};
+  if (fx.gainAqua) {
+    player.aqua = (player.aqua | 0) + fx.gainAqua;
+    when += ` When fulfilling: gained ${fx.gainAqua} aqua.`;
+  } else if (face.whenFulfilling) {
+    when += ` When fulfilling (not yet automated): ${face.whenFulfilling}`;
+  }
   const ability = face.fulfilledAbility ? ` Fulfilled ability: ${face.fulfilledAbility}` : '';
-  return { ok: true, state, log: `${player.name} fulfilled ${face.name}${late ? ' (late)' : ''} for ${face.vp} VP.${ability}` };
+  return { ok: true, state, log: `${player.name} fulfilled ${face.name}${late ? ' (late)' : ''} for ${face.vp} VP.${when}${ability}` };
 }
 
 // PAY_LATE_FEE (4B5b): a free action, up to the contract's late fee per turn,

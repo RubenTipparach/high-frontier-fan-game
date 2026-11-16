@@ -37,6 +37,13 @@ const lawKeys = (s) => {
   return out;
 };
 const yearsFromNow = (s, slot) => ((slot - (s.turn | 0)) + SLOTS) % SLOTS;
+// Does player `p` hold a fulfilled contract with ability `key` (4B2f)? Same
+// read as the engine's contractAbilityCount.
+const hasContractAbility = (p, key) => (p && p.fulfilledContracts || [])
+  .some((f) => { const face = contractFace(f.id, f.side); return !!(face && face.abilities && face.abilities[key]); });
+// Connections (4B2f): a deck is also open when you have a delegate in either
+// of its ideologies.
+const delegateIn = (s, k, pid) => (((s && s.assembly && s.assembly.delegates) || {})[k] || {})[pid] > 0;
 
 // ---- toolbar tag ----------------------------------------------------------------
 function ensureTag() {
@@ -132,7 +139,10 @@ function renderPanel() {
   const auctionOpen = myTurn && p.fundraisedThisTurn && !p.contractAuctionDone && !tp && !s.auction;
   const decks = Object.keys(CONTRACT_PAIRS).map((pair) => {
     const deck = (s.contractDecks || {})[pair] || [];
-    const open = CONTRACT_PAIRS[pair].some((k) => laws.has(k));
+    const byLaw = CONTRACT_PAIRS[pair].some((k) => laws.has(k));
+    const byConnections = !byLaw && hasContractAbility(p, 'connections')
+      && CONTRACT_PAIRS[pair].some((k) => delegateIn(s, k, p.profileId));
+    const open = byLaw || byConnections;
     const top = deck[0];
     const btns = auctionOpen && open && top ? `
       <div class="m4c-btns">
@@ -143,7 +153,7 @@ function renderPanel() {
     return `<div class="m4c-deck ${open ? 'open' : 'closed'}">
       <div class="m4c-deck-head"><b>${CONTRACT_PAIR_NAMES[pair]}</b>
         <span>${deck.length} left</span>
-        <span class="m4c-law">${open ? 'shares the Active Law' : 'no Active Law here'}</span></div>
+        <span class="m4c-law">${byLaw ? 'shares the Active Law' : byConnections ? 'open through your Connections' : 'no Active Law here'}</span></div>
       ${top ? cardThumb(top, 'blue') : '<div class="muted">empty</div>'}${btns}</div>`;
   }).join('');
   const auctionNote = auctionOpen

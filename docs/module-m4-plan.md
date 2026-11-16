@@ -106,10 +106,46 @@ late fee + default):
   deck bottom, timepiece home, no late fee or repayment, claim the default
   chit. (Reading: the hand counts as "at LEO" since your Bank is in LEO, 4A7a.)
 
-STILL TO DO in Stage 1: the contract ABILITIES (tophat free hazard, Hazard /
-Aerobrake Ignore, Shielded, Insight, Secured, Bailout, Connections deck choice,
-"When Fulfilling" effects), negotiation of contracts (4B2g), a tie-winner picker
-in the auction overlay, and Freighter / Bernal stacks carrying a contract.
+Contract ABILITIES (4B2e/f, landed 2026-11-16). Read off the printed text by
+`data/contracts.js#parseFulfilledAbility` / `parseWhenFulfilling` (no card is
+special-cased), counted from FULFILLED contracts by the engine's
+`contractAbilityCount` (0 outside M4), each with a check in check-engine:
+- **Shielded** (8 faces): -2 per copy on every Belt Roll (rocket, Freighter,
+  Bernal) and on the Solar Flare (CME) roll.
+- **Bailout** (6): immune to Budget Cuts.
+- **Secured** (8): keeps the faction privilege in Anarchy, and a Claim Jump
+  against the holder during Anarchy is refused (`target_secured`).
+- **Connections** (7): a contract deck also opens when you hold a delegate in
+  either of its ideologies (engine `contractPairsOpenTo` + the Contracts panel).
+- **Insight** (6): the `INSIGHT` op announces the research auction and sends one
+  patent deck's top card to the bottom; the turn cannot end until AUCTION_START
+  runs (`insight_auction_due`), it is once per turn, cannot be undone, and is
+  refused with Research Grants. Client: a button in the auction confirm modal.
+- **Hazard Ignore** (4 faces, quoted words such as "ring", "spin", "outburst",
+  "ice"): a Crash Hazard whose board caption (data/map-labels.js NODE_LABELS)
+  mentions the word needs no roll or FINAO (rocket and Freighter moves; the
+  client checklist mirrors it). Aerobrake Ignore with quoted words uses the same
+  path; no printed face has one yet.
+- **Tophat** (10 faces): a stack carrying a tophat contract that is not in
+  default enters its first remaining hazard each turn safely and free (rocket;
+  `player.tophatUsed.rocket`, cleared at turn start). The client checklist
+  mirrors it.
+- **Gain N Aquas** When Fulfilling (3 faces) pays on fulfilment; "Gain N
+  additional Aqua when fundraising" (Rivalry) adds to the Fundraise.
+- A contract in default has its abilities off (4B6b): the tophat check reads
+  the contract's `default` flag; fulfilled contracts are never in default.
+
+STILL TO DO in Stage 1: the conditional ignore abilities written as prose rather
+than quoted words (New Horizons "Adjacent to industrialized Sites", HAVOC "Venus
+zone", Inner Tour "Aerobrake Hazards leading to LEO", Ring Industrialization's
+Mobile Factory clause), Transport (8 faces, rule text not found in the M4
+manual excerpt), the other one-off fulfilled abilities (Luna permission, -1 ISRU
+at Mercury, +1 VP per glory chit, flyby bonuses, Acetylene from Factories,
+Murder/Suicide, the elevator lander-burn rule, implants at Colonies, the
+air-eater), the non-aqua When Fulfilling effects (they are named in the log as
+"not yet automated"), the tophat on Freighter / Bernal stacks, negotiation of
+contracts (4B2g), a tie-winner picker in the auction overlay, and Freighter /
+Bernal stacks carrying a contract.
 
 ## Stage 2 status (2026-11-15)
 

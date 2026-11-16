@@ -237,6 +237,7 @@ function escapeHtml(s) {
 export function openAuctionConfirmModal({
   card, mode, renderCardFn, bonusCards, onConfirm, multiplayer, ceoSolo, takeCost,
   subsidized, researchGrants = false, onResearchGrants, deckSearch = false, onDeckSearch,
+  insight = false, onInsight, insightPending = false,
 }) {
   if (!card) return;
   document.querySelector('.auction-confirm-overlay')?.remove();
@@ -252,6 +253,7 @@ export function openAuctionConfirmModal({
     if (action === 'confirm') onConfirm?.({});
     else if (action === 'grants') onResearchGrants?.();
     else if (action === 'search') onDeckSearch?.();
+    else if (action === 'insight') onInsight?.();
   };
   const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(false); } };
   document.addEventListener('keydown', onKey);
@@ -334,8 +336,17 @@ export function openAuctionConfirmModal({
         <strong>1 aqua</strong> and take this card straight to your Hand (no
         support cards, no hand limit).
       </div>` : ''}
+    ${insight ? `<div class="auction-cost-line auction-grants-note">
+        <strong>\u{1F50E} Insight:</strong> you may first send this card to the
+        bottom of its deck, then choose any deck's top card to auction.
+      </div>` : ''}
+    ${insightPending ? `<div class="auction-cost-line auction-grants-note">
+        <strong>\u{1F50E} Insight used:</strong> your research auction is announced,
+        so start one before ending your turn.
+      </div>` : ''}
     <div class="card-modal-actions">
       <button type="button" class="modal-btn auction-cancel">Cancel</button>
+      ${insight ? '<button type="button" class="modal-btn auction-insight" title="Insight: send this card to the bottom of its deck, then choose which top card to auction.">\u{1F50E} Insight: send it to the bottom</button>' : ''}
       ${researchGrants ? '<button type="button" class="modal-btn auction-grants">🔬 Research Grants: take for 1 aqua</button>' : ''}
       ${deckSearch ? '<button type="button" class="modal-btn auction-search" title="Renaissance Man: search the deck and choose which card goes up for auction.">🔍 Search deck (Renaissance Man)</button>' : ''}
       <button type="button" class="modal-btn primary auction-commit">${
@@ -367,6 +378,7 @@ export function openAuctionConfirmModal({
   dialog.querySelector('.auction-commit').addEventListener('click', () => close('confirm'));
   dialog.querySelector('.auction-grants')?.addEventListener('click', () => close('grants'));
   dialog.querySelector('.auction-search')?.addEventListener('click', () => close('search'));
+  dialog.querySelector('.auction-insight')?.addEventListener('click', () => close('insight'));
 
   document.body.appendChild(overlay);
   overlay.focus();

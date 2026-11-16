@@ -38,3 +38,17 @@ export const HAZARD_FLAVORS = Object.fromEntries(
 export function hazardFlavorOf(slug) {
   return HAZARD_FLAVORS[String(slug)] || null;
 }
+
+// Hazard Ignore contract ability (M4 4B2f): "Ignore Crash Hazards of the type
+// listed. Text in quotes means that Crash Hazards with that text in their
+// description are ignored." Does the board caption beside this Hazard mention
+// any of `words` (whole-word start, so "ring" matches "ring rain" and "rings")?
+// `kinds` picks Crash Hazards (skull) or Aerobrake Hazards (aero).
+export function hazardCaptionMentions(slug, words, kinds = ['skull']) {
+  if (!words || !words.length) return false;
+  const k = NODE_LABEL_KINDS[String(slug)] || [];
+  if (!kinds.some((x) => k.includes(x))) return false;
+  const caption = NODE_LABELS[String(slug)];
+  if (!caption) return false;
+  return words.some((w) => new RegExp(`\\b${String(w).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i').test(caption));
+}
