@@ -1344,6 +1344,10 @@ dress a rule-based hold up as a context problem.
 
 ## Don'ts
 
+- **Owner questions go in the survey page, not in chat.** M4 questions live in
+  the M4 Exodus Tracker (`docs/design/m4-tracker.html`, link in
+  `docs/design/README.md`), built with the `html-survey` skill. Build the
+  recommended option while a question is open.
 - **NEVER change a live game without the admin's explicit approval. Ever.**
   (User directive 2026-11-09.) An agent with access to production - a read
   token, an MCP connection, an admin session, a player token, the database -
