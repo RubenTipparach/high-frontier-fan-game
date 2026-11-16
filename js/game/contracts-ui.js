@@ -14,7 +14,8 @@ import {
   CONTRACTS_BY_ID, CONTRACT_PAIRS, CONTRACT_PAIR_NAMES, CONTRACT_BID_MAX, contractFace,
 } from '../../data/contracts.js';
 import { renderContractCard } from './contract-card.js';
-import { augmentGlyph, AUGMENTS } from './contract-glyphs.js';
+import { augmentGlyph, AUGMENTS, timepieceDialGlyph } from './contract-glyphs.js';
+import { sunspotDialSvg } from './turn-clock-ui.js';
 import { isM4, isM2 } from './online-mode.js';
 import { COLONISTS_BY_ID } from '../../data/colonists.js';
 
@@ -83,6 +84,40 @@ export function refreshContractsUi() {
   if (_panelOpen) renderPanel();
 }
 
+// ---- the Sunspot dial (4B3e: bids and deadlines are years from the Cube) --------
+const DIAL_GLYPH = 32;
+// Every OTHER player's timepiece already out on the cycle (their contract's
+// deadline), so the table can see how much time each has left.
+function timepieceMarkers(s, skipId) {
+  return (s.players || []).filter((q) => q.timepiece && q.profileId !== skipId).map((q) => ({
+    slot: ((q.timepiece.slot % SLOTS) + SLOTS) % SLOTS,
+    svg: timepieceDialGlyph({ color: q.color || '#e5e7eb', size: DIAL_GLYPH, deadbeat: !!q.timepiece.deadbeat }),
+    title: `@${q.name}'s timepiece${q.timepiece.deadbeat ? ' (late)' : `: ${yearsFromNow(s, q.timepiece.slot)} years left`}`,
+  }));
+}
+const turnLine = (s) => `Turn ${(s.turn | 0) + 1} \u00b7 round ${s.round || 1}`;
+
+// The Contracts panel's own dial: your timepiece on its deadline, a band from
+// the Cube to it, and everyone else's timepieces.
+function panelDial(s, p) {
+  const tp = p.timepiece;
+  const turn = s.turn | 0;
+  const markers = timepieceMarkers(s, p.profileId);
+  let center = [turnLine(s), 'Your timepiece is', 'in your Reserve'];
+  let band = null;
+  if (tp) {
+    const slot = ((tp.slot % SLOTS) + SLOTS) % SLOTS;
+    const left = yearsFromNow(s, tp.slot);
+    markers.push({ slot, svg: timepieceDialGlyph({ color: p.color || '#e5e7eb', size: DIAL_GLYPH, deadbeat: !!tp.deadbeat }), title: 'Your timepiece' });
+    if (tp.deadbeat) center = [turnLine(s), 'LATE', 'pay the late fee'];
+    else {
+      center = [turnLine(s), `${left} year${left === 1 ? '' : 's'} left`, `due at turn ${slot + 1}`];
+      if (left > 0) band = { from: (turn + 1) % SLOTS, to: slot, color: '#fbbf24' };
+    }
+  }
+  return `<div class="m4c-dial">${sunspotDialSvg({ turn, markers, band, center })}</div>`;
+}
+
 // ---- the panel --------------------------------------------------------------------
 function closePanel() {
   _panelOpen = false;
@@ -132,7 +167,7 @@ function renderPanel() {
   const chit = s.defaultChit
     ? `Default chit: ${esc(nameOf(s.defaultChit.profileId))} (${s.defaultChit.side} side, ${s.defaultChit.side === 'gold' ? -6 : -3} VP).`
     : 'Default chit: unclaimed.';
-  parts.push(`<div class="m4c-status"><div>⏱ ${tpLine}</div><div>🏷 ${chit}</div></div>`);
+  parts.push(`<div class="m4c-status-row">${panelDial(s, p)}<div class="m4c-status"><div>⏱ ${tpLine}</div><div>🏷 ${chit}</div></div></div>`);
 
   // Contract auction (the Fundraise's final step)
   const laws = lawKeys(s);
@@ -325,12 +360,32 @@ export function renderContractAuction(a) {
     && !q.timepiece && !(face.manned && s.defaultChit && s.defaultChit.profileId === q.profileId));
   const settled = !waiting.length;
   if (_yearsDraft == null || _yearsDraft > a.low) _yearsDraft = Math.max(0, a.low - (iAmAuctioneer ? 0 : 1));
+  // The dial: each bid is its bidder's timepiece on the slot that many years
+  // from the Cube; your draft is a faded timepiece you set by tapping a slot.
+  const turn = s.turn | 0;
+  const slotFor = (y) => (turn + y) % SLOTS;
+  const markers = timepieceMarkers(s, null);
+  for (const [id, y] of Object.entries(a.bids || {})) {
+    const q = playerById(Number(id)) || {};
+    markers.push({ slot: slotFor(y), svg: timepieceDialGlyph({ color: q.color || '#e5e7eb', size: DIAL_GLYPH }), title: `@${q.name || nameOf(Number(id))} bid ${y} year${y === 1 ? '' : 's'}` });
+  }
+  const canBid = !blocked;
+  const myBid = (a.bids || {})[myId];
+  if (canBid && myBid !== _yearsDraft) {
+    markers.push({ slot: slotFor(_yearsDraft), svg: timepieceDialGlyph({ color: (p && p.color) || '#e5e7eb', size: DIAL_GLYPH, ghost: true }), title: `Your bid: ${_yearsDraft} years` });
+  }
+  const dial = sunspotDialSvg({
+    turn, markers,
+    band: _yearsDraft > 0 ? { from: (turn + 1) % SLOTS, to: slotFor(_yearsDraft), color: '#34d399' } : null,
+    pick: canBid ? { from: turn, to: slotFor(a.low), title: (slot) => { const y = ((slot - turn) + SLOTS) % SLOTS; return `Bid ${y} year${y === 1 ? '' : 's'} (due turn ${slot + 1})`; } } : null,
+    center: [turnLine(s), `Low bid: ${a.low} year${a.low === 1 ? '' : 's'}`, canBid ? `Yours: ${_yearsDraft} year${_yearsDraft === 1 ? '' : 's'}` : ''],
+  });
   const opts = Array.from({ length: a.low + 1 }, (_, y) => `<option value="${y}" ${y === _yearsDraft ? 'selected' : ''}>${y} year${y === 1 ? '' : 's'}</option>`).join('');
   let controls = '';
   if (blocked) controls = `<p class="muted">${blocked}</p>`;
   else {
     controls = `<label>Your bid <select id="m4c-years">${opts}</select></label>
-      <button type="button" data-act="bid">Bid</button>
+      <button type="button" data-act="bid">Bid ${_yearsDraft} year${_yearsDraft === 1 ? '' : 's'}</button>
       ${iAmAuctioneer ? '' : '<button type="button" data-act="pass">Pass</button>'}`;
   }
   if (iAmAuctioneer) {
@@ -339,9 +394,10 @@ export function renderContractAuction(a) {
   el.innerHTML = `<div class="m4c-modal" role="dialog" aria-label="Contract auction">
     <div class="m4c-head"><h3>📜 Contract auction</h3><span class="muted">${CONTRACT_PAIR_NAMES[a.pair] || ''}</span></div>
     <div class="m4c-auction-body">
-      <div>${cardThumb(a.cardId, a.side || 'blue')}</div>
+      <div class="m4c-auction-card">${cardThumb(a.cardId, a.side || 'blue')}</div>
+      <div class="m4c-dial m4c-auction-dial">${dial}</div>
       <div class="m4c-side">
-        <p>Bids are in <b>years</b> until the deadline, from ${CONTRACT_BID_MAX} down to 0. The <b>lowest</b> bid wins; ${esc(nameOf(a.auctioneerId))} wins ties.</p>
+        <p>Set your timepiece on the Sunspot Cycle: each slot from the Cube is one <b>year</b> to the deadline, from ${CONTRACT_BID_MAX} down to 0. The <b>lowest</b> bid wins; ${esc(nameOf(a.auctioneerId))} wins ties.${canBid ? ' Tap a slot on the dial to set your bid.' : ''}</p>
         <p class="m4c-low">Low bid: <b>${a.low} year${a.low === 1 ? '' : 's'}</b></p>
         <ul class="m4c-bids">${bids}</ul>
         <p class="muted">${settled ? `Waiting on ${esc(nameOf(a.auctioneerId))} to close.` : `Waiting on ${waiting.map((q) => '@' + esc(q.name)).join(', ')}.`}</p>
@@ -349,7 +405,15 @@ export function renderContractAuction(a) {
         <div class="m4c-controls">${controls}</div>
       </div></div></div>`;
   const sel = el.querySelector('#m4c-years');
-  if (sel) sel.addEventListener('change', () => { _yearsDraft = Number(sel.value); });
+  if (sel) sel.addEventListener('change', () => { _yearsDraft = Number(sel.value); renderContractAuction(a); });
+  el.querySelectorAll('.dial-hit').forEach((h) => h.addEventListener('click', () => {
+    _yearsDraft = ((Number(h.dataset.slot) - turn) + SLOTS) % SLOTS;
+    const body = el.querySelector('.m4c-auction-body');
+    const top = body ? body.scrollTop : 0;
+    renderContractAuction(a);
+    const nb = el.querySelector('.m4c-auction-body');
+    if (nb) nb.scrollTop = top;
+  }));
   el.querySelectorAll('button[data-act]').forEach((b) => b.addEventListener('click', async () => {
     const act = b.dataset.act;
     if (act === 'bid') await D.submitAuctionOp({ kind: 'AUCTION_CONTRACT_BID', years: Number(sel.value) });

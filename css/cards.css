@@ -1857,7 +1857,7 @@
 .m4-body.has-craft { background-size: 100% auto, cover; background-position: center bottom, right bottom; background-repeat: no-repeat; }
 
 /* ---- Module 4 contracts panel + contract auction (js/game/contracts-ui.js) ---- */
-.m4c-overlay { position: fixed; inset: 0; z-index: 60; background: rgba(4, 6, 14, .66); display: flex;
+.m4c-overlay { position: fixed; inset: 0; z-index: 100; background: rgba(4, 6, 14, .66); display: flex;
   align-items: center; justify-content: center; padding: 12px; }
 .m4c-modal { background: #15161d; color: #e8e8ee; border: 1px solid #3a3d4c; border-radius: 12px; width: min(980px, 100%);
   max-height: calc(var(--vhpx, 1vh) * 92); display: flex; flex-direction: column; box-shadow: 0 12px 40px rgba(0, 0, 0, .6); }
@@ -1879,8 +1879,25 @@
 .m4c-btns { display: flex; flex-wrap: wrap; gap: 6px; }
 .m4c-btns button, .m4c-controls button { background: #2c5fa8; color: #fff; border: 0; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 12px; }
 .m4c-btns button:disabled, .m4c-controls button:disabled { opacity: .45; cursor: not-allowed; }
-.m4c-auction .m4c-modal { width: min(640px, 100%); }
-.m4c-auction-body { display: flex; flex-wrap: wrap; gap: 16px; padding: 12px 14px 16px; overflow-y: auto; }
+.m4c-auction .m4c-modal { width: min(900px, 100%); }
+.m4c-auction-body { display: flex; flex-wrap: wrap; gap: 16px; padding: 12px 14px 16px; overflow-y: auto;
+  min-height: 0; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+.m4c-dial { width: 300px; max-width: 100%; flex: none; }
+.m4c-dial .turn-wheel { max-width: none; width: 100%; height: auto; display: block; }
+.m4c-dial .dial-hit:hover { fill-opacity: 0.12; }
+.m4c-status-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.m4c-status-row .m4c-dial { width: 220px; }
+.m4c-status-row .m4c-status { flex: 1; min-width: 220px; }
+/* Phones: the dial and the bidding first, the card being bid on at the bottom,
+   and the whole auction scrolls inside the sheet. */
+@media (max-width: 700px) {
+  .m4c-overlay.m4c-auction { align-items: stretch; padding: 8px; }
+  .m4c-auction .m4c-modal { max-height: calc(var(--dvhpx, 1dvh) * 96); }
+  .m4c-auction-body { flex-direction: column; align-items: center; flex-wrap: nowrap; }
+  .m4c-auction-dial { order: 1; width: min(340px, 100%); }
+  .m4c-auction-body .m4c-side { order: 2; width: 100%; min-width: 0; }
+  .m4c-auction-card { order: 3; }
+}
 .m4c-side { flex: 1; min-width: 220px; font-size: 13px; }
 .m4c-low { font-size: 15px; }
 .m4c-bids { margin: 0 0 8px; padding-left: 18px; }
