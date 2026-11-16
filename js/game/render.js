@@ -11,7 +11,7 @@ import { fleetLabel } from '../../data/fleet-tags.js';
 import { NODE_TAGS, spriteForTags } from '../../data/node-tags.js';
 import { serverTagLabels, tagInfo } from '../../data/node-labels.js';
 import { nodeLabelOf, MAP_LABELS } from '../../data/map-labels.js';
-import { SIGNPOST_COLORS, SIGNPOST_DARK_TEXT, BOARD_SOLID_ONE_WAY, signpostColorsOf } from '../../data/signpost-routes.js';
+import { SIGNPOST_COLORS, SIGNPOST_DARK_TEXT, BOARD_SOLID_ONE_WAY, BOARD_DOTTED, signpostColorsOf } from '../../data/signpost-routes.js';
 import { BUGGY_ROAD_GROUPS } from '../../data/buggy-roam.js';
 import { ZONE_ASSIGNMENTS } from '../../data/zones.js';
 import { SIREN_HOME_ZONE } from '../../data/sirens.js';
@@ -1898,8 +1898,14 @@ export class MapRenderer {
     const oneWay = new Set();
     for (const d of (this.data.directedEdges || [])) { oneWay.add(d.from + '>' + d.to); oneWay.add(d.to + '>' + d.from); }
     const id2Of = (id) => (this.data.byId[id] || {}).id2;
-    const isOneWay = (ids) => ids.some((id, i) => i > 0 && oneWay.has(ids[i - 1] + '>' + id)
-      && !BOARD_SOLID_ONE_WAY.has([id2Of(ids[i - 1]), id2Of(id)].sort().join('|')));
+    // Dotted = a one-way hop (unless the board draws it solid), or a two-way
+    // hop the board draws dotted anyway.
+    const isOneWay = (ids) => ids.some((id, i) => {
+      if (i === 0) return false;
+      const pair = [id2Of(ids[i - 1]), id2Of(id)].sort().join('|');
+      if (BOARD_DOTTED.has(pair)) return true;
+      return oneWay.has(ids[i - 1] + '>' + id) && !BOARD_SOLID_ONE_WAY.has(pair);
+    });
     this._normalOneWay = [];
     const straight = this.data.straightEdges || this.data.edges;
     for (const [a, b, dv] of straight) {
