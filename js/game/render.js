@@ -1917,6 +1917,7 @@ export class MapRenderer {
       // the board (the skull sits ON the coloured line): signpost wins.
       const cols = signpostColorsOf(sa.id2, sb.id2);
       if (cols.length) { this._signpostLines.push({ pts: fromLeo([sa, sb]), cols, smooth: false, dotted }); continue; }
+      seg.dotted = dotted;
       if (sa.hazard || sb.hazard) this._hazardEdges.push(seg);
       else {
         const season = sa.siteSynodic || sb.siteSynodic;
@@ -1984,6 +1985,7 @@ export class MapRenderer {
         this._signpostLines.push({ pts: fromLeo(pts), cols, smooth: true, dotted });
         continue;
       }
+      pts.dotted = dotted;
       if (pts.some((p) => p.hazard)) this._hazardChains.push(pts);
       else {
         const seasonal = pts.find((p) => p.siteSynodic);
@@ -3185,7 +3187,7 @@ export class MapRenderer {
     // - normal paths              : pale grey
     // - signposted LEO routes     : bold, in their board sign's colour
     // - comet paths               : icy cyan-blue
-    // - hazard paths              : red dashed
+    // - hazard paths              : red (dotted only when one-way)
     const eff = this.zoom * this.fitScale;
     ctx.lineWidth = 1.4 / eff;
 
@@ -3263,26 +3265,38 @@ export class MapRenderer {
       if (!segs.length && !chains.length) continue;
       ctx.strokeStyle = SYNODIC_COLOURS[season] || '#7dd3fc';
       ctx.globalAlpha = 0.85;
-      ctx.beginPath();
-      for (const { sa, sb } of segs) {
-        ctx.moveTo(sa.x, sa.y);
-        ctx.lineTo(sb.x, sb.y);
+      // Dashes are only for one-way (arrowed) routes, as on the board.
+      for (const dotted of [false, true]) {
+        ctx.setLineDash(dotted ? [3 / eff, 3 / eff] : []);
+        ctx.beginPath();
+        for (const { sa, sb, dotted: d } of segs) {
+          if (!!d !== dotted) continue;
+          ctx.moveTo(sa.x, sa.y);
+          ctx.lineTo(sb.x, sb.y);
+        }
+        for (const pts of chains) if (!!pts.dotted === dotted) appendSmoothPath(ctx, pts);
+        ctx.stroke();
       }
-      for (const pts of chains) appendSmoothPath(ctx, pts);
-      ctx.stroke();
+      ctx.setLineDash([]);
     }
 
+    // Hazard routes: red, SOLID. Dashes are only for one-way (arrowed) routes,
+    // as on the board, where the skull on the line marks the hazard (user
+    // 2026-11-16); a one-way hazard route is dotted like any other.
     if (this._hazardEdges.length || this._hazardChains.length) {
       ctx.strokeStyle = '#f87171';
       ctx.globalAlpha = 0.7;
-      ctx.setLineDash([4 / eff, 3 / eff]);
-      ctx.beginPath();
-      for (const { sa, sb } of this._hazardEdges) {
-        ctx.moveTo(sa.x, sa.y);
-        ctx.lineTo(sb.x, sb.y);
+      for (const dotted of [false, true]) {
+        ctx.setLineDash(dotted ? [3 / eff, 3 / eff] : []);
+        ctx.beginPath();
+        for (const { sa, sb, dotted: d } of this._hazardEdges) {
+          if (!!d !== dotted) continue;
+          ctx.moveTo(sa.x, sa.y);
+          ctx.lineTo(sb.x, sb.y);
+        }
+        for (const pts of this._hazardChains) if (!!pts.dotted === dotted) appendSmoothPath(ctx, pts);
+        ctx.stroke();
       }
-      for (const pts of this._hazardChains) appendSmoothPath(ctx, pts);
-      ctx.stroke();
       ctx.setLineDash([]);
     }
 
