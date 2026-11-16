@@ -144,3 +144,28 @@ export function spacebornGlyph({ size = 24 } = {}) {
   <circle cx="23.6" cy="5.2" r="2.6" fill="#fff" stroke="#111" stroke-width="1.3"/>
 </svg></span>`;
 }
+
+// The M4 timepiece (4A2, 4B3h): an alarm clock in the owner's seat colour, the
+// marker a player sets on the Sunspot Cycle to bid on a contract and that sits
+// at the contract's deadline. Same alarm-clock silhouette as the late-fee badge
+// (bells, face, legs), so a table player reads it as the same token. Returns an
+// SVG <g> centred on (0,0) for use inside the Sunspot dial; `ghost` draws the
+// unplaced draft (dashed, see-through), `deadbeat` the flipped late side.
+export function timepieceDialGlyph({ color = '#e5e7eb', size = 26, ghost = false, deadbeat = false } = {}) {
+  const k = size / 28;
+  const ink = '#111';
+  const op = ghost ? ' opacity="0.55"' : '';
+  const dash = ghost ? ' stroke-dasharray="2.5 2"' : '';
+  const face = deadbeat ? '#c23b30' : '#fff';
+  const hands = deadbeat
+    ? `<path d="M-3.6 -3.6 3.6 3.6M3.6 -3.6 -3.6 3.6" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/>`
+    : `<path d="M0 0V-5.4M0 0 3.8 2.2" stroke="${ink}" stroke-width="2" stroke-linecap="round"/><circle r="1.3" fill="${ink}"/>`;
+  return `<g class="m4-timepiece" transform="scale(${k.toFixed(3)})"${op}>`
+    + `<path d="M-6.5 9.6-8.6 12.6M6.5 9.6 8.6 12.6" stroke="${ink}" stroke-width="3" stroke-linecap="round"/>`
+    + `<path d="M-6.5 9.6-8.6 12.6M6.5 9.6 8.6 12.6" stroke="${color}" stroke-width="1.6" stroke-linecap="round"/>`
+    + `<path d="M-11.6-6.2a5.4 5.4 0 0 1 7.6-6.4zM11.6-6.2a5.4 5.4 0 0 0-7.6-6.4z" fill="${color}" stroke="${ink}" stroke-width="1.2"${dash}/>`
+    + `<circle r="10.6" fill="${color}" stroke="${ink}" stroke-width="1.4"${dash}/>`
+    + `<circle r="7.6" fill="${face}" stroke="${ink}" stroke-width="0.8"/>`
+    + hands
+    + '</g>';
+}
