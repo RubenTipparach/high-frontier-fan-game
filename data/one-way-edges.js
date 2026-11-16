@@ -2,10 +2,23 @@
 // The solar map's one-way ("arrow") edges in id2-slug space, from the planner
 // JSON's '0'-direction edge labels: an edge labelled '0' A->B (and not B->A) is
 // traversable A -> B ONLY - the printed arrow (every aerobrake's descent plus a
-// few other one-way ramps). data/aerobrake-direction.js reads these so a route
-// can never be plotted, planned, or committed against an arrow.
+// few other one-way ramps), plus the hops INSIDE a linear one-way run that the
+// planner left unlabelled (filled in, see the generator). data/aerobrake-direction.js
+// reads these so a route can never be plotted, planned, or committed against an
+// arrow, and the map draws its dotted arrowed lines from the same list.
 export const ONE_WAY_ARROWS = [
   ["burn-dkywy", "lag-5kd7m"],
+  ["dec-6906q", "lag-5pmg4"],
+  ["dec-blxll", "lag-60v7l"],
+  ["dec-ek0ud", "lag-6r4sx"],
+  ["dec-jm8u8", "lag-n7yan"],
+  ["dec-js39g", "dec-6906q"],
+  ["dec-lb5cr", "lag-0n050"],
+  ["dec-ovffh", "lag-vlqer"],
+  ["dec-tk5vo", "dec-u7fnv"],
+  ["dec-tknzc", "dec-jm8u8"],
+  ["dec-u7fnv", "lag-w6ybr"],
+  ["dec-y2suy", "lag-6jjmn"],
   ["lag-0n050", "dec-6n33k"],
   ["lag-0ss6n", "dec-9kkdi"],
   ["lag-25q0c", "rad-q2pzt"],
@@ -38,6 +51,7 @@ export const ONE_WAY_ARROWS = [
   ["lag-h1i9d", "rad-lws0x"],
   ["lag-hdx7e", "dec-ovffh"],
   ["lag-jb3sl", "dec-1cwet"],
+  ["lag-jox91", "lag-tspde"],
   ["lag-k88xf", "lag-pzen6"],
   ["lag-lozeb", "burn-3ylxe"],
   ["lag-m01cm", "dec-2g3ok"],
@@ -65,6 +79,7 @@ export const ONE_WAY_ARROWS = [
   ["lag-zb2km", "dec-bgbto"],
   ["lag-zb2km", "lag-mdelw"],
   ["rad-en5wg", "lag-exzgn"],
+  ["rad-lws0x", "lag-jox91"],
   ["rad-mzsbe", "lag-3hf9y"],
   ["rad-ogb7r", "dec-tk5vo"],
   ["rad-pt38y", "burn-ubjdf"],

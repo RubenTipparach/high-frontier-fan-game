@@ -18,10 +18,6 @@ export const SIGNPOST_ORDER = ['purple',  'periwinkle',  'blue',  'green',  'yel
 // move. These are the one-way hops the board nevertheless draws SOLID (measured
 // on hf4.jpg: full colour, no gaps). Unordered node-slug pairs.
 export const BOARD_SOLID_ONE_WAY = new Set(['lag-dzgne|lag-poseh']);
-// Two-way hops the board nevertheless draws DOTTED: the green line below Saturn
-// runs dotted from the radiation belt through the ring crossing to the triangle
-// (checked by eye on hf4.jpg, user 2026-11-16).
-export const BOARD_DOTTED = new Set(['lag-jox91|rad-lws0x', 'lag-jox91|lag-tspde']);
 // Text on a light sign reads dark, as on the board.
 export const SIGNPOST_DARK_TEXT = new Set(['green', 'yellow']);
 export const SIGNPOST_EDGES = {
