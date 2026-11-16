@@ -27,7 +27,7 @@ import {
 } from './solo.js';
 import { PATENTS, PATENTS_BY_ID as _PATENTS_BY_ID, PATENT_TYPES, patentsByType, radiatorRadHardness, isExpansionType } from '../../data/patents.js';
 import {
-  getHandSlots, isInHand, addToHand, removeFromHandAt, removeFromHand,
+  getHandSlots, getContractHandSlots, isInHand, addToHand, removeFromHandAt, removeFromHand,
   clearHand, onHandChange,
   isBoostMarked, getBoostMarked, toggleBoostMark, clearBoostMarks,
   setBoostScope,
@@ -10316,9 +10316,11 @@ function wireHandStrip() {
 
   const repaintHand = () => {
     const slots = getHandSlots();
+    const contracts = getContractHandSlots();
     host.innerHTML = '';
     if (countEl) countEl.textContent =
-      `${slots.length} card${slots.length === 1 ? '' : 's'}`;
+      `${slots.length} card${slots.length === 1 ? '' : 's'}`
+      + (contracts.length ? ` + ${contracts.length} contract${contracts.length === 1 ? '' : 's'}` : '');
     slots.forEach((id, idx) => {
       const card = lookup(id);
       if (!card) return;
@@ -10411,6 +10413,56 @@ function wireHandStrip() {
           if (!wasSelected) wrap.classList.add('is-selected');
         } else {
           openCardModal(card, kindOf(id), idx, { nav: { siblings: stackSiblings(slots), index: idx } });
+        }
+      });
+      host.appendChild(wrap);
+    });
+    // M4 contracts are Hand cards (4B3h), drawn after the patents on the side
+    // they were won on. They don't count toward the academia hand limit, so the
+    // count reads "N cards + M contracts". A default contract lies sideways in
+    // the hand (4B4d) and can never be boosted again.
+    contracts.forEach((c) => {
+      const card = lookup(c.id);
+      if (!card) return;
+      const face = c.side === 'gold' ? 'secondary' : 'primary';
+      const wrap = document.createElement('div');
+      wrap.className = 'hand-slot is-contract' + (c.default ? ' is-default' : '');
+      if (isBoostMarked(c.id)) wrap.classList.add('is-boost-marked');
+      wrap.appendChild(renderCard(card, { face }));
+      const sideName = c.side === 'gold' ? 'gold' : (card.exodus ? 'exodus' : 'blue');
+      wrap.title = c.default
+        ? `${card.name}: in default. It can never be fulfilled; pay off its advance to discard it.`
+        : `${card.name} (${sideName} side). Contracts don't count toward your hand limit.`;
+      const quick = document.createElement('div');
+      quick.className = 'hand-quick-actions';
+      const boostTip = c.default ? 'A contract in default can never be boosted again'
+        : (isBoostMarked(c.id) ? 'Unmark boost' : 'Mark for boost');
+      const bq = document.createElement('button');
+      bq.type = 'button'; bq.className = 'hand-q q-boost'; bq.textContent = '🚀'; bq.title = boostTip;
+      bq.disabled = c.default;
+      bq.addEventListener('click', (ev) => { ev.stopPropagation(); if (!c.default) toggleBoostMark(c.id); });
+      quick.appendChild(bq);
+      wrap.appendChild(quick);
+      const viewBtn = document.createElement('button');
+      viewBtn.type = 'button'; viewBtn.className = 'hand-view-btn'; viewBtn.textContent = 'View';
+      viewBtn.addEventListener('click', (ev) => { ev.stopPropagation(); openCardModal(card, 'patent', -1, { face, readOnly: true }); });
+      wrap.appendChild(viewBtn);
+      if (!c.default) {
+        const boostBtn = document.createElement('button');
+        boostBtn.type = 'button'; boostBtn.className = 'hand-boost-btn';
+        boostBtn.textContent = isBoostMarked(c.id) ? 'Unmark' : 'Boost';
+        boostBtn.title = boostTip;
+        boostBtn.addEventListener('click', (ev) => { ev.stopPropagation(); toggleBoostMark(c.id); });
+        wrap.appendChild(boostBtn);
+      }
+      wrap.addEventListener('click', (ev) => {
+        if (ev.target.closest('.hand-q, .hand-view-btn, .hand-boost-btn')) return;
+        if (isTouchDevice()) {
+          const wasSelected = wrap.classList.contains('is-selected');
+          host.querySelectorAll('.hand-slot.is-selected').forEach((s) => s.classList.remove('is-selected'));
+          if (!wasSelected) wrap.classList.add('is-selected');
+        } else {
+          openCardModal(card, 'patent', -1, { face, readOnly: true });
         }
       });
       host.appendChild(wrap);
@@ -22651,6 +22703,12 @@ function confirmModal({ title, body, yes = 'OK', no = 'Cancel' }) {
 // side changes its mass (light = the base, heavy is heavier), so the side is
 // passed through. Mirror of the server's boostMass in engine.js.
 function boostMassOf(card, radSide) {
+  // M4: a contract weighs what its side says (the gold side can differ).
+  if (card && card.type === 'contract') {
+    const held = getContractHandSlots().find((c) => c.id === card.id);
+    const f = card.faces && card.faces[held && held.side === 'gold' ? 'secondary' : 'primary'];
+    return ((f && f.mass) != null ? f.mass : card.mass) | 0;
+  }
   if (card && card.type === 'radiator') {
     const f = card.faces && card.faces.primary;
     const side = radSide === 'light' ? 'light' : 'heavy';

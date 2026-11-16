@@ -94,14 +94,28 @@ function notify() {
 // which wiped a selection the player was mid-way through building
 // (user 2026-05-29: "something is interfering or reseting my boost
 // operation").
-export function hydrateHand(ids = []) {
+//
+// M4 contracts (4B3h "The winner takes the contract as a Hand Card") arrive as
+// the optional second argument: [{ id, side, default }]. They are Hand cards,
+// drawn in the hand strip and boost-markable, but they ignore the academia hand
+// limit, pad explosions and budget cuts (4B2a,c), so they are kept OUT of
+// getHandSlots() (which feeds the hand-limit count, Free Market, ET Produce...)
+// and read through getContractHandSlots() instead.
+let _contracts = [];
+export function hydrateHand(ids = [], contracts = []) {
   const next = Array.isArray(ids) ? [...ids] : [];
+  const nextC = Array.isArray(contracts) ? contracts.filter((c) => c && c.id)
+    .map((c) => ({ id: c.id, side: c.side || 'blue', default: !!c.default })) : [];
   const handChanged = next.length !== _hand.length
-    || next.some((id, i) => id !== _hand[i]);
+    || next.some((id, i) => id !== _hand[i])
+    || JSON.stringify(nextC) !== JSON.stringify(_contracts);
   _hand = next;
+  _contracts = nextC;
   let marksChanged = false;
   for (const id of [..._boostMarks]) {
-    if (!_hand.includes(id)) { _boostMarks.delete(id); marksChanged = true; }
+    if (!_hand.includes(id) && !_contracts.some((c) => c.id === id && !c.default)) {
+      _boostMarks.delete(id); marksChanged = true;
+    }
   }
   // PERSIST the prune. It used to be memory-only, so a boosted card's mark
   // lingered in localStorage; when that card later returned to the hand (e.g.
@@ -115,6 +129,8 @@ export function getHandSlots() {
   return _hand.slice();
 }
 export function getHandIds() { return _hand.slice(); }
+// M4 contracts held in hand: [{ id, side, default }] (see hydrateHand).
+export function getContractHandSlots() { return _contracts.map((c) => ({ ...c })); }
 
 export function isInHand(id) {
   return _hand.includes(id);

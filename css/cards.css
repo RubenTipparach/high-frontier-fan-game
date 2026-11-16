@@ -1891,3 +1891,11 @@
 .m4c-aug { display: flex; align-items: center; gap: 8px; font-size: 12px; background: #1d1f29; border-radius: 8px; padding: 4px 8px; }
 .m4c-aug.lack { opacity: .5; }
 .m4c-col { background: #1d1f29; border-radius: 8px; padding: 6px 10px; margin-bottom: 6px; font-size: 13px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+/* M4 contracts in the hand strip: same box as a patent hand card. A default
+   contract lies sideways in the hand (4B4d). */
+.hand-slot .card.m4-contract { height: 350px; max-height: 350px; overflow: hidden; }
+/* Same 0.77 hand scale, turned a quarter left about the top-left corner, then
+   dropped so it lies along the bottom of the 280px slot (270 wide, 169 tall). */
+.hand-slot.is-contract.is-default .card.m4-contract { transform: translate(0, 280px) rotate(-90deg) scale(0.77); }
+.hand-slot.is-contract.is-default { width: 270px; }

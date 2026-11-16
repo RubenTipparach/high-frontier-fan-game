@@ -112,7 +112,11 @@ export function hydrateFromSnapshot(snapshot, myId, maps) {
     groups: Array.isArray(r.groups) ? r.groups : [],
   });
   setAqua(me ? (me.aqua | 0) : 0);
-  hydrateHand((me && me.hand) || []);
+  // M4: contracts are Hand cards too (4B3h), on the side they were won on.
+  const cMeta = (me && me.contractMeta) || {};
+  hydrateHand((me && me.hand) || [], (snapshot.m4 && me && Array.isArray(me.contractHand))
+    ? me.contractHand.map((id) => ({ id, side: (cMeta[id] && cMeta[id].side) || 'blue', default: !!(cMeta[id] && cMeta[id].default) }))
+    : []);
 
   // Outposts are keyed by letter; translate the site each one sits on.
   const outposts = {};

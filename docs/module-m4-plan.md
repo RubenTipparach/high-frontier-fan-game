@@ -84,6 +84,12 @@ late fee + default):
   budget-cut immunity, Inspiration cycles the contract decks (K2a), 4E2 scoring.
 - Client: contract cards render in stacks (`js/game/contract-card.js`), the
   Contracts panel + contract auction overlay (`js/game/contracts-ui.js`).
+- A won contract is a Hand Card (4B3h): it draws in the Hand strip on its side
+  and boost-marks like any card (user 2026-11-16). It stays OUT of
+  `getHandSlots()` (hand limit, Free Market, ET Produce) and reads through
+  `hand.js#getContractHandSlots()`, since it ignores the academia hand limit,
+  pad explosions and budget cuts (4B2a,c). A default contract lies sideways in
+  the hand (4B4d) and can't be boost-marked.
 
 STILL TO DO in Stage 1: the contract ABILITIES (tophat free hazard, Hazard /
 Aerobrake Ignore, Shielded, Insight, Secured, Bailout, Connections deck choice,
