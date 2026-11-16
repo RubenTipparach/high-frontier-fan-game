@@ -252,7 +252,7 @@ function wheelSvg(displayTurn = null, opts = {}) {
   const lastEvent = getLastEvent();
 
   // Room outside the ring for timepiece markers when there are any.
-  const pad = (opts.markers && opts.markers.length) ? 70 : 0;
+  const pad = (opts.markers && opts.markers.length) ? 54 : 0;
   let svg = `<svg class="turn-wheel${opts.className ? ' ' + opts.className : ''}" viewBox="${-pad} ${-pad} ${WHEEL_VIEW + pad * 2} ${WHEEL_VIEW + pad * 2}">`;
   // Season wedges.
   for (const season of SEASONS) {
@@ -325,9 +325,14 @@ function wheelSvg(displayTurn = null, opts = {}) {
   if (opts.center && opts.center.length) {
     const lines = opts.center;
     const y0 = WHEEL_CY - ((lines.length - 1) * 17) / 2;
+    // A line is a string or { text, color }: bids read in their bidder's colour.
     lines.forEach((ln, i) => {
+      const text = typeof ln === 'string' ? ln : ln.text;
+      const o = typeof ln === 'object' ? ln : {};
+      const fill = o.color || (i === 0 ? '#f8fafc' : 'rgba(226,232,240,0.82)');
+      const weight = i === 0 || o.strong ? 800 : 500;
       svg += `<text x="${WHEEL_CX}" y="${(y0 + i * 17).toFixed(1)}" text-anchor="middle" dominant-baseline="middle"
-        font-size="${i === 0 ? 15 : 12}" font-weight="${i === 0 ? 800 : 600}" fill="${i === 0 ? '#f8fafc' : 'rgba(226,232,240,0.82)'}">${ln}</text>`;
+        font-size="${i === 0 ? 15 : 13}" font-weight="${weight}" fill="${fill}"${o.strong ? ' text-decoration="underline"' : ''}>${text}</text>`;
     });
   }
   // Clickable slots (a contract bid): one transparent wedge per pickable slot.

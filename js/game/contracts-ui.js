@@ -353,7 +353,6 @@ export function renderContractAuction(a) {
   const iAmAuctioneer = myId === a.auctioneerId;
   const blocked = p && (p.timepiece ? 'Timepiece out.'
     : (face.manned && s.defaultChit && s.defaultChit.profileId === myId ? 'Default chit: no manned bids.' : null));
-  const bids = Object.entries(a.bids || {}).map(([id, y]) => `<li><span class="player-name" style="--player-color:${esc((playerById(Number(id)) || {}).color || '')}">@${esc(nameOf(Number(id)))}</span> ${y} yr</li>`).join('');
   const waiting = (s.players || []).filter((q) => q.profileId !== a.auctioneerId && !(a.acted || []).includes(q.profileId)
     && !q.timepiece && !(face.manned && s.defaultChit && s.defaultChit.profileId === q.profileId));
   const settled = !waiting.length;
@@ -368,6 +367,10 @@ export function renderContractAuction(a) {
     markers.push({ slot: slotFor(y), svg: timepieceDialGlyph({ color: q.color || '#e5e7eb', size: DIAL_GLYPH }), title: `@${q.name || nameOf(Number(id))} bid ${y} year${y === 1 ? '' : 's'}` });
   }
   const canBid = !blocked;
+  // The bid winning right now (bold + underlined): the lowest; the initiator
+  // wins ties they are in (4B3g).
+  const lowIds = Object.entries(a.bids || {}).filter(([, y]) => y === a.low).map(([id]) => Number(id));
+  const leaderId = lowIds.includes(a.auctioneerId) ? a.auctioneerId : lowIds[0];
   const myBid = (a.bids || {})[myId];
   if (canBid && myBid !== _yearsDraft) {
     markers.push({ slot: slotFor(_yearsDraft), svg: timepieceDialGlyph({ color: (p && p.color) || '#e5e7eb', size: DIAL_GLYPH, ghost: true }), title: `Your bid: ${_yearsDraft} years` });
@@ -376,7 +379,13 @@ export function renderContractAuction(a) {
     turn, markers,
     band: _yearsDraft > 0 ? { from: (turn + 1) % SLOTS, to: slotFor(_yearsDraft), color: '#34d399' } : null,
     pick: canBid ? { from: turn, to: slotFor(a.low), title: (slot) => { const y = ((slot - turn) + SLOTS) % SLOTS; return `Bid ${y} year${y === 1 ? '' : 's'} (due turn ${slot + 1})`; } } : null,
-    center: [turnLine(s), `Low ${a.low}`, canBid ? `You ${_yearsDraft}` : ''],
+    // The bids, lowest first, inside the dial in each bidder's colour.
+    center: [turnLine(s),
+      ...Object.entries(a.bids || {}).map(([id, y]) => {
+        const q = playerById(Number(id)) || {};
+        return { text: `@${esc(q.name || nameOf(Number(id)))} ${y}`, color: q.color || null, strong: Number(id) === leaderId };
+      }),
+      ...(canBid && myBid !== _yearsDraft ? [{ text: `you ${_yearsDraft}`, color: '#34d399' }] : [])],
   });
   const opts = Array.from({ length: a.low + 1 }, (_, y) => `<option value="${y}" ${y === _yearsDraft ? 'selected' : ''}>${y} yr</option>`).join('');
   let controls = '';
@@ -393,11 +402,10 @@ export function renderContractAuction(a) {
     <div class="m4c-head"><h3>📜 Contract auction</h3><span class="muted">${CONTRACT_PAIR_NAMES[a.pair] || ''}</span></div>
     <div class="m4c-auction-body">
       <div class="m4c-auction-card">${cardThumb(a.cardId, a.side || 'blue')}</div>
-      <div class="m4c-dial m4c-auction-dial">${dial}</div>
-      <div class="m4c-side">
-        <ul class="m4c-bids">${bids}</ul>
-        <p class="muted">${settled ? `${esc(nameOf(a.auctioneerId))} to close` : `Waiting: ${waiting.map((q) => '@' + esc(q.name)).join(', ')}`}</p>
+      <div class="m4c-auction-play">
+        <div class="m4c-dial m4c-auction-dial">${dial}</div>
         <div class="m4c-controls">${controls}</div>
+        <p class="m4c-wait">${settled ? `${esc(nameOf(a.auctioneerId))} to close` : `Waiting: ${waiting.map((q) => '@' + esc(q.name)).join(', ')}`}</p>
       </div></div></div>`;
   const sel = el.querySelector('#m4c-years');
   if (sel) sel.addEventListener('change', () => { _yearsDraft = Number(sel.value); renderContractAuction(a); });
