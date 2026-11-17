@@ -46,20 +46,30 @@ export const CONTRACT_BID_MAX = 10;
 const slug = (s) => 'con_' + String(s).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
 const num = (v, d = 0) => (v == null || v === '' || Number.isNaN(Number(v)) ? d : Number(v));
 
+// Step filters: `key` (a flag), `key=value`, `key>=n`. `either=a,b` holds
+// alternatives, each itself a filter (`either=beyond=Mars,size>=9`: beyond the
+// Mars zone OR size 9+).
+function parseFilters(tokens) {
+  const filters = {};
+  for (const t of tokens) {
+    const m = t.match(/^([a-z]+)(>=|=)(.+)$/);
+    if (m && m[1] === 'either') filters.either = m[3].split(',').map((alt) => parseFilters([alt]));
+    else if (m) filters[m[1]] = m[2] === '>=' ? { min: Number(m[3]) } : m[3];
+    else filters[t] = true;
+  }
+  return filters;
+}
+
 export function parseSteps(text) {
   return String(text || '').split(';').map((s) => s.trim()).filter(Boolean).map((raw) => {
     if (raw.startsWith('manual:')) return { verb: 'manual', why: raw.slice(7).trim(), raw };
     const [head, ...rest] = raw.split(/\s+/);
-    const filters = {};
-    for (const t of rest) {
-      const m = t.match(/^([a-z]+)(>=|=)(.+)$/);
-      if (m) filters[m[1]] = m[2] === '>=' ? { min: Number(m[3]) } : m[3];
-      else filters[t] = true;
-    }
+    const filters = parseFilters(rest);
     if (head.startsWith('at:')) return { verb: 'at', sites: head.slice(3).split('|'), filters, raw };
     if (head.startsWith('enter:')) return { verb: 'enter', node: head.slice(6), filters, raw };
     if (head.startsWith('flybys:')) return { verb: 'flybys', count: Number(head.slice(7)) || 1, filters, raw };
     if (head === 'site') return { verb: 'site', filters, raw };
+    if (head === 'space') return { verb: 'space', filters, raw };
     if (head === 'return') return { verb: 'return', raw };
     if (head === 'liftoff') return { verb: 'liftoff', raw };
     return { verb: 'manual', why: `unreadable step "${raw}"`, raw };
@@ -181,14 +191,35 @@ export function contractDeckIds() {
 const zoneIdx = (z) => ZONE_ORDER.indexOf(String(z || ''));
 
 // Does `site` (a data/sites.js record) pass a step's filters? `ctx` supplies the
-// game-state questions: unexplored(siteId), size(site), gloryUnclaimed(zone),
-// atmospheric / submarine / astrobiology / elevator (siteId).
-export function siteMatches(site, filters, ctx, usedSites = []) {
+// game-state questions: unexplored(slug), size(site), gloryUnclaimed(zone),
+// atmospheric / submarine / astrobiology / elevator (slug), and for the stack
+// carrying the contract: stackHuman(), stackOperational(type), hazardRolled().
+// `slug` is the map space the stack is on; claims, factories and discs are
+// keyed by it (a curated site record's own id can differ: venus_aerostat_xity).
+export function siteMatches(site, filters, ctx, usedSites = [], slug = null) {
   if (!site) return false;
   const f = filters || {};
-  const id = site.id;
-  if (f.unexplored && !ctx.unexplored(id)) return false;
-  if (f.size && ctx.size(site) < f.size.min) return false;
+  const id = slug || site.id;
+  // Unexplored Signposted Site (owner ruling 2026-11-17): once every
+  // signposted site has been explored, any site will do.
+  const anySite = !!(f.orany && f.signposted && ctx.noUnexploredSignposted && ctx.noUnexploredSignposted());
+  if (!anySite) {
+    if (f.unexplored && !ctx.unexplored(id)) return false;
+    if (f.signposted && !(ctx.signposted && ctx.signposted(id))) return false;
+  }
+  if (f.size && (typeof f.size === 'object' ? ctx.size(site, id) < f.size.min : ctx.size(site, id) !== Number(f.size))) return false;
+  if (f.adjacent === 'hazard' && !(ctx.adjacentHazard && ctx.adjacentHazard(id))) return false;
+  if (f.busted && !(ctx.busted && ctx.busted(id))) return false;
+  if (f.ownfactory && !(ctx.ownFactory && ctx.ownFactory(id))) return false;
+  if (f.farthestglory) {
+    const z = ctx.farthestGloryZone ? ctx.farthestGloryZone() : null;
+    if (!z || site.solarZone !== z) return false;
+  }
+  if (f.human && !(ctx.stackHuman && ctx.stackHuman())) return false;
+  if (f.rolled && !(ctx.hazardRolled && ctx.hazardRolled())) return false;
+  if (f.robonaut && !(ctx.stackOperational && ctx.stackOperational('robonaut'))) return false;
+  if (f.refinery && !(ctx.stackOperational && ctx.stackOperational('refinery'))) return false;
+  if (f.either && !f.either.some((alt) => siteMatches(site, alt, ctx, usedSites, slug))) return false;
   if (f.atmospheric && !ctx.atmospheric(id)) return false;
   if (f.submarine && !ctx.submarine(id)) return false;
   if (f.astrobiology && !ctx.astrobiology(id)) return false;
@@ -208,21 +239,44 @@ export function siteMatches(site, filters, ctx, usedSites = []) {
 // Is step `step` satisfied right now? `where` describes the stack carrying the
 // contract: { siteId (a site slug, or null / a space node), atLeo, entered: [nodes
 // entered this turn] } ; `progress` = { sites: [site per done step] }.
+// `prev` is the step before this one: a `sameturn` step also needs that one to
+// hold this turn (Sun-fired Laser: Mercury L1 to Mercury L3 in one turn), so an
+// earlier announcement can never strand the contract.
 // Returns { ok, siteId?, why? }.
-export function stepSatisfied(step, where, progress, ctx) {
+export function stepSatisfied(step, where, progress, ctx, prev = null) {
   const used = (progress && progress.sites) || [];
+  if (step.filters && step.filters.sameturn && prev) {
+    const before = { ...progress, sites: used.slice(0, -1) };
+    if (!stepSatisfied(prev, where, before, ctx).ok) return { ok: false, why: 'not_same_turn' };
+  }
   switch (step.verb) {
     case 'at': {
       const id = where.siteId;
       if (!id || !step.sites.includes(id)) return { ok: false, why: 'not_at_destination' };
-      if (!siteMatches(ctx.site(id), step.filters, ctx, used)) return { ok: false, why: 'destination_conditions' };
+      // A listed space (a hazard, a Lagrange point) has no site record; only a
+      // site carries conditions to check.
+      const site = ctx.site(id);
+      const conds = Object.keys(step.filters || {}).filter((k) => k !== 'sameturn');
+      if (site ? !siteMatches(site, step.filters, ctx, used, id) : conds.length) return { ok: false, why: 'destination_conditions' };
       return { ok: true, siteId: id };
     }
     case 'site': {
       const id = where.siteId;
       const site = id ? ctx.site(id) : null;
       if (!site) return { ok: false, why: 'not_at_a_site' };
-      if (!siteMatches(site, step.filters, ctx, used)) return { ok: false, why: 'destination_conditions' };
+      if (!siteMatches(site, step.filters, ctx, used, id)) return { ok: false, why: 'destination_conditions' };
+      return { ok: true, siteId: id };
+    }
+    // A map space of a kind: `aero` (an aerobrake space), `hazard` (a crash
+    // hazard), `beyond=<zone>` (farther from the Sun than that zone).
+    case 'space': {
+      const id = where.atLeo ? null : where.siteId;
+      if (!id) return { ok: false, why: 'not_at_destination' };
+      const f = step.filters || {};
+      const kind = ctx.nodeHazard ? ctx.nodeHazard(id) : null;
+      if (f.aero && kind !== 'aero') return { ok: false, why: 'destination_conditions' };
+      if (f.hazard && kind !== 'skull') return { ok: false, why: 'destination_conditions' };
+      if (f.beyond && !(zoneIdx(ctx.nodeZone(id)) > zoneIdx(f.beyond))) return { ok: false, why: 'destination_conditions' };
       return { ok: true, siteId: id };
     }
     case 'enter':

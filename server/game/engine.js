@@ -97,6 +97,7 @@ import {
   neighborSlugs, siteHasLanderBurn, isLanderBurnNode, isHomeBernalSite,
 } from './planner-graph.js';
 import { siteHasHazardousLanderBurn, routeFlewAerobrake } from '../../data/lander-burn.js';
+import { SIGNPOSTED_SITES } from '../../data/signpost-routes.js';
 import { GREEK_TAGS } from '../../data/fleet-tags.js';
 import { isBuggyRoamBody, isBuggyRoadPair } from '../../data/buggy-roam.js';
 import { isSungrazerSite, closePassFires, SUNGRAZER_SITE_IDS } from '../../data/sungrazer.js';
@@ -13427,7 +13428,10 @@ function openTurnFor(state, player) {
     player.lateFeePaidThisTurn = 0;
     player.implantFreeUsed = false;
     player.turnStartedLate = !!(player.timepiece && player.timepiece.deadbeat);
-    if (player.rocket) player.rocket.enteredThisTurn = [];
+    if (player.rocket) {
+      player.rocket.enteredThisTurn = [];
+      if (player.rocket.hazardRolledThisTurn) delete player.rocket.hazardRolledThisTurn;
+    }
   }
   // M1: the Freighter is a second independent mover - it gets its own one move
   // per turn, separate from the rocket's. Only consumable while a freighter is
@@ -15729,23 +15733,46 @@ function contractBidBlock(state, player, cardId) {
 // Every stack location a contract card can sit in, with where that stack is.
 function findContractSlot(state, player, cardId) {
   const inLeo = (player.leo || []).findIndex((s) => s.id === cardId);
-  if (inLeo >= 0) return { arr: player.leo, idx: inLeo, where: { siteId: null, atLeo: true, entered: [] }, label: 'LEO' };
+  if (inLeo >= 0) return { arr: player.leo, idx: inLeo, where: { siteId: null, atLeo: true, entered: [], stack: player.leo }, label: 'LEO' };
   const st = (player.rocket && player.rocket.stack) || [];
   const inRocket = st.findIndex((s) => s.id === cardId);
   if (inRocket >= 0) {
     const atLeo = rocketAtLeo(state, player);
     return {
       arr: st, idx: inRocket, label: 'rocket',
-      where: { siteId: atLeo ? null : player.rocket.siteId, atLeo, entered: player.rocket.enteredThisTurn || [] },
+      where: {
+        siteId: atLeo ? null : player.rocket.siteId, atLeo, entered: player.rocket.enteredThisTurn || [],
+        stack: st, glitched: !!player.rocket.glitch, rolled: !!player.rocket.hazardRolledThisTurn,
+      },
     };
   }
   return null;
 }
-function contractCtx(state) {
+function contractCtx(state, player = null, where = {}) {
+  const unexplored = (id) => !state.discs[id] && !state.factories[id];
+  const cards = where.stack || [];
   return {
     site: (id) => siteById(id),
-    size: (site) => nodeSizeNumber(site.id),
-    unexplored: (id) => !state.discs[id] && !state.factories[id],
+    // By the map slug: a curated record's own id (venus_aerostat_xity) is not a node.
+    size: (site, slug) => nodeSizeNumber(slug || site.id),
+    unexplored,
+    // 4A7d: a site a coloured route leads to.
+    signposted: (id) => SIGNPOSTED_SITES.includes(id),
+    noUnexploredSignposted: () => !SIGNPOSTED_SITES.some(unexplored),
+    // Next to a crash hazard (a skull space), one edge away.
+    adjacentHazard: (id) => neighborSlugs(id).some((n) => hazardKind(n) === 'skull'),
+    busted: (id) => !!(state.discs[id] && state.discs[id].outcome === 'fail'),
+    ownFactory: (id) => !!(player && state.factories[id] && state.factories[id].ownerId === player.profileId),
+    // The farthest zone from the Sun in which any player has claimed a glory chit.
+    farthestGloryZone: () => [...ZONE_ORDER].reverse().find((z) => zoneChitTaken(state, z)) || null,
+    stackHuman: () => stackHasHuman(state, cards),
+    // Operational: the card is in the carrying stack and the stack is not glitched.
+    stackOperational: (type) => !where.glitched && cards.some((s) => {
+      const c = PATENTS_BY_ID[s.id];
+      return c && c.type === type;
+    }),
+    hazardRolled: () => !!where.rolled,
+    nodeHazard: (n) => hazardKind(n),
     gloryUnclaimed: (zone) => !zoneChitTaken(state, zone),
     atmospheric: (id) => isAtmosphericSite(id),
     submarine: (id) => isSubmarineSite(id),
@@ -15924,12 +15951,12 @@ function applyFulfillContract(state, op, player) {
   if (meta.default) return fail('contract_in_default');
   const loc = findContractSlot(state, player, cardId);
   if (!loc) return fail('contract_not_boosted');
-  const ctx = contractCtx(state);
+  const ctx = contractCtx(state, player, loc.where);
   const done = [];
   let why = null;
   while (meta.progress.done < face.steps.length) {
     const step = face.steps[meta.progress.done];
-    const r = stepSatisfied(step, loc.where, meta.progress, ctx);
+    const r = stepSatisfied(step, loc.where, meta.progress, ctx, meta.progress.done > 0 ? face.steps[meta.progress.done - 1] : null);
     if (!r.ok) { why = r; break; }
     meta.progress.sites.push(r.siteId || null);
     meta.progress.done += 1;
@@ -17451,6 +17478,8 @@ export function applyOperation(prevState, op, ctx) {
     if (res.state.m4 && op.kind === 'MOVE' && !op.unit && !op.debug && Array.isArray(op.segments)) {
       const r = playerByProfile(res.state, player.profileId).rocket;
       r.enteredThisTurn = [...(r.enteredThisTurn || []), ...op.segments.map((sg) => String(sg.to))];
+      // ... and whether it made a hazard roll this turn (Extreme Sports).
+      if (res.rolled || res.state.rng.cursor !== cursorBefore) r.hazardRolledThisTurn = true;
     }
     // Settlement notes a handler queued mid-op (Power Brokers' FINAO rebate).
     if (res.state && res.state.__opNotes) {

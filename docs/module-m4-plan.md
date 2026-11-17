@@ -105,6 +105,14 @@ late fee + default):
   contract in hand, at LEO, or at any player's anchored Bernal: Discard to the
   deck bottom, timepiece home, no late fee or repayment, claim the default
   chit. (Reading: the hand counts as "at LEO" since your Bank is in LEO, 4A7a.)
+- The ten destinations verified on the destinations page (owner approved all,
+  2026-11-17) are written in the sheet's Destination Steps and checked by the
+  engine: `site adjacent=hazard`, `space aero beyond=<zone>`, `at:<space>` for a
+  hazard / Lagrange space, `sameturn` (the step before must hold this turn too),
+  `site signposted unexplored orany`, `farthestglory`, `either=a,b`, and stack
+  conditions `human`, `rolled` (a hazard roll by this rocket this turn),
+  `ownfactory`, `busted`, `size=n`, `robonaut` / `refinery` (in an unglitched
+  stack). Each has a pass and a refusal in check-engine.
 - Unexplored Signposted Site (Planetary Protection, user ruling 2026-11-17):
   once every signposted site has been explored, any site will do. The open
   destinations are being verified on the destinations page

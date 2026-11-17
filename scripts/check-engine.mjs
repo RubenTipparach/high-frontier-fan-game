@@ -28,6 +28,7 @@ import { BUGGY_ROAD_GROUPS } from '../data/buggy-roam.js';
 import { CREW, CREW_BY_ID } from '../data/crew.js';
 import { COLONISTS_BY_ID, COLONISTS } from '../data/colonists.js';
 import { PATENTS, PATENTS_BY_ID } from '../data/patents.js';
+import { SIGNPOSTED_SITES } from '../data/signpost-routes.js';
 import { AD_ASTRA_EXIT_SLUGS, isAdAstraExit, sunlensAt } from '../data/ad-astra.js';
 import { diffState, applyPatch, sameState } from '../server/game/state-diff.js';
 import { scorePlayer } from '../data/endgame-scoring.js';
@@ -10668,6 +10669,258 @@ check('a "& Return" contract announces the destination, then fulfils back at LEO
   r = op(st, 'FULFILL_CONTRACT', P.profileId, { cardId: c.id });
   assert(r.ok && pl(r.state, res.winner).fulfilledContracts.length === 1, `return: ${r.error}`);
   return 'Mars North Pole announced, refused away from LEO, fulfilled on return';
+});
+
+// The ten destinations the owner approved on the destinations page (2026-11-17):
+// each one fulfils where it should and is refused where it should not.
+// Put contract `code` (either face) on the active player's rocket, boosted.
+function destContract(code, { seats = 2 } = {}) {
+  const st = startedGame({ seats, m4: true });
+  const P = currentPlayerOf(st);
+  const c = conByCode(code);
+  const gold = c.faces.secondary.code === code;
+  P.contractMeta = { [c.id]: { side: gold ? 'gold' : 'blue', paid: 0, boosted: true, default: false, progress: { sites: [], done: 0 } } };
+  P.rocket.stack.push({ id: c.id, kind: 'contract', face: gold ? 'secondary' : 'primary' });
+  const at = (slug) => { pl(st, P.profileId).rocket.siteId = slug; };
+  const fulfil = (s = st) => op(s, 'FULFILL_CONTRACT', P.profileId, { cardId: c.id });
+  const isDone = (r) => r.ok && pl(r.state, P.profileId).fulfilledContracts.some((f) => f.id === c.id);
+  return { st, P, c, at, fulfil, isDone };
+}
+const SKULL_FREE = (sl) => !neighborSlugs(sl).some((n) => hazardKind(n) === 'skull');
+// Every map node reachable from LEO.
+function mapNodes() {
+  const seen = new Set(); const queue = [leoSlug()];
+  while (queue.length) {
+    const n = queue.shift();
+    if (seen.has(n)) continue;
+    seen.add(n);
+    for (const m of neighborSlugs(n) || []) if (!seen.has(m)) queue.push(m);
+  }
+  return [...seen];
+}
+
+check("Fool's Gold: a site next to a crash hazard, then back to LEO", () => {
+  const t = destContract('M4N223F');
+  assert(neighborSlugs('eureka').some((n) => hazardKind(n) === 'skull'), 'Eureka has no skull neighbour');
+  const plain = allSiteSlugs().find((s) => siteBySlug(s) && SKULL_FREE(s));
+  t.at(plain);
+  let r = t.fulfil();
+  assert(!r.ok && r.error === 'destination_conditions', `${plain} (no hazard next door): ${r.error}`);
+  t.at('eureka');
+  r = t.fulfil();
+  assert(r.ok && /step 1 of 2/.test(r.log), `Eureka: ${r.error || r.log}`);
+  pl(r.state, t.P.profileId).rocket.siteId = null;
+  const r2 = t.fulfil(r.state);
+  assert(t.isDone(r2), `return to LEO: ${r2.error}`);
+  return `${plain} refused; Eureka announced; fulfilled back at LEO`;
+});
+
+check('Spin Control: the rapid-spin hazard beside Comet Phaethon only', () => {
+  const t = destContract('M4N239F');
+  t.at('lag-x2i7e');
+  let r = t.fulfil();
+  assert(!r.ok && r.error === 'not_at_destination', `another hazard: ${r.error}`);
+  t.at('lag-q4yka');
+  r = t.fulfil();
+  assert(t.isDone(r), `lag-q4yka: ${r.error}`);
+  return 'Icarus\'s hazard refused; Phaethon\'s fulfils';
+});
+
+check('Refueling Trawler: an aerobrake space beyond the Jupiter zone', () => {
+  const t = destContract('M4N245R');
+  assert(hazardKind('lag-0n050') === 'aero' && ['Saturn', 'Uranus', 'Neptune'].includes(zoneOfSlug('lag-0n050')), 'lag-0n050 is not an outer aerobrake');
+  const jupAero = mapNodes().find((n) => hazardKind(n) === 'aero' && zoneOfSlug(n) === 'Jupiter');
+  assert(jupAero, 'no Jupiter-zone aerobrake to test against');
+  t.at(jupAero);
+  let r = t.fulfil();
+  assert(!r.ok && r.error === 'destination_conditions', `Jupiter aerobrake ${jupAero}: ${r.error}`);
+  t.at('ceres');
+  r = t.fulfil();
+  assert(!r.ok && r.error === 'destination_conditions', `a site: ${r.error}`);
+  t.at('lag-0n050');
+  r = t.fulfil();
+  assert(t.isDone(r), `lag-0n050: ${r.error}`);
+  return `${jupAero} (Jupiter) and Ceres refused; lag-0n050 (${zoneOfSlug('lag-0n050')}) fulfils`;
+});
+
+check('Green Magnetosphere: a Mars site first, then Sol-Mars L1', () => {
+  const t = destContract('M4N252F');
+  t.at('lag-vnzy7');
+  let r = t.fulfil();
+  assert(!r.ok && r.error === 'not_at_a_site', `L1 before a Mars site: ${r.error}`);
+  t.at('deimos');
+  r = t.fulfil();
+  assert(!r.ok && r.error === 'destination_conditions', `Deimos is a moonlet, not Mars: ${r.error}`);
+  t.at('mars-arsia-mons-caves');
+  r = t.fulfil();
+  assert(r.ok && /step 1 of 2/.test(r.log), `Arsia Mons: ${r.error || r.log}`);
+  let st = r.state;
+  pl(st, t.P.profileId).rocket.siteId = 'lag-s1uqf';
+  r = t.fulfil(st);
+  assert(!r.ok && r.error === 'not_at_destination', `Sol-Mars L2: ${r.error}`);
+  pl(st, t.P.profileId).rocket.siteId = 'lag-vnzy7';
+  r = t.fulfil(st);
+  assert(t.isDone(r), `Sol-Mars L1: ${r.error}`);
+  return 'L1 first refused, Deimos refused, Arsia Mons then L2 refused, L1 fulfils';
+});
+
+check('Sun-fired Laser: enter Mercury L1 and Mercury L3 in the same turn', () => {
+  const t = destContract('M4N232F');
+  const R = () => pl(t.st, t.P.profileId).rocket;
+  R().siteId = 'lag-jkgud'; R().enteredThisTurn = ['lag-jkgud'];
+  let r = t.fulfil();
+  assert(r.ok && /step 1 of 2/.test(r.log), `L1 alone announces step 1: ${r.error || r.log}`);
+  const st = r.state;
+  const R2 = pl(st, t.P.profileId).rocket;
+  // A later turn: only L3 entered. Step 2 needs L1 this turn too.
+  R2.siteId = 'lag-skyvt'; R2.enteredThisTurn = ['lag-skyvt'];
+  r = t.fulfil(st);
+  assert(!r.ok && r.error === 'not_same_turn', `L3 on a later turn: ${r.error}`);
+  R2.enteredThisTurn = ['lag-jkgud', 'burn-utoma', 'lag-skyvt'];
+  r = t.fulfil(st);
+  assert(t.isDone(r), `both in one turn: ${r.error}`);
+  // From scratch, both in one turn fulfils in a single announcement.
+  const u = destContract('M4N232F');
+  const U = pl(u.st, u.P.profileId).rocket;
+  U.siteId = 'lag-skyvt'; U.enteredThisTurn = ['lag-jkgud', 'lag-skyvt'];
+  const r3 = u.fulfil();
+  assert(u.isDone(r3), `one announcement: ${r3.error}`);
+  return 'L1 then L3 next turn refused (not_same_turn); both in one turn fulfils';
+});
+
+check('Planetary Protection: an unexplored signposted site; any site once none is left', () => {
+  const t = destContract('M4N237F');
+  t.at('vesta');
+  let r = t.fulfil();
+  assert(!r.ok && r.error === 'destination_conditions', `Vesta is not signposted: ${r.error}`);
+  // A claim on a hyphenated site (its disc is keyed by the map slug).
+  t.st.discs['mars-hellas-basin-buried-glaciers'] = { ownerId: 99, outcome: 'success' };
+  t.at('mars-hellas-basin-buried-glaciers');
+  r = t.fulfil();
+  assert(!r.ok && r.error === 'destination_conditions', `a claimed Hellas Basin is explored: ${r.error}`);
+  t.at('ceres');
+  r = t.fulfil();
+  assert(t.isDone(r), `unexplored Ceres: ${r.error}`);
+  const u = destContract('M4N237F');
+  for (const s of SIGNPOSTED_SITES) u.st.discs[s] = { ownerId: 99, outcome: 'success' };
+  u.at('vesta');
+  r = u.fulfil();
+  assert(u.isDone(r), `every signposted site explored, any site: ${r.error}`);
+  return 'Vesta refused, claimed Hellas refused, Ceres fulfils; with all 9 explored Vesta fulfils';
+});
+
+check('Rivalry: a site in the farthest zone with a claimed glory chit, then return', () => {
+  const t = destContract('M4N223R');
+  t.at('callisto-valhalla');
+  let r = t.fulfil();
+  assert(!r.ok && r.error === 'destination_conditions', `no chit claimed yet: ${r.error}`);
+  const other = t.st.players.find((p) => p.profileId !== t.P.profileId);
+  other.glory = { chits: [], claimed: [], visited: ['Mars', 'Jupiter'], vps: 0 };
+  t.at('mars-north-pole');
+  r = t.fulfil();
+  assert(!r.ok && r.error === 'destination_conditions', `Mars is not the farthest: ${r.error}`);
+  t.at('callisto-valhalla');
+  r = t.fulfil();
+  assert(r.ok && /step 1 of 2/.test(r.log), `Callisto (Jupiter): ${r.error || r.log}`);
+  pl(r.state, t.P.profileId).rocket.siteId = null;
+  const r2 = t.fulfil(r.state);
+  assert(t.isDone(r2), `return: ${r2.error}`);
+  return 'no chits refused; Mars refused; Jupiter announced, fulfilled at LEO';
+});
+
+check('Rescue Team: a Human at a site beyond the Mars zone, or of size 9+', () => {
+  const crew = { id: 'crew_un_b612', kind: 'crew', face: 'primary' };
+  const run = (site, human) => {
+    const t = destContract('M4N243F');
+    if (human) pl(t.st, t.P.profileId).rocket.stack.push({ ...crew });
+    t.at(site);
+    const r = t.fulfil();
+    return t.isDone(r) ? 'ok' : r.error;
+  };
+  assert(run('ceres', false) === 'destination_conditions', 'no Human aboard');
+  assert(run('ceres', true) === 'ok', 'Ceres (Ceres zone) with a Human');
+  assert(run('venus-aerostat-xity', true) === 'ok', 'Venus Aerostat-Xity (size 11) with a Human');
+  assert(nodeSizeNumber('deimos') < 9 && zoneOfSlug('deimos') === 'Mars', 'Deimos test premise');
+  assert(run('deimos', true) === 'destination_conditions', 'Deimos (Mars zone, small) refused');
+  return 'no Human refused; Ceres ok; Aerostat-Xity (size 11) ok; Deimos refused';
+});
+
+check('Extreme Sports: a Human, a hazard roll and your own Factory, all this turn', () => {
+  const crew = { id: 'crew_un_b612', kind: 'crew', face: 'primary' };
+  const t = destContract('M4N225R');
+  const R = pl(t.st, t.P.profileId).rocket;
+  R.stack.push({ ...crew });
+  t.st.factories.prospero = { ownerId: t.P.profileId, spectralType: 'D' };
+  t.at('prospero');
+  let r = t.fulfil();
+  assert(!r.ok && r.error === 'destination_conditions', `no roll this turn: ${r.error}`);
+  R.hazardRolledThisTurn = true;
+  t.st.factories.prospero.ownerId = 99;
+  r = t.fulfil();
+  assert(!r.ok && r.error === 'destination_conditions', `someone else's factory: ${r.error}`);
+  t.st.factories.prospero.ownerId = t.P.profileId;
+  r = t.fulfil();
+  assert(t.isDone(r), `rolled, Human, own factory: ${r.error}`);
+  // The mark clears when this player's next turn opens (like the spaces entered).
+  const st2 = endTurns(r.state, 2);
+  assert(currentPlayerOf(st2).profileId === t.P.profileId, 'back to the same player');
+  assert(!pl(st2, t.P.profileId).rocket.hazardRolledThisTurn, 'the hazard-roll mark outlived the turn');
+  return 'no roll refused; rival factory refused; rolled + Human + own factory fulfils; cleared next turn';
+});
+
+check('a rocket MOVE that rolls a hazard is marked for Extreme Sports; paying is not', () => {
+  const space = (sl) => nodeSizeNumber(sl) <= 0 && !isLanderBurnNode(sl);
+  let pick = null;
+  for (const n of mapNodes()) {
+    if (!space(n) || hazardKind(n)) continue;
+    const m = (neighborSlugs(n) || []).find((x) => space(x) && hazardKind(x) === 'skull');
+    if (m) { pick = { from: n, to: m }; break; }
+  }
+  assert(pick, 'no open space next to a skull');
+  const thr = PATENTS_BY_ID.thr_hall_effect, gen = PATENTS_BY_ID.gen_cascade_photovoltaic;
+  const fly = (choice) => {
+    const st = startedGame({ seats: 1, m4: true });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.rocket.stack = [{ id: thr.id, kind: 'patent', face: 'primary' }, { id: gen.id, kind: 'patent', face: 'primary' }];
+    me.rocket.activeThrusterId = thr.id;
+    me.rocket.siteId = pick.from; me.rocket.tank = 6; me.rocket.tankGrade = 'water';
+    me.aqua = 20; me.movesRemaining = 1;
+    const r = applyOperation(st, { kind: 'MOVE', toSiteId: pick.to, segments: [{ from: pick.from, to: pick.to, burns: 0 }], hazardChoices: [choice] }, { profileId: me.profileId });
+    assert(r.ok, `MOVE (${choice}): ${r.error}`);
+    return r.state.players[0].rocket;
+  };
+  const paid = fly('pay');
+  assert(!paid.hazardRolledThisTurn, 'paying the hazard marked a roll');
+  let rolled = null;
+  for (let i = 0; i < 20 && !rolled; i++) {
+    const rk = fly('roll');
+    if (rk.siteId === pick.to || rk.hazardRolledThisTurn) rolled = rk;
+  }
+  assert(rolled && rolled.hazardRolledThisTurn, 'rolling the hazard did not mark the rocket');
+  return `${pick.from} into ${pick.to}: pay unmarked, roll marked`;
+});
+
+check('Beehive: an operational robonaut and refinery at a busted size-1 site', () => {
+  const kit = [{ id: 'rob_blackbody_pumped_laser', kind: 'patent', face: 'primary' }, { id: 'ref_atomic_layer_deposition', kind: 'patent', face: 'primary' }];
+  const run = (site, { busted = true, cards = kit, glitch = false } = {}) => {
+    const t = destContract('M4N236F');
+    const R = pl(t.st, t.P.profileId).rocket;
+    R.stack.push(...cards.map((s) => ({ ...s })));
+    if (glitch) R.glitch = true;
+    if (busted) t.st.discs[site] = { ownerId: 99, outcome: 'fail' };
+    t.at(site);
+    const r = t.fulfil();
+    return t.isDone(r) ? 'ok' : r.error;
+  };
+  assert(nodeSizeNumber('eureka') === 1, 'Eureka is size 1');
+  assert(run('eureka') === 'ok', 'busted Eureka with both cards');
+  assert(run('eureka', { busted: false }) === 'destination_conditions', 'not busted');
+  assert(run('eureka', { cards: kit.slice(0, 1) }) === 'destination_conditions', 'no refinery');
+  assert(run('eureka', { glitch: true }) === 'destination_conditions', 'glitched stack');
+  const two = allSiteSlugs().find((s) => nodeSizeNumber(s) === 2);
+  assert(run(two) === 'destination_conditions', `size-2 ${two}`);
+  return `busted Eureka ok; unbusted, no refinery, glitched and size-2 ${two} refused`;
 });
 
 check('a late contract: pay the fee each turn or default; debt repayment discards it with the chit', () => {

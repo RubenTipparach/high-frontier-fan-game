@@ -100,3 +100,12 @@ const NONE = Object.freeze([]);
 export function signpostColorsOf(slugA, slugB) {
   return _BY_PAIR.get(slugA + '|' + slugB) || NONE;
 }
+
+// Signposted sites (4A7d: "any Site with a colored route leading to it"): the
+// site each route's sign names. The Venus route stops at a Lagrange point
+// beside Venus, not at a Venus site, so no Venus site is signposted (owner
+// approved 2026-11-17). Planner slugs, as on the wire.
+export const SIGNPOSTED_SITES = [
+  'achilles', 'callisto-valhalla', 'hertha', 'ceres', 'neas', 'enceladus', 'lutetia',
+  'mercury-north-pole', 'mars-hellas-basin-buried-glaciers',
+];
