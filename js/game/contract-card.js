@@ -59,10 +59,19 @@ function stepsHtml(face) {
   return `<ul class="m4-steps" aria-label="Destination steps">${rows}</ul>`;
 }
 
+const M4_DENSE = [100, 145, 190, 250];
+
 export function renderContractFace(face) {
   const side = face.Side;
   const el = document.createElement('div');
-  el.className = `card m4-contract side-${side}`;
+  // Text-size step from how much text the body carries (the card itself never
+  // grows): destination, abilities, and the step checklist when in play.
+  const textLen = String(face.Destination || '').length + String(face['Fulfilled Ability'] || '').length
+    + String(face['When Fulfilling'] || '').length
+    + (face.Progress && Array.isArray(face.Steps) ? face.Steps.reduce((n, s) => n + 14 + stepLabel(s, _nameOf).length, 0) : 0)
+    + (face['Fulfilled Ability'] ? 30 : 0) + (face['When Fulfilling'] ? 30 : 0);
+  const dense = textLen > M4_DENSE[3] ? 4 : textLen > M4_DENSE[2] ? 3 : textLen > M4_DENSE[1] ? 2 : textLen > M4_DENSE[0] ? 1 : 0;
+  el.className = `card m4-contract side-${side}${dense ? ` m4-dense-${dense}` : ''}`;
   const icon = face['Title Icon'] === 'tophat' ? tophatGlyph() : face['Title Icon'] === 'mask' ? maskGlyph() : '';
   const cyb = String(face.Cybernetics || '').split(',').map((s) => s.trim()).filter(Boolean)
     .map((s) => augmentGlyph(s)).join('');

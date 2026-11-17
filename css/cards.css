@@ -1819,7 +1819,7 @@
 .card.m4-contract.side-gold { --side: #d8b90c; }
 .card.m4-contract.side-exodus { --side: #b9a0d8; }
 .m4-contract .card-inner { border: 6px solid var(--side); border-radius: 10px; overflow: hidden; background: #18181d; }
-.m4-contract .card-face { background: #18181d; color: #f2f2f2; display: flex; flex-direction: column; min-height: 340px; }
+.m4-contract .card-face { background: #18181d; color: #f2f2f2; display: flex; flex-direction: column; }
 .m4-typebar { display: grid; grid-template-columns: 26px 1fr 40px; align-items: center; gap: 4px;
   background: linear-gradient(#3a3a40, #232328); color: #fff; padding: 3px 5px; min-height: 40px; }
 .m4-type { text-align: center; font-size: 13px; font-weight: 700; letter-spacing: .02em; line-height: 1.05; }
@@ -1853,11 +1853,16 @@
 .m4-season { font-weight: 700; }
 .m4-season-red { color: #ff6b6b; } .m4-season-yellow { color: #f5c400; } .m4-season-blue { color: #6bb6ff; }
 .m4-immune { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; border: 2px solid #2fb36a; background: #111; color: #fff; font-size: 10px; vertical-align: -3px; cursor: help; }
-/* A contract with a long destination plus both ability boxes needs more than the
-   patent card's fixed 220 x 350; let it grow instead of clipping the last box. */
-.card.m4-contract { aspect-ratio: auto; height: auto; max-height: none; }
-.card.m4-contract .card-inner { height: auto; }
-.card.m4-contract .card-face { position: relative; height: auto; }
+/* Every contract is the standard card size (owner 2026-11-17). Long text steps
+   its size down instead (m4-dense-1..4, set from the text length in
+   contract-card.js) so the card never grows. */
+.card.m4-contract .card-face { position: relative; height: 100%; min-height: 0; }
+.card.m4-contract .m4-body { min-height: 0; overflow: hidden; }
+.m4-dense-1 .m4-box { font-size: 10px; } .m4-dense-1 .m4-ability { font-size: 10.5px; }
+.m4-dense-2 .m4-box { font-size: 9px; line-height: 1.18; } .m4-dense-2 .m4-ability { font-size: 9.5px; }
+.m4-dense-3 .m4-box { font-size: 8px; line-height: 1.15; padding: 3px 5px; } .m4-dense-3 .m4-ability { font-size: 8.5px; }
+.m4-dense-4 .m4-box { font-size: 7px; line-height: 1.12; padding: 2px 4px; } .m4-dense-4 .m4-ability { font-size: 7.5px; }
+.m4-dense-3 .m4-box b, .m4-dense-4 .m4-box b { font-size: 7.5px; }
 .m4-body.has-craft { background-size: 100% auto, cover; background-position: center bottom, right bottom; background-repeat: no-repeat; }
 
 /* ---- Module 4 contracts panel + contract auction (js/game/contracts-ui.js) ---- */
