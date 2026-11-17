@@ -72,6 +72,7 @@ export const NODE_TAGS = {
   "comet-halley": {"season":"red"},
   "comet-holmes": {"season":"red"},
   "comet-neujmin-1": {"season":"blue"},
+  "dec-88pxv": {"hazard":true,"aerobrake":true},
   "hermes-a": {"season":"blue"},
   "hermes-b": {"season":"blue"},
   "icarus": {"season":"red"},

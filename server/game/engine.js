@@ -15284,6 +15284,15 @@ function applyAuctionStart(state, op, ctx) {
     };
   }
 
+  // O5e: "If Research Grants (equality) law is active: When initiating a
+  // research auction operation (I2), you MUST skip the auction and instead pay
+  // 1 Aqua to take the top card." While Equality is the law in force a
+  // competitive auction is not an option. (It used to be an opt-in button beside
+  // the auction buttons, so a player could still open a normal auction under
+  // Equality - reported 2026-11-17, game 1070.) A law reached only by Lobbying
+  // stays the player's choice: they chose to lobby for it.
+  if (!wantsGrants && lawInForce(state, 'equality')) return fail('research_grants_required');
+
   // Equality (Research Grants): instead of opening an auction, pay 1 aqua and
   // take the deck-top card straight into hand (no bidding, no support draw).
   if (wantsGrants) {

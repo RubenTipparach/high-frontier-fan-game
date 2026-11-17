@@ -40,6 +40,8 @@ import { makeRefId, normalizeSiteName } from '../../data/planner-ids.js';
 import { SITE_NAME_ALIASES, aliasSiteName } from '../../data/site-name-aliases.js';
 import { classifyBody } from '../../data/body-class.js';
 import { NODE_TAGS } from '../../data/node-tags.js';
+import { NODE_TYPE_OVERRIDES } from '../../data/node-type-overrides.js';
+import { ONE_WAY_ARROWS } from '../../data/one-way-edges.js';
 import { aerobrakeLandableSet } from '../../data/aerobrake-landing.js';
 const LOCAL_SITE_BY_NAME = new Map();
 for (const s of LOCAL_SITES) {
@@ -96,7 +98,10 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
   // don't get in the way.
   const sites = [];
   for (const [id, p] of Object.entries(raw.points || {})) {
-    const rawType = p.type || 'unknown';
+    // The slug comes from the planner's own type; a curated override (a board
+    // reprint correction) can then change what the node IS, keeping its slug.
+    const id2 = makeRefId(p, p.type || 'unknown');
+    const rawType = NODE_TYPE_OVERRIDES[id2] || p.type || 'unknown';
     const type = rawType === 'site' ? classifyBody(p.siteName) : rawType;
     // Pull Excel-derived flags for real sites: astrobiology /
     // submarine / aerobrakes count etc. Falls back through the
@@ -128,7 +133,6 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
     // with a trailing counter further down. The upstream `id`
     // (random float key from the vendor JSON) stays as the
     // canonical lookup key so byId / edge data still works.
-    const id2 = makeRefId(p, rawType);
     sites.push({
       id,
       id2,
@@ -265,18 +269,17 @@ export async function loadPlannerMap({ viewW = 1400, viewH = 900 } = {}) {
   // full straight-segment graph for shortest-path math.
   const { chains, straightEdges } = buildChains(sites, edges, byId);
 
-  // One-way edges: the planner (planner-nav) blocks moving INTO a node across
-  // an edge labelled '0', so an edge labelled '0' from a to b is traversable
-  // a -> b ONLY. Surface those so the renderer can draw a direction arrow.
-  // (Exactly one side is '0'; a both-sides-'0' edge would be unusable and
-  // doesn't occur in the data.)
+  // One-way edges for the renderer's dotted lines + arrowheads. Read from
+  // data/one-way-edges.js (ONE_WAY_ARROWS, id2 slugs), the SAME list the move
+  // rules enforce through aerobrake-direction.js, so a line that draws as an
+  // arrow is exactly a hop you can only take one way. That list is the planner's
+  // '0'-labels plus the unlabelled hops inside a one-way run (see
+  // scripts/gen-one-way-edges.mjs). Mapped back to this graph's raw ids.
+  const rawById2 = new Map(sites.map((s) => [s.id2, s.id]));
   const directedEdges = [];
-  for (const a in edgeLabels) {
-    for (const b in edgeLabels[a]) {
-      if (edgeLabels[a][b] === '0' && !(edgeLabels[b] && edgeLabels[b][a] === '0')) {
-        directedEdges.push({ from: a, to: b });
-      }
-    }
+  for (const [fa, fb] of ONE_WAY_ARROWS) {
+    const a = rawById2.get(fa), b = rawById2.get(fb);
+    if (a != null && b != null) directedEdges.push({ from: a, to: b });
   }
 
   _cache = {

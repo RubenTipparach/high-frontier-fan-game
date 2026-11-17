@@ -1,3 +1,10 @@
 {
-  "lag-0ss6n": { "aerobrake": true, "hazard": true }
+  "lag-0ss6n": {
+    "aerobrake": true,
+    "hazard": true
+  },
+  "dec-88pxv": {
+    "aerobrake": true,
+    "hazard": true
+  }
 }

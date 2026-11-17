@@ -14,6 +14,7 @@
 // so a lagrange/burn/hohmann waypoint is a first-class destination -
 // not just curated SITES entries.
 
+import { NODE_TYPE_OVERRIDES } from '../../data/node-type-overrides.js';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -84,7 +85,9 @@ function loadPlanner() {
     nodes.set(slug, {
       slug,
       x: p.x, y: p.y,
-      type: p.type || 'unknown',
+      // A curated override (board reprint correction) can change what a node
+      // is while keeping its slug: data/node-type-overrides.js.
+      type: NODE_TYPE_OVERRIDES[slug] || p.type || 'unknown',
       name: p.siteName || null,
       siteWater: p.siteWater != null ? Number(p.siteWater) : null,
       siteSize: p.siteSize || null,
