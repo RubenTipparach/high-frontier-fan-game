@@ -15,7 +15,16 @@ h1 { margin:0; font:600 30px/1.1 var(--body); }
 .tally { position:sticky; top:0; background:var(--bg); padding:8px 0; border-bottom:1px solid var(--line); font:500 13px var(--mono); color:var(--muted); z-index:5; }
 .card { background:var(--paper); border:1px solid var(--line); border-radius:10px; padding:14px 16px; display:grid; gap:8px; min-width:0; }
 .card.right { border-color:var(--ok); } .card.wrong { border-color:var(--bad); }
-.head { display:flex; flex-wrap:wrap; gap:6px 10px; align-items:baseline; }
+.head { display:flex; flex-wrap:wrap; gap:6px 10px; align-items:baseline; width:100%; text-align:left; background:none; border:0; padding:0; color:inherit; font:inherit; cursor:pointer; }
+.head::before { content:""; width:8px; height:8px; border-right:2px solid var(--muted); border-bottom:2px solid var(--muted); transform:rotate(45deg); align-self:center; margin:0 4px 4px 2px; transition:transform .15s; }
+.card.closed .head::before { transform:rotate(-45deg); margin-bottom:0; }
+.card.closed .body { display:none; }
+.body { display:grid; gap:8px; min-width:0; }
+.chip { font:600 11px var(--mono); border-radius:999px; padding:1px 8px; margin-left:auto; border:1px solid var(--line); color:var(--muted); }
+.card.right .chip { color:var(--ok); border-color:var(--ok); } .card.wrong .chip { color:var(--bad); border-color:var(--bad); }
+.tally { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.tally button { font:500 12px var(--mono); color:var(--ink); background:var(--chip); border:1px solid var(--line); border-radius:6px; padding:3px 8px; min-height:28px; cursor:pointer; }
+.tally #count { margin-right:auto; }
 .head b { font-size:17px; } .code { font:500 12px var(--mono); color:var(--muted); }
 .printed { margin:0; } .printed span { color:var(--muted); }
 .rule { font:500 13px var(--mono); background:var(--chip); border-radius:6px; padding:6px 8px; overflow-x:auto; white-space:nowrap; }
@@ -42,7 +51,7 @@ button:focus-visible, textarea:focus-visible { outline:2px solid var(--accent); 
     <h1>M4 Contract Destinations</h1>
     <p class="lede">Destinations the game cannot check yet, filled in for you to verify. Each space is ringed in cyan on the board (a neighbouring hazard in yellow). Mark the entry Right or Wrong (with a note if wrong).</p>
   </header>
-  <div class="tally" id="tally">0 of 0 checked</div>
+  <div class="tally"><span id="count">0 of 0 checked</span><button type="button" id="openall">Open all</button><button type="button" id="closeall">Close all</button></div>
   <main id="list" class="wrap"></main>
 </div>
 <script>
@@ -86,17 +95,30 @@ function render() {
             it.extra ? el('div', { class: 'extra' }, extraParts(it.extra)) : null),
           it.shot ? el('img', { class: 'shot', src: it.shot, loading: 'lazy', alt: 'Board around ' + it.name + ', ringed in cyan' }) : null)))
       : el('p', { class: 'empty', text: 'Checked from the board at the moment the step is announced, not a fixed list of spaces.' });
-    const root = el('article', { class: 'card' },
-      el('div', { class: 'head' }, el('b', { text: e.name }), el('span', { class: 'code', text: e.id }),
-        e.items.length > 1 ? el('span', { class: 'code', text: e.items.length + ' spaces' }) : null),
-      el('p', { class: 'printed' }, el('span', { text: 'Printed: ' }), e.printed),
-      el('div', { class: 'rule', text: e.rule }),
-      e.note ? el('p', { class: 'note', text: e.note }) : null,
-      items, el('div', { class: 'verdict' }, right, wrong), ta, status);
-    cards[e.id] = { root, opts: [right, wrong], ta, status };
+    const chip = el('span', { class: 'chip', text: 'to check' });
+    const head = el('button', { class: 'head', type: 'button', 'aria-expanded': 'false', onclick: () => setOpen(e.id, root.classList.contains('closed')) },
+      el('b', { text: e.name }), el('span', { class: 'code', text: e.id }),
+      e.items.length > 1 ? el('span', { class: 'code', text: e.items.length + ' spaces' }) : null, chip);
+    const root = el('article', { class: 'card closed' }, head,
+      el('div', { class: 'body' },
+        el('p', { class: 'printed' }, el('span', { text: 'Printed: ' }), e.printed),
+        el('div', { class: 'rule', text: e.rule }),
+        e.note ? el('p', { class: 'note', text: e.note }) : null,
+        items, el('div', { class: 'verdict' }, right, wrong), ta, status));
+    cards[e.id] = { root, head, chip, opts: [right, wrong], ta, status };
     list.append(root);
   }
 }
+let openSet = new Set();
+try { openSet = new Set(JSON.parse(localStorage.getItem('m4dest-open') || '[]')); } catch (e) {}
+function setOpen(id, open) {
+  const c = cards[id]; if (!c) return;
+  c.root.classList.toggle('closed', !open); c.head.setAttribute('aria-expanded', String(open));
+  if (open) openSet.add(id); else openSet.delete(id);
+  try { localStorage.setItem('m4dest-open', JSON.stringify([...openSet])); } catch (e) {}
+}
+document.getElementById('openall').addEventListener('click', () => ENTRIES.forEach((e) => setOpen(e.id, true)));
+document.getElementById('closeall').addEventListener('click', () => ENTRIES.forEach((e) => setOpen(e.id, false)));
 const isDone = (a) => !!a && (a.choice != null || (a.text || '').trim() !== '');
 function paint(id) {
   const a = answers[id], c = cards[id]; if (!c) return;
@@ -104,7 +126,8 @@ function paint(id) {
   if (document.activeElement !== c.ta) c.ta.value = (a && a.text) || '';
   c.root.classList.toggle('right', !!a && a.choice === 0);
   c.root.classList.toggle('wrong', !!a && a.choice === 1);
-  document.getElementById('tally').textContent = ENTRIES.filter((e) => isDone(answers[e.id])).length + ' of ' + ENTRIES.length + ' checked';
+  c.chip.textContent = a && a.choice === 0 ? 'right' : a && a.choice === 1 ? 'wrong' : isDone(a) ? 'noted' : 'to check';
+  document.getElementById('count').textContent = ENTRIES.filter((e) => isDone(answers[e.id])).length + ' of ' + ENTRIES.length + ' checked';
 }
 function choose(id, i) {
   if (!canWrite) return;
@@ -143,5 +166,5 @@ async function connect() {
     }
   }, () => {});
 }
-render(); ENTRIES.forEach((e) => paint(e.id)); connect();
+render(); ENTRIES.forEach((e) => { paint(e.id); if (openSet.has(e.id)) setOpen(e.id, true); }); connect();
 </script>
