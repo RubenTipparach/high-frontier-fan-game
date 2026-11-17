@@ -239,7 +239,12 @@ per room and carried into the game state as a boolean (`state.m0`,
   to 0, and the create-form / solo-wizard / room-settings rows show for admins
   only. M4 REQUIRES M0 (4A1a) and forces it on. It does not combine with a
   variant yet (`m4_no_variants`; CEO Solitaire's own M4 rules, 4G, are not
-  wired). Stages and the contract card-data columns: `docs/module-m4-plan.md`.
+  wired). M4 is not played with M2 for now (`m4_no_m2` on create AND settings),
+  and contracts whose destination needs a piece the game lacks (Bernals,
+  colonists, freighters, the isobank) are dealt out of the decks
+  (`data/contracts.js#faceUnplayable`; owner 2026-11-17). Lagrange ring
+  numbers (L1-L5) read off the board live in `data/lagrange-labels.js`.
+  Stages and the contract card-data columns: `docs/module-m4-plan.md`.
   Releasing it later follows the checklist below.
 - **Promo crew (data/crew.js#PROMO_CREW) - RELEASED to every player
   (user 2026-11-14).** No admin check (the old `promo_crew_admin_only` is

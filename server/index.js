@@ -1092,6 +1092,8 @@ app.post('/lobbies', requireProfile, (req, res) => {
     if (withVariant.length || body.ceoSolo || body.tutorial) {
       return res.status(400).json({ error: 'm4_no_variants', detail: withVariant });
     }
+    // Owner 2026-11-17: M4 is not played with M2 for now.
+    if (m2) return res.status(400).json({ error: 'm4_no_m2' });
     m0 = 1;
   }
   // A room runs AT MOST ONE variant (see VARIANT_KEYS). Rejected rather than
@@ -1653,7 +1655,7 @@ app.post('/lobbies/:id/kick', requireProfile, (req, res) => {
 app.post('/lobbies/:id/settings', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
-  const lobby = db.prepare('SELECT host_id, status, hermes, sirens, max_players, hot_seat FROM lobbies WHERE id = ?').get(id);
+  const lobby = db.prepare('SELECT host_id, status, hermes, sirens, max_players, hot_seat, m2, m4 FROM lobbies WHERE id = ?').get(id);
   if (!lobby) return res.status(404).json({ error: 'not_found' });
   if (lobby.host_id !== req.profile.id) return res.status(403).json({ error: 'not_host' });
   if (lobby.status !== 'waiting') return res.status(409).json({ error: 'already_started' });
@@ -1715,6 +1717,11 @@ app.post('/lobbies/:id/settings', requireProfile, (req, res) => {
   if (body.m1 !== undefined) { sets.push('m1 = ?'); args.push(body.m1 ? 1 : 0); }
   // M2 is released (v1.3.0): any host may toggle it pre-start (a ceoSolo room may
   // carry it too - Futures in solo).
+  // M4 does not combine with M2 for now (owner 2026-11-17): refuse a save that
+  // would leave both on.
+  const m4After = (body.m4 !== undefined && profileIsAdmin(req.profile, req)) ? !!body.m4 : !!lobby.m4;
+  const m2After = body.m2 !== undefined ? !!body.m2 : !!lobby.m2;
+  if (m4After && m2After) return res.status(400).json({ error: 'm4_no_m2' });
   if (body.m2 !== undefined) { sets.push('m2 = ?'); args.push(body.m2 ? 1 : 0); }
   // M4 is an ADMIN-ONLY preview: a non-admin host's toggle is ignored. Turning
   // it on also turns M0 on (M4 requires it, 4A1a).

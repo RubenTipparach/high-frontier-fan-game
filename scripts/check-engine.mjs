@@ -31,7 +31,7 @@ import { PATENTS, PATENTS_BY_ID } from '../data/patents.js';
 import { AD_ASTRA_EXIT_SLUGS, isAdAstraExit, sunlensAt } from '../data/ad-astra.js';
 import { diffState, applyPatch, sameState } from '../server/game/state-diff.js';
 import { scorePlayer } from '../data/endgame-scoring.js';
-import { CONTRACTS, CONTRACT_PAIRS } from '../data/contracts.js';
+import { CONTRACTS, CONTRACT_PAIRS, faceUnplayable } from '../data/contracts.js';
 import { siteBySlug, nodeSizeNumber, isLanderBurnNode, isAerobrakeLandableSite, neighborSlugs, siteHasLanderBurn, allSiteSlugs, leoSlug } from '../server/game/planner-graph.js';
 import { adjacentSites, SITES } from '../data/sites.js';
 import { NODE_LABELS } from '../data/map-labels.js';
@@ -10570,11 +10570,17 @@ check('M4 deals three ideology-pair contract decks; an M4-off deal is untouched'
   const on = createInitialState({ players: [{ profileId: 1, name: 'A', seat: 1 }, { profileId: 2, name: 'B', seat: 2 }], seed: 9, m4: true });
   const m0 = createInitialState({ players: [{ profileId: 1, name: 'A', seat: 1 }, { profileId: 2, name: 'B', seat: 2 }], seed: 9, m0: true });
   assert(Object.keys(on.contractDecks).join() === 'IF,HU,EA', 'pair decks');
-  assert(Object.values(on.contractDecks).every((d) => d.length === 12), 'twelve contracts a deck');
+  // Contracts whose destination needs a piece this game lacks (Bernals,
+  // colonists, freighters, the isobank: M1 / M2 content) are dealt out.
+  const sizes = Object.values(on.contractDecks).map((d) => d.length).join();
+  assert(sizes === '11,12,9', `deck sizes ${sizes}`);
+  const dealt = Object.values(on.contractDecks).flat().map((id) => CONTRACTS.find((c) => c.id === id));
+  assert(dealt.every((c) => c && !faceUnplayable(c.faces.primary)), 'an unplayable contract was dealt');
+  assert(CONTRACTS.some((c) => !c.exodus && faceUnplayable(c.faces.primary)), 'nothing is dealt out');
   assert(JSON.stringify(on.decks) === JSON.stringify(m0.decks), 'the patent deal changed when M4 was switched on');
   assert(!('contractDecks' in m0) && !('timepiece' in m0.players[0]), 'an M4-off game carries contract state');
   assert(on.players.every((p) => p.timepiece === null && Array.isArray(p.contractHand)), 'timepieces start in the Reserve');
-  return '3 x 12 contracts; patent decks identical to the same M0 game';
+  return 'IF 11, HU 12, EA 9 (module contracts dealt out); patent decks identical to the same M0 game';
 });
 
 check('a contract auction needs a Fundraise and a deck sharing an Active Law', () => {

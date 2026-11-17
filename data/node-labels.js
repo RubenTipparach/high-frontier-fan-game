@@ -3,6 +3,7 @@
 // the site popup (js/game/render.js) so both read the same vocabulary. Pure
 // data: imports only the generated NODE_TAGS, no DOM.
 import { NODE_TAGS } from './node-tags.js';
+import { lagrangeLabel } from './lagrange-labels.js';
 
 // `node` is a planner node ({ id2, type, flybyBoost }), or any object carrying
 // at least id2. Season is intentionally NOT included here; both callers render
@@ -18,6 +19,9 @@ export function serverTagLabels(node) {
     if (nt.exit) out.push('exit');
     if (nt.special) out.push('special');
   }
+  // The Lagrange number printed in the ring (L1 to L5), when the board has one.
+  const lg = node ? lagrangeLabel(node.id2) : null;
+  if (lg) out.push(lg);
   if (node) {
     // The node TYPE itself. A plain or hazardous burn IS a burn (the pink
     // circle); a lander burn already reads as "lander-burn" above, so don't
@@ -47,6 +51,7 @@ const TAG_INFO = {
 };
 export function tagInfo(label) {
   if (TAG_INFO[label]) return TAG_INFO[label];
+  if (label && /^L[1-5]s?$/.test(label)) return `Lagrange point ${label}, numbered as on the board.`;
   if (label && label.startsWith('flyby')) return 'Flyby: a gravity assist grants free burns when you swing past.';
   if (label && label.endsWith('season')) return 'Seasonal space: only enterable during this phase of the Sunspot cycle.';
   return '';

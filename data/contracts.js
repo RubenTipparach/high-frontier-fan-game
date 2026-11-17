@@ -160,10 +160,21 @@ export function contractFace(cardId, side = 'blue') {
   const c = CONTRACTS_BY_ID[cardId];
   return c ? c.faces[sideFace(side)] : null;
 }
+// A face whose destination needs something an M4 game cannot have right now: a
+// Bernal / Colony (M2), a Freighter / GW thruster / Space Elevator (M1), the
+// isobank (Stage 3), or a body that is not on our map. Read off the sheet's
+// Destination Steps (the manual: reason). Owner 2026-11-17: these contracts are
+// dealt out of M4 for now, and M4 does not combine with M2.
+const NEEDS_ABSENT = /bernal|colon|BEO|freighter|isobank|isotop|\(M1\)|\(M2\)|not on this map/i;
+export function faceUnplayable(face) {
+  return !!(face && face.steps.some((s) => s.verb === 'manual' && NEEDS_ABSENT.test(s.why || '')));
+}
 // The three ideology-pair decks, blue side up, unshuffled (the server shuffles).
+// Cards are dealt and auctioned blue side up, so a card whose BLUE face cannot
+// be played is left out.
 export function contractDeckIds() {
   const decks = { IF: [], HU: [], EA: [] };
-  for (const c of CONTRACTS) if (!c.exodus && decks[c.pair]) decks[c.pair].push(c.id);
+  for (const c of CONTRACTS) if (!c.exodus && decks[c.pair] && !faceUnplayable(c.faces.primary)) decks[c.pair].push(c.id);
   return decks;
 }
 

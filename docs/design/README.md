@@ -13,3 +13,12 @@ two-seat M4 game; they are not checked in.
 Answers land in the artifact's `answers` collection (one document per question
 id). Read them with ArtifactData, fold each into the engine / docs, then move the
 question into `DECIDED` and republish the same file path.
+
+## M4 Contract Destinations (verification)
+
+https://claude.ai/artifact/4hHtBz7odjF5UsSq1LfVcy
+
+The contract destinations the engine cannot check yet, each with a proposed
+rule and the board spaces it resolves to (copyable ids, hazard captions), for
+the owner to mark Right / Wrong. Source: `docs/design/m4-destinations.html`.
+Verdicts land in the artifact's `answers` collection, keyed by contract code.
