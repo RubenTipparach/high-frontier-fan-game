@@ -20,6 +20,7 @@ h1 { margin:0; font:600 30px/1.1 var(--body); }
 .card.closed .head::before { transform:rotate(-45deg); margin-bottom:0; }
 .card.closed .body { display:none; }
 .body { display:grid; gap:8px; min-width:0; }
+.cardimg { width:220px; max-width:60%; border-radius:12px; display:block; }
 .chip { font:600 11px var(--mono); border-radius:999px; padding:1px 8px; margin-left:auto; border:1px solid var(--line); color:var(--muted); }
 .card.right .chip { color:var(--ok); border-color:var(--ok); } .card.wrong .chip { color:var(--bad); border-color:var(--bad); }
 .tally { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
@@ -101,6 +102,7 @@ function render() {
       e.items.length > 1 ? el('span', { class: 'code', text: e.items.length + ' spaces' }) : null, chip);
     const root = el('article', { class: 'card closed' }, head,
       el('div', { class: 'body' },
+        el('img', { class: 'cardimg', src: 'cards/' + e.id + '.jpg', loading: 'lazy', alt: e.name + ' contract card' }),
         el('p', { class: 'printed' }, el('span', { text: 'Printed: ' }), e.printed),
         el('div', { class: 'rule', text: e.rule }),
         e.note ? el('p', { class: 'note', text: e.note }) : null,
