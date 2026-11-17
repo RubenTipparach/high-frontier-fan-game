@@ -5695,8 +5695,12 @@ function buildMpDeckPicker(host, snapshot) {
   // Subsidized Research (solitaire Equality law): the top card + the FIRST
   // bonus support are FREE; a second bonus support may be bought for 2 aqua.
   const subsidized = ceo && iCanUseLaw('equality');
+  // O5e: with Equality IN FORCE, Research Grants replaces the auction - only the
+  // "take for 1" row below is offered.
+  const grantsOnly = !ceo && lawInForceNow('equality');
   const label = document.createElement('div');
   label.className = 'mp-detail-label';
+  if (grantsOnly) label.hidden = true;
   label.textContent = subsidized
     ? 'Subsidized Research: take the top card + one bonus support FREE (1 op). A second bonus support costs 2 aqua.'
     : ceo
@@ -5750,7 +5754,7 @@ function buildMpDeckPicker(host, snapshot) {
       row.appendChild(sb);
     }
   }
-  host.appendChild(row);
+  if (!grantsOnly) host.appendChild(row);
 
   // Equality (Research Grants): skip the auction entirely. Pay 1 aqua and take
   // the deck top straight to hand. Only offered when the base law is usable -
@@ -5758,7 +5762,9 @@ function buildMpDeckPicker(host, snapshot) {
   if (!ceo && iCanUseLaw('equality')) {
     const glabel = document.createElement('div');
     glabel.className = 'mp-detail-label';
-    glabel.innerHTML = '<strong>Research Grants:</strong> pay 1 aqua, take the top card (no auction).';
+    glabel.innerHTML = grantsOnly
+      ? '<strong>Research Grants (Equality is the Active Law):</strong> no auctions. Pay 1 aqua and take the top card of a deck.'
+      : '<strong>Research Grants:</strong> pay 1 aqua, take the top card (no auction).';
     host.appendChild(glabel);
     const grow = document.createElement('div');
     grow.className = 'mp-deck-row';
@@ -9734,6 +9740,7 @@ function humanizeOnlineOpError(code, detail) {
     marketeer_wins_tie: 'A tied bidder holds the Marketeer privilege - they win the tie, so the lot must go to them.',
     bid_too_low: 'Bid must beat the current high bid.',
     insufficient_aqua: 'Not enough aqua.',
+    research_grants_required: 'Equality is the Active Law: there are no research auctions. Research Grants instead - pay 1 aqua and take the top card.',
     bad_amount: 'Enter a whole number.',
     not_owner: 'You do not own that.',
     not_in_hand: 'That card is not in your hand.',
@@ -21965,6 +21972,15 @@ function myActiveLaws() {
   return usable;
 }
 function iCanUseLaw(key) { return myActiveLaws().has(key); }
+// Is ideology `key`'s law IN FORCE for everyone right now (the active star, plus
+// any Unity activates), as opposed to usable by me only because I lobbied it?
+// Mirror of the server's lawInForce. A law in force can be MANDATORY, e.g.
+// Research Grants (O5e) replaces the auction outright.
+function lawInForceNow(key) {
+  const snap = _onlineSnapshot;
+  if (!_online || !snap || !snap.m0 || !snap.assembly) return false;
+  return assemblyActiveLaws(snap.assembly, snap.activeLawStar, !!snap.ceoSolo, !!snap.anarchy).active.has(key);
+}
 // Is this Claim disc mine? Offline (no owners on the discs) every claim is.
 function claimIsMine(disc) {
   if (!_online || !disc || disc.ownerId == null) return true;
@@ -32000,7 +32016,10 @@ function doAuctionCard(card) {
   // auction and take the deck top straight to Hand for 1 aqua. CEO Solitaire runs
   // Subsidized Research instead (priced through ceoTakePricing above).
   const researchGrants = online && !ceoSolo && iCanUseLaw('equality');
+  // O5e: Equality IN FORCE makes Research Grants mandatory (no auction button).
+  const grantsOnly = online && !ceoSolo && lawInForceNow('equality');
   openAuctionConfirmModal({
+    grantsOnly,
     card,
     mode,
     ceoSolo,
