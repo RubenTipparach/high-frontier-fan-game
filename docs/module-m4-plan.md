@@ -105,6 +105,10 @@ late fee + default):
   contract in hand, at LEO, or at any player's anchored Bernal: Discard to the
   deck bottom, timepiece home, no late fee or repayment, claim the default
   chit. (Reading: the hand counts as "at LEO" since your Bank is in LEO, 4A7a.)
+- Unexplored Signposted Site (Planetary Protection, user ruling 2026-11-17):
+  once every signposted site has been explored, any site will do. The open
+  destinations are being verified on the destinations page
+  (`docs/design/m4-destinations.html`, link in `docs/design/README.md`).
 
 Contract ABILITIES (4B2e/f, landed 2026-11-16). Read off the printed text by
 `data/contracts.js#parseFulfilledAbility` / `parseWhenFulfilling` (no card is
