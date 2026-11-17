@@ -4,7 +4,8 @@
 // and where several routes share a hop it draws them side by side, like a rainbow.
 // GENERATED 2026-11-15 by sampling the board colour along every map edge, joined up
 // to LEO along the board's own line, then checked by eye against the board (the
-// Mercury route was hand-extended to the North Pole). Each entry is an UNORDERED pair
+// Mercury route was hand-extended to the North Pole). The sampler missed DOTTED
+// stretches (half gaps), so the Venus Aerostat-Xity approach was hand-added. Each entry is an UNORDERED pair
 // of node server slugs (id2); a pair may sit in several colours.
 // Pure data: no DOM, no node: imports.
 export const SIGNPOST_COLORS = {
@@ -13,6 +14,10 @@ export const SIGNPOST_COLORS = {
 };
 // Stripe order across a shared hop (the board's rainbow, left to right).
 export const SIGNPOST_ORDER = ['purple',  'periwinkle',  'blue',  'green',  'yellow',  'orange',  'red'];
+// One-way hops (planner '0'-label) draw DOTTED, as the board draws a one-way
+// move. These are the one-way hops the board nevertheless draws SOLID (measured
+// on hf4.jpg: full colour, no gaps). Unordered node-slug pairs.
+export const BOARD_SOLID_ONE_WAY = new Set(['lag-dzgne|lag-poseh']);
 // Text on a light sign reads dark, as on the board.
 export const SIGNPOST_DARK_TEXT = new Set(['green', 'yellow']);
 export const SIGNPOST_EDGES = {
@@ -33,6 +38,9 @@ export const SIGNPOST_EDGES = {
     'burn-f805o|lag-ryqwd', 'burn-f805o|rad-ogb7r', 'burn-ue3lc|lag-leo', 'burn-ue3lc|rad-ogb7r',
     'dec-ct329|lag-dzgne', 'dec-ct329|lag-m0sea', 'dec-xczyh|hoh-ulj9x', 'dec-xczyh|lag-poseh',
     'hoh-ulj9x|lag-ryqwd', 'lag-dzgne|lag-poseh',
+    // Hand-added 2026-11-16: the LEO - Venus line runs on from LV0 through the
+    // acid clouds and the triangle, then a dotted arrow into Aerostat-Xity.
+    'burn-5eobz|lag-m0sea', 'burn-5eobz|lag-c3cha', 'dec-nsxxd|lag-c3cha', 'dec-nsxxd|venus-aerostat-xity',
   ],
   blue: [
     'burn-6mef9|hoh-pd9d6', 'burn-6mef9|lag-93mxc', 'burn-94orx|ceres', 'burn-94orx|lag-93mxc',

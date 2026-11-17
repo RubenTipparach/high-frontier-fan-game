@@ -668,7 +668,8 @@ Mirrors the murdoku-companion split:
   Fly deploys are independent jobs; Fly job is gated on the canonical repo.
   **Opt-out:** a branch whose name contains `nodeploy` (e.g.
   `claude/nodeploy-<idea>`) is ignored by the push trigger, so pushing it runs
-  no build and deploys nothing. Use it for prototypes that must not touch prod.
+  no build and deploys nothing. Use it ONLY when the user has expressly said
+  to, for a mockup or prototype that must not touch prod (see "Don'ts").
   A one-off push can also skip CI with `[skip ci]` in the head commit message.
 
 ### Board history storage - diffs, and never one big query
@@ -1381,6 +1382,17 @@ dress a rule-based hold up as a context problem.
   (`POST /admin/games/<id>/edit`) and nothing else. Holding an edit token is
   NOT approval: use it only for the exact change the admin approved, report
   what it did, and remind the admin to revoke it.
+- **ONE active deploying branch at a time. Don't open new branches.**
+  (User directive 2026-11-17.) Every non-`nodeploy` branch deploys to the same
+  live site on push, so two active deploying branches overwrite each other:
+  whichever pushed last is live, and the other branch's changes vanish from
+  prod. Keep all work on the ONE branch that has the open PR (or the session's
+  assigned branch when none is open), and add new fixes to it instead of
+  starting a fresh branch and PR.
+- **Don't use a `nodeploy` branch without the user's express permission.**
+  It is for a mockup / prototype the user asked to keep off prod, nothing
+  else. A bug fix belongs on the active deploying branch, not hidden on a
+  `nodeploy` branch. (User directive 2026-11-17.)
 - **Don't use the `send_later` tool (claude-code-remote) to schedule
   self check-ins.** No recurring "re-check the PR in an hour" wake-ups.
   When watching a PR, react to webhook events as they arrive and stop;

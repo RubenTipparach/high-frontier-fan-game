@@ -12,7 +12,7 @@ import { NODE_TAGS, spriteForTags } from '../../data/node-tags.js';
 import { serverTagLabels, tagInfo } from '../../data/node-labels.js';
 import { lagrangeLabel } from '../../data/lagrange-labels.js';
 import { nodeLabelOf, MAP_LABELS } from '../../data/map-labels.js';
-import { SIGNPOST_COLORS, SIGNPOST_DARK_TEXT, signpostColorsOf } from '../../data/signpost-routes.js';
+import { SIGNPOST_COLORS, SIGNPOST_DARK_TEXT, BOARD_SOLID_ONE_WAY, signpostColorsOf } from '../../data/signpost-routes.js';
 import { BUGGY_ROAD_GROUPS } from '../../data/buggy-roam.js';
 import { ZONE_ASSIGNMENTS } from '../../data/zones.js';
 import { SIREN_HOME_ZONE } from '../../data/sirens.js';
@@ -1872,7 +1872,6 @@ export class MapRenderer {
       this._waypointsByType.set(w.type, arr);
     }
     this._normalEdges = [];
-    this._hazardEdges = [];
     // Signposted routes ("LEO - Mars"): every one starts at LEO and the board
     // draws it as a bold line in its sign's colour; routes sharing a hop run
     // side by side as a rainbow. Each entry carries the polyline (oriented
@@ -1893,24 +1892,35 @@ export class MapRenderer {
     // extends that to adjacent lagrange / burn waypoints so the
     // whole approach corridor reads as one colour.
     this._cometEdgesBySeason = new Map();
+    // One-way connections (planner '0'-label). The board draws a one-way move
+    // as a DOTTED line with an arrowhead, so these hops stroke dashed in
+    // whatever colour their route takes (the arrowhead is drawn separately).
+    const oneWay = new Set();
+    for (const d of (this.data.directedEdges || [])) { oneWay.add(d.from + '>' + d.to); oneWay.add(d.to + '>' + d.from); }
+    const id2Of = (id) => (this.data.byId[id] || {}).id2;
+    // Dotted = a one-way hop, unless the board draws that hop solid.
+    const isOneWay = (ids) => ids.some((id, i) => i > 0 && oneWay.has(ids[i - 1] + '>' + id)
+      && !BOARD_SOLID_ONE_WAY.has([id2Of(ids[i - 1]), id2Of(id)].sort().join('|')));
+    this._normalOneWay = [];
     const straight = this.data.straightEdges || this.data.edges;
     for (const [a, b, dv] of straight) {
       const sa = this.data.byId[a], sb = this.data.byId[b];
       if (!sa || !sb) continue;
       const seg = { sa, sb, dv };
-      if (sa.hazard || sb.hazard) this._hazardEdges.push(seg);
-      else {
-        const season = sa.siteSynodic || sb.siteSynodic;
-        if (season) {
-          if (!this._cometEdgesBySeason.has(season)) this._cometEdgesBySeason.set(season, []);
-          this._cometEdgesBySeason.get(season).push(seg);
-        }
-        else {
-          const cols = signpostColorsOf(sa.id2, sb.id2);
-          if (cols.length) this._signpostLines.push({ pts: fromLeo([sa, sb]), cols, smooth: false });
-          else this._normalEdges.push(seg);
-        }
+      const dotted = isOneWay([a, b]);
+      // A signposted route keeps its colour straight through a hazard, as on
+      // the board (the skull sits ON the coloured line): signpost wins.
+      const cols = signpostColorsOf(sa.id2, sb.id2);
+      if (cols.length) { this._signpostLines.push({ pts: fromLeo([sa, sb]), cols, smooth: false, dotted }); continue; }
+      seg.dotted = dotted;
+      // A hazard route is a normal route (the skull marks the hazard, as on the
+      // board); only one-way hops are dashed.
+      const season = sa.siteSynodic || sb.siteSynodic;
+      if (season) {
+        if (!this._cometEdgesBySeason.has(season)) this._cometEdgesBySeason.set(season, []);
+        this._cometEdgesBySeason.get(season).push(seg);
       }
+      else (dotted ? this._normalOneWay : this._normalEdges).push(seg);
     }
     // One-way edges (planner '0'-label): draw ONE direction arrow per one-way
     // curve, on its visible terminus, pointing the only way it's traversable.
@@ -1948,35 +1958,34 @@ export class MapRenderer {
       if (sa && sb) { this._directedEdges.push({ sa, sb }); seenArrow.add(key); }
     }
     this._chains = [];
-    this._hazardChains = [];
     this._cometChainsBySeason = new Map();
+    this._chainsOneWay = [];
     for (const chain of (this.data.chains || [])) {
       const pts = chain.map((id) => this.data.byId[id]).filter(Boolean);
       if (pts.length < 2) continue;
-      if (pts.some((p) => p.hazard)) this._hazardChains.push(pts);
-      else {
-        const seasonal = pts.find((p) => p.siteSynodic);
-        if (seasonal) {
-          const season = seasonal.siteSynodic;
-          if (!this._cometChainsBySeason.has(season)) this._cometChainsBySeason.set(season, []);
-          this._cometChainsBySeason.get(season).push(pts);
-        }
-        else {
-          // A chain is one smooth ribbon: it carries every signpost colour
-          // most of its hops carry (a bend node can sit just off the line).
-          const tally = new Map();
-          for (let i = 1; i < pts.length; i++) {
-            for (const c of signpostColorsOf(pts[i - 1].id2, pts[i].id2)) tally.set(c, (tally.get(c) || 0) + 1);
-          }
-          const cols = [...tally].filter(([, n]) => n * 2 >= pts.length - 1).map(([c]) => c);
-          if (cols.length) {
-            const order = signpostColorsOf(pts[0].id2, pts[1].id2);
-            cols.sort((a, b) => (order.indexOf(a) + 99 * (order.indexOf(a) < 0)) - (order.indexOf(b) + 99 * (order.indexOf(b) < 0)));
-            this._signpostLines.push({ pts: fromLeo(pts), cols, smooth: true });
-          }
-          else this._chains.push(pts);
-        }
+      const dotted = isOneWay(chain);
+      // A chain is one smooth ribbon: it carries every signpost colour most of
+      // its hops carry (a bend node can sit just off the line). Signpost wins
+      // over hazard and season, as on the board.
+      const tally = new Map();
+      for (let i = 1; i < pts.length; i++) {
+        for (const c of signpostColorsOf(pts[i - 1].id2, pts[i].id2)) tally.set(c, (tally.get(c) || 0) + 1);
       }
+      const cols = [...tally].filter(([, n]) => n * 2 >= pts.length - 1).map(([c]) => c);
+      if (cols.length) {
+        const order = signpostColorsOf(pts[0].id2, pts[1].id2);
+        cols.sort((a, b) => (order.indexOf(a) + 99 * (order.indexOf(a) < 0)) - (order.indexOf(b) + 99 * (order.indexOf(b) < 0)));
+        this._signpostLines.push({ pts: fromLeo(pts), cols, smooth: true, dotted });
+        continue;
+      }
+      pts.dotted = dotted;
+      const seasonal = pts.find((p) => p.siteSynodic);
+      if (seasonal) {
+        const season = seasonal.siteSynodic;
+        if (!this._cometChainsBySeason.has(season)) this._cometChainsBySeason.set(season, []);
+        this._cometChainsBySeason.get(season).push(pts);
+      }
+      else (dotted ? this._chainsOneWay : this._chains).push(pts);
     }
 
     // Body groups: every real site picks up a `bodyKey` in the
@@ -3168,7 +3177,6 @@ export class MapRenderer {
     // - normal paths              : pale grey
     // - signposted LEO routes     : bold, in their board sign's colour
     // - comet paths               : icy cyan-blue
-    // - hazard paths              : red dashed
     const eff = this.zoom * this.fitScale;
     ctx.lineWidth = 1.4 / eff;
 
@@ -3182,6 +3190,17 @@ export class MapRenderer {
     }
     for (const pts of this._chains) appendSmoothPath(ctx, pts);
     ctx.stroke();
+    // One-way board routes: dotted, as the board draws them.
+    if (this._normalOneWay.length || this._chainsOneWay.length) {
+      ctx.setLineDash([3 / eff, 3 / eff]);
+      ctx.lineWidth = 2 / eff;
+      ctx.beginPath();
+      for (const { sa, sb } of this._normalOneWay) { ctx.moveTo(sa.x, sa.y); ctx.lineTo(sb.x, sb.y); }
+      for (const pts of this._chainsOneWay) appendSmoothPath(ctx, pts);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.lineWidth = 1.4 / eff;
+    }
 
     // Signposted routes: bold, in the colour of their board sign. A hop
     // shared by several routes splits into side-by-side stripes (the board's
@@ -3194,21 +3213,28 @@ export class MapRenderer {
         line.cols.forEach((col, i) => {
           const off = n > 1 ? (i - (n - 1) / 2) * stripe : 0;
           if (!byCol.has(col)) byCol.set(col, { wide: [], thin: [] });
-          byCol.get(col)[n > 1 ? 'thin' : 'wide'].push({ pts: off ? offsetPolyline(line.pts, off) : line.pts, smooth: line.smooth });
+          byCol.get(col)[n > 1 ? 'thin' : 'wide'].push({ pts: off ? offsetPolyline(line.pts, off) : line.pts, smooth: line.smooth, dotted: !!line.dotted });
         });
       }
       ctx.globalAlpha = 0.95;
       for (const [col, { wide, thin }] of byCol) {
         ctx.strokeStyle = SIGNPOST_COLORS[col] || '#cbd5e1';
         for (const [list, w] of [[wide, single], [thin, stripe]]) {
-          if (!list.length) continue;
-          ctx.lineWidth = w;
-          ctx.beginPath();
-          for (const { pts, smooth } of list) {
-            if (smooth) appendSmoothPath(ctx, pts);
-            else { ctx.moveTo(pts[0].x, pts[0].y); for (let k = 1; k < pts.length; k++) ctx.lineTo(pts[k].x, pts[k].y); }
+          // Solid hops first, then the one-way hops dotted (the board's dotted
+          // arrow in the route's own colour).
+          for (const dotted of [false, true]) {
+            const part = list.filter((l) => l.dotted === dotted);
+            if (!part.length) continue;
+            ctx.lineWidth = w;
+            ctx.setLineDash(dotted ? [single * 1.1, single * 0.9] : []);
+            ctx.beginPath();
+            for (const { pts, smooth } of part) {
+              if (smooth) appendSmoothPath(ctx, pts);
+              else { ctx.moveTo(pts[0].x, pts[0].y); for (let k = 1; k < pts.length; k++) ctx.lineTo(pts[k].x, pts[k].y); }
+            }
+            ctx.stroke();
           }
-          ctx.stroke();
+          ctx.setLineDash([]);
         }
       }
       ctx.lineWidth = 1.4 / eff;
@@ -3228,28 +3254,21 @@ export class MapRenderer {
       if (!segs.length && !chains.length) continue;
       ctx.strokeStyle = SYNODIC_COLOURS[season] || '#7dd3fc';
       ctx.globalAlpha = 0.85;
-      ctx.beginPath();
-      for (const { sa, sb } of segs) {
-        ctx.moveTo(sa.x, sa.y);
-        ctx.lineTo(sb.x, sb.y);
+      // Dashes are only for one-way (arrowed) routes, as on the board.
+      for (const dotted of [false, true]) {
+        ctx.setLineDash(dotted ? [3 / eff, 3 / eff] : []);
+        ctx.beginPath();
+        for (const { sa, sb, dotted: d } of segs) {
+          if (!!d !== dotted) continue;
+          ctx.moveTo(sa.x, sa.y);
+          ctx.lineTo(sb.x, sb.y);
+        }
+        for (const pts of chains) if (!!pts.dotted === dotted) appendSmoothPath(ctx, pts);
+        ctx.stroke();
       }
-      for (const pts of chains) appendSmoothPath(ctx, pts);
-      ctx.stroke();
-    }
-
-    if (this._hazardEdges.length || this._hazardChains.length) {
-      ctx.strokeStyle = '#f87171';
-      ctx.globalAlpha = 0.7;
-      ctx.setLineDash([4 / eff, 3 / eff]);
-      ctx.beginPath();
-      for (const { sa, sb } of this._hazardEdges) {
-        ctx.moveTo(sa.x, sa.y);
-        ctx.lineTo(sb.x, sb.y);
-      }
-      for (const pts of this._hazardChains) appendSmoothPath(ctx, pts);
-      ctx.stroke();
       ctx.setLineDash([]);
     }
+
 
     // One-way edges: a single arrowhead at the DESTINATION end of the
     // connection, its tip touching the destination node's border (sized to the

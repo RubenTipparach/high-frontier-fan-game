@@ -16,7 +16,7 @@
 // Run locally: node scripts/check-engine.mjs
 
 import { createInitialState, seasonForSlot } from '../server/game/state.js';
-import { applyOperation, autoFixGlitches, liveScoreboard, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, repairSpeciesDeckSplit, cycleMarketDecks, rocketSolarZone, activeNetThrust, outpostWater, buildFutureCtx, resolveSunspotEvent, computeFinalScores } from '../server/game/engine.js';
+import { applyOperation, slotMass, autoFixGlitches, liveScoreboard, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, repairSpeciesDeckSplit, cycleMarketDecks, rocketSolarZone, activeNetThrust, outpostWater, buildFutureCtx, resolveSunspotEvent, computeFinalScores } from '../server/game/engine.js';
 import { BERNALS } from '../data/bernals.js';
 import { FUTURE_GOALS, SYNODIC_COMET_IDS, CENTAUR_SITE_IDS } from '../data/future-goals.js';
 import { PLANNER_SLUG_ALIASES } from '../data/site-aliases.js';
@@ -44,7 +44,7 @@ import { turnsToImpact, TURNS_PER_CYCLE, HERMES_ROUNDS, hermesSitesIndustrialize
   hermesTargetSites, hermesProspectWaived, isHermesTargetSite, HERMES_MAX_PLAYERS, NEUJMIN_SITE } from '../data/hermes.js';
 import { truncateBottomHalf, isLegalAltruismRounds, altruismTarget, altruismVerdict,
   ALTRUISM_ROUNDS } from '../data/altruism.js';
-import { blackStepsBetween, walkBlackDown, NODES as FUEL_NODES, MAX_DRY, rocketDryMass } from '../data/fuel-graph.js';
+import { blackStepsBetween, walkBlackDown, NODES as FUEL_NODES, MAX_DRY, rocketDryMass, redStepsBetween } from '../data/fuel-graph.js';
 import { resolveSupportChain, unmetRequirements, resolveCoolingAcross } from '../data/support-chain.js';
 import { elevatorPairKey } from '../data/space-elevators.js';
 import { futureGoalForCard, checkFutureGoal } from '../data/future-goals.js';
@@ -11749,6 +11749,66 @@ check('Hazard Ignore passes the quoted hazards; the tophat enters one hazard fre
   const def = applyOperation(st, { kind: 'MOVE', hazardPay: true, segments: [{ from: null, to: PLAIN, burns: 0, turn: 1 }] }, { profileId: me.profileId });
   assert(def.ok && def.state.players[0].aqua < 20, `a defaulted tophat still waived the hazard: ${def.error || def.log}`);
   return `${ring.face.name} passes "${NODE_LABELS[RING]}"; ${tophat.face.name} carries the ship through "${NODE_LABELS[PLAIN]}" free`;
+});
+
+// Alchemist Aviatrices ("During Factory Refuel, double the amount of isotope
+// fuel") must count wherever the Miner on the same card counts: aboard an
+// anchored Bernal Dirtside to the factory, or on the rocket at that Bernal's
+// space. It only counted a colonist sitting ON the factory site, so a refuel run
+// from the Bernal got the Future's doubling but not the Alchemist's (reported
+// 2026-11-17, game 1035: 2 fuel-strip steps per refuel instead of 4).
+check('an Alchemist on a Dirtside Bernal (or the rocket at its space) doubles isotope refuel', () => {
+  const SITE = 'luna-shackleton-polar-rim', SPACE = 'lag-qofv5';
+  const run = (where) => {
+    const st = startedGame({ m0: true, m1: true, m2: true, seats: 2, maxRounds: 7 });
+    const me = st.players[st.activeIndex];
+    st.factories = { [SITE]: { ownerId: me.profileId, spectralType: 'S' } };
+    const alch = { id: 'col_rock_rats_miners_union', kind: 'colonist', face: 'secondary' };
+    me.bernals = [{ cardId: 'ber_l4_antimatter_factory', figure: 'stanford', face: 'secondary', promoted: true,
+      siteId: SPACE, anchored: true, tank: 0, wiring: {}, route: [], stack: where === 'bernal' ? [alch] : [] }];
+    me.rocket.siteId = SPACE; me.rocket.turnStartSiteId = SPACE;
+    me.rocket.stack = [{ id: 'gw-_amat_catalyzed_fission_fusion', kind: 'patent', face: 'secondary' }, ...(where === 'rocket' ? [alch] : [])];
+    me.rocket.activeThrusterId = 'gw-_amat_catalyzed_fission_fusion';
+    me.rocket.tank = 0; me.rocket.tankGrade = 'isotope'; me.rocket.tankSpectral = 'S';
+    me.isostandards = ['S'];   // a Luna factory is Dirtside only under the isostandard (2Ba)
+    me.futureEffects = ['doubleIsotopeRefuel']; me.opsRemaining = 1; me.refueledSites = []; st.turnActions = [];
+    const dry = rocketDryMass(me.rocket.stack.reduce((m, sl) => m + slotMass(sl), 0));
+    const r = applyOperation(st, { kind: 'SITE_REFUEL', siteId: SITE, mode: 'isotope' }, { profileId: me.profileId });
+    assert(r.ok, `${where}: refuel refused ${r.error}`);
+    const t1 = r.state.players.find((p) => p.profileId === me.profileId).rocket.tank;
+    return redStepsBetween(dry) - redStepsBetween(dry + t1);
+  };
+  const none = run('nowhere'), onBernal = run('bernal'), onRocket = run('rocket');
+  assert(none === 2, `Future alone should be 2 fuel-strip steps, got ${none}`);
+  assert(onBernal === 4, `Alchemist aboard the Dirtside Bernal: want 4 steps, got ${onBernal}`);
+  assert(onRocket === 4, `Alchemist on the rocket at the Bernal's space: want 4 steps, got ${onRocket}`);
+  return `Future alone ${none} steps; with the Alchemist on the Bernal ${onBernal}, on the rocket ${onRocket}`;
+});
+
+// O5e Research Grants: with Equality the law IN FORCE, a research auction is
+// replaced outright - "you must skip the auction and instead pay 1 Aqua to take
+// the top card". It used to be an opt-in, so a normal auction still opened under
+// Equality (reported 2026-11-17, game 1070).
+check('Equality in force: a research auction is refused, Research Grants takes the top card', () => {
+  const mk = (star) => {
+    const st = startedGame({ m0: true, seats: 3 });
+    st.activeLawStar = star; st.anarchy = false;
+    const me = st.players[st.activeIndex];
+    me.opsRemaining = 1; me.aqua = 5; me.hand = [];
+    return { st, me };
+  };
+  let { st, me } = mk('equality');
+  let r = applyOperation(st, { kind: 'AUCTION_START', deckType: 'thruster' }, { profileId: me.profileId });
+  assert(!r.ok && r.error === 'research_grants_required', `auction under Equality: ${r.ok ? 'opened' : r.error}`);
+  const top = st.decks.thruster[0];
+  r = applyOperation(st, { kind: 'AUCTION_START', deckType: 'thruster', useEquality: true }, { profileId: me.profileId });
+  assert(r.ok, `Research Grants refused: ${r.error}`);
+  const after = r.state.players.find((p) => p.profileId === me.profileId);
+  assert(after.hand.includes(top) && after.aqua === 4 && !r.state.auction, 'grants should put the top card in hand for 1 aqua, no auction');
+  ({ st, me } = mk('freedom'));
+  r = applyOperation(st, { kind: 'AUCTION_START', deckType: 'thruster' }, { profileId: me.profileId });
+  assert(r.ok && r.state.auction, `an ordinary auction under another law: ${r.error}`);
+  return 'Equality: auction refused, grants took the top card for 1 aqua; Freedom: auction opens';
 });
 
 // The smoke verdict above runs before the checks added below it; this one

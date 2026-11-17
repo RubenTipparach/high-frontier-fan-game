@@ -238,6 +238,7 @@ export function openAuctionConfirmModal({
   card, mode, renderCardFn, bonusCards, onConfirm, multiplayer, ceoSolo, takeCost,
   subsidized, researchGrants = false, onResearchGrants, deckSearch = false, onDeckSearch,
   insight = false, onInsight, insightPending = false,
+  grantsOnly = false,
 }) {
   if (!card) return;
   document.querySelector('.auction-confirm-overlay')?.remove();
@@ -281,12 +282,18 @@ export function openAuctionConfirmModal({
   const solo = !!ceoSolo;
   const cards = 1 + bonus.length;
   const cost = Number.isFinite(takeCost) ? takeCost : cards;
-  const modeChip = solo
+  const modeChip = grantsOnly
+    ? 'Equality'
+    : solo
     ? 'Solitaire research'
     : multiplayer
       ? 'Multiplayer auction'
       : escapeHtml(inMarket ? 'Card Market' : 'Free Library');
-  const costLine = solo
+  const costLine = grantsOnly
+    ? `<strong>Cost:</strong> 1 operation + <strong>1 aqua</strong>. You take the
+       top of the <strong>${escapeHtml(card.type || 'patent')}</strong> deck
+       straight to your Hand.`
+    : solo
     ? (subsidized
       ? `<strong>Cost:</strong> 1 operation, <strong>free</strong> (Subsidized Research:
          the top card + one bonus support ride free; you may pay <strong>2 aqua</strong>
@@ -312,11 +319,11 @@ export function openAuctionConfirmModal({
 
   dialog.innerHTML = `
     <div class="auction-head">
-      <h3>${solo ? '🎯 Confirm Research' : '🎯 Confirm Auction'}</h3>
+      <h3>${grantsOnly ? '🔬 Research Grants' : solo ? '🎯 Confirm Research' : '🎯 Confirm Auction'}</h3>
       <span class="auction-mode">${modeChip}</span>
     </div>
     <div class="auction-body">
-      <div class="auction-section-label">${solo
+      <div class="auction-section-label">${(solo || grantsOnly)
         ? 'Take from the top of the ' + escapeHtml(card.type || 'patent') + ' deck'
         : multiplayer
           ? 'Up for auction (top of the ' + escapeHtml(card.type || 'patent') + ' deck)'
@@ -325,16 +332,16 @@ export function openAuctionConfirmModal({
       <div class="auction-cost-line">
         ${costLine}
       </div>
-      <div class="auction-bonus-section">
+      ${grantsOnly ? '' : `<div class="auction-bonus-section">
         <div class="auction-section-label">${(multiplayer && !solo) ? 'Support deck previews' : 'Bonus cards (taken on confirm)'}</div>
         ${bonusBlock}
         ${bonus.length === 0 ? '' : `<div class="auction-bonus-cards" id="auction-bonus-cards"></div>`}
-      </div>
+      </div>`}
     </div>
     ${researchGrants ? `<div class="auction-cost-line auction-grants-note">
         <strong>Research Grants (Equality):</strong> instead of an auction, pay
         <strong>1 aqua</strong> and take this card straight to your Hand (no
-        support cards, no hand limit).
+        support cards, no hand limit).${grantsOnly ? ' Equality is the Active Law, so there are no auctions: this is the only way to research.' : ''}
       </div>` : ''}
     ${insight ? `<div class="auction-cost-line auction-grants-note">
         <strong>\u{1F50E} Insight:</strong> you may first send this card to the
@@ -348,10 +355,10 @@ export function openAuctionConfirmModal({
       <button type="button" class="modal-btn auction-cancel">Cancel</button>
       ${insight ? '<button type="button" class="modal-btn auction-insight" title="Insight: send this card to the bottom of its deck, then choose which top card to auction.">\u{1F50E} Insight: send it to the bottom</button>' : ''}
       ${researchGrants ? '<button type="button" class="modal-btn auction-grants">🔬 Research Grants: take for 1 aqua</button>' : ''}
-      ${deckSearch ? '<button type="button" class="modal-btn auction-search" title="Renaissance Man: search the deck and choose which card goes up for auction.">🔍 Search deck (Renaissance Man)</button>' : ''}
-      <button type="button" class="modal-btn primary auction-commit">${
+      ${(deckSearch && !grantsOnly) ? '<button type="button" class="modal-btn auction-search" title="Renaissance Man: search the deck and choose which card goes up for auction.">🔍 Search deck (Renaissance Man)</button>' : ''}
+      ${grantsOnly ? '' : `<button type="button" class="modal-btn primary auction-commit">${
         solo ? `🎯 Take for ${cost} aqua` : multiplayer ? '🎯 Start auction' : '🎯 Confirm'
-      }</button>
+      }</button>`}
     </div>
   `;
   // Mount the main card art.
@@ -375,7 +382,7 @@ export function openAuctionConfirmModal({
     }
   }
   dialog.querySelector('.auction-cancel').addEventListener('click', () => close(false));
-  dialog.querySelector('.auction-commit').addEventListener('click', () => close('confirm'));
+  dialog.querySelector('.auction-commit')?.addEventListener('click', () => close('confirm'));
   dialog.querySelector('.auction-grants')?.addEventListener('click', () => close('grants'));
   dialog.querySelector('.auction-search')?.addEventListener('click', () => close('search'));
   dialog.querySelector('.auction-insight')?.addEventListener('click', () => close('insight'));
