@@ -10930,6 +10930,32 @@ check('an Alchemist on a Dirtside Bernal (or the rocket at its space) doubles is
   return `Future alone ${none} steps; with the Alchemist on the Bernal ${onBernal}, on the rocket ${onRocket}`;
 });
 
+// O5e Research Grants: with Equality the law IN FORCE, a research auction is
+// replaced outright - "you must skip the auction and instead pay 1 Aqua to take
+// the top card". It used to be an opt-in, so a normal auction still opened under
+// Equality (reported 2026-11-17, game 1070).
+check('Equality in force: a research auction is refused, Research Grants takes the top card', () => {
+  const mk = (star) => {
+    const st = startedGame({ m0: true, seats: 3 });
+    st.activeLawStar = star; st.anarchy = false;
+    const me = st.players[st.activeIndex];
+    me.opsRemaining = 1; me.aqua = 5; me.hand = [];
+    return { st, me };
+  };
+  let { st, me } = mk('equality');
+  let r = applyOperation(st, { kind: 'AUCTION_START', deckType: 'thruster' }, { profileId: me.profileId });
+  assert(!r.ok && r.error === 'research_grants_required', `auction under Equality: ${r.ok ? 'opened' : r.error}`);
+  const top = st.decks.thruster[0];
+  r = applyOperation(st, { kind: 'AUCTION_START', deckType: 'thruster', useEquality: true }, { profileId: me.profileId });
+  assert(r.ok, `Research Grants refused: ${r.error}`);
+  const after = r.state.players.find((p) => p.profileId === me.profileId);
+  assert(after.hand.includes(top) && after.aqua === 4 && !r.state.auction, 'grants should put the top card in hand for 1 aqua, no auction');
+  ({ st, me } = mk('freedom'));
+  r = applyOperation(st, { kind: 'AUCTION_START', deckType: 'thruster' }, { profileId: me.profileId });
+  assert(r.ok && r.state.auction, `an ordinary auction under another law: ${r.error}`);
+  return 'Equality: auction refused, grants took the top card for 1 aqua; Freedom: auction opens';
+});
+
 // The smoke verdict above runs before the checks added below it; this one
 // covers every check in the file.
 if (failures) {
