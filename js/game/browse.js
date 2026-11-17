@@ -130,7 +130,7 @@ import { fuelTankCylinderMarkup, fuelTransferSectionMarkup } from './fuel-tank-v
 // hand/stack rendering, the Bernal modal) resolves a boosted/auctioned Bernal.
 // Keyed reads only; Bernals only surface in m2 games, so nothing else changes.
 // M4 contract cards are stack slots too (only ever present in an m4 game).
-import { CONTRACTS_BY_ID, contractFace } from '../../data/contracts.js';
+import { CONTRACTS, CONTRACTS_BY_ID, contractFace } from '../../data/contracts.js';
 import { renderContractCard } from './contract-card.js';
 const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...BERNALS_BY_ID, ...COLONISTS_BY_ID, ...CONTRACTS_BY_ID };
 import { renderAssemblyPanel, renderAssemblyLaws } from './assembly.js';
@@ -32422,13 +32422,16 @@ function renderPatents() {
   // a non-M2 game never sees the categories. Both are a white-front /
   // purple-promoted class loaded from data/colonists.js + data/bernals.js.
   const m2Types = isM2() ? ['colonist', 'bernal'] : [];
-  const types = [...PATENT_TYPES, 'supports', 'crew', ...expansionTypes, ...m2Types];
+  // M4 contracts: their own tab, only in an M4 game.
+  const m4Types = isM4() ? ['contract'] : [];
+  const types = [...PATENT_TYPES, 'supports', 'crew', ...expansionTypes, ...m2Types, ...m4Types];
   const counts = Object.fromEntries(PATENT_TYPES.map((t) => [t, patentsByType(t).length]));
   for (const t of expansionTypes) counts[t] = patentsByType(t).length;
   counts.crew = CREW_FACES.length;
   counts.supports = patentsThatSupply(supplyKinds).length;
   counts.colonist = COLONISTS.length;
   counts.bernal = BERNALS.length;
+  counts.contract = CONTRACTS.length;
   // Drop the "(soon)" suffix once M1 is live; the cards are playable then.
   const m1Live = isM1();
   const TYPE_LABEL = {
@@ -32437,6 +32440,7 @@ function renderPatents() {
     'supports': 'Supports',
     'colonist': 'Colonists',
     'bernal': 'Bernals',
+    'contract': 'Contracts',
   };
   // Seed initial active tab from a pending programmatic open
   // (openPatentsSupports), falling back to the first type.
@@ -32555,6 +32559,28 @@ function renderPatents() {
   const grid = document.createElement('div');
   grid.className = 'card-grid';
   host.appendChild(grid);
+  // A contract tile: the side the library's side toggle shows (blue / gold;
+  // Exodus contracts have one side). Inspect-only, tap for the full card.
+  const contractSideOf = (c) => (c.exodus ? 'exodus' : (librarySide === 'secondary' ? 'gold' : 'blue'));
+  const contractLibraryTile = (c) => {
+    const side = contractSideOf(c);
+    const el = renderContractCard(c.id, side) || document.createElement('div');
+    el.dataset.cardId = c.id;
+    el.classList.add('is-inspectable');
+    el.addEventListener('click', () => {
+      const back = document.createElement('div');
+      back.className = 'mp-modal-back mp-card-preview-back';
+      const box = document.createElement('div');
+      box.className = 'mp-card-preview';
+      const big = renderContractCard(c.id, side);
+      if (big) box.appendChild(big);
+      back.appendChild(box);
+      back.addEventListener('click', () => back.remove());
+      document.body.appendChild(back);
+    });
+    return el;
+  };
+  const contractTileMatches = (c, q) => [c.faces.primary, c.faces.secondary].some((f) => f && String(f.name || '').toLowerCase().includes(q));
 
   // Each physical card exists in exactly one location: deck,
   // hand, or rocket. The library grid decorates every tile with
@@ -32736,6 +32762,7 @@ function renderPatents() {
       for (const c of CREW_FACES) if (cardMatchesQuery(c, q)) { grid.appendChild(decorateForHand(c, 'crew')); hits++; }
       if (isM2()) for (const c of COLONISTS) if (cardMatchesQuery(c, q)) { grid.appendChild(decorateForHand(c, 'colonist')); hits++; }
       if (isM2()) for (const c of BERNALS) if (cardMatchesQuery(c, q)) { grid.appendChild(decorateForHand(c, 'bernal')); hits++; }
+      if (isM4()) for (const c of CONTRACTS) if (contractTileMatches(c, q)) { grid.appendChild(contractLibraryTile(c)); hits++; }
       if (!hits) {
         const empty = document.createElement('p');
         empty.className = 'muted patent-search-empty';
@@ -32763,6 +32790,10 @@ function renderPatents() {
     if (filter === 'bernal') {
       // M2 Bernal (space-colony) cards (white working face / purple promoted face).
       for (const c of BERNALS) grid.appendChild(decorateForHand(c, 'bernal'));
+      return;
+    }
+    if (filter === 'contract') {
+      for (const c of CONTRACTS) grid.appendChild(contractLibraryTile(c));
       return;
     }
     if (filter === 'supports') {
