@@ -299,7 +299,7 @@ function renderPanel() {
   parts.push(`<h4>Boosted</h4><div class="m4c-row">${boosted || '<span class="muted">none</span>'}</div>`);
   parts.push(`<h4>Fulfilled</h4><div class="m4c-row">${fulfilled || '<span class="muted">none yet</span>'}</div>`);
   if (partnered.length) parts.push(`<h4>Partner</h4><div class="m4c-row">${partnered.join('')}</div>`);
-  if (s.m2) parts.push(augmentationsHtml(s, p, myTurn));
+  parts.push(augmentationsHtml(s, p, myTurn));
 
   el.innerHTML = `<div class="m4c-modal" role="dialog" aria-label="Contracts">
     <div class="m4c-head"><h3>📜 Contracts</h3><button type="button" class="m4c-close" aria-label="Close">✕</button></div>
@@ -329,29 +329,39 @@ function augmentationsHtml(s, p, myTurn) {
   const colName = (id) => (COLONISTS_BY_ID[id] || {}).name || id;
   const chips = SHAPES.map((sh) => {
     const a = aug[sh];
-    const st = a ? `on ${esc(colName(a.colonistId))} (side ${a.side}: ${esc(sideText(sh, a.side))})`
-      : (portfolio.has(sh) ? 'in your supply, ready to implant' : 'not in your portfolio');
+    const on = a && (a.colonySite ? `${spaceName(a.colonySite)} Colony` : colName(a.colonistId));
+    const st = a ? `${esc(on)} (side ${a.side}: ${esc(sideText(sh, a.side))})`
+      : (portfolio.has(sh) ? 'ready' : '');
     return `<div class="m4c-aug ${portfolio.has(sh) ? 'have' : 'lack'}">${augmentGlyph(sh, { size: 26 })}<span><b>${AUGMENTS[sh].name}</b> ${st}</span></div>`;
   }).join('');
-  // The BEO Colony (4C2a) is, with Module 2, a Bernal anchored Dirtside: an
-  // anchored Bernal that is not the Home Bernal (the engine decides; this is the hint).
-  const beo = (p.bernals || []).filter((bn) => bn && bn.anchored).length >= 2;
+  const opts = [...portfolio].map((sh) => `<option value="${sh}">${AUGMENTS[sh].name}</option>`).join('');
+  const controls = (key, attrs) => (myTurn && opts ? `<div class="m4c-controls"><select data-shape-for="${key}">${opts}</select>
+    <select data-side-for="${key}"><option value="2">side 2</option><option value="1">side 1</option></select>
+    <button type="button" data-act="implant" ${attrs}>Implant</button></div>` : '');
+  // Without Module 2 (no Colonists / Bernals) chits go on your Colonies (user
+  // ruling 2026-11-17).
+  if (!s.m2) {
+    const mine = Object.entries(s.colonies || {}).filter(([, c]) => c && c.ownerId === p.profileId).map(([site]) => site);
+    const rows = mine.map((site) => {
+      const here = SHAPES.filter((sh) => aug[sh] && aug[sh].colonySite === site).map((sh) => augmentGlyph(sh, { size: 22 })).join('');
+      return `<div class="m4c-col"><b>${esc(spaceName(site))} Colony</b> ${here}${controls(site, `data-col="${esc(site)}" data-colony="1"`)}</div>`;
+    }).join('');
+    return `<h4>Augmentations</h4><div class="m4c-augs">${chips}</div>${rows || '<p class="muted">No Colony.</p>'}`;
+  }
   const bns = (p.bernals || []).map((bn, i) => ({ bn, i })).filter((x) => x.bn.anchored);
-  let station = '<p class="muted">Implanting happens at your anchored Bernal, on the Colonists aboard it.</p>';
+  let station = '<p class="muted">No anchored Bernal.</p>';
   if (bns.length) {
     const { bn, i } = bns[0];
     const cols = (bn.stack || []).filter((sl) => COLONISTS_BY_ID[sl.id]);
-    const opts = [...portfolio].map((sh) => `<option value="${sh}">${AUGMENTS[sh].name}</option>`).join('');
     station = cols.length ? cols.map((sl) => {
       const mine = SHAPES.filter((sh) => aug[sh] && aug[sh].colonistId === sl.id).map((sh) => augmentGlyph(sh, { size: 22 })).join('');
       return `<div class="m4c-col"><b>${esc(colName(sl.id))}</b> <span class="muted">${esc((COLONISTS_BY_ID[sl.id] || {}).specialty || '')}</span> ${mine}
         ${myTurn && opts ? `<div class="m4c-controls"><select data-shape-for="${sl.id}">${opts}</select>
           <select data-side-for="${sl.id}"><option value="2">side 2</option><option value="1">side 1</option></select>
           <button type="button" data-act="implant" data-col="${sl.id}" data-bernal="${i}">Implant</button></div>` : ''}</div>`;
-    }).join('') : '<p class="muted">No Colonists aboard your anchored Bernal.</p>';
+    }).join('') : '<p class="muted">No Colonists aboard.</p>';
   }
   return `<h4>Augmentations</h4>
-    <p class="muted">Your portfolio is the cybernetics icons on your fulfilled contracts. Implant needs your anchored Bernal, a Colonist aboard it, and a Bernal anchored Dirtside (a BEO Colony)${beo ? '' : ' (you have none yet)'}. One chit of each shape.</p>
     <div class="m4c-augs">${chips}</div>${station}`;
 }
 
@@ -371,9 +381,15 @@ async function onAct(b) {
     const side = Number(panel.querySelector(`[data-side-for="${col}"]`).value);
     const p = me();
     const a = p && p.augments && p.augments[shape];
-    // Juggling (4C4e): a chit already on another Colonist aboard comes off first.
-    const remove = a && a.colonistId !== col ? [shape] : [];
-    await D.submitTurnOp({ kind: 'IMPLANT', bernal: Number(b.dataset.bernal), remove, implants: [{ colonistId: col, shape, side }] });
+    if (b.dataset.colony) {
+      // Juggling only off this same Colony.
+      const remove = a && a.colonySite === col ? [shape] : [];
+      await D.submitTurnOp({ kind: 'IMPLANT', colony: col, remove, implants: [{ shape, side }] });
+    } else {
+      // Juggling (4C4e): a chit already on another Colonist aboard comes off first.
+      const remove = a && a.colonistId !== col ? [shape] : [];
+      await D.submitTurnOp({ kind: 'IMPLANT', bernal: Number(b.dataset.bernal), remove, implants: [{ colonistId: col, shape, side }] });
+    }
   }
   else if (act === 'pay') await payContractFee(id);
   else if (act === 'abandon') await abandonContract(id);

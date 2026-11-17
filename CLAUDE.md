@@ -244,6 +244,8 @@ per room and carried into the game state as a boolean (`state.m0`,
   colonists, freighters, the isobank) are dealt out of the decks
   (`data/contracts.js#faceUnplayable`; owner 2026-11-17). Lagrange ring
   numbers (L1-L5) read off the board live in `data/lagrange-labels.js`.
+  Without M2 there are no Colonists or Bernals, so IMPLANT puts augmentation
+  chits on one of your Colonies instead (owner ruling 2026-11-17).
   Stages and the contract card-data columns: `docs/module-m4-plan.md`.
   Releasing it later follows the checklist below.
 - **Promo crew (data/crew.js#PROMO_CREW) - RELEASED to every player

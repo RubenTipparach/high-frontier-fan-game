@@ -10971,6 +10971,56 @@ check('Partner Enterprise: a declined request seats nobody; a second seat is ref
   return 'declined: nobody seated; second seat refused; M0 refused';
 });
 
+check('Partner Enterprise: undoing a later action keeps the request open', () => {
+  const { st, me, owner, c } = enterpriseGame();
+  me.leo = [...(me.leo || []), { id: 'thr_hall_effect', kind: 'patent', face: 'primary' }];
+  const base = JSON.parse(JSON.stringify(st));
+  let r = fundraiseWith(st, me.profileId, { enterprise: { ownerId: owner.profileId, cardId: c.id, give: { aqua: 2 } } });
+  assert(r.ok && r.state.trade && r.state.trade.enterprise, `request: ${r.error}`);
+  r = op(r.state, 'TRANSFER', me.profileId, { cardIds: ['thr_hall_effect'], from: 'leo', to: 'rocket' });
+  assert(r.ok, `transfer: ${r.error}`);
+  r = applyOperation(r.state, { kind: 'UNDO' }, { profileId: me.profileId, turnBaseState: base });
+  assert(r.ok, `undo: ${r.error}`);
+  const t = r.state.trade;
+  assert(t && t.enterprise && t.enterprise.cardId === c.id && t.give.aqua === 2, `the request was lost on replay: ${JSON.stringify(t)}`);
+  return 'transfer undone; the Enterprise request (2 aqua) still open';
+});
+
+// Augmentations without Module 2 (user ruling 2026-11-17): no Colonists or
+// Bernals, so Implant puts chits on one of your Colonies.
+check('Implant without M2: chits go on your Colony', () => {
+  const st = startedGame({ m4: true });
+  const me = currentPlayerOf(st);
+  const c = conByCode('M4N229F');
+  const shapes = c.faces.primary.cybernetics;
+  assert(shapes.length, 'test contract has no cybernetics');
+  const shape = shapes[0];
+  me.fulfilledContracts = [{ id: c.id, side: 'blue', round: 1 }];
+  st.colonies = st.colonies || {};
+  let r = op(st, 'IMPLANT', me.profileId, { colony: 'ceres', implants: [{ shape, side: 2 }] });
+  assert(!r.ok && r.error === 'no_colony', `no colony: ${r.error}`);
+  st.colonies.ceres = { ownerId: me.profileId };
+  const other = ['heart', 'jar', 'hexagon', 'splat', 'battery', 'triangle'].find((s) => !shapes.includes(s));
+  r = op(st, 'IMPLANT', me.profileId, { colony: 'ceres', implants: [{ shape: other, side: 2 }] });
+  assert(!r.ok && r.error === 'not_in_portfolio', `not in portfolio: ${r.error}`);
+  r = op(st, 'IMPLANT', me.profileId, { colony: 'ceres', implants: [{ shape, side: 2 }] });
+  assert(r.ok, `implant: ${r.error}`);
+  const a = pl(r.state, me.profileId).augments[shape];
+  assert(a && a.colonySite === 'ceres' && a.side === 2, `chit ${JSON.stringify(a)}`);
+  assert(pl(r.state, me.profileId).opsRemaining === me.opsRemaining - 1, 'Implant is the operation');
+  // A second Colony cannot take the same chit without juggling it off here first.
+  const s2 = r.state;
+  s2.colonies.vesta = { ownerId: me.profileId };
+  pl(s2, me.profileId).opsRemaining = 1;
+  r = op(s2, 'IMPLANT', me.profileId, { colony: 'vesta', implants: [{ shape, side: 2 }] });
+  assert(!r.ok && r.error === 'chit_in_use', `in use: ${r.error}`);
+  r = op(s2, 'IMPLANT', me.profileId, { colony: 'vesta', remove: [shape] });
+  assert(!r.ok && r.error === 'chit_not_colocated', `juggle from another colony: ${r.error}`);
+  r = op(s2, 'IMPLANT', me.profileId, { colony: 'ceres', remove: [shape], implants: [{ shape, side: 2 }] });
+  assert(r.ok, `juggle on the same colony: ${r.error}`);
+  return `${shape} implanted at the Ceres Colony; portfolio, in-use and juggling rules hold`;
+});
+
 check('Beehive: an operational robonaut and refinery at a busted size-1 site', () => {
   const kit = [{ id: 'rob_blackbody_pumped_laser', kind: 'patent', face: 'primary' }, { id: 'ref_atomic_layer_deposition', kind: 'patent', face: 'primary' }];
   const run = (site, { busted = true, cards = kit, glitch = false } = {}) => {

@@ -113,6 +113,11 @@ late fee + default):
   conditions `human`, `rolled` (a hazard roll by this rocket this turn),
   `ownfactory`, `busted`, `size=n`, `robonaut` / `refinery` (in an unglitched
   stack). Each has a pass and a refusal in check-engine.
+- Augmentations without M2 (user ruling 2026-11-17: "augmentations without
+  m2 use regular colonies instead of bernal"): IMPLANT takes `colony: <site>`
+  and puts the chits on that Colony of yours (`augments[shape] = { colonySite,
+  side }`); owning the Colony is the BEO Colony; juggling only off the same
+  Colony. The 4C3 side abilities are still not wired either way.
 - Unexplored Signposted Site (Planetary Protection, user ruling 2026-11-17):
   once every signposted site has been explored, any site will do. The open
   destinations are being verified on the destinations page

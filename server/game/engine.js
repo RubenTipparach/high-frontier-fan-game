@@ -13315,7 +13315,7 @@ function pickPayload(op) {
     case 'LOAD_FUEL': return { cardId: op.cardId, holder: op.holder };
     case 'DUMP_FUEL_CARD': return { cardId: op.cardId, holder: op.holder };
     case 'FREE_MARKET': return { cardId: op.cardId, cardIds: op.cardIds, leoCardId: op.leoCardId, leoCardIds: op.leoCardIds };
-    case 'FUNDRAISE': return { place: op.place, moveFrom: op.moveFrom, moveTo: op.moveTo, freeDelegate: op.freeDelegate, discard: op.discard, star: op.star, ...(op.arbiterDouble ? { arbiterDouble: true } : {}) };
+    case 'FUNDRAISE': return { place: op.place, moveFrom: op.moveFrom, moveTo: op.moveTo, freeDelegate: op.freeDelegate, discard: op.discard, star: op.star, ...(op.arbiterDouble ? { arbiterDouble: true } : {}), ...(op.enterprise ? { enterprise: op.enterprise } : {}) };
     // rabbleRouser MUST ride along: without it an UNDO/REDO replay would re-run
     // the Lobby with the rouse dropped and quietly lose the Anarchy flip.
     case 'LOBBY': return { ideology: op.ideology, ...(op.rabbleRouser ? { rabbleRouser: true } : {}), ...(op.ambassador ? { ambassador: true } : {}) };
@@ -13351,7 +13351,7 @@ function pickPayload(op) {
     case 'SET_CARD_GROUPS': return { groups: op.groups };
     case 'FULFILL_CONTRACT': return { cardId: op.cardId };
     case 'ABANDON_CONTRACT': return { cardId: op.cardId };
-    case 'IMPLANT': return { bernal: op.bernal, implants: op.implants, remove: op.remove };
+    case 'IMPLANT': return { bernal: op.bernal, colony: op.colony, implants: op.implants, remove: op.remove };
     case 'PAY_LATE_FEE': return { cardId: op.cardId, amount: op.amount };
     case 'CLEAR_ROUTE': return op.unit ? { unit: op.unit } : {};
     default:
@@ -16179,7 +16179,7 @@ function colonistAugCount(player, colonistId) {
 // Industrialist Colonist there makes it a once-per-turn free action (4C4g).
 function applyImplant(state, op, player) {
   if (!state.m4) return fail('not_m4');
-  if (!state.m2) return fail('m2_off');
+  if (!state.m2) return applyImplantAtColony(state, op, player);
   const bn = (player.bernals || [])[Number(op.bernal) || 0];
   if (!bn) return fail('no_bernal');
   if (!bn.anchored) return fail('bernal_not_anchored');
@@ -16220,6 +16220,43 @@ function applyImplant(state, op, player) {
   else player.opsRemaining -= 1;
   const where = (siteById(bn.siteId) || {}).name || 'the Bernal';
   return { ok: true, state, log: `${player.name} ${parts.join(' and ')} at ${where}${free ? ' (Industrialist: free)' : ''}.` };
+}
+// IMPLANT without Module 2 (user ruling 2026-11-17: "augmentations without m2
+// use regular colonies instead of bernal"): there are no Colonists or Bernals,
+// so the chits go on one of your Colonies (the Crew who settled it), at that
+// Colony. Having the Colony is the BEO Colony. Juggling only moves a chit off
+// this same Colony.
+function applyImplantAtColony(state, op, player) {
+  const siteId = String(op.colony || '');
+  const col = (state.colonies || {})[siteId];
+  if (!col || col.ownerId !== player.profileId) return fail('no_colony');
+  if (player.opsRemaining <= 0) return fail('no_ops_left');
+  player.augments = player.augments || {};
+  const removes = Array.isArray(op.remove) ? op.remove.map(String) : [];
+  const implants = Array.isArray(op.implants) ? op.implants : [];
+  if (!removes.length && !implants.length) return fail('nothing_to_implant');
+  const where = (siteById(siteId) || {}).name || siteId;
+  const parts = [];
+  for (const shape of removes) {
+    const a = player.augments[shape];
+    if (!a) return fail('no_such_chit', { shape });
+    if (a.colonySite !== siteId) return fail('chit_not_colocated', { shape });
+    delete player.augments[shape];
+    parts.push(`took the ${shape} chit off`);
+  }
+  const portfolio = portfolioShapes(state, player);
+  for (const imp of implants) {
+    const shape = String(imp && imp.shape || '');
+    const side = Number(imp && imp.side) === 1 ? 1 : 2;
+    if (!AUG_SHAPES.includes(shape)) return fail('bad_shape');
+    if (!portfolio.has(shape)) return fail('not_in_portfolio', { shape });
+    if (player.augments[shape]) return fail('chit_in_use', { shape });
+    if (shape === 'heart' && side === 1) return fail('parenthood_not_yet');
+    player.augments[shape] = { colonySite: siteId, side };
+    parts.push(`implanted ${shape} (side ${side})`);
+  }
+  player.opsRemaining -= 1;
+  return { ok: true, state, log: `${player.name} ${parts.join(' and ')} at the ${where} Colony.` };
 }
 // ===== end Module 4 augmentations ============================================
 
