@@ -7892,6 +7892,7 @@ function applyTransfer(state, op, player) {
     }
     return outpostOf(ep).siteId;
   };
+  let usedTransport = false;
   const rocketEmpty = player.rocket.stack.length === 0;
   const involvesRocket = from === 'rocket' || to === 'rocket';
   if (involvesRocket && rocketEmpty) {
@@ -7924,7 +7925,13 @@ function applyTransfer(state, op, player) {
     // one end of an unbuilt pair does not bridge cargo across it (user
     // 2026-07-29: "the option to send stuff up the space elevator shouldn't
     // exist before I build it").
-    return fail('not_colocated');
+    // M4 Transport contract ability (4B2f): "Cargo transfer along a buggy road
+    // ... (1/turn)". (The Bernal-to-its-Dirtside half needs M2.)
+    const viaRoad = state.m4 && contractAbilityCount(state, player, 'transport') > 0
+      && siteOf(from) != null && siteOf(to) != null && isBuggyRoadPair(siteOf(from), siteOf(to));
+    if (!viaRoad) return fail('not_colocated');
+    if (player.transportUsed) return fail('transport_used');
+    usedTransport = true;
   }
 
   const srcArr = stackArrayOf(player, from);
@@ -8001,7 +8008,8 @@ function applyTransfer(state, op, player) {
     const whereName = createdBernal.site == null ? 'LEO' : ((siteById(createdBernal.site) || {}).name || createdBernal.site);
     return { ok: true, state, log: `${player.name} deployed the ${bname} colony at ${whereName} and loaded ${label}.` };
   }
-  return { ok: true, state, log: `${player.name} moved ${label} to ${stackLabel(to)}.` };
+  if (usedTransport) player.transportUsed = true;
+  return { ok: true, state, log: `${player.name} moved ${label} to ${stackLabel(to)}${usedTransport ? ' along the buggy road (Transport)' : ''}.` };
 }
 
 // The Martian (H9b): a FREE action, once per turn. With an Operational card
@@ -10636,6 +10644,10 @@ function applyEtProduce(state, op, player) {
     // Human must still be there - a sitdown needs workers on the floor.
     const sitdown = hasPrivilege(state, player, 'SITDOWN');
     if (!sitdown && !mayCommitFelony(state, player)) return fail('not_your_factory');
+    // Secured contract ability (4B2f): during Anarchy the owner is immune to
+    // Felonies, "superseding all other Felony Abilities".
+    const facOwner = playerByProfile(state, fac.ownerId);
+    if (state.anarchy && facOwner && contractAbilityCount(state, facOwner, 'secured') > 0) return fail('target_secured');
     if (!actorCrewAtSite(state, siteId, player.profileId)) return fail('felony_needs_human');
     if (!sitdown && opposingHumanAtSite(state, siteId, player.profileId)) return fail('factory_defended');
   }
@@ -13493,6 +13505,7 @@ function openTurnFor(state, player) {
     player.contractAuctionDone = false;
     player.lateFeePaidThisTurn = 0;
     player.implantFreeUsed = false;
+    if (player.transportUsed) delete player.transportUsed;
     player.turnStartedLate = !!(player.timepiece && player.timepiece.deadbeat);
     if (player.rocket) {
       player.rocket.enteredThisTurn = [];

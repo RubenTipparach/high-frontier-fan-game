@@ -11124,6 +11124,30 @@ check('Augment Heart side 2: a second delegate move in a Fundraise', () => {
   return `moved ${home} -> ${a1} -> ${a2}; side 1 refused`;
 });
 
+check('Transport (4B2f): one cargo transfer a turn along a buggy road', () => {
+  const run = (withTransport) => {
+    const st = startedGame({ m4: true });
+    const me = currentPlayerOf(st);
+    if (withTransport) {
+      const c = CONTRACTS.find((x) => x.faces.primary.abilities && x.faces.primary.abilities.transport);
+      me.fulfilledContracts = [{ id: c.id, side: 'blue', round: 1 }];
+    }
+    me.rocket.siteId = 'mars-north-pole';
+    me.rocket.stack.push({ id: 'thr_hall_effect', kind: 'patent', face: 'primary' }, { id: 'ref_atomic_layer_deposition', kind: 'patent', face: 'primary' });
+    me.outposts = { A: { letter: 'A', siteId: 'mars-arsia-mons-caves', cards: [], tank: 0 } };
+    return { st, me };
+  };
+  let { st, me } = run(false);
+  let r = op(st, 'TRANSFER', me.profileId, { cardIds: ['thr_hall_effect'], from: 'rocket', to: 'outpostA' });
+  assert(!r.ok && r.error === 'not_colocated', `no Transport: ${r.error}`);
+  ({ st, me } = run(true));
+  r = op(st, 'TRANSFER', me.profileId, { cardIds: ['thr_hall_effect'], from: 'rocket', to: 'outpostA' });
+  assert(r.ok && /buggy road \(Transport\)/.test(r.log), `Transport: ${r.error || r.log}`);
+  const r2 = op(r.state, 'TRANSFER', me.profileId, { cardIds: ['ref_atomic_layer_deposition'], from: 'rocket', to: 'outpostA' });
+  assert(!r2.ok && r2.error === 'transport_used', `second: ${r2.error}`);
+  return r.log;
+});
+
 check('Beehive: an operational robonaut and refinery at a busted size-1 site', () => {
   const kit = [{ id: 'rob_blackbody_pumped_laser', kind: 'patent', face: 'primary' }, { id: 'ref_atomic_layer_deposition', kind: 'patent', face: 'primary' }];
   const run = (site, { busted = true, cards = kit, glitch = false } = {}) => {

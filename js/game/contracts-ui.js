@@ -502,7 +502,7 @@ export function renderContractAuction(a) {
   if (blocked) controls = `<p class="muted">${blocked}</p>`;
   else {
     controls = `<select id="m4c-years" aria-label="Your bid in years">${opts}</select>
-      <button type="button" data-act="bid">Bid ${_yearsDraft}</button>
+      <button type="button" data-act="bid">Submit ${_yearsDraft} yr</button>
       ${iAmAuctioneer ? '' : '<button type="button" data-act="pass">Pass</button>'}`;
   }
   if (iAmAuctioneer) {

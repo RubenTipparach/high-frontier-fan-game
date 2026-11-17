@@ -11559,10 +11559,23 @@ function appendElevatorRideButtons(container, unit, close, className = 'rocket-s
     container.appendChild(btn);
   }
 }
+// M4 Transport contract ability (4B2f): one cargo transfer a turn along a
+// buggy road, so a road-linked stack counts as a destination until it is used.
+function transportRoadLink(a, b) {
+  if (!_online || !_onlineSnapshot || !_onlineSnapshot.m4 || !a || !b || a === b) return false;
+  const me = mySnapshotPlayer();
+  if (!me || me.transportUsed) return false;
+  const has = (me.fulfilledContracts || []).some((f) => { const face = contractFace(f.id, f.side); return !!(face && face.abilities && face.abilities.transport); });
+  if (!has) return false;
+  const sa = toServerId(_onlineMaps, a) || a;
+  const sb = toServerId(_onlineMaps, b) || b;
+  return isBuggyRoadPair(sa, sb);
+}
 function getColocatedDestinations(sourceId) {
   const sourceSite = getStackSiteId(sourceId);
   if (!sourceSite) return [];
-  const colo = (siteId) => siteId === sourceSite || elevatorColocatedClient(siteId, sourceSite);
+  const colo = (siteId) => siteId === sourceSite || elevatorColocatedClient(siteId, sourceSite)
+    || transportRoadLink(siteId, sourceSite);
   const dests = [];
   // LEO is always at LEO. If source is at LEO and not LEO
   // itself, LEO is a destination. Skip when source IS LEO.
