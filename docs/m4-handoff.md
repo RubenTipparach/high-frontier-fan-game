@@ -123,7 +123,10 @@ Read CLAUDE.md first, then `docs/module-m4-plan.md` (the stage plan and the
 5. **Stage 3:** isotope monetization, the isobank and isobanker, gold-side
    upheaval, Exodus contracts, the starship launch.
 6. **Release later** with the four-step checklist in CLAUDE.md. Before that,
-   look at CEO Solitaire's own M4 rules (4G), which are not wired.
+   note the 4G solitaire rules are already implemented by CEO Solitaire (V6),
+   including the 4G3 Solitaire Assembly (owner 2026-11-17); M4 inside a CEO
+   Solitaire room is still refused (`m4_no_variants`; `createInitialState`
+   drops m4 with ceoSolo).
 
 ## Open questions for the user
 

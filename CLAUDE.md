@@ -238,8 +238,9 @@ per room and carried into the game state as a boolean (`state.m0`,
   settings routes only write it for `profileIsAdmin`; everyone else is forced
   to 0, and the create-form / solo-wizard / room-settings rows show for admins
   only. M4 REQUIRES M0 (4A1a) and forces it on. It does not combine with a
-  variant yet (`m4_no_variants`; CEO Solitaire's own M4 rules, 4G, are not
-  wired). M4 is not played with M2 for now (`m4_no_m2` on create AND settings),
+  variant yet (`m4_no_variants`). The 4G solitaire rules are DONE: CEO
+  Solitaire (V6) implements them, including the 4G3 Solitaire Assembly (owner
+  2026-11-17); only the gate refusing M4 in a CEO Solitaire room remains. M4 is not played with M2 for now (`m4_no_m2` on create AND settings),
   and contracts whose destination needs a piece the game lacks (Bernals,
   colonists, freighters, the isobank) are dealt out of the decks
   (`data/contracts.js#faceUnplayable`; owner 2026-11-17). Lagrange ring
