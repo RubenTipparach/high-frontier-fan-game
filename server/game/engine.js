@@ -165,6 +165,7 @@ function slotMass(slot) {
   }
   const crew = CREW_BY_ID[slot.id];
   if (crew) {
+    if (slot.massless) return 0;   // Jar augmentation, side 1 (M4)
     const key = slot.face === 'secondary' ? 'secondary' : 'primary';
     const cf = (crew.faces && (crew.faces[key] || crew.faces.primary)) || {};
     return (cf.mass | 0);
@@ -373,6 +374,35 @@ function playerHasAtmoScoop(player, stack) {
 function augmentSideAt(player, shape, side, slug) {
   const a = player && player.augments && player.augments[shape];
   return !!(a && a.side === side && slug != null && a.colonySite === String(slug));
+}
+// Without M2, Jar 1, Hexagon and Battery count for your Crew (owner ruling
+// 2026-11-17). Mass and prospecting are read per slot on BOTH the client and
+// the server, so the Crew slot carries the result as marks (massless /
+// augProspector) that travel in the game state; refreshed at the start of every
+// op and after an Implant. M4-only, so a game without it is untouched.
+function playerSlotArrays(p) {
+  const out = [];
+  if (p.rocket && Array.isArray(p.rocket.stack)) out.push(p.rocket.stack);
+  if (Array.isArray(p.leo)) out.push(p.leo);
+  for (const o of Object.values(p.outposts || {})) if (o && Array.isArray(o.cards)) out.push(o.cards);
+  if (p.freighter && Array.isArray(p.freighter.stack)) out.push(p.freighter.stack);
+  for (const bn of (p.bernals || [])) if (bn && Array.isArray(bn.stack)) out.push(bn.stack);
+  return out;
+}
+function syncCrewAugmentMarks(st) {
+  if (!st || !st.m4 || st.m2) return;
+  for (const p of st.players || []) {
+    const massless = hasAugmentSide(p, 'jar', 1);
+    const hex = p.augments && p.augments.hexagon;
+    const pro = hex ? (hex.side === 1 ? { kind: 'raygun', isru: 1 } : { kind: 'buggy', isru: 2 }) : null;
+    for (const arr of playerSlotArrays(p)) {
+      for (const s of arr) {
+        if (!s || !CREW_BY_ID[s.id]) continue;
+        if (massless) s.massless = true; else delete s.massless;
+        if (pro) s.augProspector = pro; else delete s.augProspector;
+      }
+    }
+  }
 }
 function hasAugmentSide(player, shape, side) {
   const a = player && player.augments && player.augments[shape];
@@ -667,6 +697,11 @@ function prospectorFace(slot) {
   if (crew) {
     const key = slot.face === 'secondary' ? 'secondary' : 'primary';
     const cf = (crew.faces && (crew.faces[key] || crew.faces.primary)) || {};
+    // Hexagon augmentation (M4): the Crew's prospector becomes the chit's
+    // Raygun (ISRU 1) or Buggy (ISRU 2); every crew prints ISRU 4.
+    if (slot.augProspector) {
+      return { properties: [{ key: slot.augProspector.kind, value: true }], isru: slot.augProspector.isru | 0 };
+    }
     return {
       properties: cf.prospector ? [{ key: cf.prospector, value: true }] : [],
       isru: Number(cf.isru) | 0,
@@ -697,6 +732,7 @@ function slotHasIsruRig(slot) {
   if (crew) {
     const key = slot.face === 'secondary' ? 'secondary' : 'primary';
     const cf = (crew.faces && (crew.faces[key] || crew.faces.primary)) || {};
+    if (slot.augProspector) return true;
     return cf.isru != null && Number.isFinite(Number(cf.isru));
   }
   return faceProps(slot).some((x) => x && x.key === 'isru');
@@ -16323,6 +16359,7 @@ function applyImplantAtColony(state, op, player) {
     parts.push(`implanted ${shape} (side ${side})`);
   }
   player.opsRemaining -= 1;
+  syncCrewAugmentMarks(state);
   return { ok: true, state, log: `${player.name} ${parts.join(' and ')} at the ${where} Colony.` };
 }
 // ===== end Module 4 augmentations ============================================
@@ -17376,6 +17413,7 @@ export function applyOperation(prevState, op, ctx) {
   const clonePrev = () => {
     const st = clone(prevState);
     preRepair = [...repairSirensAssembly(st), ...repairSpeciesDeckSplit(st)];
+    syncCrewAugmentMarks(st);
     // Outposts store their water canned, so fold any an outpost still carries
     // loose from before that rule into a can. Here rather than after the op for
     // the same reason as the repairs above: the read path cans it for display,

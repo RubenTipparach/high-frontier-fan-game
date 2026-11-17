@@ -11109,6 +11109,44 @@ check('Augment Splat side 1: the Factory at your augmented Colony also produces 
   return 'C product refused at a V Factory, allowed with Splat side 1 on its Colony';
 });
 
+check('Without M2, Jar 1 and Hexagon count for your Crew (0 Mass; Raygun ISRU 1)', () => {
+  const site = allSiteSlugs().find((s) => { const r = siteBySlug(s); return r && r.hydration === 2 && nodeSizeNumber(s) >= 1; });
+  assert(site, 'no hydration-2 site to test on');
+  const prospect = (augs) => {
+    const st = startedGame({ m4: true });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    const crewId = me.faction.cardId;
+    me.rocket.siteId = site;
+    me.rocket.stack = [{ id: crewId, kind: 'crew', face: me.faction.face || 'primary' }];
+    me.rocket.activeProspectorId = crewId;
+    me.augments = augs;
+    return applyOperation(st, { kind: 'PROSPECT', siteId: site }, { profileId: me.profileId });
+  };
+  const plain = prospect({});
+  assert(!plain.ok && plain.error === 'isru_too_high', `crew ISRU 4 at hydration 2: ${plain.error}`);
+  const hex = prospect({ hexagon: { colonySite: 'ceres', side: 1 } });
+  assert(hex.ok, `Hexagon 1 (Raygun ISRU 1): ${hex.error}`);
+  // Jar 1: the Crew slot is marked massless wherever it is, and the mark lifts with the chit.
+  const st = startedGame({ m4: true });
+  const c = conByCode('M4N229F');
+  const me = currentPlayerOf(st);
+  me.fulfilledContracts = [{ id: c.id, side: 'blue', round: 1 }];
+  st.colonies = { ceres: { ownerId: me.profileId } };
+  me.augments = { jar: { colonySite: 'ceres', side: 1 } };
+  me.rocket.stack.push({ id: me.faction.cardId, kind: 'crew', face: 'primary' });
+  let r = op(st, 'INCOME', me.profileId, {});
+  assert(r.ok, `an op: ${r.error}`);
+  const crewSlot = pl(r.state, me.profileId).rocket.stack.find((s) => s.id === me.faction.cardId);
+  assert(crewSlot && crewSlot.massless === true, 'Jar 1 did not mark the Crew 0 Mass');
+  pl(r.state, me.profileId).augments = {};
+  pl(r.state, me.profileId).opsRemaining = 1;
+  const r2 = op(r.state, 'INCOME', me.profileId, {});
+  const after = r2.ok ? pl(r2.state, me.profileId).rocket.stack.find((s) => s.id === me.faction.cardId) : null;
+  assert(after && !after.massless, `mark not lifted (${r2.error || ''})`);
+  return `crew at ${site}: refused at ISRU 4, prospects with Hexagon 1; Jar 1 marks it 0 Mass and the mark lifts`;
+});
+
 check('Augment Heart side 2: a second delegate move in a Fundraise', () => {
   const { st, me } = colonyAugGame('heart', 2);
   const home = (st.homeIdeology || {})[me.profileId];
