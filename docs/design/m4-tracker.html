@@ -257,6 +257,16 @@ const SECTIONS = [
         options: ['No: that is a glitch roll, not a Belt Roll', 'Yes'], rec: 0,
         why: 'Its result does not depend on the roll total, so a -2 has nothing to act on.' },
     ] },
+  { tag: 'A', name: 'Augmentations',
+    lead: 'Without M2 the chit sits on a Colony. Built: Splat 1 and 2, Triangle 2, Heart 2.',
+    qs: [
+      { id: 'A1', q: 'Jar side 2: "FTs may be spent for FINAO". Whose water?',
+        options: ['The tank of the stack taking the hazard', 'Any of your water'], rec: 0,
+        why: 'Same as paying at the hazard.' },
+      { id: 'A2', q: 'Colonist-only sides without M2 (Jar 1 0 mass, Hexagon Raygun / Buggy, Battery generator / reactor). On a Colony they...',
+        options: ['Do nothing', 'Act for stacks at the Colony site'], rec: 0,
+        why: 'Nothing on a Colony moves.' },
+    ] },
   { tag: 'U', name: 'Screens',
     lead: 'How M4 shows up for the player.',
     qs: [
@@ -275,6 +285,12 @@ const SECTIONS = [
 
 const DECIDED = [
   // Newest first: { text: 'What was decided, with the owner\'s words', where: 'Where it landed' },
+  { text: 'Gold sides need M1 (and M2): not in M0+M4. Isotope Monetization is possible with M4+M1 (2026-11-17).', where: 'docs/module-m4-plan.md (Stage 3)' },
+  { text: 'Contract auction ties use the patent auction flow: the initiator names the winner (2026-11-17).', where: 'contracts-ui.js' },
+  { text: 'Augmentations without M2 go on your Colonies (2026-11-17).', where: 'IMPLANT' },
+  { text: 'Unexplored Signposted Site: once none is left, any site (2026-11-17).', where: 'Planetary Protection' },
+  { text: 'All ten proposed destinations approved (2026-11-17).', where: 'data/card-data.js, engine' },
+  { text: 'Minimal UI text: players know the game (2026-11-17).', where: 'CLAUDE.md' },
   { text: 'M4 work stays on the nodeploy branch: "Do nodeploy" (2026-11-16).', where: 'claude/nodeploy-m4-contracts' },
   { text: 'A contract cannot be discarded unless in Anarchy (2026-11-16).', where: 'ABANDON_CONTRACT, docs/module-m4-plan.md' },
   { text: 'A won contract sits in the Hand strip; the Contracts panel points there (2026-11-16).', where: 'js/game/hand.js, contracts-ui.js' },

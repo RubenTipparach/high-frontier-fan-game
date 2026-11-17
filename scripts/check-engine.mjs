@@ -39,7 +39,7 @@ import { NODE_LABELS } from '../data/map-labels.js';
 import { isAtmosphericSite } from '../data/site-categories.js';
 
 import { SIREN_BUSTED_SITES, splitDeckForSoloSpecies, SIREN_SOLO_SPECTRALS } from '../data/sirens.js';
-import { usesSoloAssembly, lawForIdeology, SOLO_LAWS, IDEOLOGY_ORDER } from '../data/assembly.js';
+import { usesSoloAssembly, lawForIdeology, SOLO_LAWS, IDEOLOGY_ORDER, adjacentPlaces } from '../data/assembly.js';
 import { turnsToImpact, TURNS_PER_CYCLE, HERMES_ROUNDS, hermesSitesIndustrialized,
   hermesTargetSites, hermesProspectWaived, isHermesTargetSite, HERMES_MAX_PLAYERS, NEUJMIN_SITE } from '../data/hermes.js';
 import { truncateBottomHalf, isLegalAltruismRounds, altruismTarget, altruismVerdict,
@@ -11019,6 +11019,109 @@ check('Implant without M2: chits go on your Colony', () => {
   r = op(s2, 'IMPLANT', me.profileId, { colony: 'ceres', remove: [shape], implants: [{ shape, side: 2 }] });
   assert(r.ok, `juggle on the same colony: ${r.error}`);
   return `${shape} implanted at the Ceres Colony; portfolio, in-use and juggling rules hold`;
+});
+
+check('a contract left in an Outpost at its destination fulfils from there', () => {
+  const t = destContract('M4N237F');
+  t.at('ceres');
+  let r = op(t.st, 'TRANSFER', t.P.profileId, { cardIds: [t.c.id], from: 'rocket', to: 'newOutpost' });
+  assert(r.ok, `rocket to a new outpost: ${r.error}`);
+  const P = pl(r.state, t.P.profileId);
+  assert(Object.values(P.outposts).some((o) => o.cards.some((s) => s.id === t.c.id)), 'the contract is in the outpost');
+  P.rocket.siteId = 'vesta';   // the rocket flies on; the outpost stays at Ceres
+  r = op(r.state, 'FULFILL_CONTRACT', t.P.profileId, { cardId: t.c.id });
+  assert(r.ok && pl(r.state, t.P.profileId).fulfilledContracts.some((f) => f.id === t.c.id), `fulfil from the outpost: ${r.error}`);
+  return 'Planetary Protection fulfilled from Outpost A at Ceres';
+});
+
+check('contract auction tie between two rivals: the initiator names the winner', () => {
+  let st = startedGame({ seats: 3, m4: true });
+  const c = stackDeck(st, 'M4N228F');
+  const ini = currentPlayerOf(st);
+  const [r1, r2] = st.players.filter((p) => p.profileId !== ini.profileId);
+  let r = fundraise(st, ini.profileId);
+  assert(r.ok, r.error); st = r.state; st.activeLawStar = CONTRACT_PAIRS[c.pair][0];
+  r = op(st, 'AUCTION_CONTRACT_START', ini.profileId, { pair: c.pair });
+  assert(r.ok, r.error); st = r.state;
+  for (const p of [r1, r2]) { r = op(st, 'AUCTION_CONTRACT_BID', p.profileId, { years: 4 }); assert(r.ok, `bid: ${r.error}`); st = r.state; }
+  r = op(st, 'AUCTION_CONTRACT_CLOSE', ini.profileId, {});
+  assert(!r.ok && r.error === 'pick_winner', `no pick: ${r.error}`);
+  r = op(st, 'AUCTION_CONTRACT_CLOSE', ini.profileId, { winnerId: r2.profileId });
+  assert(r.ok && pl(r.state, r2.profileId).contractHand.includes(c.id), `award to the second rival: ${r.error}`);
+  return r.log;
+});
+
+// Augmentation side abilities (4C3) without Module 2: the chit's Colony site.
+function colonyAugGame(shape, side) {
+  const st = startedGame({ m4: true });
+  const me = currentPlayerOf(st);
+  st.colonies = st.colonies || {};
+  st.colonies.ceres = { ownerId: me.profileId };
+  me.augments = { [shape]: { colonySite: 'ceres', side } };
+  return { st, me };
+}
+check('Augment Splat side 2: +1 hydration at the Colony; Triangle side 2: +2 aqua on a Site Refuel there', () => {
+  const run = (augs) => {
+    const st = startedGame({ m4: true });
+    const me = currentPlayerOf(st);
+    st.colonies = { ceres: { ownerId: me.profileId } };
+    me.augments = augs;
+    me.rocket.stack = [{ id: 'rob_blackbody_pumped_laser', kind: 'patent', face: 'primary' }];
+    me.rocket.activeProspectorId = 'rob_blackbody_pumped_laser';
+    me.rocket.siteId = 'ceres'; me.rocket.tank = 0;
+    const aq = me.aqua;
+    const r = op(st, 'SITE_REFUEL', me.profileId, { siteId: 'ceres' });
+    return { r, gain: r.ok ? pl(r.state, me.profileId).rocket.tank : null, aqua: r.ok ? pl(r.state, me.profileId).aqua - aq : null };
+  };
+  const base = run({});
+  assert(base.r.ok, `plain refuel: ${base.r.error}`);
+  const splat = run({ splat: { colonySite: 'ceres', side: 2 } });
+  assert(splat.r.ok && splat.gain > base.gain, `splat 2 refuel ${splat.gain} vs ${base.gain} (${splat.r.error || ''})`);
+  const tri = run({ triangle: { colonySite: 'ceres', side: 2 } });
+  assert(tri.r.ok && tri.aqua === 2 && /\+2 aqua \(Triangle\)/.test(tri.r.log), `triangle 2: ${tri.r.error || tri.r.log}`);
+  const elsewhere = run({ triangle: { colonySite: 'vesta', side: 2 } });
+  assert(elsewhere.r.ok && elsewhere.aqua === 0, 'a Triangle on another Colony paid here');
+  return `water ${base.gain} -> ${splat.gain} with Splat 2; Triangle 2 +2 aqua at its Colony only`;
+});
+
+check('Augment Splat side 1: the Factory at your augmented Colony also produces C-type', () => {
+  const SITE = 'vesta';
+  const CARD = 'thr_hall_effect';
+  assert(PATENTS_BY_ID[CARD].spectralType === 'C', 'test card is not C-type');
+  const produce = (augs) => {
+    const st = startedGame({ m4: true });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    for (const [k, d] of Object.entries(st.decks)) if (Array.isArray(d)) st.decks[k] = d.filter((x) => x !== CARD);
+    me.hand = [CARD]; me.opsRemaining = 1;
+    me.rocket.siteId = SITE; me.rocket.stack = [{ id: me.faction.cardId, kind: 'crew', face: 'primary' }];
+    me.rocket.activeThrusterId = null; me.rocket.tank = 0;
+    st.factories = { ...(st.factories || {}), [SITE]: { ownerId: me.profileId, spectralType: 'V' } };
+    st.colonies = { [SITE]: { ownerId: me.profileId } };
+    me.augments = augs;
+    st.turnActions = [];
+    return applyOperation(st, { kind: 'ET_PRODUCE', siteId: SITE, cardId: CARD, toRocket: true }, { profileId: me.profileId });
+  };
+  const plain = produce({});
+  assert(!plain.ok && plain.error === 'wrong_spectral', `V factory, no chit: ${plain.error}`);
+  const splat = produce({ splat: { colonySite: SITE, side: 1 } });
+  assert(splat.ok, `Splat 1 at the Colony: ${splat.error}`);
+  return 'C product refused at a V Factory, allowed with Splat side 1 on its Colony';
+});
+
+check('Augment Heart side 2: a second delegate move in a Fundraise', () => {
+  const { st, me } = colonyAugGame('heart', 2);
+  const home = (st.homeIdeology || {})[me.profileId];
+  const adj = (p) => adjacentPlaces(p);
+  const a1 = adj(home)[0];
+  const a2 = adj(a1).find((x) => x !== home);
+  let r = fundraiseWith(st, me.profileId, { moveFrom: home, moveTo: a1, moveFrom2: a1, moveTo2: a2 });
+  assert(r.ok, `two moves: ${r.error}`);
+  assert(/\(Heart\)/.test(r.log), r.log);
+  const { st: s2, me: m2 } = colonyAugGame('heart', 1);
+  r = fundraiseWith(s2, m2.profileId, { moveFrom: home, moveTo: a1, moveFrom2: a1, moveTo2: a2 });
+  assert(!r.ok && r.error === 'no_second_move', `heart side 1: ${r.error}`);
+  return `moved ${home} -> ${a1} -> ${a2}; side 1 refused`;
 });
 
 check('Beehive: an operational robonaut and refinery at a busted size-1 site', () => {

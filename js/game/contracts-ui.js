@@ -206,6 +206,11 @@ function locationOf(p, id) {
   if ((p.leo || []).some((s) => s.id === id)) return 'LEO';
   const r = p.rocket || {};
   if ((r.stack || []).some((s) => s.id === id)) return r.siteId ? `Rocket at ${spaceName(r.siteId)}` : 'Rocket at LEO';
+  for (const o of Object.values(p.outposts || {})) {
+    if ((o.cards || []).some((s) => s.id === id)) return `Outpost ${o.letter} at ${spaceName(o.siteId)}`;
+  }
+  const fr = p.freighter;
+  if (fr && (fr.stack || []).some((s) => s.id === id)) return fr.siteId ? `Freighter at ${spaceName(fr.siteId)}` : 'Freighter at LEO';
   return null;
 }
 
@@ -501,7 +506,13 @@ export function renderContractAuction(a) {
       ${iAmAuctioneer ? '' : '<button type="button" data-act="pass">Pass</button>'}`;
   }
   if (iAmAuctioneer) {
-    controls += `<div class="m4c-btns"><button type="button" data-act="close" ${settled ? '' : 'disabled'}>Close</button></div>`;
+    // Ties (4B3g), as in a patent auction: the initiator wins a tie they are in;
+    // otherwise they name the winner among the tied bidders.
+    const tied = Object.keys(a.bids || {}).map(Number).filter((id) => a.bids[id] === a.low);
+    const pick = tied.length > 1 && !tied.includes(a.auctioneerId);
+    controls += pick
+      ? `<div class="m4c-btns">${tied.map((id) => `<button type="button" data-act="close" data-winner="${id}" ${settled ? '' : 'disabled'}>Award to @${esc(nameOf(id))} (${a.low} yr)</button>`).join('')}</div>`
+      : `<div class="m4c-btns"><button type="button" data-act="close" ${settled ? '' : 'disabled'}>Close</button></div>`;
   }
   el.innerHTML = `<div class="m4c-modal" role="dialog" aria-label="Contract auction">
     <div class="m4c-head"><h3>📜 Contract auction</h3><span class="muted">${CONTRACT_PAIR_NAMES[a.pair] || ''}</span></div>
@@ -526,6 +537,6 @@ export function renderContractAuction(a) {
     const act = b.dataset.act;
     if (act === 'bid') await D.submitAuctionOp({ kind: 'AUCTION_CONTRACT_BID', years: Number(sel.value) });
     else if (act === 'pass') await D.submitAuctionOp({ kind: 'AUCTION_CONTRACT_PASS' });
-    else if (act === 'close') await D.submitAuctionOp({ kind: 'AUCTION_CONTRACT_CLOSE' });
+    else if (act === 'close') await D.submitAuctionOp({ kind: 'AUCTION_CONTRACT_CLOSE', ...(b.dataset.winner ? { winnerId: Number(b.dataset.winner) } : {}) });
   }));
 }

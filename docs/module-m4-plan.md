@@ -113,6 +113,14 @@ late fee + default):
   conditions `human`, `rolled` (a hazard roll by this rocket this turn),
   `ownfactory`, `busted`, `size=n`, `robonaut` / `refinery` (in an unglitched
   stack). Each has a pass and a refusal in check-engine.
+- Gold sides need M1 (and M2); they are out of M0+M4. Isotope Monetization
+  (and so the gold-side upheaval) is possible with M4+M1 (user 2026-11-17):
+  that is the Stage 3 target.
+- Augmentation sides built (no-M2 Colony placement): Splat 1 (Factory also
+  C), Splat 2 (+1 hydration), Triangle 2 (+2 aqua on Site Refuel), Heart 2
+  (second delegate move in a Fundraise). Open in the tracker: Jar 2 (A1) and
+  the Colonist-only sides without M2 (A2). Heart 1 (Parenthood) is M2 only;
+  Triangle 1 (+1 Isotope) waits for Stage 3.
 - Augmentations without M2 (user ruling 2026-11-17: "augmentations without
   m2 use regular colonies instead of bernal"): IMPLANT takes `colony: <site>`
   and puts the chits on that Colony of yours (`augments[shape] = { colonySite,

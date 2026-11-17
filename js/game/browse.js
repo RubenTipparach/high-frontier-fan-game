@@ -7465,6 +7465,8 @@ function fundraiseMyPlaces(snapshot) {
   for (const p of ASSEMBLY_PLACES) {
     let n = (dmap[p] || {})[myId] | 0;
     if (_fr && _fr.place === p) n += 1;
+    if (_fr && _fr.move1 && _fr.move1.from === p) n -= 1;   // Heart: the first move already left
+    if (_fr && _fr.move1 && _fr.move1.to === p) n += 1;
     if (n > 0) set.add(p);
   }
   return set;
@@ -7547,6 +7549,7 @@ function fundraiseProjectedWinners(snapshot) {
   };
   bump(_fr.freeDelegate, -1);   // a cube freed to allow the placement
   bump(_fr.place, +1);
+  if (_fr.move1) { bump(_fr.move1.from, -1); bump(_fr.move1.to, +1); }
   bump(_fr.moveFrom, -1);
   bump(_fr.moveTo, +1);
   // ARBITER: the holder's own tally may count their delegates twice.
@@ -7592,6 +7595,8 @@ function renderAssemblyFundraise(body, snapshot) {
     else promptText = 'Step 3 - Tie vote! Click which tied ideology gets the active-law star.';
   } else if (_fr.moveFrom) {
     promptText = `Step 2 - Move: click a highlighted adjacent space to move your ${esc((ASSEMBLY_IDEOLOGY_BY_KEY[_fr.moveFrom] || {}).name || _fr.moveFrom)} delegate.`;
+  } else if (_fr.move1) {
+    promptText = 'Step 2 - Heart: second move, or skip.';
   } else {
     promptText = 'Step 2 - Move one space: click one of your glowing cubes to pick it up, or skip.';
   }
@@ -7624,6 +7629,12 @@ function renderAssemblyFundraise(body, snapshot) {
   if (_fr.place) view.delegates[_fr.place] = [...(view.delegates[_fr.place] || []), myColor];
   // Once a move is chosen (we are on the tally step), preview it too so the vote
   // standing the player is starring reflects the move they just made.
+  if (_fr.move1) {
+    const from = view.delegates[_fr.move1.from] || [];
+    const idx = from.indexOf(myColor);
+    if (idx >= 0) view.delegates[_fr.move1.from] = [...from.slice(0, idx), ...from.slice(idx + 1)];
+    view.delegates[_fr.move1.to] = [...(view.delegates[_fr.move1.to] || []), myColor];
+  }
   if (_fr.moveFrom && _fr.moveTo) {
     const from = view.delegates[_fr.moveFrom] || [];
     const idx = from.indexOf(myColor);
@@ -7783,7 +7794,19 @@ function onFundraiseCell(snapshot, place, available) {
   if (place === _fr.moveFrom) { _fr.moveFrom = null; refreshAssemblyModal(); return; }   // put it back
   if (!available.has(place)) { _onlineToast('Move only to an adjacent space.', 'error'); return; }
   _fr.moveTo = place;
+  // Heart augmentation, side 2 (M4): a second one-space delegate move.
+  if (!_fr.move1 && heartSecondMove(snapshot)) {
+    _fr.move1 = { from: _fr.moveFrom, to: _fr.moveTo };
+    _fr.moveFrom = null; _fr.moveTo = null;
+    refreshAssemblyModal();
+    return;
+  }
   fundraiseAdvanceToStar(snapshot);
+}
+function heartSecondMove(snapshot) {
+  const me = snapshot && snapshot.m4 ? (snapshot.players || []).find((p) => p.profileId === mySeatId()) : null;
+  const a = me && me.augments && me.augments.heart;
+  return !!(a && a.side === 2);
 }
 // Step back ONE action in the guided Fundraise: the inverse of the forward
 // clicks, popped newest-first (the star tally -> the move destination -> the
@@ -7798,7 +7821,8 @@ function fundraiseUndo() {
     if (_fr.moveTo) _fr.moveTo = null;   // undo the destination, keep the picked cube to re-aim
     else _fr.moveFrom = null;            // tally was reached via "Skip move", so drop to cube-pick
   } else if (_fr.step === 'move') {
-    if (_fr.moveFrom) _fr.moveFrom = null;   // put the picked-up cube back down
+    if (!_fr.moveFrom && _fr.move1) { _fr.moveFrom = _fr.move1.from; _fr.move1 = null; }   // reopen the first move
+    else if (_fr.moveFrom) _fr.moveFrom = null;   // put the picked-up cube back down
     else { _fr.step = 'place'; _fr.enterprise = null; }   // back to the placement step
   } else if (_fr.place) {
     _fr.place = null;                        // unselect the placed delegate
@@ -7910,7 +7934,10 @@ function commitFundraise() {
   if (_fr.place) op.place = _fr.place;
   if (_fr.enterprise) op.enterprise = _fr.enterprise;
   if (_fr.freeDelegate) op.freeDelegate = _fr.freeDelegate;
-  if (_fr.moveFrom && _fr.moveTo) { op.moveFrom = _fr.moveFrom; op.moveTo = _fr.moveTo; }
+  if (_fr.move1) {
+    op.moveFrom = _fr.move1.from; op.moveTo = _fr.move1.to;
+    if (_fr.moveFrom && _fr.moveTo) { op.moveFrom2 = _fr.moveFrom; op.moveTo2 = _fr.moveTo; }
+  } else if (_fr.moveFrom && _fr.moveTo) { op.moveFrom = _fr.moveFrom; op.moveTo = _fr.moveTo; }
   if (_fr.star) op.star = _fr.star;
   if (_fr.arbiterDouble) op.arbiterDouble = true;
   // Martial Law (Authority): discard an opponent's delegate. The server

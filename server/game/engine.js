@@ -366,6 +366,19 @@ function playerHasAtmoScoop(player, stack) {
   });
 }
 
+// M4 augmentation abilities (4C3). Without Module 2 a chit sits on one of your
+// Colonies (user ruling 2026-11-17), so a side that works "here" works at that
+// Colony's site. (With M2 the chit rides a Colonist; M4 does not combine with
+// M2 yet, so that placement is not read here.)
+function augmentSideAt(player, shape, side, slug) {
+  const a = player && player.augments && player.augments[shape];
+  return !!(a && a.side === side && slug != null && a.colonySite === String(slug));
+}
+function hasAugmentSide(player, shape, side) {
+  const a = player && player.augments && player.augments[shape];
+  return !!(a && a.side === side);
+}
+
 // Effective hydration of a site for a player's prospect / refuel (subsystem 5).
 // Atmospheric Scoop (SCOOP) makes an aerostat site COLOCATED with or ADJACENT
 // to the scoop count as hydration 2. The scoop rides the stack doing the work,
@@ -373,9 +386,11 @@ function playerHasAtmoScoop(player, stack) {
 // away. `unit` = { stack, siteId } for a non-rocket prospect; defaults to the
 // rocket so every existing caller is unchanged.
 function effectiveHydration(site, player, unit) {
-  const base = Number.isFinite(site && site.hydration) ? site.hydration : 0;
+  let base = Number.isFinite(site && site.hydration) ? site.hydration : 0;
   const stack = unit ? unit.stack : (player.rocket && player.rocket.stack);
   const here = unit ? unit.siteId : (player.rocket && player.rocket.siteId);
+  // Splat augmentation, side 2: +1 Hydration (4C3) at your augmented Colony.
+  if (augmentSideAt(player, 'splat', 2, here)) base += 1;
   if (!isAerostatSite(site) || !playerHasAtmoScoop(player, stack)) return base;
   // TWO ID SPACES, and this compared across them (reported 2026-08-11: "this
   // card power is not working"). `here` is a rocket/unit siteId, which is a
@@ -10643,7 +10658,9 @@ function applyEtProduce(state, op, player) {
   if (prodCard && fac.spectralType && !op._replay) {
     const spec = prodCard.spectralType;
     const anyC = tailingsRemining(state, player, siteId)
-      || playerHasColonistPower(state, player, 'etProduceCAnywhere');
+      || playerHasColonistPower(state, player, 'etProduceCAnywhere')
+      // Splat augmentation, side 1: "Factory is also Carbon" (4C3).
+      || augmentSideAt(player, 'splat', 1, siteId);
     if (spec && String(spec).toLowerCase() !== 'any' && spec !== fac.spectralType && !(anyC && spec === 'C')) {
       return fail('wrong_spectral', { product: spec, factory: fac.spectralType });
     }
@@ -11068,10 +11085,24 @@ function applyFundraise(state, op, player) {
     if (place === moveFrom) have += 1;
     if (have <= 0) return fail('no_delegate_there');
   }
+  // Heart augmentation, side 2: "+1 delegate move during fundraise" (4C3).
+  const moveFrom2 = op.moveFrom2 ? String(op.moveFrom2) : null;
+  const moveTo2 = op.moveTo2 ? String(op.moveTo2) : null;
+  if ((moveFrom2 && !moveTo2) || (!moveFrom2 && moveTo2)) return fail('bad_move');
+  if (moveFrom2) {
+    if (!(state.m4 && hasAugmentSide(player, 'heart', 2))) return fail('no_second_move');
+    if (!ASSEMBLY_PLACES.includes(moveFrom2) || !ASSEMBLY_PLACES.includes(moveTo2)) return fail('bad_place');
+    if (!adjacentPlaces(moveFrom2).includes(moveTo2)) return fail('not_adjacent');
+  }
   if (place) setPlaceCount(asm, place, pid, placeCount(asm, place, pid) + 1);
   if (moveFrom) {
     setPlaceCount(asm, moveFrom, pid, placeCount(asm, moveFrom, pid) - 1);
     setPlaceCount(asm, moveTo, pid, placeCount(asm, moveTo, pid) + 1);
+  }
+  if (moveFrom2) {
+    if (placeCount(asm, moveFrom2, pid) <= 0) return fail('no_delegate_there');
+    setPlaceCount(asm, moveFrom2, pid, placeCount(asm, moveFrom2, pid) - 1);
+    setPlaceCount(asm, moveTo2, pid, placeCount(asm, moveTo2, pid) + 1);
   }
   // Authority (Martial Law) discard is applied AFTER the vote tally below (O3a):
   // the discarded cube still counts in the tally, and moving the Active Law INTO
@@ -11128,6 +11159,7 @@ function applyFundraise(state, op, player) {
       : `placed a delegate on ${placeName(place)}`);
   }
   if (moveFrom) parts.push(`moved a delegate ${placeName(moveFrom)} -> ${placeName(moveTo)}`);
+  if (moveFrom2) parts.push(`moved a delegate ${placeName(moveFrom2)} -> ${placeName(moveTo2)} (Heart)`);
   if (enterprise) {
     state.trade = {
       initiatorId: pid, partnerId: enterprise.owner.profileId, awaiting: 'partner', version: 1,
@@ -11632,9 +11664,12 @@ function applySiteRefuel(state, op, player) {
   if (gateW.freeRepeat) label += ' (Miner colonist: extra refuel)';
   const destTank = bernalDest ? bernalDest.tank : player.rocket.tank;
   const destNote = bernalDest ? ' into the Bernal Stack' : '';
+  // Triangle augmentation, side 2: "Site refuel yields +2 Aqua" (4C3).
+  const tri = augmentSideAt(player, 'triangle', 2, siteId) ? 2 : 0;
+  if (tri) player.aqua = (player.aqua | 0) + tri;
   return {
     ok: true, state,
-    log: `${player.name}: ${label} at ${site.name} (+${round6(gain)} water${destNote}; tank ${round6(destTank)}).`,
+    log: `${player.name}: ${label} at ${site.name} (+${round6(gain)} water${destNote}; tank ${round6(destTank)})${tri ? `, +${tri} aqua (Triangle)` : ''}.`,
   };
 }
 
@@ -13315,7 +13350,7 @@ function pickPayload(op) {
     case 'LOAD_FUEL': return { cardId: op.cardId, holder: op.holder };
     case 'DUMP_FUEL_CARD': return { cardId: op.cardId, holder: op.holder };
     case 'FREE_MARKET': return { cardId: op.cardId, cardIds: op.cardIds, leoCardId: op.leoCardId, leoCardIds: op.leoCardIds };
-    case 'FUNDRAISE': return { place: op.place, moveFrom: op.moveFrom, moveTo: op.moveTo, freeDelegate: op.freeDelegate, discard: op.discard, star: op.star, ...(op.arbiterDouble ? { arbiterDouble: true } : {}), ...(op.enterprise ? { enterprise: op.enterprise } : {}) };
+    case 'FUNDRAISE': return { place: op.place, moveFrom: op.moveFrom, moveTo: op.moveTo, freeDelegate: op.freeDelegate, discard: op.discard, star: op.star, ...(op.arbiterDouble ? { arbiterDouble: true } : {}), ...(op.enterprise ? { enterprise: op.enterprise } : {}), ...(op.moveFrom2 ? { moveFrom2: op.moveFrom2, moveTo2: op.moveTo2 } : {}) };
     // rabbleRouser MUST ride along: without it an UNDO/REDO replay would re-run
     // the Lobby with the rouse dropped and quietly lose the Anarchy flip.
     case 'LOBBY': return { ideology: op.ideology, ...(op.rabbleRouser ? { rabbleRouser: true } : {}), ...(op.ambassador ? { ambassador: true } : {}) };
@@ -15776,6 +15811,25 @@ function findContractSlot(state, player, cardId) {
         stack: st, glitched: !!player.rocket.glitch, rolled: !!player.rocket.hazardRolledThisTurn,
       },
     };
+  }
+  // Any other stack of yours carrying it (4B4b: the stack holding the contract
+  // fulfils): an Outpost, or the Freighter (M1). Neither tracks a pass-through
+  // list, so only the space it stands on counts.
+  for (const o of Object.values(player.outposts || {})) {
+    const i = (o.cards || []).findIndex((s) => s.id === cardId);
+    if (i >= 0) {
+      return { arr: o.cards, idx: i, label: `Outpost ${o.letter}`,
+        where: { siteId: o.siteId, atLeo: false, entered: [], stack: o.cards, glitched: !!o.glitch } };
+    }
+  }
+  const fr = player.freighter;
+  if (fr && Array.isArray(fr.stack)) {
+    const i = fr.stack.findIndex((s) => s.id === cardId);
+    if (i >= 0) {
+      const atLeo = fr.siteId == null || fr.siteId === leoSlug();
+      return { arr: fr.stack, idx: i, label: 'Freighter',
+        where: { siteId: atLeo ? null : fr.siteId, atLeo, entered: [], stack: fr.stack, glitched: !!fr.glitched } };
+    }
   }
   return null;
 }
