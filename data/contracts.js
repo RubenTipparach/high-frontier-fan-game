@@ -236,6 +236,73 @@ export function siteMatches(site, filters, ctx, usedSites = [], slug = null) {
   return true;
 }
 
+// A destination step in plain words, for the checklist drawn on the card
+// (4B4d: each step is announced in order). `nameOf(slug)` names a map space.
+function siteAdjectives(f) {
+  const a = [];
+  if (f.unexplored) a.push('unexplored');
+  if (f.signposted) a.push('signposted');
+  if (f.busted) a.push('busted');
+  if (f.synodic) a.push('synodic');
+  if (f.submarine) a.push('submarine');
+  if (f.atmospheric) a.push('atmospheric');
+  if (f.astrobiology) a.push('astrobiology');
+  if (f.elevator) a.push('space elevator');
+  if (f.spectral) a.push(`${f.spectral}-type`);
+  if (f.size) a.push(typeof f.size === 'object' ? `size ${f.size.min}+` : `size-${f.size}`);
+  return a;
+}
+function sitePlace(f) {
+  const w = [];
+  if (f.body) w.push(`on ${f.body}`);
+  if (f.zone) w.push(`in the ${f.zone} zone`);
+  if (f.notzone) w.push(`outside the ${String(f.notzone).split('|').join(' / ')} zone`);
+  if (f.beyond) w.push(`beyond the ${f.beyond} zone`);
+  if (f.hydration != null) w.push(`with hydration ${f.hydration}`);
+  if (f.either) w.push(f.either.map((alt) => [...sitePlace(alt), ...siteAdjectives(alt)].join(' ')).join(' or '));
+  if (f.adjacent === 'hazard') w.push('next to a hazard');
+  if (f.farthestglory) w.push('in the farthest zone with a claimed glory chit');
+  if (f.glory === 'unclaimed') w.push('in a zone whose glory chit is unclaimed');
+  if (f.different) w.push('(a different site)');
+  return w;
+}
+function stackTerms(f) {
+  const w = [];
+  if (f.human) w.push('a Human aboard');
+  if (f.robonaut && f.refinery) w.push('an operational robonaut and refinery');
+  else if (f.robonaut) w.push('an operational robonaut');
+  else if (f.refinery) w.push('an operational refinery');
+  return w;
+}
+const article = (word) => (/^[aeiou]/i.test(word) ? 'an' : 'a');
+export function stepLabel(step, nameOf = (s) => s) {
+  const f = step.filters || {};
+  const same = f.sameturn ? ' the same turn' : '';
+  const withs = stackTerms(f);
+  const withTail = withs.length ? ` with ${withs.join(' and ')}` : '';
+  const rolled = f.rolled ? ', after a hazard roll this turn' : '';
+  switch (step.verb) {
+    case 'at': return `Reach ${step.sites.map(nameOf).join(' or ')}${withTail}${same}`;
+    case 'site': {
+      if (f.ownfactory) return `Land at your Factory${withTail}${rolled}${same}`;
+      const adj = siteAdjectives(f);
+      const noun = [...adj, 'site'].join(' ');
+      const place = sitePlace(f);
+      const fallback = f.orany ? ' (any site once none is left)' : '';
+      return `Reach ${article(noun)} ${noun}${place.length ? ' ' + place.join(', ') : ''}${fallback}${withTail}${rolled}${same}`;
+    }
+    case 'space': {
+      const kind = f.aero ? 'an aerobrake space' : f.hazard ? 'a hazard space' : 'a space';
+      return `Reach ${kind}${f.beyond ? ` beyond the ${f.beyond} zone` : ''}${same}`;
+    }
+    case 'enter': return `Pass through ${nameOf(step.node)}${same}`;
+    case 'flybys': return `${step.count} flyby${step.count === 1 ? '' : 's'}${f.beyond ? ` beyond the ${f.beyond} zone` : ''} in one turn`;
+    case 'liftoff': return 'Lift off from there';
+    case 'return': return 'Return to LEO';
+    default: return step.why || step.raw;
+  }
+}
+
 // Is step `step` satisfied right now? `where` describes the stack carrying the
 // contract: { siteId (a site slug, or null / a space node), atLeo, entered: [nodes
 // entered this turn] } ; `progress` = { sites: [site per done step] }.

@@ -13,7 +13,10 @@
 import {
   CONTRACTS_BY_ID, CONTRACT_PAIRS, CONTRACT_PAIR_NAMES, CONTRACT_BID_MAX, contractFace,
 } from '../../data/contracts.js';
-import { renderContractCard } from './contract-card.js';
+import { renderContractCard, richText, setContractProgressSource } from './contract-card.js';
+import { SITES_BY_ID } from '../../data/sites.js';
+import { lagrangeLabel } from '../../data/lagrange-labels.js';
+import { nodeLabelOf } from '../../data/map-labels.js';
 import { augmentGlyph, AUGMENTS, timepieceDialGlyph } from './contract-glyphs.js';
 import { sunspotDialSvg } from './turn-clock-ui.js';
 import { isM4, isM2 } from './online-mode.js';
@@ -23,7 +26,29 @@ let D = null;               // deps from browse.js (snapshot readers + submitter
 let _panelOpen = false;
 const SLOTS = 12;
 
-export function initContractsUi(deps) { D = deps; }
+export function initContractsUi(deps) {
+  D = deps;
+  // A contract of mine that is out of my hand (boosted, aboard a stack) shows
+  // its destination steps ticked off, wherever its card is drawn.
+  setContractProgressSource((id) => {
+    const p = me();
+    const meta = p && (p.contractMeta || {})[id];
+    if (!meta || (p.contractHand || []).includes(id) || (p.fulfilledContracts || []).some((f) => f.id === id)) return null;
+    return { done: (meta.progress && meta.progress.done) | 0 };
+  }, spaceName);
+}
+// The name a player reads for a map space: the site, the Lagrange point
+// (numbered as on the board), the hazard by its board caption.
+function spaceName(slug) {
+  const site = SITES_BY_ID[String(slug).replace(/-/g, '_')] || SITES_BY_ID[slug];
+  if (site) return site.name;
+  const lg = lagrangeLabel(slug);
+  if (lg) return `Lagrange ${lg}`;
+  const cap = nodeLabelOf(slug);
+  if (cap) return `the "${cap.replace(/\s+/g, ' ')}" hazard`;
+  const n = D && D.spaceName ? D.spaceName(slug) : null;
+  return n && !/^(Lagrange|Burn point)$/i.test(n) ? n : 'the marked space';
+}
 
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 const snap = () => (D && D.snapshot()) || null;
@@ -79,9 +104,56 @@ export function refreshContractsUi() {
       tag.classList.toggle('turn-tag-alert', !!(late || canAuction));
     }
   }
-  if (!on) { closePanel(); renderContractAuction(null); return; }
+  if (!on) { closePanel(); renderContractAuction(null); _seenFulfilled = null; return; }
+  announceFulfilled(s);
   renderContractAuction(s.auction && s.auction.kind === 'contract' ? s.auction : null);
   if (_panelOpen) renderPanel();
+}
+
+// ---- contract fulfilled (4B4f) ------------------------------------------------------
+// A contract that newly lands in anyone's fulfilled splay pops a modal: yours as
+// "Contract fulfilled", a rival's naming who did it. Read off the game state,
+// not the button press, so it shows however the news arrives. The first look
+// at a game only records what is already fulfilled (a refresh never replays it).
+let _seenFulfilled = null;   // Set of "profileId:cardId"
+let _fulfilledQueue = [];
+function announceFulfilled(s) {
+  const now = [];
+  for (const q of s.players || []) for (const f of q.fulfilledContracts || []) now.push({ q, f, key: `${q.profileId}:${f.id}` });
+  if (!_seenFulfilled) { _seenFulfilled = new Set(now.map((x) => x.key)); return; }
+  const mine = me() && me().profileId;
+  for (const x of now) {
+    if (_seenFulfilled.has(x.key)) continue;
+    _seenFulfilled.add(x.key);
+    _fulfilledQueue.push({ ...x, mine: x.q.profileId === mine });
+  }
+  if (!document.getElementById('m4-contract-fulfilled')) showNextFulfilled();
+}
+function showNextFulfilled() {
+  const x = _fulfilledQueue.shift();
+  if (!x) return;
+  const face = contractFace(x.f.id, x.f.side) || {};
+  const who = `<span class="player-name" style="--player-color:${esc(x.q.color || '')}">@${esc(x.q.name)}</span>`;
+  const el = document.createElement('div');
+  el.id = 'm4-contract-fulfilled';
+  el.className = 'm4c-overlay m4c-fulfilled';
+  el.innerHTML = `<div class="m4c-modal" role="dialog" aria-modal="true" aria-labelledby="m4c-ful-title">
+    <div class="m4c-head"><h3 id="m4c-ful-title">🏁 ${x.mine ? 'Contract fulfilled' : `${who}: contract fulfilled`}</h3>
+      <button type="button" class="m4c-close" aria-label="Close">✕</button></div>
+    <div class="m4c-body m4c-ful-body">
+      <div class="m4c-ful-card">${cardThumb(x.f.id, x.f.side)}</div>
+      <div class="m4c-ful-text">
+        <p class="m4c-ful-name">${esc(face.name || x.f.id)}</p>
+        <p class="m4c-ful-vp">+${face.vp | 0} VP</p>
+        ${face.fulfilledAbility ? `<p>${richText(face.fulfilledAbility)}</p>` : ''}
+        <button type="button" class="m4c-ful-ok">OK</button>
+      </div>
+    </div></div>`;
+  const close = () => { el.remove(); showNextFulfilled(); };
+  el.addEventListener('click', (e) => { if (e.target === el || e.target.closest('.m4c-close, .m4c-ful-ok')) close(); });
+  document.body.appendChild(el);
+  const ok = el.querySelector('.m4c-ful-ok');
+  if (ok) ok.focus();
 }
 
 // ---- the Sunspot dial (4B3e: bids and deadlines are years from the Cube) --------
@@ -133,7 +205,7 @@ function cardThumb(id, side) {
 function locationOf(p, id) {
   if ((p.leo || []).some((s) => s.id === id)) return 'LEO';
   const r = p.rocket || {};
-  if ((r.stack || []).some((s) => s.id === id)) return r.siteId ? `rocket at ${r.siteId}` : 'rocket at LEO';
+  if ((r.stack || []).some((s) => s.id === id)) return r.siteId ? `Rocket at ${spaceName(r.siteId)}` : 'Rocket at LEO';
   return null;
 }
 
@@ -202,21 +274,31 @@ function renderPanel() {
     const meta = p.contractMeta[id];
     const f = faceOf(p, id);
     const where = locationOf(p, id) || 'in a stack';
-    const next = f.steps[meta.progress ? meta.progress.done : 0];
     const late = tp && tp.contractId === id && tp.deadbeat;
-    const stepLine = next ? `Next: ${esc(next.verb === 'manual' ? next.why : next.raw)}` : '';
     return `<div class="m4c-item">${cardThumb(id, meta.side)}
-      <div class="m4c-note">${esc(where)} - step ${meta.progress ? meta.progress.done : 0} of ${f.steps.length}. ${stepLine}</div>
+      <div class="m4c-note">${esc(where)}</div>
       <div class="m4c-btns">${myTurn ? `<button type="button" data-act="fulfill" data-id="${id}">Fulfill here</button>` : ''}
       ${myTurn && late ? `<button type="button" data-act="pay" data-id="${id}" data-max="${f.lateFee}">Pay late fee (${f.lateFee})</button>` : ''}
       ${myTurn && abandonBlock(s, p, id) === null ? `<button type="button" data-act="abandon" data-id="${id}">Abandon (Anarchy)</button>` : ''}</div></div>`;
   }).join('');
-  const fulfilled = (p.fulfilledContracts || []).map((x) => `<div class="m4c-item">${cardThumb(x.id, x.side)}</div>`).join('');
+  const partnerLine = (x) => ((x.partners || []).length
+    ? `<div class="m4c-note">🤝 ${x.partners.map((id) => { const q = playerById(id) || {}; return `<span class="player-name" style="--player-color:${esc(q.color || 'currentColor')}">@${esc(q.name || nameOf(id))}</span>`; }).join(', ')}</div>`
+    : '');
+  const fulfilled = (p.fulfilledContracts || []).map((x) => `<div class="m4c-item">${cardThumb(x.id, x.side)}${partnerLine(x)}</div>`).join('');
+  // My partner enterprises: other players' fulfilled contracts carrying my delegate.
+  const partnered = [];
+  for (const q of (s.players || [])) {
+    if (q.profileId === p.profileId) continue;
+    for (const x of (q.fulfilledContracts || [])) {
+      if ((x.partners || []).includes(p.profileId)) partnered.push(`<div class="m4c-item">${cardThumb(x.id, x.side)}<div class="m4c-note">@${esc(q.name)}</div></div>`);
+    }
+  }
   parts.push(`<h4>In hand</h4><p class="muted">${inHand
     ? `${inHand} in your Hand.`
     : 'none'}</p>`);
   parts.push(`<h4>Boosted</h4><div class="m4c-row">${boosted || '<span class="muted">none</span>'}</div>`);
   parts.push(`<h4>Fulfilled</h4><div class="m4c-row">${fulfilled || '<span class="muted">none yet</span>'}</div>`);
+  if (partnered.length) parts.push(`<h4>Partner</h4><div class="m4c-row">${partnered.join('')}</div>`);
   if (s.m2) parts.push(augmentationsHtml(s, p, myTurn));
 
   el.innerHTML = `<div class="m4c-modal" role="dialog" aria-label="Contracts">
@@ -231,6 +313,13 @@ const SHAPES = ['heart', 'jar', 'hexagon', 'splat', 'battery', 'triangle'];
 function portfolioOf(p) {
   const out = new Set();
   for (const f of (p.fulfilledContracts || [])) for (const c of ((contractFace(f.id, f.side) || {}).cybernetics || [])) out.add(c);
+  // Partner enterprises (4B8d): other players' fulfilled contracts with my delegate.
+  for (const q of ((snap() && snap().players) || [])) {
+    if (q.profileId === p.profileId) continue;
+    for (const f of (q.fulfilledContracts || [])) {
+      if ((f.partners || []).includes(p.profileId)) for (const c of ((contractFace(f.id, f.side) || {}).cybernetics || [])) out.add(c);
+    }
+  }
   return out;
 }
 const sideText = (shape, side) => ((AUGMENTS[shape] || {}).tip || '').split(' / ')[side - 1] || '';

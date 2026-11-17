@@ -10901,6 +10901,76 @@ check('a rocket MOVE that rolls a hazard is marked for Extreme Sports; paying is
   return `${pick.from} into ${pick.to}: pay unmarked, roll marked`;
 });
 
+// Partner Enterprise (4B3a / 4B8): a Fundraise can seat its delegate on an
+// opponent's fulfilled contract instead of the assembly, with the owner's
+// negotiated permission (a trade the Fundraise opens, offers attached).
+function enterpriseGame() {
+  const st = startedGame({ m4: true });
+  const me = currentPlayerOf(st);
+  const owner = st.players.find((p) => p.profileId !== me.profileId);
+  const c = conByCode('M4N229F');   // Submersible Prospector (blue)
+  owner.fulfilledContracts = [{ id: c.id, side: 'blue', round: 1 }];
+  me.aqua = 20;
+  return { st, me, owner, c };
+}
+const fundraiseWith = (st, who, extra) => {
+  let r = op(st, 'FUNDRAISE', who, extra);
+  for (const star of ['centrist', ...IDEOLOGY_ORDER]) {
+    if (r.ok || r.error !== 'star_choice_required') break;
+    r = op(st, 'FUNDRAISE', who, { ...extra, star });
+  }
+  return r;
+};
+check('Partner Enterprise: a Fundraise asks for a seat, with an offer; accepting seats the delegate', () => {
+  const { st, me, owner, c } = enterpriseGame();
+  const cubes0 = liveScoreboard(st).players.find((r) => r.profileId === me.profileId).cubeVp;
+  let r = fundraiseWith(st, me.profileId, { enterprise: { ownerId: me.profileId, cardId: c.id } });
+  assert(!r.ok && r.error === 'bad_enterprise_owner', `own contract: ${r.error}`);
+  r = fundraiseWith(st, me.profileId, { enterprise: { ownerId: owner.profileId, cardId: 'con_beehive' } });
+  assert(!r.ok && r.error === 'not_an_enterprise', `unfulfilled card: ${r.error}`);
+  r = fundraiseWith(st, me.profileId, { place: (st.homeIdeology || {})[me.profileId], enterprise: { ownerId: owner.profileId, cardId: c.id } });
+  assert(!r.ok && r.error === 'enterprise_or_assembly', `both: ${r.error}`);
+  r = fundraiseWith(st, me.profileId, { enterprise: { ownerId: owner.profileId, cardId: c.id, give: { aqua: 3 } } });
+  assert(r.ok, `request: ${r.error}`);
+  let s2 = r.state;
+  assert(s2.trade && s2.trade.enterprise && s2.trade.enterprise.cardId === c.id && s2.trade.give.aqua === 3, `trade ${JSON.stringify(s2.trade)}`);
+  assert(/partner seat on Submersible Prospector \(3 aqua\)/.test(r.log), r.log);
+  const aquaBefore = { me: pl(s2, me.profileId).aqua, owner: pl(s2, owner.profileId).aqua };
+  r = op(s2, 'TRADE_ACCEPT', owner.profileId, {});
+  assert(r.ok, `accept: ${r.error}`);
+  s2 = r.state;
+  const ent = pl(s2, owner.profileId).fulfilledContracts[0];
+  assert((ent.partners || []).includes(me.profileId), 'no partner delegate seated');
+  assert(pl(s2, me.profileId).aqua === aquaBefore.me - 3 && pl(s2, owner.profileId).aqua === aquaBefore.owner + 3, 'the offer did not change hands');
+  const cubes1 = liveScoreboard(s2).players.find((x) => x.profileId === me.profileId).cubeVp;
+  assert(cubes1 === cubes0 + 1, `a partner delegate scores as a delegate (${cubes0} -> ${cubes1})`);
+  assert(!s2.trade, 'trade closed');
+  return r.log;
+});
+
+check('Partner Enterprise: a declined request seats nobody; a second seat is refused', () => {
+  const { st, me, owner, c } = enterpriseGame();
+  let r = fundraiseWith(st, me.profileId, { enterprise: { ownerId: owner.profileId, cardId: c.id } });
+  assert(r.ok && r.state.trade && r.state.trade.enterprise, `request with no offer: ${r.error}`);
+  // The owner may counter with a price, even though nothing else is on the table.
+  let s2 = r.state;
+  r = op(s2, 'TRADE_COUNTER', owner.profileId, { give: {}, receive: { aqua: 2 } });
+  assert(r.ok && r.state.trade.give.aqua === 2 && r.state.trade.enterprise, `counter with a price: ${r.error}`);
+  r = op(r.state, 'TRADE_DECLINE', me.profileId, {});
+  assert(r.ok && /declined the partner seat/.test(r.log), `decline: ${r.error || r.log}`);
+  assert(!(pl(r.state, owner.profileId).fulfilledContracts[0].partners || []).length, 'a declined request seated a delegate');
+  // Seated once, a second request on the same enterprise is refused.
+  const { st: st3, me: me3, owner: o3, c: c3 } = enterpriseGame();
+  o3.fulfilledContracts[0].partners = [me3.profileId];
+  r = fundraiseWith(st3, me3.profileId, { enterprise: { ownerId: o3.profileId, cardId: c3.id } });
+  assert(!r.ok && r.error === 'already_partner', `second seat: ${r.error}`);
+  // Outside M4 there is no enterprise.
+  const plain = startedGame({ m0: true });
+  r = fundraiseWith(plain, currentPlayerOf(plain).profileId, { enterprise: { ownerId: 2, cardId: c.id } });
+  assert(!r.ok && r.error === 'not_m4', `M0 game: ${r.error}`);
+  return 'declined: nobody seated; second seat refused; M0 refused';
+});
+
 check('Beehive: an operational robonaut and refinery at a busted size-1 site', () => {
   const kit = [{ id: 'rob_blackbody_pumped_laser', kind: 'patent', face: 'primary' }, { id: 'ref_atomic_layer_deposition', kind: 'patent', face: 'primary' }];
   const run = (site, { busted = true, cards = kit, glitch = false } = {}) => {

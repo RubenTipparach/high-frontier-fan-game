@@ -9,7 +9,17 @@ import {
   lateFeeBadge, advanceBadge, vpBadge, mannedGlyph, abilityHtml,
 } from './contract-glyphs.js';
 import { assetUrl } from '../base.js';
-import { contractFace } from '../../data/contracts.js';
+import { contractFace, stepLabel } from '../../data/contracts.js';
+
+// Where a contract in play stands: set by contracts-ui.js to read the viewing
+// player's own contract progress ({ done, total } by card id) and to name map
+// spaces. A contract with progress draws its destination as a checklist.
+let _progressOf = () => null;
+let _nameOf = (slug) => slug;
+export function setContractProgressSource(progressOf, nameOf) {
+  _progressOf = progressOf || (() => null);
+  _nameOf = nameOf || ((slug) => slug);
+}
 
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
 
@@ -18,7 +28,7 @@ const BODY = {
   Sun: '☉', Mercury: '☿', Venus: '♀', Earth: '⊕', Moon: '☾', Mars: '♂',
   Ceres: '⚳', Jupiter: '♃', Saturn: '♄', Uranus: '♅', Neptune: '♆', Pluto: '♇',
 };
-function richText(s) {
+export function richText(s) {
   return abilityHtml(s || '')
     .replace(/\[(Sun|Mercury|Venus|Earth|Moon|Mars|Ceres|Jupiter|Saturn|Uranus|Neptune|Pluto)\]/g,
       (_, b) => `<span class="m4-body-glyph" data-tip="${b}">${BODY[b]}</span>`)
@@ -35,6 +45,19 @@ function richText(s) {
 }
 
 const SIDE_LABEL = { blue: 'Blue side', gold: 'Gold side', exodus: 'Project Exodus' };
+
+// The destination steps as a checklist (✅ announced, ⬜ to go), in the same
+// tick language as the Futures checklist. Only for a contract in play.
+function stepsHtml(face) {
+  const prog = face.Progress;
+  const steps = face.Steps;
+  if (!prog || !Array.isArray(steps) || !steps.length) return '';
+  const rows = steps.map((s, i) => {
+    const done = i < (prog.done | 0);
+    return `<li class="${done ? 'done' : ''}${i === (prog.done | 0) ? ' next' : ''}">${done ? '✅' : '⬜'} ${esc(stepLabel(s, _nameOf))}</li>`;
+  }).join('');
+  return `<ul class="m4-steps" aria-label="Destination steps">${rows}</ul>`;
+}
 
 export function renderContractFace(face) {
   const side = face.Side;
@@ -66,7 +89,7 @@ export function renderContractFace(face) {
         ${vpBadge(face.VP)}
       </div>
       <div class="card-body m4-body has-craft" style='background-image:${art}'>
-        <div class="m4-box m4-dest"><b>Destination</b>${richText(face.Destination)}</div>
+        <div class="m4-box m4-dest"><b>Destination</b>${richText(face.Destination)}${stepsHtml(face)}</div>
         ${face['Fulfilled Ability'] ? `<div class="m4-box m4-ability"><b>Fulfilled ability</b>${richText(face['Fulfilled Ability'])}</div>` : ''}
         ${face['When Fulfilling'] ? `<div class="m4-box m4-when"><b>When fulfilling</b>${richText(face['When Fulfilling'])}</div>` : ''}
       </div>
@@ -89,5 +112,6 @@ export function renderContractCard(cardId, side = 'blue') {
     Manned: f.manned, Mass: f.mass, 'Rad-Hard': f.radHardness, VP: f.vp, 'Late Fee': f.lateFee,
     Advance: f.advance, Cybernetics: f.cybernetics.join(', '), 'Title Icon': f.titleIcon,
     Destination: f.destination, 'Fulfilled Ability': f.fulfilledAbility, 'When Fulfilling': f.whenFulfilling,
+    Steps: f.steps, Progress: _progressOf(cardId),
   });
 }

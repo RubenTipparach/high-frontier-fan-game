@@ -131,6 +131,7 @@ import { fuelTankCylinderMarkup, fuelTransferSectionMarkup } from './fuel-tank-v
 // Keyed reads only; Bernals only surface in m2 games, so nothing else changes.
 // M4 contract cards are stack slots too (only ever present in an m4 game).
 import { CONTRACTS_BY_ID, contractFace } from '../../data/contracts.js';
+import { renderContractCard } from './contract-card.js';
 const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...BERNALS_BY_ID, ...COLONISTS_BY_ID, ...CONTRACTS_BY_ID };
 import { renderAssemblyPanel, renderAssemblyLaws } from './assembly.js';
 import { uiIcon, cardPileBadge } from './ui-icons.js';
@@ -2889,6 +2890,24 @@ function cardLabel(id) {
 // Pop the full card so a player can assess it before trading. Click anywhere to
 // close. Layered above the builder modal.
 function openCardPreview(id) {
+  // A contract (an enterprise in a partner request) previews as its card too.
+  if (CONTRACTS_BY_ID[id] && !PATENTS_BY_ID[id]) {
+    let side = 'blue';
+    for (const q of ((_onlineSnapshot && _onlineSnapshot.players) || [])) {
+      const f = (q.fulfilledContracts || []).find((x) => x.id === id);
+      if (f) side = f.side;
+    }
+    const back = document.createElement('div');
+    back.className = 'mp-modal-back mp-card-preview-back';
+    const box = document.createElement('div');
+    box.className = 'mp-card-preview';
+    const el = renderContractCard(id, side);
+    if (el) box.appendChild(el);
+    back.appendChild(box);
+    back.addEventListener('click', () => back.remove());
+    document.body.appendChild(back);
+    return;
+  }
   const card = PATENTS_BY_ID[id] || CREW_BY_ID[id];
   if (!card) return;
   const back = document.createElement('div');
@@ -3195,7 +3214,8 @@ function openTradeBuilder(opts = {}) {
       const give = giveCol.read();
       const receive = recvCol.read();
       const empty = (s) => !s.aqua && !s.water && !s.handCardIds.length && !s.cargoCardIds.length && !s.leoCardIds.length && !s.abilities.length && !s.lunaGrant;
-      if (empty(give) && empty(receive)) { err.textContent = 'Put at least one item on the table.'; return; }
+      const entTrade = opts.isCounter && _onlineSnapshot && _onlineSnapshot.trade && _onlineSnapshot.trade.enterprise;
+      if (empty(give) && empty(receive) && !entTrade) { err.textContent = 'Put at least one item on the table.'; return; }
       send.disabled = true;
       const op = opts.isCounter
         ? { kind: 'TRADE_COUNTER', give, receive }
@@ -3296,6 +3316,19 @@ function renderMpTradeBlock(snapshot, host, { embedded = false } = {}) {
     return row;
   };
   deal.append(mkRow('You give', myGive), mkRow('You receive', myReceive));
+  // M4 Partner Enterprise request: what accepting seats, and where.
+  if (trade.enterprise) {
+    const owner = (snapshot.players || []).find((p) => p.profileId === trade.enterprise.ownerId) || {};
+    const f = (owner.fulfilledContracts || []).find((x) => x.id === trade.enterprise.cardId) || {};
+    const face = contractFace(trade.enterprise.cardId, f.side || 'blue') || { name: trade.enterprise.cardId };
+    const row = document.createElement('div');
+    row.className = 'mp-trade-deal-row mp-trade-enterprise';
+    row.innerHTML = `<span class="mp-trade-deal-label">🤝 Partner</span> `
+      + `<button type="button" class="mp-trade-cardname">${esc(face.name)}</button>`;
+    const nameBtn = row.querySelector('.mp-trade-cardname');
+    if (nameBtn) nameBtn.addEventListener('click', () => openCardPreview(trade.enterprise.cardId));
+    deal.appendChild(row);
+  }
   block.appendChild(deal);
 
   const status = document.createElement('div');
@@ -7089,7 +7122,8 @@ function myCubesFree(snapshot, profileId) {
   const players = snapshot.players || [];
   const fp = players[snapshot.firstPlayerIndex || 0];
   const sunspot = (!snapshot.ceoSolo && fp && fp.profileId === myId) ? 1 : 0;
-  return Math.max(0, FACTORY_CUBES - delegates - facs - sunspot);
+  const partners = partnerDelegatesOf(snapshot, myId);
+  return Math.max(0, FACTORY_CUBES - delegates - facs - sunspot - partners);
 }
 // Glance read-out: active laws + how many cubes I still have free. Shown in both
 // the sidebar and the modal.
@@ -7565,6 +7599,7 @@ function renderAssemblyFundraise(body, snapshot) {
   prompt.innerHTML = `<strong>Fundraise</strong> &middot; <span>${promptText}</span>`
     + (_fr.freeDelegate ? `<div class="assembly-fr-chosen">Freed a cube from ${esc((ASSEMBLY_IDEOLOGY_BY_KEY[_fr.freeDelegate] || {}).name || _fr.freeDelegate)}.</div>` : '')
     + (_fr.place ? `<div class="assembly-fr-chosen">Placing on ${esc((ASSEMBLY_IDEOLOGY_BY_KEY[_fr.place] || {}).name || _fr.place)}.</div>` : '')
+    + (_fr.enterprise ? `<div class="assembly-fr-chosen">🤝 ${enterpriseRequestText(snapshot, _fr.enterprise)}</div>` : '')
     + (_fr.discard ? `<div class="assembly-fr-chosen">⚔ Martial Law: discarding ${esc(fundraiseDiscardLabel(snapshot))}.</div>` : '');
 
   // Board with the interaction wired for the current step.
@@ -7636,6 +7671,11 @@ function renderAssemblyFundraise(body, snapshot) {
     return;
   }
   if (step === 'place') {
+    // M4 Partner Enterprise (4B3a): the new delegate may go on an opponent's
+    // fulfilled contract instead, asking the owner's permission (a negotiation).
+    if (enterpriseAvailable(snapshot) && inHand > 0 && !_fr.freeDelegate) {
+      btns.append(mkBtn('🤝 Enterprise', 'modal-btn', () => openEnterprisePicker(snapshot)));
+    }
     btns.append(
       mkBtn('Skip placement', 'modal-btn', () => { _fr.step = 'move'; refreshAssemblyModal(); }),
       mkBtn(_fr.place ? 'Next: move →' : 'Next →', 'modal-btn primary', () => { _fr.step = 'move'; refreshAssemblyModal(); }),
@@ -7759,7 +7799,7 @@ function fundraiseUndo() {
     else _fr.moveFrom = null;            // tally was reached via "Skip move", so drop to cube-pick
   } else if (_fr.step === 'move') {
     if (_fr.moveFrom) _fr.moveFrom = null;   // put the picked-up cube back down
-    else _fr.step = 'place';                 // back to the placement step
+    else { _fr.step = 'place'; _fr.enterprise = null; }   // back to the placement step
   } else if (_fr.place) {
     _fr.place = null;                        // unselect the placed delegate
   } else if (_fr.freeDelegate) {
@@ -7773,9 +7813,102 @@ function fundraiseCanUndo() {
   if (!_fr) return false;
   return _fr.step !== 'place' || !!_fr.place || !!_fr.freeDelegate;
 }
+// ---- M4 Partner Enterprise (4B3a / 4B8) ----------------------------------------
+// My delegates sitting on other players' fulfilled contracts (each is a cube).
+function partnerDelegatesOf(snapshot, pid) {
+  if (!snapshot || !snapshot.m4) return 0;
+  let n = 0;
+  for (const q of snapshot.players || []) {
+    for (const f of q.fulfilledContracts || []) n += (f.partners || []).filter((x) => x === pid).length;
+  }
+  return n;
+}
+// Opponents' fulfilled contracts I could ask to partner on (peace only, no
+// trade already on the table, not already seated there).
+function enterpriseTargets(snapshot) {
+  const myId = mySeatId();
+  if (!snapshot || !snapshot.m4 || snapshot.war || snapshot.trade) return [];
+  const out = [];
+  for (const q of snapshot.players || []) {
+    if (q.profileId === myId) continue;
+    for (const f of q.fulfilledContracts || []) {
+      if ((f.partners || []).includes(myId)) continue;
+      out.push({ owner: q, f });
+    }
+  }
+  return out;
+}
+function enterpriseAvailable(snapshot) { return enterpriseTargets(snapshot).length > 0; }
+function enterpriseRequestText(snapshot, ent) {
+  const owner = (snapshot.players || []).find((q) => q.profileId === ent.ownerId) || {};
+  const f = (owner.fulfilledContracts || []).find((x) => x.id === ent.cardId) || {};
+  const face = contractFace(ent.cardId, f.side || 'blue') || { name: ent.cardId };
+  const offer = tradeSideText(ent.give || {});
+  return `<span class="player-name" style="--player-color:${esc(owner.color || 'currentColor')}">@${esc(owner.name || '?')}</span>`
+    + `: ${esc(face.name)}${offer !== 'nothing' ? ` (${esc(offer)})` : ''}`;
+}
+// Pick the enterprise and attach any offer. The owner answers it like a trade:
+// accept, counter, or turn it down.
+function openEnterprisePicker(snapshot) {
+  const back = document.createElement('div');
+  back.className = 'mp-modal-back enterprise-picker';
+  const modal = document.createElement('div');
+  modal.className = 'mp-trade-builder-modal enterprise-modal';
+  back.appendChild(modal);
+  const close = () => back.remove();
+  back.addEventListener('click', (e) => { if (e.target === back) close(); });
+  const me = mySnapshotPlayer();
+  let picked = null;
+  const render = () => {
+    modal.innerHTML = '';
+    const h = document.createElement('h3');
+    h.textContent = '🤝 Enterprise';
+    const grid = document.createElement('div');
+    grid.className = 'enterprise-grid';
+    for (const { owner, f } of enterpriseTargets(snapshot)) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'enterprise-pick' + (picked && picked.f.id === f.id && picked.owner.profileId === owner.profileId ? ' is-picked' : '');
+      const card = renderContractCard(f.id, f.side);
+      if (card) b.appendChild(card);
+      const who = document.createElement('div');
+      who.className = 'enterprise-owner';
+      who.innerHTML = `<span class="player-name" style="--player-color:${esc(owner.color || 'currentColor')}">@${esc(owner.name)}</span>`
+        + ((f.partners || []).length ? ` · ${(f.partners || []).length} partner${(f.partners || []).length === 1 ? '' : 's'}` : '');
+      b.appendChild(who);
+      b.addEventListener('click', () => { picked = { owner, f }; render(); });
+      grid.appendChild(b);
+    }
+    modal.append(h, grid);
+    let offerCol = null;
+    if (picked && me) {
+      offerCol = buildTradeColumn('Offer', me, { kind: 'leo' });
+      offerCol.el.classList.add('enterprise-offer');
+      modal.appendChild(offerCol.el);
+    }
+    const btns = document.createElement('div');
+    btns.className = 'mp-trade-btns';
+    btns.append(mkBtn('Cancel', 'modal-btn', close));
+    const ok = mkBtn('Ask', 'modal-btn primary', () => {
+      if (!picked) return;
+      _fr.enterprise = { ownerId: picked.owner.profileId, cardId: picked.f.id, give: offerCol ? offerCol.read() : {} };
+      _fr.place = null;
+      _fr.step = 'move';
+      close();
+      refreshAssemblyModal();
+    });
+    ok.disabled = !picked;
+    btns.append(ok);
+    modal.appendChild(btns);
+  };
+  render();
+  document.body.appendChild(back);
+}
+
 function commitFundraise() {
   const op = { kind: 'FUNDRAISE' };
   if (_fr.place) op.place = _fr.place;
+  if (_fr.enterprise) op.enterprise = _fr.enterprise;
   if (_fr.freeDelegate) op.freeDelegate = _fr.freeDelegate;
   if (_fr.moveFrom && _fr.moveTo) { op.moveFrom = _fr.moveFrom; op.moveTo = _fr.moveTo; }
   if (_fr.star) op.star = _fr.star;
@@ -8537,7 +8670,8 @@ function renderComponentRow(p, snapshot) {
   // and clicking it breaks down where each cube sits.
   const facUsed = ownedSiteCount(snapshot.factories, p.profileId);
   const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
-  const delegateUsed = ASSEMBLY_PLACES.reduce((s, pl) => s + ((dmap[pl] || {})[p.profileId] | 0), 0);
+  const delegateUsed = ASSEMBLY_PLACES.reduce((s, pl) => s + ((dmap[pl] || {})[p.profileId] | 0), 0)
+    + partnerDelegatesOf(snapshot, p.profileId);
   const players = snapshot.players || [];
   const fp = players[snapshot.firstPlayerIndex || 0];
   const sunspotUsed = (!(_onlineSnapshot && _onlineSnapshot.ceoSolo) && fp && fp.profileId === p.profileId) ? 1 : 0;
@@ -8707,7 +8841,9 @@ function renderAbilityBadges(p) {
     && own !== 'POWERSAT'
     && !borrowed.some((g) => g && g.ability === 'POWERSAT');
   const beamer = playerPowersatBeamedBy(p);
-  if (!own && !borrowed.length && !showPowersat && !beamer) return null;
+  // M4: the abilities of this player's fulfilled contracts (4B2f), one chip each.
+  const contractAbilities = (_onlineSnapshot && _onlineSnapshot.m4) ? contractAbilityChips(p) : [];
+  if (!own && !borrowed.length && !showPowersat && !beamer && !contractAbilities.length) return null;
   const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
   const row = document.createElement('div');
   row.className = 'mp-ability-badges';
@@ -8742,7 +8878,38 @@ function renderAbilityBadges(p) {
       + (perm ? ' (permanent, irreversible)' : `, ${g.turnsRemaining} turn(s) left`);
     row.appendChild(b);
   }
+  for (const c of contractAbilities) {
+    const b = document.createElement('span');
+    b.className = 'mp-ability contract';
+    b.textContent = '📜 ' + c.label;
+    b.title = `${c.label} - fulfilled contract ability (${c.from}): ${c.text}`;
+    row.appendChild(b);
+  }
   return row;
+}
+
+// The fulfilled-contract abilities a player holds, as short chip labels. The
+// printed ability text rides along for the tooltip (transcription notes in
+// [brackets] stripped). A defaulted contract's abilities are off (4B6b), and a
+// defaulted contract is never in the fulfilled splay.
+function contractAbilityChips(p) {
+  const out = [];
+  for (const f of (p.fulfilledContracts || [])) {
+    const face = contractFace(f.id, f.side);
+    if (!face || !face.fulfilledAbility) continue;
+    const ab = face.abilities || {};
+    const text = String(face.fulfilledAbility).replace(/\[[^\]]*\]\s*/g, '').trim();
+    let label = null;
+    for (const k of ['shielded', 'bailout', 'secured', 'insight', 'connections', 'transport']) {
+      if (ab[k]) label = k[0].toUpperCase() + k.slice(1);
+    }
+    if (!label && ab.hazardIgnore) label = `Ignore ${ab.hazardIgnore.map((w) => `"${w}"`).join(' / ')} hazards`;
+    if (!label && ab.aerobrakeIgnore) label = `Ignore ${ab.aerobrakeIgnore.map((w) => `"${w}"`).join(' / ')} aerobrakes`;
+    if (!label && ab.fundraiseAqua) label = `+${ab.fundraiseAqua} aqua fundraising`;
+    if (!label) label = text.length > 28 ? text.slice(0, 26).replace(/\s+\S*$/, '') + '...' : text;
+    out.push({ label, text, from: face.name });
+  }
+  return out;
 }
 
 // Read-only rocket context for a snapshot rocket: the same thrust / fuel / mass
@@ -35276,4 +35443,9 @@ initContractsUi({
   submitAuctionOp: (op) => submitMpAuctionOp(op),
   toast: (msg, level) => { if (_onlineToast) _onlineToast(msg, level); },
   confirm: (opts) => confirmModal(opts),
+  // The name a player reads for a map space (a site, a Lagrange point, a hazard).
+  spaceName: (slug) => {
+    const n = _activeData && _activeData.sites ? _activeData.sites.find((x) => x.id2 === slug) : null;
+    return n ? (n.name || null) : null;
+  },
 });

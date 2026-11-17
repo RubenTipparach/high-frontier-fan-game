@@ -10981,9 +10981,21 @@ function canTakeFirstPlayer(state, player) {
   if (fp && fp.profileId === player.profileId) return true;
   return cubesInPlay(state, player.profileId) < FACTORY_CUBES;
 }
+// M4 partner delegates (4B8a): this player's delegates sitting on OTHER
+// players' fulfilled contracts (their enterprises). Each is one of the 7 cubes
+// and scores as a delegate (4B8b / 4E2a). Zero outside M4.
+function partnerDelegateCount(state, profileId) {
+  if (!state || !state.m4) return 0;
+  let n = 0;
+  for (const q of state.players || []) {
+    for (const f of q.fulfilledContracts || []) n += (f.partners || []).filter((x) => x === profileId).length;
+  }
+  return n;
+}
 function cubesInPlay(state, profileId) {
   let n = ownedSiteCount(state.factories, profileId)
     + playerDelegatesPlaced(assemblyOf(state), profileId)
+    + partnerDelegateCount(state, profileId)
     // A Mobile Factory off its claim is still one of the 7 cubes.
     + (state.mobileCubes || []).filter((c) => c && c.ownerId === profileId).length;
   // The Sunspot / first-player cube occupies one of the holder's 7. CEO
@@ -11012,6 +11024,16 @@ function applyFundraise(state, op, player) {
   // ideology or a space where you already hold a delegate.
   const place = op.place ? String(op.place) : null;
   if (place && !ASSEMBLY_PLACES.includes(place)) return fail('bad_place');
+  // M4 Partner Enterprise (4B3a / 4B8): the new delegate goes on an opponent's
+  // fulfilled contract instead of the assembly, during peace, with the owner's
+  // negotiated permission. The Fundraise opens that negotiation as a trade; the
+  // delegate lands when the owner accepts (see applyTradeAccept).
+  let enterprise = null;
+  if (op.enterprise) {
+    const ent = enterpriseRequestRefusal(state, player, op.enterprise, { place });
+    if (ent.error) return fail(ent.error, ent.detail);
+    enterprise = ent;
+  }
   if (place) {
     const home = (state.homeIdeology || {})[pid];
     if (place !== home && placeCount(asm, place, pid) <= 0) return fail('bad_place_target');
@@ -11106,6 +11128,15 @@ function applyFundraise(state, op, player) {
       : `placed a delegate on ${placeName(place)}`);
   }
   if (moveFrom) parts.push(`moved a delegate ${placeName(moveFrom)} -> ${placeName(moveTo)}`);
+  if (enterprise) {
+    state.trade = {
+      initiatorId: pid, partnerId: enterprise.owner.profileId, awaiting: 'partner', version: 1,
+      give: enterprise.give, receive: normTradeSide({}), location: enterprise.location,
+      enterprise: { ownerId: enterprise.owner.profileId, cardId: enterprise.cardId },
+    };
+    const offer = sideIsEmpty(enterprise.give) ? '' : ` (${tradeSideSummary(state, enterprise.give)})`;
+    parts.push(`asked ${enterprise.owner.name} for a partner seat on ${enterprise.face.name}${offer}`);
+  }
   const did = parts.length ? parts.join(' and ') : 'took income';
   // M4 (4B3): the Fundraise's final step may open a contract auction.
   if (state.m4) player.fundraisedThisTurn = true;
@@ -14247,7 +14278,7 @@ function computeFinalScores(state) {
   // unfulfilled contract claims the default chit as part of scoring).
   const contractRows = contractScoring(state);
   const scores = state.players.map((p, idx) => {
-    const cubeVp = m0 ? playerDelegatesPlaced(asm, p.profileId) : 0;
+    const cubeVp = m0 ? playerDelegatesPlaced(asm, p.profileId) + partnerDelegateCount(state, p.profileId) : 0;
     const awardVp = (m0 && winnerKey) ? ideologyAwardVp(state, p, winnerKey) : 0;
     // state.colonies is keyed BY site slug, so entries() (not values()) - the
     // slug is what tells a Sirenian dome whether it sits at an aerostat.
@@ -14336,7 +14367,7 @@ function ceoSoloScore(state, player) {
   const outposts = player.outposts ? Object.keys(player.outposts).length : 0;
   const rocket = (player.rocket && Array.isArray(player.rocket.stack) && player.rocket.stack.length > 0) ? 1 : 0;
   const gloryVp = playerGloryVp(player);
-  const cubeVp = m0 ? playerDelegatesPlaced(asm, player.profileId) : 0;
+  const cubeVp = m0 ? playerDelegatesPlaced(asm, player.profileId) + partnerDelegateCount(state, player.profileId) : 0;
   // Anchored Bernals + Futures stars count toward the live CEO tally too, so the
   // board KPI reflects ALL current game pieces (user 2026-07-05). Score the
   // stars through futureStarScore, the SAME helper the endgame tally and the
@@ -14501,7 +14532,7 @@ export function assemblyVpByPlayer(state) {
   const winnerKey = (state.finalVote && state.finalVote.winner) || null;
   for (const p of state.players) {
     out[p.profileId] = {
-      cubeVp: asm ? playerDelegatesPlaced(asm, p.profileId) : 0,
+      cubeVp: asm ? playerDelegatesPlaced(asm, p.profileId) + partnerDelegateCount(state, p.profileId) : 0,
       awardVp: (asm && winnerKey) ? ideologyAwardVp(state, p, winnerKey) : 0,
     };
   }
@@ -14537,7 +14568,7 @@ export function liveScoreboard(state) {
     const rocket = (p.rocket && Array.isArray(p.rocket.stack) && p.rocket.stack.length > 0) ? 1 : 0;
     const firstPlayer = idx === firstIdx ? 1 : 0;
     const gloryVp = playerGloryVp(p);
-    const cubeVp = asm ? playerDelegatesPlaced(asm, p.profileId) : 0;
+    const cubeVp = asm ? playerDelegatesPlaced(asm, p.profileId) + partnerDelegateCount(state, p.profileId) : 0;
     const bernalBd = m2 ? bernalScoreBreakdown(state, p) : { vp: 0, rows: [] };
     const bernalVp = bernalBd.vp;
     // Each accomplished Future scores its OWN current value (the same re-check +
@@ -15984,8 +16015,7 @@ function applyFulfillContract(state, op, player) {
   } else if (face.whenFulfilling) {
     when += ` When fulfilling (not yet automated): ${face.whenFulfilling}`;
   }
-  const ability = face.fulfilledAbility ? ` Fulfilled ability: ${face.fulfilledAbility}` : '';
-  return { ok: true, state, log: `${player.name} fulfilled ${face.name}${late ? ' (late)' : ''} for ${face.vp} VP.${when}${ability}` };
+  return { ok: true, state, log: `${player.name} fulfilled ${face.name}${late ? ' (late)' : ''} (+${face.vp} VP).${when}` };
 }
 
 // PAY_LATE_FEE (4B5b): a free action, up to the contract's late fee per turn,
@@ -16119,13 +16149,17 @@ function contractScoring(state) {
 // Gated on state.m4 AND state.m2 (colonists, Bernals and colonies are Module 2).
 // A faction owns ONE augmentation chit of each of the six cybernetics shapes
 // (4C4d), recorded as player.augments[shape] = { colonistId, side } once it is
-// implanted. Its portfolio is the cybernetics icons on its fulfilled contracts
-// (4B8d; partner enterprises are later).
+// implanted. Its portfolio is the cybernetics icons on its enterprises (its
+// fulfilled contracts) and its partner enterprises (other players' fulfilled
+// contracts carrying its delegate), 4B8d.
 const AUG_SHAPES = ['heart', 'jar', 'hexagon', 'splat', 'battery', 'triangle'];
-function portfolioShapes(player) {
+function portfolioShapes(state, player) {
   const out = new Set();
-  for (const f of (player.fulfilledContracts || [])) {
-    for (const s of ((contractFace(f.id, f.side) || {}).cybernetics || [])) out.add(s);
+  const add = (f) => { for (const s of ((contractFace(f.id, f.side) || {}).cybernetics || [])) out.add(s); };
+  for (const f of (player.fulfilledContracts || [])) add(f);
+  for (const q of (state.players || [])) {
+    if (q.profileId === player.profileId) continue;
+    for (const f of (q.fulfilledContracts || [])) if ((f.partners || []).includes(player.profileId)) add(f);
   }
   return out;
 }
@@ -16168,7 +16202,7 @@ function applyImplant(state, op, player) {
     delete player.augments[shape];
     parts.push(`took the ${shape} chit off ${cardNameOf(a.colonistId)}`);
   }
-  const portfolio = portfolioShapes(player);
+  const portfolio = portfolioShapes(state, player);
   for (const imp of implants) {
     const shape = String(imp && imp.shape || '');
     const colonistId = String(imp && imp.colonistId || '');
@@ -16492,6 +16526,28 @@ function tradeSideSummary(state, side) {
   return parts.length ? parts.join(' + ') : 'nothing';
 }
 
+// Can `player` ask for a partner seat on `req` = { ownerId, cardId, give }?
+// Returns { owner, cardId, face, give, location } or { error }.
+function enterpriseRequestRefusal(state, player, req, { place = null } = {}) {
+  if (!state.m4) return { error: 'not_m4' };
+  if (state.war) return { error: 'enterprise_needs_peace' };
+  if (place) return { error: 'enterprise_or_assembly' };
+  if (state.trade) return { error: 'trade_in_progress' };
+  const owner = playerByProfile(state, Number(req.ownerId));
+  if (!owner || owner.profileId === player.profileId) return { error: 'bad_enterprise_owner' };
+  const cardId = String(req.cardId || '');
+  const f = (owner.fulfilledContracts || []).find((x) => x.id === cardId);
+  if (!f) return { error: 'not_an_enterprise' };
+  if ((f.partners || []).includes(player.profileId)) return { error: 'already_partner' };
+  if (cubesInPlay(state, player.profileId) >= FACTORY_CUBES) return { error: 'no_cubes_left' };
+  const give = normTradeSide(req.give);
+  const bad = validateTradeSide(state, player, give);
+  if (bad) return { error: bad };
+  const meet = tradeMeetingError(state, player, owner, give, normTradeSide({}));
+  if (meet.error) return { error: meet.error };
+  return { owner, cardId, face: contractFace(cardId, f.side) || { name: cardId }, give, location: meet.location };
+}
+
 function applyTradeOffer(state, op, ctx) {
   // Trades are ALLOWED while an auction lot is open: a deal is how a bidder
   // priced out of the lot (auto-passed on aqua) gets back in - accepting a
@@ -16555,7 +16611,7 @@ function applyTradeCounter(state, op, ctx) {
   let give = normTradeSide(op.give);
   let receive = normTradeSide(op.receive);
   if (callerRole === 'partner') { const tmp = give; give = receive; receive = tmp; }
-  if (sideIsEmpty(give) && sideIsEmpty(receive)) return fail('empty_trade');
+  if (sideIsEmpty(give) && sideIsEmpty(receive) && !t.enterprise) return fail('empty_trade');
 
   const initiator = playerByProfile(state, t.initiatorId);
   const partner = playerByProfile(state, t.partnerId);
@@ -16598,6 +16654,17 @@ function applyTradeAccept(state, op, ctx) {
   let err = validateTradeSide(state, initiator, t.give) || validateTradeSide(state, partner, t.receive)
     || validateTradeReceipt(partner, t.give) || validateTradeReceipt(initiator, t.receive);
   if (err) return fail(err);
+  // A Partner Enterprise request (4B8): the owner's acceptance seats the
+  // fundraiser's delegate on the contract. Re-checked against the live board.
+  let entSlot = null;
+  if (t.enterprise) {
+    if (state.war) return fail('enterprise_needs_peace');
+    const owner = playerByProfile(state, t.enterprise.ownerId);
+    entSlot = owner && (owner.fulfilledContracts || []).find((x) => x.id === t.enterprise.cardId);
+    if (!entSlot) return fail('not_an_enterprise');
+    if ((entSlot.partners || []).includes(initiator.profileId)) return fail('already_partner');
+    if (cubesInPlay(state, initiator.profileId) >= FACTORY_CUBES) return fail('no_cubes_left');
+  }
 
   // Atomic swap. Both sides resolved off the same pre-swap balances above.
   executeTradeSide(initiator, partner, t.give);
@@ -16611,6 +16678,13 @@ function applyTradeAccept(state, op, ctx) {
 
   const giveSum = tradeSideSummary(state, t.give);
   const recvSum = tradeSideSummary(state, t.receive);
+  let entNote = '';
+  if (entSlot) {
+    entSlot.partners = [...(entSlot.partners || []), initiator.profileId];
+    const owner = playerByProfile(state, t.enterprise.ownerId);
+    const face = contractFace(entSlot.id, entSlot.side) || { name: entSlot.id };
+    entNote = `${initiator.name} partners on ${owner.name}'s ${face.name}`;
+  }
   state.trade = null;
   // A trade may re-open an auction for a priced-out bidder (aqua moved, and
   // the aqua auto-pass is dynamic): recompute the phase so `awaiting` flips
@@ -16619,7 +16693,9 @@ function applyTradeAccept(state, op, ctx) {
   if (state.auction) recomputeAuction(state);
   return {
     ok: true, state,
-    log: `${initiator.name} traded ${giveSum} to ${partner.name} for ${recvSum}.`,
+    log: t.enterprise
+      ? `${entNote}${giveSum !== 'nothing' ? ` (${giveSum}` : ''}${recvSum !== 'nothing' ? `${giveSum !== 'nothing' ? '; ' : ' ('}${partner.name} gave ${recvSum}` : ''}${giveSum !== 'nothing' || recvSum !== 'nothing' ? ')' : ''}.`
+      : `${initiator.name} traded ${giveSum} to ${partner.name} for ${recvSum}.`,
   };
 }
 
@@ -16633,7 +16709,9 @@ function applyTradeDecline(state, op, ctx) {
   state.trade = null;
   return {
     ok: true, state,
-    log: `${caller.name} called off the trade with ${other ? other.name : 'the other player'}.`,
+    log: t.enterprise
+      ? `${caller.name} declined the partner seat.`
+      : `${caller.name} called off the trade with ${other ? other.name : 'the other player'}.`,
   };
 }
 

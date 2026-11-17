@@ -9561,6 +9561,18 @@ html.battery-save *::after {
 .mp-ability.borrowed { background: rgba(80, 200, 160, 0.16); color: #bff3df; border-color: #2f6f5c; }
 .mp-ability.borrowed.permanent { background: rgba(220, 180, 80, 0.18); color: #f4e2b0; border-color: #7a6326; }
 .mp-ability.powersat { background: rgba(90, 170, 255, 0.2); color: #cfe6ff; border-color: #3b6ea8; }
+.enterprise-modal { max-width: 760px; }
+.enterprise-modal h3 { margin: 0 0 6px; }
+.enterprise-grid { display: flex; flex-wrap: wrap; gap: 12px; margin: 10px 0; }
+.enterprise-pick { background: none; border: 2px solid transparent; border-radius: 12px; padding: 4px; cursor: pointer;
+  color: inherit; font: inherit; width: 190px; display: grid; gap: 4px; justify-items: center; }
+.enterprise-pick:hover { border-color: var(--border); }
+.enterprise-pick.is-picked { border-color: #c98512; background: rgba(201, 133, 18, .12); }
+.enterprise-pick .card { width: 180px; }
+.enterprise-owner { font-size: 13px; }
+.enterprise-offer { margin-top: 6px; }
+.mp-trade-enterprise { margin-top: 4px; }
+.mp-ability.contract { background: rgba(201, 133, 18, 0.18); color: #f6dfb2; border-color: #8a5d12; }
 
 /* Builder modal: a focused, backdropped dialog. */
 .mp-modal-back {

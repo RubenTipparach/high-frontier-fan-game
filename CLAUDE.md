@@ -1267,6 +1267,14 @@ produce a log line that lands in it. This is not console logging - a
   fine. Pre-existing arrows in old comments / UI labels are not
   worth a rewrite sweep; just do not add new ones. (User
   directive 2026-07-01.)
+- **Minimal UI text: the player already knows the game.** (User directive,
+  repeated many times, recorded 2026-11-17.) Our players play HF4 at the table:
+  never explain a rule, term or mechanic in the UI (what an Enterprise is, what
+  a contract does, why a step matters). Labels are a word or two, buttons a
+  verb, modals carry the card / number / name and nothing else. No intro
+  paragraphs, no "(optional)", no "now active", no restating what a glyph or
+  card already shows. Rules explanations belong in tooltips at most, and only
+  when the board itself does not show it. If in doubt, cut it.
 - **Navigate-to is always the LAST button in a site popup.** It's
   a pure inspection affordance (no game state changes), so any
   real game actions (Plan rocket route, Prospect, Refuel, etc.)
