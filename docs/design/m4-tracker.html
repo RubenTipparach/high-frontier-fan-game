@@ -120,6 +120,8 @@ code { font: 500 0.9em var(--mono); }
 .stage .bar i { display: block; height: 100%; background: var(--done); }
 .items { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .items li { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; min-width: 0; }
+.items .wait { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; }
+.items .wait li { display: block; font-size: 13px; line-height: 1.4; }
 .items .what { min-width: 0; }
 .items .what b { font-weight: 600; }
 .items .what small { display: block; color: var(--muted); font-size: 13px; }
@@ -187,30 +189,38 @@ const ART_IMG = '';
 // Progress, newest status first within each stage. s: done | partial | design | todo.
 const PROGRESS = [
   { name: 'Stage 1: Contracts', items: [
-    { s: 'done', t: 'Admin-only M4 rooms', d: 'M4 forces M0 on; variants stay off.' },
-    { s: 'done', t: 'Contract decks from the card sheet', d: 'Three ideology-pair decks, blue and gold faces, Exodus contracts.' },
+    { s: 'done', t: 'Admin-only M4 rooms', d: 'M4 forces M0 on; no variants, no M2.' },
+    { s: 'done', t: 'Contract decks from the card sheet', d: 'Three ideology-pair decks. Contracts needing absent pieces are dealt out.' },
     { s: 'done', t: 'Contract auction', d: 'Fundraise ends with it. Bids in years, lowest wins, finder\'s fee 1 aqua.' },
+    { s: 'done', t: 'Ties: the patent auction close', d: 'The initiator awards a tie they are not in.' },
     { s: 'done', t: 'A won contract is a Hand card', d: 'Outside the hand limit; boosts on the side it was won on.' },
-    { s: 'partial', t: 'Boost and fulfil', d: '52 of 84 faces checked automatically; 32 destinations wait on other pieces.' },
+    { s: 'partial', t: 'Boost and fulfil', d: '61 of 84 faces checked by the game. 23 wait on:',
+      wait: [
+        ['M2: Bernals, Colonies, Colonists', 'Junket, Fugitive, Drug Smuggling, Life Support Reconfig Team; gold: Home on Lagrange, Planetary Rail Network, Subnubilar Zeppelin, Mercury Sunset Convoy, Goo Spores, Chipjack, Life Support Test Protocol'],
+        ['M1: Freighter, GW / TW thruster, Space Elevator', 'gold: Daedalus Starship Research, Ring Industrialization, Skyhook'],
+        ['Stage 3: Isobank, isotopes', 'TW Stress Test, Radiation Shield Prototype; gold: Cyborg Transhumans, Spaceborn Political Rally, Refugees, Isotope Fueling Station, Rival Isobank'],
+        ['Not on our map', 'Search for Life Center (Echeclus); gold: Trojan Listening Posts (Agamemnon, Aeneas)'],
+      ] },
+    { s: 'done', t: 'Carried by any stack', d: 'Rocket, LEO, Outposts, Freighter.' },
+    { s: 'done', t: 'Destination checklist on the card', d: 'Steps ticked as announced.' },
+    { s: 'done', t: 'Contract fulfilled popup', d: 'For everyone at the table.' },
     { s: 'done', t: 'Late fees, default, the default chit, scoring', d: 'Mishap Insurance pays the first fee; -3 / -6 chit.' },
     { s: 'done', t: 'Losing and abandoning contracts', d: 'Decommission returns it to hand; abandon only in Anarchy or War.' },
-    { s: 'done', t: 'Contract abilities, first batch', d: 'Shielded, Bailout, Secured, Connections, Insight, Hazard Ignore, Tophat, Gain N Aquas, Rivalry.' },
-    { s: 'done', t: 'Bid on the Sunspot dial with the alarm-clock timepiece', d: 'Tap a slot to set your bid; the dial shows the turn, every bid and the time it buys. The Contracts panel shows years left.' },
-    { s: 'todo', t: 'Remaining abilities', d: 'Conditional ignores, Transport, one-off abilities, other When Fulfilling effects.' },
-    { s: 'todo', t: 'Tie-winner picker in the auction', d: 'The rules already accept the pick.' },
+    { s: 'done', t: 'Contract abilities, first batch', d: 'Shielded, Bailout, Secured, Connections, Insight, Hazard Ignore, Tophat, Gain N Aquas, Rivalry. Chips under player names.' },
+    { s: 'done', t: 'Bid on the Sunspot dial with the alarm-clock timepiece' },
+    { s: 'todo', t: 'Remaining abilities (blue sides)', d: 'New Horizons, Artemis, Closest Planet, Inner Tour, Sun-fired Laser, Equatorial Launch Railway, Plasma Intrusion Laboratory, Rescue Team, Tsiolkovsky Elevator Lab; When Fulfilling: Planetary Protection, Beehive.' },
     { s: 'todo', t: 'Negotiating contracts (4B2g)', d: 'Trade an unfulfilled contract with its timepiece.' },
-    { s: 'todo', t: 'Contracts on Freighter and Bernal stacks', d: 'Today a contract rides the rocket or sits in LEO.' },
   ] },
   { name: 'Stage 2: Augmentations', items: [
-    { s: 'done', t: 'IMPLANT at a BEO Colony', d: 'Portfolio chits on Colonists aboard your Dirtside Bernal.' },
+    { s: 'done', t: 'IMPLANT', d: 'No M2: on your Colony. M2: on Colonists at your Dirtside Bernal.' },
+    { s: 'done', t: 'Enterprises and partner enterprises (4B8)', d: 'Fundraise seats a partner delegate by negotiation.' },
     { s: 'done', t: 'Promotion needs an augmentation (4C7e)', d: 'For Colonists.' },
-    { s: 'todo', t: 'The twelve augmentation abilities (4C3)' },
-    { s: 'todo', t: 'Parenthood on the heart chit (4C5)' },
-    { s: 'todo', t: 'Enterprises and partner enterprises (4B8)' },
-    { s: 'todo', t: 'Promotion counts for Freighter, Bernal, GW thruster' },
+    { s: 'partial', t: 'The twelve augmentation abilities (4C3)', d: 'Built: Splat 1, Splat 2, Triangle 2, Heart 2. Open: A1, A2. Heart 1 needs M2; Triangle 1 needs isotopes.' },
+    { s: 'todo', t: 'Parenthood on the heart chit (4C5)', d: 'M2.' },
+    { s: 'todo', t: 'Promotion counts for Freighter, Bernal, GW thruster', d: 'M1 / M2.' },
     { s: 'design', t: 'Chit and Spaceborn glyphs on colonist cards', d: 'Needs a rendered preview and your sign-off first.' },
   ] },
-  { name: 'Stage 3: Isotopes and the starship', items: [
+  { name: 'Stage 3: Isotopes and the starship (M4 + M1)', items: [
     { s: 'todo', t: 'Isotope monetization' },
     { s: 'todo', t: 'The isobank and the isobanker' },
     { s: 'todo', t: 'Gold-side contract upheaval (4B1b)' },
@@ -219,12 +229,15 @@ const PROGRESS = [
   { name: 'Art and release', items: [
     { s: 'done', t: 'Contract card art', d: 'A unique craft over a rendered planet backdrop, per card.' },
     { s: 'done', t: 'Spaceborn and robot colonist art', d: 'The SVG set was chosen.' },
-    { s: 'todo', t: 'CEO Solitaire\'s own M4 rules (4G)' },
+    { s: 'done', t: 'CEO Solitaire rules (4G)', d: 'CEO Solitaire implements them. M4 in a CEO room is still refused.' },
     { s: 'todo', t: 'Release to every host', d: 'The four-step checklist, when you say so.' },
   ] },
 ];
 
 const REELS = [
+  { src: 'reels/m4-solo-spin.mp4', t: 'Spin Control (solo)', d: 'Into the rapid-spin hazard, pay, fulfil.' },
+  { src: 'reels/m4-solo-rescue.mp4', t: 'Rescue Team (solo)', d: 'Crew aboard at the size-11 Aerostat-Xity, fulfil.' },
+  { src: 'reels/m4-augmentation.mp4', t: 'Augmentation, no M2', d: 'Implant the triangle on the Ceres Colony.' },
   { src: 'reels/m4-auction.mp4', t: 'Contract auction', d: 'Open at 10 years, a rival underbids at 4, the initiator closes it.' },
   { src: 'reels/m4-insight.mp4', t: 'Insight', d: 'Send a reactor to the bottom, then auction the next one.' },
   { src: 'reels/m4-connections.mp4', t: 'Connections', d: 'Honor / Unity opens through an Honor delegate.' },
@@ -331,7 +344,8 @@ function renderProgress() {
       bar,
       el('ul', { class: 'items' }, st.items.map((i) => el('li', {},
         el('span', { class: 'pill ' + i.s, text: LABEL[i.s] }),
-        el('div', { class: 'what' }, el('b', { text: i.t }), i.d ? el('small', { text: i.d }) : null))))));
+        el('div', { class: 'what' }, el('b', { text: i.t }), i.d ? el('small', { text: i.d }) : null,
+          i.wait ? el('ul', { class: 'wait' }, i.wait.map(([piece, cards]) => el('li', {}, el('b', { text: piece + ': ' }), el('small', { text: cards })))) : null))))));
   }
   const reels = document.getElementById('reels');
   for (const r of REELS) {
