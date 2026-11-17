@@ -1651,6 +1651,15 @@ function colonistColocatedWithSite(state, player, e, siteId) {
     const bn = (player.bernals || [])[Number(e.from.slice('bernal'.length)) || 0];
     if (bn && bn.anchored && bernalDirtsides(state, bn, player).includes(siteId)) return true;
   }
+  // A colonist on any other stack (rocket, outpost, freighter) parked in the
+  // space of one of the player's anchored Bernals is there too: a Site Refuel at
+  // that Bernal's Dirtside factory is run from that space (2A7d), so a Miner or
+  // an Alchemist riding the rocket there counts, as one aboard the Bernal does.
+  if (e.siteId != null) {
+    for (const bn of (player.bernals || [])) {
+      if (bn && bn.anchored && bn.siteId === e.siteId && bernalDirtsides(state, bn, player).includes(siteId)) return true;
+    }
+  }
   return false;
 }
 // Colonist SPECIALISTS of one specialty colocated with a site (both faces carry
@@ -11283,9 +11292,14 @@ function applySiteRefuel(state, op, player) {
     // Same yield as the tank Isotope Refuel: base 1, doubled by the relevant
     // Futures and again by a colocated Alchemist Aviatrices colonist.
     let iBase = hasFutureEffect(player, 'doubleIsotopeRefuel') ? 2 : 1;
+    // Colocated by the SAME rule as the Miner's extra refuel (colonistColocatedWithSite):
+    // aboard an anchored Bernal Dirtside to this site counts. It used to demand
+    // the colonist's stack sit on the site itself, so an Alchemist on the Bernal
+    // (or on the rocket at the Bernal's space) never doubled while the Miner on
+    // the same card still granted its extra refuel (reported 2026-11-17, game 1035).
     const alchemist = (state.m2 && [...colonistLocations(player)].some((e) => {
       const pw = colonistSlotPower(e.slot);
-      return e.siteId === siteId && pw && pw.doubleIsotopeRefuel;
+      return pw && pw.doubleIsotopeRefuel && colonistColocatedWithSite(state, player, e, siteId);
     }));
     if (alchemist) iBase *= 2;
     outpost.cards = outpost.cards || [];
@@ -11395,9 +11409,14 @@ function applySiteRefuel(state, op, player) {
     // Candle / Antimatter) double every isotope refuel, and a colocated
     // Alchemist Aviatrices colonist doubles it again.
     let iBase = hasFutureEffect(player, 'doubleIsotopeRefuel') ? 2 : 1;
+    // Colocated by the SAME rule as the Miner's extra refuel (colonistColocatedWithSite):
+    // aboard an anchored Bernal Dirtside to this site counts. It used to demand
+    // the colonist's stack sit on the site itself, so an Alchemist on the Bernal
+    // (or on the rocket at the Bernal's space) never doubled while the Miner on
+    // the same card still granted its extra refuel (reported 2026-11-17, game 1035).
     const alchemist = (state.m2 && [...colonistLocations(player)].some((e) => {
       const pw = colonistSlotPower(e.slot);
-      return e.siteId === siteId && pw && pw.doubleIsotopeRefuel;
+      return pw && pw.doubleIsotopeRefuel && colonistColocatedWithSite(state, player, e, siteId);
     }));
     if (alchemist) iBase *= 2;
     const iroom = redStepsBetween(idry + itank);
