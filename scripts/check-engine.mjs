@@ -11186,6 +11186,91 @@ check('Transport (4B2f): one cargo transfer a turn along a buggy road', () => {
   return r.log;
 });
 
+check('Tophat on a Freighter: its first hazard is entered free, once a turn (R4)', () => {
+  const space = (sl) => nodeSizeNumber(sl) <= 0 && !isLanderBurnNode(sl);
+  let pick = null;
+  for (const n of mapNodes()) {
+    if (!space(n) || hazardKind(n)) continue;
+    const m = (neighborSlugs(n) || []).find((x) => space(x) && hazardKind(x) === 'skull');
+    if (m) { pick = { from: n, to: m }; break; }
+  }
+  const tophat = CONTRACTS.find((c) => c.faces.primary.tophat);
+  assert(pick && tophat, 'no open space next to a skull, or no tophat contract');
+  const fly = (withHat) => {
+    const st = startedGame({ seats: 2, m1: true, m4: true });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.freighter = { cardId: 'fre_z_pinch_d_t_6li_fusion', face: 'primary', siteId: pick.from, stack: [], tank: 30, wiring: {}, route: [] };
+    if (withHat) {
+      me.freighter.stack.push({ id: tophat.id, kind: 'contract', face: 'primary' });
+      me.contractMeta = { [tophat.id]: { side: 'blue', paid: 0, boosted: true, default: false, progress: { sites: [], done: 0 } } };
+    }
+    me.freighterMovesRemaining = 1; me.aqua = 60;
+    st.turnActions = [];
+    return applyOperation(st, { kind: 'MOVE', unit: 'freighter', debug: true, segments: [{ from: pick.from, to: pick.to, burns: 0, turn: 1 }] }, { profileId: me.profileId });
+  };
+  const plain = fly(false);
+  assert(plain.ok && plain.calc.rollItems === 1 && !plain.calc.tophat, `no hat: ${plain.error || JSON.stringify(plain.calc)}`);
+  const hat = fly(true);
+  assert(hat.ok && hat.calc.rollItems === 0 && hat.calc.tophat === pick.to, `hat: ${hat.error || JSON.stringify(hat.calc)}`);
+  return `${pick.from} into ${pick.to}: 1 roll without, 0 with the tophat aboard`;
+});
+
+check('Shielded protects a Mobile Factory belt roll (R6)', () => {
+  const space = (sl) => nodeSizeNumber(sl) <= 0 && !isLanderBurnNode(sl);
+  let pick = null;
+  for (const n of mapNodes()) {
+    if (!space(n) || hazardKind(n)) continue;
+    const r = (neighborSlugs(n) || []).find((x) => hazardKind(x) === 'rad');
+    if (r) { pick = { from: n, to: r }; break; }
+  }
+  assert(pick, 'no open space next to a radiation belt');
+  const shieldC = CONTRACTS.find((c) => c.faces.primary.abilities && c.faces.primary.abilities.shielded);
+  const fly = (shielded) => {
+    const st = startedGame({ seats: 1, m1: true, m4: true });
+    const me = st.players[0];
+    me.freighter = { cardId: 'fre_fission_heated_steam', promoted: true, face: 'secondary', siteId: null, tank: 0, route: [], stack: [] };
+    st.mobileCubes = [{ id: 'mf1', ownerId: me.profileId, siteId: pick.from, spectralType: 'C', tag: 'alpha' }];
+    if (shielded) me.fulfilledContracts = [{ id: shieldC.id, side: 'blue', round: 1 }];
+    return applyOperation(st, { kind: 'MOVE_FACTORY', fromSiteId: pick.from, toSiteId: pick.to, hazardPay: true }, { profileId: me.profileId });
+  };
+  const plain = fly(false);
+  assert(plain.ok, `plain move: ${plain.error}`);
+  assert(/rolled|glitch|d6|\(/.test(plain.log) || plain.rolled, 'the plain move made no belt roll');
+  const sh = fly(true);
+  assert(sh.ok && !sh.rolled, `Shielded: ${sh.error || 'still rolled'} ${sh.log || ''}`);
+  return `${pick.from} into belt ${pick.to}: rolled without, safe pass with Shielded`;
+});
+
+check('Jar side 2: your water pays FINAO when aqua runs short (A1)', () => {
+  const space = (sl) => nodeSizeNumber(sl) <= 0 && !isLanderBurnNode(sl);
+  let pick = null;
+  for (const n of mapNodes()) {
+    if (!space(n) || hazardKind(n)) continue;
+    const m = (neighborSlugs(n) || []).find((x) => space(x) && hazardKind(x) === 'skull');
+    if (m) { pick = { from: n, to: m }; break; }
+  }
+  const thr = PATENTS_BY_ID.thr_hall_effect, gen = PATENTS_BY_ID.gen_cascade_photovoltaic;
+  const fly = (jar) => {
+    const st = startedGame({ seats: 1, m4: true });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.rocket.stack = [{ id: thr.id, kind: 'patent', face: 'primary' }, { id: gen.id, kind: 'patent', face: 'primary' }];
+    me.rocket.activeThrusterId = thr.id;
+    me.rocket.siteId = pick.from; me.rocket.tank = 6; me.rocket.tankGrade = 'water';
+    me.aqua = 0; me.movesRemaining = 1;
+    if (jar) { st.colonies = { ceres: { ownerId: me.profileId } }; me.augments = { jar: { colonySite: 'ceres', side: 2 } }; }
+    return applyOperation(st, { kind: 'MOVE', toSiteId: pick.to, segments: [{ from: pick.from, to: pick.to, burns: 0 }], hazardChoices: ['pay'] }, { profileId: me.profileId });
+  };
+  const broke = fly(false);
+  assert(!broke.ok && broke.error === 'insufficient_aqua', `no aqua, no Jar: ${broke.error}`);
+  const jar = fly(true);
+  assert(jar.ok, `Jar 2 pays from the tank: ${jar.error}`);
+  const me = jar.state.players[0];
+  assert(me.aqua === 0 && me.rocket.tank < 6, `aqua ${me.aqua}, tank ${me.rocket.tank}`);
+  return `FINAO paid from the tank: 6 -> ${me.rocket.tank}`;
+});
+
 check('Beehive: an operational robonaut and refinery at a busted size-1 site', () => {
   const kit = [{ id: 'rob_blackbody_pumped_laser', kind: 'patent', face: 'primary' }, { id: 'ref_atomic_layer_deposition', kind: 'patent', face: 'primary' }];
   const run = (site, { busted = true, cards = kit, glitch = false } = {}) => {

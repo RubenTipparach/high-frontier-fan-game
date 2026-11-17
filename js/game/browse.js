@@ -19602,8 +19602,12 @@ function contractIgnoreWordsOf(p) {
 // M4 tophat (4B2e), mirror of the engine's stackHasActiveTophat: the rocket
 // carries a tophat contract that is not in default, and has not used it this turn.
 function rocketTophatFree(p) {
-  if (!isM4() || !p || !p.rocket || (p.tophatUsed && p.tophatUsed.rocket)) return false;
-  return (p.rocket.stack || []).some((slot) => {
+  return !!(p && p.rocket) && stackTophatFree(p, p.rocket.stack, 'rocket');
+}
+// Tophat (4B2e): any stack carrying it, once per stack per turn (owner R4).
+function stackTophatFree(p, stack, key) {
+  if (!isM4() || !p || (p.tophatUsed && p.tophatUsed[key])) return false;
+  return (stack || []).some((slot) => {
     if (!slot || slot.kind !== 'contract') return false;
     const meta = (p.contractMeta || {})[slot.id];
     const face = contractFace(slot.id, (meta && meta.side) || slot.face || 'blue');
@@ -19684,6 +19688,18 @@ onTurnChange(() => {
 // when the balance can't cover the bill. The wording leans hard
 // on "cannot be undone" because the rulebook commits the dice as
 // soon as they hit the table - same idiom here.
+// Jar side 2 (owner answer A1): whole water across your tanks and Outpost cans
+// pays FINAO after aqua. Mirror of the engine's finaoFunds.
+function jarFinaoWater() {
+  const me = _online && _onlineSnapshot && _onlineSnapshot.m4 ? mySnapshotPlayer() : null;
+  const a = me && me.augments && me.augments.jar;
+  if (!a || a.side !== 2) return 0;
+  let n = 0;
+  if (me.rocket && (me.rocket.tankGrade || 'water') === 'water') n += Math.floor(me.rocket.tank || 0);
+  if (me.freighter && (me.freighter.tankGrade || 'water') === 'water') n += Math.floor(me.freighter.tank || 0);
+  for (const o of Object.values(me.outposts || {})) for (const c of ((o && o.cards) || [])) if (c && c.kind === 'fuel' && c.grade === 'water') n += Math.floor(c.amount || 0);
+  return n;
+}
 function hazardConfirmModal(hazards, { allowStepwise = false } = {}) {
   return new Promise((resolve) => {
     document.querySelector('.confirm-modal-overlay')?.remove();
@@ -19702,7 +19718,8 @@ function hazardConfirmModal(hazards, { allowStepwise = false } = {}) {
 
     const n = hazards.length;
     const cost = n * finaoPer();
-    const have = getAqua();
+    // Jar augmentation, side 2 (M4): your water counts toward FINAO.
+    const have = getAqua() + jarFinaoWater();
     const canPay = have >= cost;
     const list = hazards.map((h, i) =>
       `<li><span class="haz-order">${i + 1}.</span> <span class="haz-glyph">${h.glyph}</span> `
@@ -27067,6 +27084,9 @@ async function commitFreighterMoveOnline() {
     liftoffAssist: (frLiftGate && frLiftGate.needsRoll) ? { site: frSite, glyph: '🏭', label: 'liftoff assist' } : null,
     landingAssist: (landG.needsRoll && destSite) ? { site: destSite, glyph: '🏭', label: 'landing assist' } : null,
     liftoffAssistActive: !!(frLiftGate && frLiftGate.assist),
+    chaosImmune: playerHasPrivilege(mySnapshotPlayer(), 'POWER_SERIES_CHAOS_MODEL'),
+    ignoreWords: contractIgnoreWordsOf(mySnapshotPlayer()),
+    tophatFree: (() => { const meF = mySnapshotPlayer(); return !!(meF && meF.freighter) && stackTophatFree(meF, meF.freighter.stack, 'freighter'); })(),
   });
   let hazardPay = false;
   if (payable.length) {

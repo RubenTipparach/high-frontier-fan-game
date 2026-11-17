@@ -1690,8 +1690,47 @@ function seniorityDisksOnAssembly(state) {
 function payFinao(state, player, cost) {
   const paid = Math.max(0, cost | 0);
   if (paid <= 0) return 0;
-  player.aqua = (player.aqua | 0) - paid;
+  chargeFinao(state, player, paid);
   return finaoRebate(state, player, paid);
+}
+// Jar augmentation, side 2: "FTs may be spent for FINAO" (4C3), from any of your
+// water (owner answer A1): the rocket and Freighter tanks and the water cans in
+// your Outposts, whole units. Aqua is spent first. `rocketTank` overrides the
+// rocket's tank for a move that has already burned part of it.
+function finaoWaterTaps(player, { rocketTank = null } = {}) {
+  const taps = [];
+  const r = player.rocket;
+  if (r && (r.tankGrade || 'water') === 'water') {
+    taps.push({ have: () => Math.floor(rocketTank != null ? rocketTank : (r.tank || 0)), take: (n) => { r.tank = round6((r.tank || 0) - n); } });
+  }
+  const fr = player.freighter;
+  if (fr && (fr.tankGrade || 'water') === 'water') {
+    taps.push({ have: () => Math.floor(fr.tank || 0), take: (n) => { fr.tank = round6((fr.tank || 0) - n); } });
+  }
+  for (const o of Object.values(player.outposts || {})) {
+    for (const c of ((o && o.cards) || [])) {
+      if (c && c.kind === 'fuel' && c.grade === 'water') taps.push({ have: () => Math.floor(c.amount || 0), take: (n) => { c.amount = (c.amount || 0) - n; } });
+    }
+  }
+  return taps;
+}
+function finaoFunds(state, player, opts) {
+  const aqua = player.aqua | 0;
+  if (!(state.m4 && hasAugmentSide(player, 'jar', 2))) return aqua;
+  return aqua + finaoWaterTaps(player, opts).reduce((n, tp) => n + Math.max(0, tp.have()), 0);
+}
+function chargeFinao(state, player, cost) {
+  let need = Math.max(0, cost | 0);
+  const fromAqua = state.m4 && hasAugmentSide(player, 'jar', 2) ? Math.min(Math.max(0, player.aqua | 0), need) : need;
+  player.aqua = (player.aqua | 0) - fromAqua;
+  need -= fromAqua;
+  for (const tp of (need > 0 ? finaoWaterTaps(player) : [])) {
+    const n = Math.min(need, Math.max(0, tp.have()));
+    if (n > 0) { tp.take(n); need -= n; }
+    if (need <= 0) break;
+  }
+  if (need > 0) player.aqua = (player.aqua | 0) - need;
+  for (const o of Object.values(player.outposts || {})) if (o && o.cards) o.cards = o.cards.filter((c) => !(c.kind === 'fuel' && (c.amount || 0) <= 0));
 }
 // The Power Brokers settlement on its own, for a caller that pays up front and
 // settles once the net payment is known (MOVE refunds FINAO for a hazard the
@@ -4473,20 +4512,27 @@ function applyMoveFreighter(state, op, player) {
   const frCrashSpace = (liftG.assist && from && arrivals.length) ? String(arrivals[0]) : null;
   const frCrashIgnored = [];
   const frColonyWaived = [];
+  // M4 tophat (4B2e, owner answer R4: any stack carrying it, once per stack per
+  // turn): the Freighter's first remaining hazard is entered safely, free.
+  const frTophatFree = !(player.tophatUsed && player.tophatUsed.freighter)
+    && stackHasActiveTophat(state, player, fr.stack);
+  let frTophatSlug = null;
   for (const slug of generic) {
     if (chaosModelImmune(state, player, slug)) { frColonyWaived.push(slug); continue; }
     if (contractIgnoresHazard(state, player, slug)) { frColonyWaived.push(slug); continue; }
     if (frCrashSpace && slug === frCrashSpace && !isLanderBurnNode(slug)) { frCrashIgnored.push(slug); continue; }
     if (liftoffColonyWaives(state, from, slug)) { frColonyWaived.push(slug); continue; }
+    if (frTophatFree && !frTophatSlug) { frTophatSlug = slug; frColonyWaived.push(slug); continue; }
     rollItems.push({ slug, kind: hazardKind(slug) });
   }
 
   if (op.debug) {
-    return { ok: true, state, log: '', calc: { unit: 'freighter', dest, destSize, thisTurnBurns,
+    return { ok: true, state, log: '', calc: { unit: 'freighter', dest, destSize, thisTurnBurns, ...(frTophatSlug ? { tophat: frTophatSlug } : {}),
       crashIgnored: frCrashIgnored, colonyWaived: frColonyWaived,
       ...(frAcetylene ? { acetylene: true, acetyleneCost: frAcetyleneCost, acetyleneCredit: frAcetCredit } : {}),
       glitched: !!fr.glitched, rollItems: rollItems.length, radZones: rad.length } };
   }
+  if (frTophatSlug) player.tophatUsed = { ...(player.tophatUsed || {}), freighter: true };
   // Acetylene liftoff: burn the site's stored water (the player's outposts at the
   // origin), NOT the freighter's own tank - the boosters are fuelled from the
   // atmosphere. Charged only once every gate above has passed, so a refused move
@@ -4506,7 +4552,7 @@ function applyMoveFreighter(state, op, player) {
   const wantPay = !!op.hazardPay;
   const finaoPer = finaoPerFor(state, player);
   const finaoCost = wantPay ? rollItems.length * finaoPer : 0;
-  if (finaoCost > 0 && finaoCost > (player.aqua | 0)) return fail('insufficient_aqua');
+  if (finaoCost > 0 && finaoCost > finaoFunds(state, player)) return fail('insufficient_aqua');
   if (finaoCost > 0) payFinao(state, player, finaoCost);
 
   const gen = makeRng(state.seed, state.rng.cursor);
@@ -4845,7 +4891,7 @@ function applyMoveBernal(state, op, player) {
   const wantPay = !!op.hazardPay;
   const finaoPer = finaoPerFor(state, player);
   const finaoCost = wantPay ? rollItems.length * finaoPer : 0;
-  if (finaoCost > 0 && finaoCost > (player.aqua | 0)) return fail('insufficient_aqua');
+  if (finaoCost > 0 && finaoCost > finaoFunds(state, player)) return fail('insufficient_aqua');
   if (finaoCost > 0) payFinao(state, player, finaoCost);
 
   const gen = makeRng(state.seed, state.rng.cursor);
@@ -5270,7 +5316,7 @@ function applyMoveFactory(state, op, player) {
   const wantPay = !!op.hazardPay;
   const finaoPer = finaoPerFor(state, player);
   const finaoCost = wantPay ? rollItems.length * finaoPer : 0;
-  if (finaoCost > 0 && finaoCost > (player.aqua | 0)) return fail('insufficient_aqua');
+  if (finaoCost > 0 && finaoCost > finaoFunds(state, player)) return fail('insufficient_aqua');
   if (finaoCost > 0) payFinao(state, player, finaoCost);
   // Acetylene: the boosters burn the site's stored water, never the cube.
   if (cubeAcet && cubeAcetCost > 0) {
@@ -5303,7 +5349,9 @@ function applyMoveFactory(state, op, player) {
     // fail here) can't matter - skip it entirely so the move stays UNDOABLE.
     // (A non-glitch-free factory always risks a 1/6 glitch, a real random
     // outcome, so that roll legitimately still blocks undo.)
-    const facGlitchFree = playerHasColonistPower(state, player, 'glitchFree');
+    // Shielded contract ability (owner answer R6): it protects this belt roll
+    // too, so a Shielded faction's Mobile Factory passes like a glitch-free one.
+    const facGlitchFree = playerHasColonistPower(state, player, 'glitchFree') || contractShield(state, player) > 0;
     if (facGlitchFree) {
       for (const slug of rad) rolls.push({ slug, kind: 'rad', bypassed: true });
     } else for (const slug of rad) {
@@ -5887,7 +5935,7 @@ function applyMove(state, op, player) {
   const finaoPer = finaoPerFor(state, player);
   const paidCount = hazardChoices.filter((c) => c === 'pay').length;
   const finaoCost = paidCount * finaoPer;
-  if (finaoCost > 0 && finaoCost > (player.aqua | 0)) return fail('insufficient_aqua');
+  if (finaoCost > 0 && finaoCost > finaoFunds(state, player, { rocketTank: walkBlackDown(wetMass, stepsNeeded) - dryMass })) return fail('insufficient_aqua');
 
   // Commit the burn + the FINAO payment, then resolve dice in travel
   // order. rolls[] is recorded on the rocket for the client to play
@@ -5896,7 +5944,7 @@ function applyMove(state, op, player) {
   // the new tank water is whatever mass is left above dry (often fractional).
   player.rocket.tank = round6(walkBlackDown(wetMass, stepsNeeded) - dryMass);
   // Paid now; the Power Brokers settlement waits for the refund below.
-  if (finaoCost > 0) player.aqua -= finaoCost;
+  if (finaoCost > 0) chargeFinao(state, player, finaoCost);
   // Acetylene liftoff: burn the site's stored water (the player's outpost
   // tank(s) here), oldest outpost first. Whole units; validated above.
   if (acetylene) {
@@ -9094,7 +9142,7 @@ function applyAnchorBernal(state, op, player) {
   if (isGeoElevatorBuild) {
     const wantPay = !!op.hazardPay;
     const finaoPer = finaoPerFor(state, player);
-    if (wantPay && finaoPer > (player.aqua | 0)) return fail('insufficient_aqua');
+    if (wantPay && finaoPer > finaoFunds(state, player)) return fail('insufficient_aqua');
     // The attempt spends the operation regardless of the roll's outcome.
     if (freeViaColonist) spendColonistFreeOp(player, 'Industrialist');
     else player.opsRemaining -= 1;
@@ -12383,7 +12431,7 @@ function applyAirEaterRefuel(state, op, player) {
   const safeAero = stackSafeAerobrake(player.rocket);
   const wantPay = !safeAero && !!op.hazardPay;
   const finaoPer = finaoPerFor(state, player);
-  if (wantPay && finaoPer > (player.aqua | 0)) return fail('insufficient_aqua');
+  if (wantPay && finaoPer > finaoFunds(state, player)) return fail('insufficient_aqua');
   const gen = makeRng(state.seed, state.rng.cursor);
   const rolls = [];
   let destroyed = false;
@@ -12781,7 +12829,7 @@ function applyBuildElevator(state, op, player) {
 
   const wantPay = !!op.hazardPay;
   const finaoPer = finaoPerFor(state, player);
-  if (wantPay && finaoPer > (player.aqua | 0)) return fail('insufficient_aqua');
+  if (wantPay && finaoPer > finaoFunds(state, player)) return fail('insufficient_aqua');
   if (op.debug) {
     return { ok: true, state, log: '', calc: { pair: pair.key, factoryEnd, otherEnd, wouldPay: wantPay, performer: cubeKind, free: !!iceworms } };
   }
@@ -13128,7 +13176,7 @@ function applyEpicHazard(state, op, player) {
   // The Epic Hazard roll (or FINAO).
   const wantPay = !!op.hazardPay;
   const finaoPer = finaoPerFor(state, player);
-  if (wantPay && finaoPer > (player.aqua | 0) - aquaCost) return fail('insufficient_aqua');
+  if (wantPay && finaoPer > finaoFunds(state, player) - aquaCost) return fail('insufficient_aqua');
   let rolled = false, d6 = null, failed = false;
   if (wantPay) {
     payFinao(state, player, finaoPer);

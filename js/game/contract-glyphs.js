@@ -82,7 +82,7 @@ export function tophatGlyph({ size = 22 } = {}) {
   return `<svg class="m4-title-icon" data-tip="Top hat: a Stack carrying this contract safely enters 1 Hazard per Turn without paying FINAO (the trillionaire pays)." width="${size}" height="${size}" viewBox="0 0 24 24" fill="#fff"><path d="M7 3.5h10l-.6 13.2H7.6z"/><path d="M2.5 17.2c2.6 1.6 6 2.3 9.5 2.3s6.9-.7 9.5-2.3v1.6c-2.6 1.8-6 2.6-9.5 2.6s-6.9-.8-9.5-2.6z"/><rect x="7.4" y="13.2" width="9.2" height="1.6" fill="#2b2b2f"/></svg>`;
 }
 export function maskGlyph({ size = 22 } = {}) {
-  return `<svg class="m4-title-icon" data-tip="Mask: a Felony contract. Moving it, or discarding a Human it carries, may be a Felony." width="${size}" height="${size}" viewBox="0 0 24 24" fill="#fff"><path d="M2 8.5c3-1.7 6.5-1.6 10 .2 3.5-1.8 7-1.9 10-.2.2 3.8-1.3 7-4.6 7-2.4 0-3.6-1.8-5.4-1.8S9 15.5 6.6 15.5C3.3 15.5 1.8 12.3 2 8.5z"/><ellipse cx="7.4" cy="10.9" rx="2.2" ry="1.4" fill="#2b2b2f"/><ellipse cx="16.6" cy="10.9" rx="2.2" ry="1.4" fill="#2b2b2f"/></svg>`;
+  return `<svg class="m4-title-icon" data-tip="Felony: this stack may commit Felonies (as Felonious). Lost on default." width="${size}" height="${size}" viewBox="0 0 24 24" fill="#fff"><path d="M2 8.5c3-1.7 6.5-1.6 10 .2 3.5-1.8 7-1.9 10-.2.2 3.8-1.3 7-4.6 7-2.4 0-3.6-1.8-5.4-1.8S9 15.5 6.6 15.5C3.3 15.5 1.8 12.3 2 8.5z"/><ellipse cx="7.4" cy="10.9" rx="2.2" ry="1.4" fill="#2b2b2f"/><ellipse cx="16.6" cy="10.9" rx="2.2" ry="1.4" fill="#2b2b2f"/></svg>`;
 }
 
 // --- Bottom badges ------------------------------------------------------------
