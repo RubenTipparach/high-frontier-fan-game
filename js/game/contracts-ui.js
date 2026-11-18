@@ -213,6 +213,13 @@ function locationOf(p, id) {
   return null;
 }
 
+// The Completed contracts tab, opened from the Contracts chip in the stack row.
+export function openCompletedContracts() {
+  _tab = 'yours';
+  _tabForced = true;   // a waiting auction must not pull it back to the Market
+  _panelOpen = true;
+  renderPanel();
+}
 // The timepiece badge (turn bar): the contract on the clock, and where it is.
 export function timepieceBadge() {
   const s = snap(); const p = me();

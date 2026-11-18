@@ -121,7 +121,7 @@ import { futureGoalForCard, checkFutureGoal, CENTAUR_SITE_IDS, GREEK_CAMP_IDS, T
 // M2 Colonist powers (FINAO halved etc.) - the same flags the engine reads.
 import { colonistPower } from '../../data/colonist-abilities.js';
 import { openBernalStackModal, openBernalFuelTank } from './bernal-modal.js';
-import { initContractsUi, refreshContractsUi, abandonBlock, contractFeeDue, payContractFee, abandonContract, timepieceBadge, renderContractAuctionStep } from './contracts-ui.js';
+import { initContractsUi, refreshContractsUi, abandonBlock, contractFeeDue, payContractFee, abandonContract, timepieceBadge, renderContractAuctionStep, openCompletedContracts } from './contracts-ui.js';
 import { getBernalSprite } from './bernal-sprite.js';
 import { fuelTankCylinderMarkup, fuelTransferSectionMarkup } from './fuel-tank-view.js';
 // One client card-lookup: patents PLUS the M2 Bernal cards (which live in
@@ -11169,6 +11169,15 @@ function renderStackSwitcher() {
       siteAvailable: true,
       isEmpty: false,
     },
+    // M4: once you have completed contracts, a Contracts chip beside the LEO
+    // Stack opens them (owner 2026-11-18).
+    ...(() => {
+      const done = (isM4() && (mySnapshotPlayer() || {}).fulfilledContracts) || [];
+      return done.length ? [{
+        id: 'contracts', glyphHtml: '<span class="chip-emoji">📜</span>', sub: 'Contracts', cards: done.length,
+        title: `Completed contracts - ${done.length}`, siteAvailable: false, isEmpty: false, noPin: true,
+      }] : [];
+    })(),
     {
       id: 'rocket', icon: 'rocket', sub: 'Rocket', cards: rocketStack.length,
       title: rocketStack.length
@@ -11303,7 +11312,7 @@ function renderStackSwitcher() {
         <span class="chip-glyph">${s.glyphHtml || uiIcon(s.icon)}${s.water ? waterDot : ''}</span>
         <span class="chip-sub">${esc(s.sub)}</span>${pile}
       </button>
-      <button type="button" class="hand-stack-pin" title="Fly map to ${esc(s.sub)}" ${s.siteAvailable ? '' : 'disabled'}>📍</button>
+      ${s.noPin ? '' : `<button type="button" class="hand-stack-pin" title="Fly map to ${esc(s.sub)}" ${s.siteAvailable ? '' : 'disabled'}>📍</button>`}
     </span>`;
   }).join('');
 
@@ -11321,6 +11330,7 @@ function renderStackSwitcher() {
 // modal is the affordance that explains the empty state.
 function focusAndOpenStack(id) {
   if (!id) return;
+  if (id === 'contracts') { openCompletedContracts(); return; }
   // The promoted Freighter waiting in hand has no stack to open: its chip
   // offers the Big Cube Swap that launches it again.
   if (id === 'freighter' && myWaitingFreighterPromotion()) {

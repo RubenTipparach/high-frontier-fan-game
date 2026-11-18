@@ -2000,3 +2000,5 @@ button.m4c-aug:hover { border-color: #60a5fa; background: #232838; }
 .m4c-fr-step .m4c-decks { justify-content: center; }
 .m4c-fr-skip { justify-content: flex-end; margin-top: 10px; }
 .m4c-fr-skip button { background: #374151; }
+.hand-stack-chip .chip-emoji { font-size: 18px; line-height: 1; }
+.m4c-deck .m4c-btns { justify-content: center; }
