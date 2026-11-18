@@ -1819,7 +1819,7 @@
 .card.m4-contract.side-gold { --side: #d8b90c; }
 .card.m4-contract.side-exodus { --side: #b9a0d8; }
 .m4-contract .card-inner { border: 6px solid var(--side); border-radius: 10px; overflow: hidden; background: #18181d; }
-.m4-contract .card-face { background: #18181d; color: #f2f2f2; display: flex; flex-direction: column; min-height: 340px; }
+.m4-contract .card-face { background: #18181d; color: #f2f2f2; display: flex; flex-direction: column; }
 .m4-typebar { display: grid; grid-template-columns: 26px 1fr 40px; align-items: center; gap: 4px;
   background: linear-gradient(#3a3a40, #232328); color: #fff; padding: 3px 5px; min-height: 40px; }
 .m4-type { text-align: center; font-size: 13px; font-weight: 700; letter-spacing: .02em; line-height: 1.05; }
@@ -1836,6 +1836,10 @@
 .m4-box { border-radius: 6px; padding: 4px 6px; font-size: 11px; line-height: 1.25; }
 .m4-box b { display: block; font-size: 9px; letter-spacing: .12em; text-transform: uppercase; margin-bottom: 1px; }
 .m4-dest { background: rgba(0, 0, 0, .78); color: #fff; align-self: flex-start; max-width: 70%; }
+.m4-steps { list-style: none; margin: 4px 0 0; padding: 4px 0 0; border-top: 1px solid rgba(255, 255, 255, .25);
+  display: grid; gap: 2px; font-size: .92em; font-weight: 400; }
+.m4-steps li.done { opacity: .75; }
+.m4-steps li.next { font-weight: 700; }
 .m4-ability { background: rgba(0, 0, 0, .72); color: #fff; text-align: center; font-size: 11.5px; }
 .m4-when { background: rgba(0, 0, 0, .72); color: #fff; align-self: flex-start; max-width: 75%; margin-top: auto; }
 .m4-money { display: flex; align-items: center; justify-content: space-between; padding: 4px 7px; background: #111; }
@@ -1849,15 +1853,20 @@
 .m4-season { font-weight: 700; }
 .m4-season-red { color: #ff6b6b; } .m4-season-yellow { color: #f5c400; } .m4-season-blue { color: #6bb6ff; }
 .m4-immune { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; border: 2px solid #2fb36a; background: #111; color: #fff; font-size: 10px; vertical-align: -3px; cursor: help; }
-/* A contract with a long destination plus both ability boxes needs more than the
-   patent card's fixed 220 x 350; let it grow instead of clipping the last box. */
-.card.m4-contract { aspect-ratio: auto; height: auto; max-height: none; }
-.card.m4-contract .card-inner { height: auto; }
-.card.m4-contract .card-face { position: relative; height: auto; }
+/* Every contract is the standard card size (owner 2026-11-17). Long text steps
+   its size down instead (m4-dense-1..4, set from the text length in
+   contract-card.js) so the card never grows. */
+.card.m4-contract .card-face { position: relative; height: 100%; min-height: 0; }
+.card.m4-contract .m4-body { min-height: 0; overflow: hidden; }
+.m4-dense-1 .m4-box { font-size: 10px; } .m4-dense-1 .m4-ability { font-size: 10.5px; }
+.m4-dense-2 .m4-box { font-size: 9px; line-height: 1.18; } .m4-dense-2 .m4-ability { font-size: 9.5px; }
+.m4-dense-3 .m4-box { font-size: 8px; line-height: 1.15; padding: 3px 5px; } .m4-dense-3 .m4-ability { font-size: 8.5px; }
+.m4-dense-4 .m4-box { font-size: 7px; line-height: 1.12; padding: 2px 4px; } .m4-dense-4 .m4-ability { font-size: 7.5px; }
+.m4-dense-3 .m4-box b, .m4-dense-4 .m4-box b { font-size: 7.5px; }
 .m4-body.has-craft { background-size: 100% auto, cover; background-position: center bottom, right bottom; background-repeat: no-repeat; }
 
 /* ---- Module 4 contracts panel + contract auction (js/game/contracts-ui.js) ---- */
-.m4c-overlay { position: fixed; inset: 0; z-index: 60; background: rgba(4, 6, 14, .66); display: flex;
+.m4c-overlay { position: fixed; inset: 0; z-index: 100; background: rgba(4, 6, 14, .66); display: flex;
   align-items: center; justify-content: center; padding: 12px; }
 .m4c-modal { background: #15161d; color: #e8e8ee; border: 1px solid #3a3d4c; border-radius: 12px; width: min(980px, 100%);
   max-height: calc(var(--vhpx, 1vh) * 92); display: flex; flex-direction: column; box-shadow: 0 12px 40px rgba(0, 0, 0, .6); }
@@ -1879,8 +1888,43 @@
 .m4c-btns { display: flex; flex-wrap: wrap; gap: 6px; }
 .m4c-btns button, .m4c-controls button { background: #2c5fa8; color: #fff; border: 0; border-radius: 6px; padding: 6px 10px; cursor: pointer; font-size: 12px; }
 .m4c-btns button:disabled, .m4c-controls button:disabled { opacity: .45; cursor: not-allowed; }
-.m4c-auction .m4c-modal { width: min(640px, 100%); }
-.m4c-auction-body { display: flex; flex-wrap: wrap; gap: 16px; padding: 12px 14px 16px; overflow-y: auto; }
+.m4c-auction .m4c-modal { width: auto; max-width: min(720px, 100%); }
+.m4c-fulfilled { z-index: 110; }
+.m4c-fulfilled .m4c-modal { width: auto; max-width: min(620px, 100%); border-color: #c98512; }
+.m4c-ful-body { display: flex; gap: 16px; align-items: flex-start; }
+.m4c-ful-card { flex: 0 0 220px; }
+.m4c-ful-text { display: grid; gap: 8px; font-size: 14px; line-height: 1.4; }
+.m4c-ful-text p { margin: 0; }
+.m4c-ful-name { font-size: 17px; font-weight: 700; }
+.m4c-ful-vp { font-size: 22px; font-weight: 800; color: #fbbf24; }
+.m4c-ful-ok { justify-self: start; margin-top: 6px; padding: 8px 22px; border-radius: 8px; border: 1px solid #c98512;
+  background: #c98512; color: #15161d; font-weight: 700; cursor: pointer; }
+@media (max-width: 560px) {
+  .m4c-ful-body { flex-direction: column; align-items: center; }
+  .m4c-ful-card { flex-basis: auto; width: 200px; }
+}
+.m4c-auction-body { justify-content: center; align-items: center; }
+.m4c-auction-play { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.m4c-auction-play .m4c-controls { justify-content: center; }
+.m4c-wait { margin: 0; font-size: 12px; color: #9aa3b5; }
+.m4c-auction-body { display: flex; flex-wrap: wrap; gap: 16px; padding: 12px 14px 16px; overflow-y: auto;
+  min-height: 0; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+.m4c-dial { width: 300px; max-width: 100%; flex: none; }
+.m4c-dial .turn-wheel { max-width: none; width: 100%; height: auto; display: block; }
+.m4c-dial .dial-hit:hover { fill-opacity: 0.12; }
+.m4c-status-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.m4c-status-row .m4c-dial { width: 220px; }
+.m4c-status-row .m4c-status { flex: 1; min-width: 220px; }
+/* Phones: the dial and the bidding first, the card being bid on at the bottom,
+   and the whole auction scrolls inside the sheet. */
+@media (max-width: 700px) {
+  .m4c-overlay.m4c-auction { align-items: stretch; padding: 8px; }
+  .m4c-auction .m4c-modal { max-height: calc(var(--dvhpx, 1dvh) * 96); }
+  .m4c-auction-body { flex-direction: column; align-items: center; flex-wrap: nowrap; }
+  .m4c-auction-play { order: 1; width: 100%; }
+  .m4c-auction-dial { width: min(340px, 100%); }
+  .m4c-auction-card { order: 2; }
+}
 .m4c-side { flex: 1; min-width: 220px; font-size: 13px; }
 .m4c-low { font-size: 15px; }
 .m4c-bids { margin: 0 0 8px; padding-left: 18px; }
@@ -1900,3 +1944,8 @@
 .hand-slot.is-contract.is-default .card.m4-contract { transform: translate(0, 280px) rotate(-90deg) scale(0.77); }
 .hand-slot.is-contract.is-default { width: 270px; }
 .hand-slot .hand-q.is-blocked { opacity: .4; }
+
+/* Planetary Protection: pick one Ideology for 2 delegates. */
+.m4-ideo-pick .m4-ideo-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 8px 0 12px; }
+.m4-ideo-pick .m4-ideo-row button { border: 2px solid var(--ideo); background: color-mix(in srgb, var(--ideo) 18%, transparent); color: inherit; border-radius: 6px; padding: 8px 4px; cursor: pointer; font-weight: 600; }
+.m4-ideo-pick .m4-ideo-row button:hover { background: color-mix(in srgb, var(--ideo) 35%, transparent); }

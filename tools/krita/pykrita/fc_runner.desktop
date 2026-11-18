@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Service
+ServiceTypes=Krita/PythonPlugin
+X-KDE-Library=fc_runner
+X-Python-2-Compatible=false
+Name=Fleet Command script runner

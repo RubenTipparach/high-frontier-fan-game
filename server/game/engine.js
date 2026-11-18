@@ -39,6 +39,7 @@ import { COLONISTS_BY_ID } from '../../data/colonists.js';
 // with a mass); they only ever enter play through m4-gated paths.
 import {
   CONTRACTS_BY_ID, CONTRACT_PAIRS, CONTRACT_PAIR_NAMES, CONTRACT_BID_MAX, contractFace, sideFace, stepSatisfied,
+  acetyleneTerms,
 } from '../../data/contracts.js';
 const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...BERNALS_BY_ID, ...COLONISTS_BY_ID, ...CONTRACTS_BY_ID };
 import { resolveSupportChain, unmetRequirements, openCycleChainCard } from '../../data/support-chain.js';
@@ -64,7 +65,7 @@ import { scorePlayer, freeMarketBlackSideValue } from '../../data/endgame-scorin
 // engine reads them so the liftoff/landing gate uses the FINAL net thrust,
 // not the printed base value.
 import { weightClassForMass, freighterNetThrust } from '../../data/net-thrust-track.js';
-import { hazardFlavorOf } from '../../data/hazard-flavors.js';
+import { hazardFlavorOf, hazardCaptionMentions } from '../../data/hazard-flavors.js';
 import { SOLAR_ZONE_INFO, adjacentSites } from '../../data/sites.js';
 // Site location classes (astrobiology / submarine / atmospheric / elevator),
 // shared with the client (colony types + promotion colonies + futures).
@@ -97,6 +98,7 @@ import {
   neighborSlugs, siteHasLanderBurn, isLanderBurnNode, isHomeBernalSite,
 } from './planner-graph.js';
 import { siteHasHazardousLanderBurn, routeFlewAerobrake } from '../../data/lander-burn.js';
+import { SIGNPOSTED_SITES } from '../../data/signpost-routes.js';
 import { GREEK_TAGS } from '../../data/fleet-tags.js';
 import { isBuggyRoamBody, isBuggyRoadPair } from '../../data/buggy-roam.js';
 import { isSungrazerSite, closePassFires, SUNGRAZER_SITE_IDS } from '../../data/sungrazer.js';
@@ -164,6 +166,7 @@ function slotMass(slot) {
   }
   const crew = CREW_BY_ID[slot.id];
   if (crew) {
+    if (slot.massless) return 0;   // Jar augmentation, side 1 (M4)
     const key = slot.face === 'secondary' ? 'secondary' : 'primary';
     const cf = (crew.faces && (crew.faces[key] || crew.faces.primary)) || {};
     return (cf.mass | 0);
@@ -365,6 +368,54 @@ function playerHasAtmoScoop(player, stack) {
   });
 }
 
+// M4 augmentation abilities (4C3). Without Module 2 a chit sits on one of your
+// Colonies (user ruling 2026-11-17), so a side that works "here" works at that
+// Colony's site. (With M2 the chit rides a Colonist; M4 does not combine with
+// M2 yet, so that placement is not read here.)
+function augmentSideAt(player, shape, side, slug) {
+  const a = player && player.augments && player.augments[shape];
+  return !!(a && a.side === side && slug != null && a.colonySite === String(slug));
+}
+// Without M2, Jar 1, Hexagon and Battery count for your Crew (owner ruling
+// 2026-11-17). Mass and prospecting are read per slot on BOTH the client and
+// the server, so the Crew slot carries the result as marks (massless /
+// augProspector) that travel in the game state; refreshed at the start of every
+// op and after an Implant. M4-only, so a game without it is untouched.
+function playerSlotArrays(p) {
+  const out = [];
+  if (p.rocket && Array.isArray(p.rocket.stack)) out.push(p.rocket.stack);
+  if (Array.isArray(p.leo)) out.push(p.leo);
+  for (const o of Object.values(p.outposts || {})) if (o && Array.isArray(o.cards)) out.push(o.cards);
+  if (p.freighter && Array.isArray(p.freighter.stack)) out.push(p.freighter.stack);
+  for (const bn of (p.bernals || [])) if (bn && Array.isArray(bn.stack)) out.push(bn.stack);
+  return out;
+}
+function syncCrewAugmentMarks(st) {
+  if (!st || !st.m4 || st.m2) return;
+  for (const p of st.players || []) {
+    const massless = hasAugmentSide(p, 'jar', 1);
+    const hex = p.augments && p.augments.hexagon;
+    const pro = hex ? (hex.side === 1 ? { kind: 'raygun', isru: 1 } : { kind: 'buggy', isru: 2 }) : null;
+    for (const arr of playerSlotArrays(p)) {
+      for (const s of arr) {
+        if (!s || !CREW_BY_ID[s.id]) continue;
+        if (massless) s.massless = true; else delete s.massless;
+        if (pro) s.augProspector = pro; else delete s.augProspector;
+      }
+    }
+  }
+}
+// The support kinds a Battery chit gives your Crew (M4; never with M2).
+function batteryCrewKinds(player) {
+  const a = player && player.augments && player.augments.battery;
+  if (!a) return [];
+  return a.side === 1 ? ['gen-electric'] : a.side === 2 ? ['reactor-antimatter'] : [];
+}
+function hasAugmentSide(player, shape, side) {
+  const a = player && player.augments && player.augments[shape];
+  return !!(a && a.side === side);
+}
+
 // Effective hydration of a site for a player's prospect / refuel (subsystem 5).
 // Atmospheric Scoop (SCOOP) makes an aerostat site COLOCATED with or ADJACENT
 // to the scoop count as hydration 2. The scoop rides the stack doing the work,
@@ -372,9 +423,11 @@ function playerHasAtmoScoop(player, stack) {
 // away. `unit` = { stack, siteId } for a non-rocket prospect; defaults to the
 // rocket so every existing caller is unchanged.
 function effectiveHydration(site, player, unit) {
-  const base = Number.isFinite(site && site.hydration) ? site.hydration : 0;
+  let base = Number.isFinite(site && site.hydration) ? site.hydration : 0;
   const stack = unit ? unit.stack : (player.rocket && player.rocket.stack);
   const here = unit ? unit.siteId : (player.rocket && player.rocket.siteId);
+  // Splat augmentation, side 2: +1 Hydration (4C3) at your augmented Colony.
+  if (augmentSideAt(player, 'splat', 2, here)) base += 1;
   if (!isAerostatSite(site) || !playerHasAtmoScoop(player, stack)) return base;
   // TWO ID SPACES, and this compared across them (reported 2026-08-11: "this
   // card power is not working"). `here` is a rocket/unit siteId, which is a
@@ -651,6 +704,11 @@ function prospectorFace(slot) {
   if (crew) {
     const key = slot.face === 'secondary' ? 'secondary' : 'primary';
     const cf = (crew.faces && (crew.faces[key] || crew.faces.primary)) || {};
+    // Hexagon augmentation (M4): the Crew's prospector becomes the chit's
+    // Raygun (ISRU 1) or Buggy (ISRU 2); every crew prints ISRU 4.
+    if (slot.augProspector) {
+      return { properties: [{ key: slot.augProspector.kind, value: true }], isru: slot.augProspector.isru | 0 };
+    }
     return {
       properties: cf.prospector ? [{ key: cf.prospector, value: true }] : [],
       isru: Number(cf.isru) | 0,
@@ -681,6 +739,7 @@ function slotHasIsruRig(slot) {
   if (crew) {
     const key = slot.face === 'secondary' ? 'secondary' : 'primary';
     const cf = (crew.faces && (crew.faces[key] || crew.faces.primary)) || {};
+    if (slot.augProspector) return true;
     return cf.isru != null && Number.isFinite(Number(cf.isru));
   }
   return faceProps(slot).some((x) => x && x.key === 'isru');
@@ -1572,6 +1631,57 @@ function noAerobrakeFail(state, slots, hopNodes) {
 // Does the player hold an in-play colonist granting a GLOBAL power flag
 // (glitch-free stacks, FINAO halved, doubled free market, ...)? Location-
 // conditioned flags (sizeRollMod) use colonistSizeRollModAt instead.
+// Module 4 contract abilities (4B2e/f) the player's FULFILLED contracts grant
+// (data/contracts.js#parseFulfilledAbility reads them off the printed text). A
+// fulfilled contract is never in default, so every one counts. Returns the
+// number of copies (Shielded is cumulative), 0 outside M4.
+function contractAbilityCount(state, player, key) {
+  if (!state || !state.m4 || !player) return 0;
+  let n = 0;
+  for (const f of (player.fulfilledContracts || [])) {
+    const face = contractFace(f.id, f.side);
+    const v = face && face.abilities && face.abilities[key];
+    if (v) n += (typeof v === 'number' ? v : 1);
+  }
+  return n;
+}
+// The value of a non-counting contract ability (a list, an object), merged
+// over the player's fulfilled contracts. Lists are unioned; [] outside M4.
+function contractAbilityList(state, player, key) {
+  if (!state || !state.m4 || !player) return [];
+  const out = [];
+  for (const f of (player.fulfilledContracts || [])) {
+    const face = contractFace(f.id, f.side);
+    const v = face && face.abilities && face.abilities[key];
+    if (v == null || v === false) continue;
+    for (const x of (Array.isArray(v) ? v : [v])) if (!out.includes(x)) out.push(x);
+  }
+  return out;
+}
+// A faction-style ability a fulfilled contract grants (Sun-fired Laser: the
+// push icon, Powersat). An Ability, so Anarchy does not suspend it.
+const contractGrantsPrivilege = (state, player, key) => contractAbilityList(state, player, 'privilege').includes(key);
+// Acetylene Rocketplane Liftoff terms at `slug` for this player (Equatorial
+// Launch Railway: from any of your Factories, half cost on atmospheric Sites).
+function acetyleneTermsFor(state, player, slug, wetMass) {
+  const f = state.factories && state.factories[slug];
+  return acetyleneTerms({
+    atmospheric: isAtmosphericSite(slug) || isAerostatSiteId(slug),
+    ownFactory: !!(f && f.ownerId === player.profileId),
+    railway: contractAbilityCount(state, player, 'acetyleneFactories') > 0,
+    wetMass,
+  });
+}
+// "-N ISRU when prospecting <body>" (Closest Planet): the ISRU reduction a
+// player's fulfilled contracts give a prospect of `site`.
+function contractIsruBonusAt(state, player, site) {
+  const body = String((site && site.body) || '');
+  return contractAbilityList(state, player, 'isruBody')
+    .reduce((n, x) => n + ((x && x.body === body) ? (x.n | 0) : 0), 0);
+}
+// Shielded (4B2f): -2 to Belt & CME Rolls to your Stacks, per copy.
+const contractShield = (state, player) => 2 * contractAbilityCount(state, player, 'shielded');
+
 function playerHasColonistPower(state, player, key) {
   if (!state.m2) return false;
   for (const e of colonistLocations(player)) {
@@ -1621,8 +1731,47 @@ function seniorityDisksOnAssembly(state) {
 function payFinao(state, player, cost) {
   const paid = Math.max(0, cost | 0);
   if (paid <= 0) return 0;
-  player.aqua = (player.aqua | 0) - paid;
+  chargeFinao(state, player, paid);
   return finaoRebate(state, player, paid);
+}
+// Jar augmentation, side 2: "FTs may be spent for FINAO" (4C3), from any of your
+// water (owner answer A1): the rocket and Freighter tanks and the water cans in
+// your Outposts, whole units. Aqua is spent first. `rocketTank` overrides the
+// rocket's tank for a move that has already burned part of it.
+function finaoWaterTaps(player, { rocketTank = null } = {}) {
+  const taps = [];
+  const r = player.rocket;
+  if (r && (r.tankGrade || 'water') === 'water') {
+    taps.push({ have: () => Math.floor(rocketTank != null ? rocketTank : (r.tank || 0)), take: (n) => { r.tank = round6((r.tank || 0) - n); } });
+  }
+  const fr = player.freighter;
+  if (fr && (fr.tankGrade || 'water') === 'water') {
+    taps.push({ have: () => Math.floor(fr.tank || 0), take: (n) => { fr.tank = round6((fr.tank || 0) - n); } });
+  }
+  for (const o of Object.values(player.outposts || {})) {
+    for (const c of ((o && o.cards) || [])) {
+      if (c && c.kind === 'fuel' && c.grade === 'water') taps.push({ have: () => Math.floor(c.amount || 0), take: (n) => { c.amount = (c.amount || 0) - n; } });
+    }
+  }
+  return taps;
+}
+function finaoFunds(state, player, opts) {
+  const aqua = player.aqua | 0;
+  if (!(state.m4 && hasAugmentSide(player, 'jar', 2))) return aqua;
+  return aqua + finaoWaterTaps(player, opts).reduce((n, tp) => n + Math.max(0, tp.have()), 0);
+}
+function chargeFinao(state, player, cost) {
+  let need = Math.max(0, cost | 0);
+  const fromAqua = state.m4 && hasAugmentSide(player, 'jar', 2) ? Math.min(Math.max(0, player.aqua | 0), need) : need;
+  player.aqua = (player.aqua | 0) - fromAqua;
+  need -= fromAqua;
+  for (const tp of (need > 0 ? finaoWaterTaps(player) : [])) {
+    const n = Math.min(need, Math.max(0, tp.have()));
+    if (n > 0) { tp.take(n); need -= n; }
+    if (need <= 0) break;
+  }
+  if (need > 0) player.aqua = (player.aqua | 0) - need;
+  for (const o of Object.values(player.outposts || {})) if (o && o.cards) o.cards = o.cards.filter((c) => !(c.kind === 'fuel' && (c.amount || 0) <= 0));
 }
 // The Power Brokers settlement on its own, for a caller that pays up front and
 // settles once the net payment is known (MOVE refunds FINAO for a hazard the
@@ -1793,12 +1942,16 @@ function factionPrivilegesLocked(state, player) {
   if (!state || !state.m2) return false;
   return !(player && (player.bernals || []).some((bn) => bn && bn.anchored && isHomeBernal(bn)));
 }
+function keepsPrivilegeInAnarchy(state, player) {
+  return playerHasColonistPower(state, player, 'privilegeInAnarchy')
+    || contractAbilityCount(state, player, 'secured') > 0;
+}
 function privilegeOf(state, player) {
   if (!player || !player.faction) return null;
   if (factionPrivilegesLocked(state, player)) return null;
-  // Eugenic Pilgrims (colonist power): the faction privilege is not lost in
-  // Anarchy.
-  if (state && state.anarchy && !playerHasColonistPower(state, player, 'privilegeInAnarchy')) return null;
+  // Eugenic Pilgrims (colonist power) and the Secured contract ability (4B2f):
+  // the faction privilege is not lost in Anarchy.
+  if (state && state.anarchy && !keepsPrivilegeInAnarchy(state, player)) return null;
   const card = CREW_BY_ID[player.faction.cardId];
   const face = card && card.faces && card.faces[player.faction.face];
   return face ? privKey(face.bonus) : null;
@@ -1809,7 +1962,7 @@ function secondFacePrivilege(state, player) {
   if (!player || !player.faction) return null;
   if (!playerHasColonistPower(state, player, 'bothCrewFaces')) return null;
   if (factionPrivilegesLocked(state, player)) return null;
-  if (state && state.anarchy && !playerHasColonistPower(state, player, 'privilegeInAnarchy')) return null;
+  if (state && state.anarchy && !keepsPrivilegeInAnarchy(state, player)) return null;
   const card = CREW_BY_ID[player.faction.cardId];
   const other = player.faction.face === 'primary' ? 'secondary' : 'primary';
   const face = card && card.faces && card.faces[other];
@@ -1845,12 +1998,13 @@ function playerOwnsAbility(player, key) {
 function hasPrivilege(state, player, key) {
   return privilegeOf(state, player) === key || hasGrantedPrivilege(player, key)
     || hasBorrowedAbility(player, key) || secondFacePrivilege(state, player) === key
-    || hasPrivilegeBernal(state, player, key);
+    || hasPrivilegeBernal(state, player, key) || contractGrantsPrivilege(state, player, key);
 }
 function playersWithPrivilege(state, key) {
   return (state.players || []).filter((p) => privilegeOf(state, p) === key
     || hasGrantedPrivilege(p, key) || hasBorrowedAbility(p, key)
-    || secondFacePrivilege(state, p) === key || hasPrivilegeBernal(state, p, key));
+    || secondFacePrivilege(state, p) === key || hasPrivilegeBernal(state, p, key)
+    || contractGrantsPrivilege(state, p, key));
 }
 // An anchored Bernal whose ability grants the faction privilege `key` (the L2
 // Collimator Bernal grants POWERSAT, the L4s Pharmaceutics Bernal grants
@@ -1993,6 +2147,54 @@ const HELIOCENTRICITY_CREW_ID = 'crew_heliocentricity';
 // POWER SERIES CHAOS MODEL (Heliocentricity, black): "Immune to Hazards
 // mentioning geysers, rings, spin, and winds." The hazard's printed flavour
 // lives in data/hazard-flavors.js.
+// Hazard Ignore / Aerobrake Ignore contract abilities (4B2f): a fulfilled
+// contract names hazard words in quotes; Crash (skull) or Aerobrake hazards
+// whose board caption mentions one are ignored.
+function contractIgnoreWords(state, player, key) {
+  if (!state || !state.m4 || !player) return [];
+  const out = new Set();
+  for (const f of (player.fulfilledContracts || [])) {
+    const face = contractFace(f.id, f.side);
+    for (const w of ((face && face.abilities && face.abilities[key]) || [])) out.add(w);
+  }
+  return [...out];
+}
+// Tophat (4B2e): a Stack containing a tophat contract (not in default, 4B6b)
+// can safely enter 1 Hazard per Turn without paying FINAO.
+function stackHasActiveTophat(state, player, stack) {
+  if (!state || !state.m4 || !player) return false;
+  return (stack || []).some((slot) => {
+    if (!slot || slot.kind !== 'contract') return false;
+    const meta = (player.contractMeta || {})[slot.id];
+    const face = contractFace(slot.id, (meta && meta.side) || slot.face || 'blue');
+    return !!(face && face.tophat && !(meta && meta.default));
+  });
+}
+function contractIgnoresHazard(state, player, slug) {
+  const k = hazardKind(slug);
+  if (k === 'skull') return hazardCaptionMentions(slug, contractIgnoreWords(state, player, 'hazardIgnore'), ['skull']);
+  if (k === 'aero') {
+    if (hazardCaptionMentions(slug, contractIgnoreWords(state, player, 'aerobrakeIgnore'), ['aero'])) return true;
+    // Inner Tour (the Earth-zone corridors into LEO) / HAVOC (Venus zone).
+    const zones = contractAbilityList(state, player, 'aerobrakeZones');
+    return zones.length > 0 && zones.includes(zoneOfSlug(slug));
+  }
+  return false;
+}
+// New Horizons (4B2f): a Crash (skull) hazard next to any industrialized Site
+// is ignored, 1 per spacecraft per turn. `stackKey` names the spacecraft
+// ('rocket' / 'freighter'); the use is spent here, and the ledger lifts as the
+// player's next turn opens.
+function newHorizonsIgnores(state, player, slug, stackKey) {
+  if (hazardKind(slug) !== 'skull') return false;
+  const per = contractAbilityCount(state, player, 'skullNearFactory');
+  if (!per) return false;
+  const used = (player.newHorizonsUsed && player.newHorizonsUsed[stackKey]) | 0;
+  if (used >= per) return false;
+  if (!neighborSlugs(slug).some((n) => state.factories && state.factories[n])) return false;
+  player.newHorizonsUsed = { ...(player.newHorizonsUsed || {}), [stackKey]: used + 1 };
+  return true;
+}
 function chaosModelImmune(state, player, slug) {
   return !!hazardFlavorOf(slug) && hasPrivilege(state, player, 'POWER_SERIES_CHAOS_MODEL');
 }
@@ -2644,7 +2846,7 @@ function applyFlareToPlayer(state, p, flare, notesArr) {
     const info = SOLAR_ZONE_INFO[zone];
     const mod = info ? info.solar : 0;
     if (mod === null) return slots;
-    const hit = flare + mod;
+    const hit = flare + mod - contractShield(state, p);
     if (hit <= 0) return slots;
     const survivors = [];
     for (const slot of slots) {
@@ -3004,7 +3206,7 @@ function resolveSunspotEvent(state, kind, opts = {}) {
       .map((p) => p.profileId);
     for (const p of state.players) {
       if ((p.hand || []).length > 0 && !waiting.includes(p.profileId)) {
-        notes.detail(`Budget Cuts: ${p.name} is immune (Home Bernal ability).`);
+        notes.detail(`Budget Cuts: ${p.name} is immune (${contractAbilityCount(state, p, 'bailout') ? 'Bailout contract' : 'Home Bernal ability'}).`);
       }
     }
     if (!waiting.length) {
@@ -3298,7 +3500,10 @@ function describeHazardRolls(rolls) {
   const tourTail = toured
     ? ` Tourism Cycler: ${toured} radiation belt${toured === 1 ? '' : 's'} crossed with no roll.`
     : '';
-  return (parts.length ? ` [${parts.join('; ')}]` : '') + tourTail;
+  // Shielded contracts (4B2f) took 2 off every belt roll per copy.
+  const sh = (rolls || []).find((r) => r && r.kind === 'rad' && r.d6 != null && r.shielded);
+  const shieldTail = sh ? ` Shielded: -${sh.shielded} on each belt roll.` : '';
+  return (parts.length ? ` [${parts.join('; ')}]` : '') + tourTail + shieldTail;
 }
 
 // Does a (normalized) face carry the solar capability badge? Mirror of
@@ -3387,6 +3592,11 @@ function playerCrewReactorKinds(player, { pendingAnchorBn = null } = {}) {
     }
     kinds = kinds ? Array.from(new Set([...kinds, ...pw.crewOnBoardReactor])) : [...pw.crewOnBoardReactor];
   }
+  // M4 Battery augmentation (4C3), counting for your Crew without M2 (owner
+  // ruling 2026-11-17; tracker A3 recommended): side 1 "on-board pulse
+  // generator" supplies e electric, side 2 "on-board exotic reactor" antimatter.
+  const bat = batteryCrewKinds(player);
+  if (bat.length) kinds = Array.from(new Set([...(kinds || []), ...bat]));
   // A crew-granted reactor is a reactor: it meets an "Any Reactor" support too.
   if (kinds && kinds.some((k) => String(k).startsWith('reactor-')) && !kinds.includes('reactor-any')) kinds.push('reactor-any');
   return kinds;
@@ -3791,6 +4001,12 @@ function bernalWaivesLanderBurn(player) {
   return ((player && player.bernals) || []).some((bn) => bn && bn.anchored
     && (bn.cardId === GEO_ELEVATOR_BERNAL_ID || bn.cardId === LOFSTROM_LOOP_BERNAL_ID)
     && (bn.promoted || bn.face === 'secondary'));
+}
+// The lander-burn waiver at `slug`: the GEO Elevator / Lofstrom Loop Bernal
+// (anywhere), or the M4 Tsiolkovsky Elevator Lab contract (Elevator Sites only).
+function landerBurnWaivedAt(state, player, slug) {
+  if (bernalWaivesLanderBurn(player)) return true;
+  return !!(slug && contractAbilityCount(state, player, 'elevatorLanderBurns') && isSpaceElevatorSite(slug));
 }
 
 // Liftoff hazard waiver (mirror of browse.js#liftoffColonyWaives). A
@@ -4260,9 +4476,10 @@ function applyMoveFreighter(state, op, player) {
   let frAcetylene = false;
   let frAcetyleneCost = 0;
   if (op.acetyleneLiftoff && from) {
-    if (!(isAtmosphericSite(from) || isAerostatSiteId(from))) return fail('not_atmospheric');
+    const terms = acetyleneTermsFor(state, player, from, frWetMass);
+    if (!terms.allowed) return fail('not_atmospheric');
     if (!canUseFactoryNonVictory(state, player, state.factories[from])) return fail('no_factory');
-    frAcetyleneCost = Math.ceil(2 * frWetMass);
+    frAcetyleneCost = terms.cost;
     const siteTanks = Object.values(player.outposts || {}).filter((o) => o && o.siteId === from);
     const availWater = siteTanks.reduce((sum, o) => sum + Math.floor(outpostWater(o)), 0);
     if (availWater < frAcetyleneCost) return fail('insufficient_site_water', { need: frAcetyleneCost, have: availWater });
@@ -4319,7 +4536,7 @@ function applyMoveFreighter(state, op, player) {
   const fromSize = nodeSizeNumber(here);
   let liftG = (from == null || fromSize <= 1 || (frNoAssistUnder6 && fromSize < 6))
     ? { ok: true, needsRoll: false }
-    : maneuverGate(state, here, frThrust, { powersat, isFreighter: true, acetylene: frAcetylene, replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player), electiveFor: player });
+    : maneuverGate(state, here, frThrust, { powersat, isFreighter: true, acetylene: frAcetylene, replay: !!op._replay, bernalLanderBurnWaived: landerBurnWaivedAt(state, player, here), electiveFor: player });
   // A promoted Freighter's big cube is a Mobile Factory too (1B6), so it may
   // assist ITSELF off a Site the way a small cube does (1B6b): size 5 or less.
   // Like a parked small cube, it needs no Claim to lift off.
@@ -4349,7 +4566,7 @@ function applyMoveFreighter(state, op, player) {
   const frAeroWaives = op._replay ? isAerobrakeLandableSite(dest) : frFlewCorridor;
   let landG = (frAeroWaives || destSize <= 1 || (frNoAssistUnder6 && destSize < 6))
     ? { ok: true, needsRoll: false }
-    : maneuverGate(state, dest, frThrust, { powersat, isFreighter: true, replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) });
+    : maneuverGate(state, dest, frThrust, { powersat, isFreighter: true, replay: !!op._replay, bernalLanderBurnWaived: landerBurnWaivedAt(state, player, dest) });
   // 1B6b landing: the promoted big cube assists itself down onto a Claim
   // (anyone's), size 5 or less, exactly as a small Mobile Factory cube does.
   if (!landG.ok) landG = promotedFreighterSelfAssist(state, player, dest, { powersat, needClaim: true }) || landG;
@@ -4377,19 +4594,28 @@ function applyMoveFreighter(state, op, player) {
   const frCrashSpace = (liftG.assist && from && arrivals.length) ? String(arrivals[0]) : null;
   const frCrashIgnored = [];
   const frColonyWaived = [];
+  // M4 tophat (4B2e, owner answer R4: any stack carrying it, once per stack per
+  // turn): the Freighter's first remaining hazard is entered safely, free.
+  const frTophatFree = !(player.tophatUsed && player.tophatUsed.freighter)
+    && stackHasActiveTophat(state, player, fr.stack);
+  let frTophatSlug = null;
   for (const slug of generic) {
     if (chaosModelImmune(state, player, slug)) { frColonyWaived.push(slug); continue; }
+    if (contractIgnoresHazard(state, player, slug)) { frColonyWaived.push(slug); continue; }
+    if (newHorizonsIgnores(state, player, slug, 'freighter')) { frColonyWaived.push(slug); continue; }
     if (frCrashSpace && slug === frCrashSpace && !isLanderBurnNode(slug)) { frCrashIgnored.push(slug); continue; }
     if (liftoffColonyWaives(state, from, slug)) { frColonyWaived.push(slug); continue; }
+    if (frTophatFree && !frTophatSlug) { frTophatSlug = slug; frColonyWaived.push(slug); continue; }
     rollItems.push({ slug, kind: hazardKind(slug) });
   }
 
   if (op.debug) {
-    return { ok: true, state, log: '', calc: { unit: 'freighter', dest, destSize, thisTurnBurns,
+    return { ok: true, state, log: '', calc: { unit: 'freighter', dest, destSize, thisTurnBurns, ...(frTophatSlug ? { tophat: frTophatSlug } : {}),
       crashIgnored: frCrashIgnored, colonyWaived: frColonyWaived,
       ...(frAcetylene ? { acetylene: true, acetyleneCost: frAcetyleneCost, acetyleneCredit: frAcetCredit } : {}),
       glitched: !!fr.glitched, rollItems: rollItems.length, radZones: rad.length } };
   }
+  if (frTophatSlug) player.tophatUsed = { ...(player.tophatUsed || {}), freighter: true };
   // Acetylene liftoff: burn the site's stored water (the player's outposts at the
   // origin), NOT the freighter's own tank - the boosters are fuelled from the
   // atmosphere. Charged only once every gate above has passed, so a refused move
@@ -4409,7 +4635,7 @@ function applyMoveFreighter(state, op, player) {
   const wantPay = !!op.hazardPay;
   const finaoPer = finaoPerFor(state, player);
   const finaoCost = wantPay ? rollItems.length * finaoPer : 0;
-  if (finaoCost > 0 && finaoCost > (player.aqua | 0)) return fail('insufficient_aqua');
+  if (finaoCost > 0 && finaoCost > finaoFunds(state, player)) return fail('insufficient_aqua');
   if (finaoCost > 0) payFinao(state, player, finaoCost);
 
   const gen = makeRng(state.seed, state.rng.cursor);
@@ -4461,18 +4687,19 @@ function applyMoveFreighter(state, op, player) {
     // rolls (applyFlareToPlayer sweeps the rocket stack and never touches a
     // Freighter), so skipping the roll skips both.
     const frImmune = unitBeltImmune(fr);
+    const frShield = contractShield(state, player);
     const frCanFail = rad.some((slug) => {
       const flareBonus = (slug === dest) ? 0 : seasonBonus;
-      return (6 + flareBonus - frThrust) > frRad;
+      return (6 + flareBonus - frThrust - frShield) > frRad;
     });
     if (frGlitchFree || frImmune || !frCanFail) {
       for (const slug of rad) rolls.push({ slug, kind: 'rad', bypassed: true, radHard: frRad, thrust: frThrust });
     } else for (const slug of rad) {
       const flareBonus = (slug === dest) ? 0 : seasonBonus;
       const d6 = gen.d6();
-      const radVal = Math.max(0, d6 + flareBonus - frThrust);
+      const radVal = Math.max(0, d6 + flareBonus - frThrust - frShield);
       const radFail = radVal > frRad;
-      rolls.push({ slug, kind: 'rad', d6, fail: radFail, radHard: frRad, thrust: frThrust, seasonBonus: flareBonus });
+      rolls.push({ slug, kind: 'rad', d6, fail: radFail, radHard: frRad, thrust: frThrust, seasonBonus: flareBonus, ...(frShield ? { shielded: frShield } : {}) });
       if (radFail) {
         if (playerHasColonistPower(state, player, 'glitchFree')) continue;   // glitch-free stacks
         if (fr.glitched) { destroyed = true; haltSlug = slug; break; }
@@ -4692,7 +4919,7 @@ function applyMoveBernal(state, op, player) {
   const fromSize = nodeSizeNumber(here);
   const liftG = (from == null || fromSize <= 1)
     ? { ok: true, needsRoll: false }
-    : maneuverGate(state, here, 0, { powersat: hasPowersat(state, player), replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) });
+    : maneuverGate(state, here, 0, { powersat: hasPowersat(state, player), replay: !!op._replay, bernalLanderBurnWaived: landerBurnWaivedAt(state, player, here) });
   if (!liftG.ok) {
     return fail('cannot_liftoff', { siteSize: fromSize, site: here, landerBurn: !!liftG.landerBurn });
   }
@@ -4709,7 +4936,7 @@ function applyMoveBernal(state, op, player) {
     isLanderOf: isLanderBurnNode,
   });
   const bnAeroWaives = op._replay ? isAerobrakeLandableSite(dest) : bnFlewCorridor;
-  const landG = (bnAeroWaives || destSize <= 1) ? { ok: true, needsRoll: false } : maneuverGate(state, dest, 0, { powersat: hasPowersat(state, player), replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) });
+  const landG = (bnAeroWaives || destSize <= 1) ? { ok: true, needsRoll: false } : maneuverGate(state, dest, 0, { powersat: hasPowersat(state, player), replay: !!op._replay, bernalLanderBurnWaived: landerBurnWaivedAt(state, player, dest) });
   // thrust 0: a Bernal crawls, it has no thrust triangle. Stated so the client's
   // cannot_land message reads "yours is 0" rather than "yours is undefined".
   if (!landG.ok) return fail('cannot_land', { thrust: 0, siteSize: destSize, site: dest, landerBurn: !!landG.landerBurn });
@@ -4747,7 +4974,7 @@ function applyMoveBernal(state, op, player) {
   const wantPay = !!op.hazardPay;
   const finaoPer = finaoPerFor(state, player);
   const finaoCost = wantPay ? rollItems.length * finaoPer : 0;
-  if (finaoCost > 0 && finaoCost > (player.aqua | 0)) return fail('insufficient_aqua');
+  if (finaoCost > 0 && finaoCost > finaoFunds(state, player)) return fail('insufficient_aqua');
   if (finaoCost > 0) payFinao(state, player, finaoCost);
 
   const gen = makeRng(state.seed, state.rng.cursor);
@@ -4780,8 +5007,9 @@ function applyMoveBernal(state, op, player) {
     // WEAKEST card out-hardens the worst possible result has nothing at stake.
     const bnGlitchFree = playerHasColonistPower(state, player, 'glitchFree');
     const bnWeakest = unitRadHardness(bn, player, state);
+    const bnShield = contractShield(state, player);
     const worstPossible = Math.max(0, ...rad.map((slug) =>
-      6 + ((slug === dest) ? 0 : seasonBonus) - bnThrustForRad));
+      6 + ((slug === dest) ? 0 : seasonBonus) - bnThrustForRad - bnShield));
     const bnCanFail = rad.length > 0 && worstPossible > bnWeakest;
     if (bnGlitchFree || !bnCanFail) {
       for (const slug of rad) rolls.push({ slug, kind: 'rad', bypassed: true, radHard: bnWeakest });
@@ -4793,9 +5021,9 @@ function applyMoveBernal(state, op, player) {
         // still take it.
         const flareBonus = (slug === dest) ? 0 : seasonBonus;
         const d6 = gen.d6();
-        const radVal = Math.max(0, d6 + flareBonus - bnThrustForRad);
+        const radVal = Math.max(0, d6 + flareBonus - bnThrustForRad - bnShield);
         if (radVal > worst) worst = radVal;
-        rolls.push({ slug, kind: 'rad', d6, rad: radVal, thrust: bnThrustForRad, seasonBonus: flareBonus });
+        rolls.push({ slug, kind: 'rad', d6, rad: radVal, thrust: bnThrustForRad, seasonBonus: flareBonus, ...(bnShield ? { shielded: bnShield } : {}) });
       }
       // The guided tutorial never loses a card to a belt (the rolls still play).
       if (worst > 0 && !state.tutorial) {
@@ -5171,7 +5399,7 @@ function applyMoveFactory(state, op, player) {
   const wantPay = !!op.hazardPay;
   const finaoPer = finaoPerFor(state, player);
   const finaoCost = wantPay ? rollItems.length * finaoPer : 0;
-  if (finaoCost > 0 && finaoCost > (player.aqua | 0)) return fail('insufficient_aqua');
+  if (finaoCost > 0 && finaoCost > finaoFunds(state, player)) return fail('insufficient_aqua');
   if (finaoCost > 0) payFinao(state, player, finaoCost);
   // Acetylene: the boosters burn the site's stored water, never the cube.
   if (cubeAcet && cubeAcetCost > 0) {
@@ -5204,7 +5432,9 @@ function applyMoveFactory(state, op, player) {
     // fail here) can't matter - skip it entirely so the move stays UNDOABLE.
     // (A non-glitch-free factory always risks a 1/6 glitch, a real random
     // outcome, so that roll legitimately still blocks undo.)
-    const facGlitchFree = playerHasColonistPower(state, player, 'glitchFree');
+    // Shielded contract ability (owner answer R6): it protects this belt roll
+    // too, so a Shielded faction's Mobile Factory passes like a glitch-free one.
+    const facGlitchFree = playerHasColonistPower(state, player, 'glitchFree') || contractShield(state, player) > 0;
     if (facGlitchFree) {
       for (const slug of rad) rolls.push({ slug, kind: 'rad', bypassed: true });
     } else for (const slug of rad) {
@@ -5516,9 +5746,10 @@ function applyMove(state, op, player) {
   let acetylene = false;
   let acetyleneCost = 0;
   if (op.acetyleneLiftoff && from) {
-    if (!(isAtmosphericSite(from) || isAerostatSiteId(from))) return fail('not_atmospheric');
+    const terms = acetyleneTermsFor(state, player, from, wetMass);
+    if (!terms.allowed) return fail('not_atmospheric');
     if (!canUseFactoryNonVictory(state, player, state.factories[from])) return fail('no_factory');
-    acetyleneCost = Math.ceil(2 * wetMass);
+    acetyleneCost = terms.cost;
     const siteTanks = Object.values(player.outposts || {}).filter((o) => o && o.siteId === from);
     const availWater = siteTanks.reduce((s, o) => s + Math.floor(outpostWater(o)), 0);
     if (availWater < acetyleneCost) return fail('insufficient_site_water', { need: acetyleneCost, have: availWater });
@@ -5666,7 +5897,7 @@ function applyMove(state, op, player) {
   // is a hazard roll unless a colony waives it. No factory => hard block.
   // Liftoff gates the origin (skipped at LEO, siteId null); landing gates
   // the destination.
-  const liftG = from ? maneuverGate(state, from, thrust, { powersat, acetylene, isFreighter: asFreighter, replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player), electiveFor: player }) : { ok: true, needsRoll: false };
+  const liftG = from ? maneuverGate(state, from, thrust, { powersat, acetylene, isFreighter: asFreighter, replay: !!op._replay, bernalLanderBurnWaived: landerBurnWaivedAt(state, player, from), electiveFor: player }) : { ok: true, needsRoll: false };
   if (!liftG.ok) return fail('cannot_liftoff', { thrust, siteSize: liftG.size, site: from, landerBurn: !!liftG.landerBurn });
   // Aerobrake landing: a destination that sits next to an aerobrake corridor
   // (the 🪂 symbol) can be reached by parachute - no thrust-to-land
@@ -5705,7 +5936,7 @@ function applyMove(state, op, player) {
     : flewTheCorridor;
   const landG = (aeroWaivesLanding || acetWaivesLanding)
     ? { ok: true, assist: false, needsRoll: false }
-    : maneuverGate(state, dest, thrust, { powersat, isFreighter: asFreighter, replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) });
+    : maneuverGate(state, dest, thrust, { powersat, isFreighter: asFreighter, replay: !!op._replay, bernalLanderBurnWaived: landerBurnWaivedAt(state, player, dest) });
   if (!landG.ok) return fail('cannot_land', { thrust, siteSize: landG.size, site: dest, landerBurn: !!landG.landerBurn });
   // Did the parachute do the work? A size-10 Mars site is unreachable by thrust
   // - nothing in the deck exceeds 6 - so an aerobrake descent is the ONLY way
@@ -5733,6 +5964,11 @@ function applyMove(state, op, player) {
   const crashIgnoredSlugs = []; // H6c: first-space hazard ignored on a factory-assist liftoff
   const chaosSlugs = [];        // POWER SERIES CHAOS MODEL: geyser / ring / spin / wind hazards
   const cavitationSlugs = [];   // CAVITATION ENGINEERS: the turn's one ignored aerobrake
+  const contractIgnoredSlugs = []; // M4 Hazard Ignore contract abilities (4B2f)
+  // M4 tophat (4B2e): the turn's first remaining hazard is entered safely, free.
+  const tophatFree = !(player.tophatUsed && player.tophatUsed.rocket)
+    && stackHasActiveTophat(state, player, player.rocket.stack);
+  let tophatSlug = null;
   // H6c Crash Hazard: the FIRST space moved into with a factory-assist liftoff
   // has its hazard IGNORED. Only the immediate liftoff-leg node (arrivals[0]),
   // and only when the liftoff actually uses factory-assist (liftG.assist). The
@@ -5746,6 +5982,8 @@ function applyMove(state, op, player) {
     // aerobrake hazards with no roll; skull hazards still roll.
     if (k === 'aero' && safeAero) { safeAeroSlugs.push(slug); continue; }
     if (chaosModelImmune(state, player, slug)) { chaosSlugs.push(slug); continue; }
+    if (contractIgnoresHazard(state, player, slug)) { contractIgnoredSlugs.push(slug); continue; }
+    if (newHorizonsIgnores(state, player, slug, 'rocket')) { contractIgnoredSlugs.push(slug); continue; }
     if (k === 'aero' && cavitationIgnores(state, player)) { cavitationSlugs.push(slug); continue; }
     // Factory-assist liftoff ignores the hazard on the first space entered
     // (H6c) - but NEVER when that space is a lander burn (or half-lander burn).
@@ -5758,6 +5996,7 @@ function applyMove(state, op, player) {
     // A factory-with-colony makes the launch pad safe: liftoff-leg skull /
     // aero hazards adjacent to the colony pass with no roll.
     if (liftoffColonyWaives(state, from, slug)) { colonyWaivedSlugs.push(slug); continue; }
+    if (tophatFree && !tophatSlug) { tophatSlug = slug; continue; }
     rollItems.push({ slug, kind: k });
   }
   if (landG.needsRoll) rollItems.push({ slug: dest, kind: 'assist', phase: 'landing' });
@@ -5781,7 +6020,7 @@ function applyMove(state, op, player) {
   const finaoPer = finaoPerFor(state, player);
   const paidCount = hazardChoices.filter((c) => c === 'pay').length;
   const finaoCost = paidCount * finaoPer;
-  if (finaoCost > 0 && finaoCost > (player.aqua | 0)) return fail('insufficient_aqua');
+  if (finaoCost > 0 && finaoCost > finaoFunds(state, player, { rocketTank: walkBlackDown(wetMass, stepsNeeded) - dryMass })) return fail('insufficient_aqua');
 
   // Commit the burn + the FINAO payment, then resolve dice in travel
   // order. rolls[] is recorded on the rocket for the client to play
@@ -5790,7 +6029,7 @@ function applyMove(state, op, player) {
   // the new tank water is whatever mass is left above dry (often fractional).
   player.rocket.tank = round6(walkBlackDown(wetMass, stepsNeeded) - dryMass);
   // Paid now; the Power Brokers settlement waits for the refund below.
-  if (finaoCost > 0) player.aqua -= finaoCost;
+  if (finaoCost > 0) chargeFinao(state, player, finaoCost);
   // Acetylene liftoff: burn the site's stored water (the player's outpost
   // tank(s) here), oldest outpost first. Whole units; validated above.
   if (acetylene) {
@@ -5814,6 +6053,11 @@ function applyMove(state, op, player) {
   for (const slug of safeAeroSlugs) rolls.push({ slug, kind: 'aero', safe: true });
   for (const slug of chaosSlugs) rolls.push({ slug, kind: hazardKind(slug), safe: true, chaosModel: true });
   for (const slug of cavitationSlugs) rolls.push({ slug, kind: 'aero', safe: true, cavitation: true });
+  for (const slug of contractIgnoredSlugs) rolls.push({ slug, kind: hazardKind(slug), safe: true, contractIgnore: true });
+  if (tophatSlug) {
+    rolls.push({ slug: tophatSlug, kind: hazardKind(tophatSlug), safe: true, tophat: true });
+    player.tophatUsed = { ...(player.tophatUsed || {}), rocket: true };
+  }
   for (const slug of colonyWaivedSlugs) rolls.push({ slug, kind: hazardKind(slug), safe: true });
   for (const slug of crashIgnoredSlugs) rolls.push({ slug, kind: hazardKind(slug), safe: true });
   for (const slug of radWaived) rolls.push({ slug, kind: 'rad', bypassed: true, tourismCycler: true });
@@ -5850,7 +6094,7 @@ function applyMove(state, op, player) {
   if (rad.length) {
     if (thrust > RAD_BYPASS_THRUST) {
       for (const slug of rad) rolls.push({ slug, kind: 'rad', bypassed: true, thrust });
-    } else if (!someCardAtRadRisk(player, player.rocket.stack, thrust, state)) {
+    } else if (!someCardAtRadRisk(player, player.rocket.stack, thrust + contractShield(state, player), state)) {
       // Nothing in the stack can be lost regardless of the roll (every rad-
       // sensitive card out-hardens the worst possible result), so skip the roll:
       // no die is spent, so the move stays UNDOABLE. (User: bypass the rad roll +
@@ -5922,7 +6166,7 @@ function applyMove(state, op, player) {
     while (j + 1 < segs.length && !(Number(segs[j + 1].burns) > 0)) j += 1;
     if (j === segs.length - 1) {
       if (aeroWaivesLanding || acetWaivesLanding || landG.assist) return arrivals.length;
-      const g0 = maneuverGate(state, dest, 0, { powersat, replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) });
+      const g0 = maneuverGate(state, dest, 0, { powersat, replay: !!op._replay, bernalLanderBurnWaived: landerBurnWaivedAt(state, player, dest) });
       if (g0.ok && !g0.needsRoll) return arrivals.length;
       return Math.max(h, j - 1);
     }
@@ -5968,8 +6212,10 @@ function applyMove(state, op, player) {
     // per hazard node, not once for the move.
     const rocketeers = zoneOfSlug(slug) === 'Earth'
       && hasPrivilege(state, player, 'ROCKETEERS') ? 2 : 0;
-    const radVal = Math.max(0, d6 - thrust - rocketeers);
-    rolls.push({ slug, kind: 'rad', d6, rad: radVal, thrust, ...(rocketeers ? { rocketeers } : {}) });
+    // Shielded contracts (4B2f): -2 per copy.
+    const shielded = contractShield(state, player);
+    const radVal = Math.max(0, d6 - thrust - rocketeers - shielded);
+    rolls.push({ slug, kind: 'rad', d6, rad: radVal, thrust, ...(rocketeers ? { rocketeers } : {}), ...(shielded ? { shielded } : {}) });
     // The guided tutorial never decommissions or degrades a card to a
     // radiation belt roll - the rolls play, but the ship rides through
     // unscathed. (User 2026-07-10.)
@@ -6173,6 +6419,13 @@ function applyMove(state, op, player) {
       : `${player.name} burned ${stepsSpent} fuel steps over ${burnWord} from ${originName} to ${destName}.`);
   if (chaosSlugs.length) log += ` Power Series Chaos Model: ${chaosSlugs.length} geyser / ring / spin / wind hazard${chaosSlugs.length === 1 ? '' : 's'} passed with no roll.`;
   if (cavitationSlugs.length) log += ' Cavitation Engineers: the aerobrake was ignored (once per turn).';
+  if (contractIgnoredSlugs.length) log += ` Hazard Ignore contract: ${contractIgnoredSlugs.length} hazard${contractIgnoredSlugs.length === 1 ? '' : 's'} passed with no roll.`;
+  if (tophatSlug) log += ' Tophat contract: one hazard entered safely, no FINAO (once per turn).';
+  // Shielded (4B2f): named whenever a belt was crossed, rolled or not (with the
+  // shield a soft stack can be out of reach of any roll, so none is made).
+  if (rolls.some((r) => r && r.kind === 'rad' && !r.tourismCycler) && contractShield(state, player)) {
+    log += ` Shielded contract: -${contractShield(state, player)} on each belt roll.`;
+  }
   if (haltedShort) {
     const planned = (siteById(plannedDest) || {}).name || plannedDest;
     log += ` A radiation belt knocked out the thruster, so the ship `
@@ -7808,6 +8061,7 @@ function applyTransfer(state, op, player) {
     }
     return outpostOf(ep).siteId;
   };
+  let usedTransport = false;
   const rocketEmpty = player.rocket.stack.length === 0;
   const involvesRocket = from === 'rocket' || to === 'rocket';
   if (involvesRocket && rocketEmpty) {
@@ -7840,7 +8094,13 @@ function applyTransfer(state, op, player) {
     // one end of an unbuilt pair does not bridge cargo across it (user
     // 2026-07-29: "the option to send stuff up the space elevator shouldn't
     // exist before I build it").
-    return fail('not_colocated');
+    // M4 Transport contract ability (4B2f): "Cargo transfer along a buggy road
+    // ... (1/turn)". (The Bernal-to-its-Dirtside half needs M2.)
+    const viaRoad = state.m4 && contractAbilityCount(state, player, 'transport') > 0
+      && siteOf(from) != null && siteOf(to) != null && isBuggyRoadPair(siteOf(from), siteOf(to));
+    if (!viaRoad) return fail('not_colocated');
+    if (player.transportUsed) return fail('transport_used');
+    usedTransport = true;
   }
 
   const srcArr = stackArrayOf(player, from);
@@ -7917,7 +8177,8 @@ function applyTransfer(state, op, player) {
     const whereName = createdBernal.site == null ? 'LEO' : ((siteById(createdBernal.site) || {}).name || createdBernal.site);
     return { ok: true, state, log: `${player.name} deployed the ${bname} colony at ${whereName} and loaded ${label}.` };
   }
-  return { ok: true, state, log: `${player.name} moved ${label} to ${stackLabel(to)}.` };
+  if (usedTransport) player.transportUsed = true;
+  return { ok: true, state, log: `${player.name} moved ${label} to ${stackLabel(to)}${usedTransport ? ' along the buggy road (Transport)' : ''}.` };
 }
 
 // The Martian (H9b): a FREE action, once per turn. With an Operational card
@@ -8966,7 +9227,7 @@ function applyAnchorBernal(state, op, player) {
   if (isGeoElevatorBuild) {
     const wantPay = !!op.hazardPay;
     const finaoPer = finaoPerFor(state, player);
-    if (wantPay && finaoPer > (player.aqua | 0)) return fail('insufficient_aqua');
+    if (wantPay && finaoPer > finaoFunds(state, player)) return fail('insufficient_aqua');
     // The attempt spends the operation regardless of the roll's outcome.
     if (freeViaColonist) spendColonistFreeOp(player, 'Industrialist');
     else player.opsRemaining -= 1;
@@ -9180,6 +9441,8 @@ function isHomeBernal(bn) {
 // (Bernals only exist in M2 games; the flag check keeps the zero-bleed rule
 // explicit).
 function immuneToBudgetCuts(state, player) {
+  // Bailout contract ability (4B2f): immune to budget cuts.
+  if (contractAbilityCount(state, player, 'bailout')) return true;
   if (!state.m2) return false;
   for (const bn of ((player && player.bernals) || [])) {
     if (!bn || !isHomeBernal(bn)) continue;
@@ -9367,7 +9630,9 @@ function applyDecommission(state, op, player) {
         // full Felonious privilege - it must NOT also unlock Claim Jump, Luna
         // prospecting, Factory Hijack, or Crew (Human) decommission above, so
         // it's checked here directly rather than folded into mayCommitFelony.
-        if (!mayCommitFelony(state, player) && !hasPrivilege(state, player, 'COLLECTIVE_BARGAINING')) {
+        // Rescue Team (M4 contract ability) allows Murder/Suicide the same way.
+        if (!mayCommitFelony(state, player) && !hasPrivilege(state, player, 'COLLECTIVE_BARGAINING')
+          && !contractAbilityCount(state, player, 'murderSuicide')) {
           blocked++; continue;
         }
         src.splice(idx, 1);
@@ -9432,6 +9697,9 @@ function applyClaimJump(state, op, player) {
   if (!actorCrewAtSite(state, siteId, player.profileId)) return fail('felony_needs_human');
   if (opposingHumanAtSite(state, siteId, player.profileId)) return fail('claim_defended');
   const prev = state.players.find((p) => p.profileId === disc.ownerId);
+  // Secured contract ability (4B2f): during Anarchy the holder is immune to
+  // Felonies, so their Claims cannot be jumped.
+  if (prev && state.anarchy && contractAbilityCount(state, prev, 'secured')) return fail('target_secured');
   disc.ownerId = player.profileId;
   const log = `${player.name} claim-jumped ${site.name}${prev ? ` from ${prev.name}` : ''} (Felony).`;
   pushNews(state, '\u{1F5FD}', log);
@@ -10005,7 +10273,8 @@ function applyProspect(state, op, player) {
   // Colocated modifier cards (subsystems 2 + 3): scan the PROSPECTING stack (the
   // rocket, or the freighter / bernal / outpost the prospect fires from).
   const colocatedPowers = unit.stack.map(powerOfSlot);
-  const isruMod = sumColocatedIsruMod(colocatedPowers, { isAerostat: isAerostatSite(site) });
+  const isruMod = sumColocatedIsruMod(colocatedPowers, { isAerostat: isAerostatSite(site) })
+    - contractIsruBonusAt(state, player, site);   // Closest Planet: -1 ISRU at Mercury
   const effIsru = Math.max(0, prospectorIsru(provSlot) + isruMod);   // isruMod <= 0 (easier), floored at 0
   // V5 Hermes Fall: prospecting the binary auto-succeeds with a robonaut of ANY
   // ISRU - but SOLO ONLY (user 2026-08-07). Both halves are hydration 0, so the
@@ -10038,7 +10307,9 @@ function applyProspect(state, op, player) {
   if ((state.players || []).length >= 2 && String(site.body || '') === 'Luna') {
     const fp = state.players[state.firstPlayerIndex || 0];
     const isFirst = fp && fp.profileId === player.profileId;
-    const granted = !!(state.lunaGrants && state.lunaGrants[String(player.profileId)]);
+    // Artemis (M4): Luna without the first player's permission.
+    const granted = !!(state.lunaGrants && state.lunaGrants[String(player.profileId)])
+      || contractAbilityCount(state, player, 'lunaFree') > 0;
     if (!isFirst && !granted) {
       if (mayCommitFelony(state, player)) lunaFelony = true;
       else return fail('luna_treaty');
@@ -10547,6 +10818,10 @@ function applyEtProduce(state, op, player) {
     // Human must still be there - a sitdown needs workers on the floor.
     const sitdown = hasPrivilege(state, player, 'SITDOWN');
     if (!sitdown && !mayCommitFelony(state, player)) return fail('not_your_factory');
+    // Secured contract ability (4B2f): during Anarchy the owner is immune to
+    // Felonies, "superseding all other Felony Abilities".
+    const facOwner = playerByProfile(state, fac.ownerId);
+    if (state.anarchy && facOwner && contractAbilityCount(state, facOwner, 'secured') > 0) return fail('target_secured');
     if (!actorCrewAtSite(state, siteId, player.profileId)) return fail('felony_needs_human');
     if (!sitdown && opposingHumanAtSite(state, siteId, player.profileId)) return fail('factory_defended');
   }
@@ -10569,7 +10844,9 @@ function applyEtProduce(state, op, player) {
   if (prodCard && fac.spectralType && !op._replay) {
     const spec = prodCard.spectralType;
     const anyC = tailingsRemining(state, player, siteId)
-      || playerHasColonistPower(state, player, 'etProduceCAnywhere');
+      || playerHasColonistPower(state, player, 'etProduceCAnywhere')
+      // Splat augmentation, side 1: "Factory is also Carbon" (4C3).
+      || augmentSideAt(player, 'splat', 1, siteId);
     if (spec && String(spec).toLowerCase() !== 'any' && spec !== fac.spectralType && !(anyC && spec === 'C')) {
       return fail('wrong_spectral', { product: spec, factory: fac.spectralType });
     }
@@ -10907,9 +11184,21 @@ function canTakeFirstPlayer(state, player) {
   if (fp && fp.profileId === player.profileId) return true;
   return cubesInPlay(state, player.profileId) < FACTORY_CUBES;
 }
+// M4 partner delegates (4B8a): this player's delegates sitting on OTHER
+// players' fulfilled contracts (their enterprises). Each is one of the 7 cubes
+// and scores as a delegate (4B8b / 4E2a). Zero outside M4.
+function partnerDelegateCount(state, profileId) {
+  if (!state || !state.m4) return 0;
+  let n = 0;
+  for (const q of state.players || []) {
+    for (const f of q.fulfilledContracts || []) n += (f.partners || []).filter((x) => x === profileId).length;
+  }
+  return n;
+}
 function cubesInPlay(state, profileId) {
   let n = ownedSiteCount(state.factories, profileId)
     + playerDelegatesPlaced(assemblyOf(state), profileId)
+    + partnerDelegateCount(state, profileId)
     // A Mobile Factory off its claim is still one of the 7 cubes.
     + (state.mobileCubes || []).filter((c) => c && c.ownerId === profileId).length;
   // The Sunspot / first-player cube occupies one of the holder's 7. CEO
@@ -10938,6 +11227,16 @@ function applyFundraise(state, op, player) {
   // ideology or a space where you already hold a delegate.
   const place = op.place ? String(op.place) : null;
   if (place && !ASSEMBLY_PLACES.includes(place)) return fail('bad_place');
+  // M4 Partner Enterprise (4B3a / 4B8): the new delegate goes on an opponent's
+  // fulfilled contract instead of the assembly, during peace, with the owner's
+  // negotiated permission. The Fundraise opens that negotiation as a trade; the
+  // delegate lands when the owner accepts (see applyTradeAccept).
+  let enterprise = null;
+  if (op.enterprise) {
+    const ent = enterpriseRequestRefusal(state, player, op.enterprise, { place });
+    if (ent.error) return fail(ent.error, ent.detail);
+    enterprise = ent;
+  }
   if (place) {
     const home = (state.homeIdeology || {})[pid];
     if (place !== home && placeCount(asm, place, pid) <= 0) return fail('bad_place_target');
@@ -10972,10 +11271,24 @@ function applyFundraise(state, op, player) {
     if (place === moveFrom) have += 1;
     if (have <= 0) return fail('no_delegate_there');
   }
+  // Heart augmentation, side 2: "+1 delegate move during fundraise" (4C3).
+  const moveFrom2 = op.moveFrom2 ? String(op.moveFrom2) : null;
+  const moveTo2 = op.moveTo2 ? String(op.moveTo2) : null;
+  if ((moveFrom2 && !moveTo2) || (!moveFrom2 && moveTo2)) return fail('bad_move');
+  if (moveFrom2) {
+    if (!(state.m4 && hasAugmentSide(player, 'heart', 2))) return fail('no_second_move');
+    if (!ASSEMBLY_PLACES.includes(moveFrom2) || !ASSEMBLY_PLACES.includes(moveTo2)) return fail('bad_place');
+    if (!adjacentPlaces(moveFrom2).includes(moveTo2)) return fail('not_adjacent');
+  }
   if (place) setPlaceCount(asm, place, pid, placeCount(asm, place, pid) + 1);
   if (moveFrom) {
     setPlaceCount(asm, moveFrom, pid, placeCount(asm, moveFrom, pid) - 1);
     setPlaceCount(asm, moveTo, pid, placeCount(asm, moveTo, pid) + 1);
+  }
+  if (moveFrom2) {
+    if (placeCount(asm, moveFrom2, pid) <= 0) return fail('no_delegate_there');
+    setPlaceCount(asm, moveFrom2, pid, placeCount(asm, moveFrom2, pid) - 1);
+    setPlaceCount(asm, moveTo2, pid, placeCount(asm, moveTo2, pid) + 1);
   }
   // Authority (Martial Law) discard is applied AFTER the vote tally below (O3a):
   // the discarded cube still counts in the tally, and moving the Active Law INTO
@@ -10987,7 +11300,10 @@ function applyFundraise(state, op, player) {
   // hauled home and claimed still counts (the old code counted only carried
   // chits, so a player whose chits were all claimed fundraised for +0).
   const honor = playerCanUseLaw(state, player, 'honor');
-  const gain = honor ? gloryChitCount(player) : INCOME_AQUA;
+  // Rivalry-style contract ability (4B2f): "Gain N additional Aqua when
+  // fundraising", per fulfilled copy.
+  const contractExtra = contractAbilityCount(state, player, 'fundraiseAqua');
+  const gain = (honor ? gloryChitCount(player) : INCOME_AQUA) + contractExtra;
   player.aqua = (player.aqua | 0) + gain;
   player.opsRemaining -= 1;
   // Vote tally (the final step): move the active-law star onto the winner. One
@@ -11029,6 +11345,16 @@ function applyFundraise(state, op, player) {
       : `placed a delegate on ${placeName(place)}`);
   }
   if (moveFrom) parts.push(`moved a delegate ${placeName(moveFrom)} -> ${placeName(moveTo)}`);
+  if (moveFrom2) parts.push(`moved a delegate ${placeName(moveFrom2)} -> ${placeName(moveTo2)} (Heart)`);
+  if (enterprise) {
+    state.trade = {
+      initiatorId: pid, partnerId: enterprise.owner.profileId, awaiting: 'partner', version: 1,
+      give: enterprise.give, receive: normTradeSide({}), location: enterprise.location,
+      enterprise: { ownerId: enterprise.owner.profileId, cardId: enterprise.cardId },
+    };
+    const offer = sideIsEmpty(enterprise.give) ? '' : ` (${tradeSideSummary(state, enterprise.give)})`;
+    parts.push(`asked ${enterprise.owner.name} for a partner seat on ${enterprise.face.name}${offer}`);
+  }
   const did = parts.length ? parts.join(' and ') : 'took income';
   // M4 (4B3): the Fundraise's final step may open a contract auction.
   if (state.m4) player.fundraisedThisTurn = true;
@@ -11037,7 +11363,7 @@ function applyFundraise(state, op, player) {
     : '';
   return {
     ok: true, state,
-    log: `${player.name} fundraised - ${did}, +${gain} aqua${honor ? ' (Honor: per glory chit)' : ''}.${op.arbiterDouble ? ' As Arbiter, their delegates counted twice in the vote tally.' : ''}${starNote}${martial}`,
+    log: `${player.name} fundraised - ${did}, +${gain} aqua${honor ? ' (Honor: per glory chit)' : ''}${contractExtra ? ` (+${contractExtra} from a fulfilled contract)` : ''}.${op.arbiterDouble ? ' As Arbiter, their delegates counted twice in the vote tally.' : ''}${starNote}${martial}`,
   };
 }
 
@@ -11534,9 +11860,12 @@ function applySiteRefuel(state, op, player) {
   if (gateW.freeRepeat) label += ' (Miner colonist: extra refuel)';
   const destTank = bernalDest ? bernalDest.tank : player.rocket.tank;
   const destNote = bernalDest ? ' into the Bernal Stack' : '';
+  // Triangle augmentation, side 2: "Site refuel yields +2 Aqua" (4C3).
+  const tri = augmentSideAt(player, 'triangle', 2, siteId) ? 2 : 0;
+  if (tri) player.aqua = (player.aqua | 0) + tri;
   return {
     ok: true, state,
-    log: `${player.name}: ${label} at ${site.name} (+${round6(gain)} water${destNote}; tank ${round6(destTank)}).`,
+    log: `${player.name}: ${label} at ${site.name} (+${round6(gain)} water${destNote}; tank ${round6(destTank)})${tri ? `, +${tri} aqua (Triangle)` : ''}.`,
   };
 }
 
@@ -12202,7 +12531,7 @@ function applyAirEaterRefuel(state, op, player) {
   const safeAero = stackSafeAerobrake(player.rocket);
   const wantPay = !safeAero && !!op.hazardPay;
   const finaoPer = finaoPerFor(state, player);
-  if (wantPay && finaoPer > (player.aqua | 0)) return fail('insufficient_aqua');
+  if (wantPay && finaoPer > finaoFunds(state, player)) return fail('insufficient_aqua');
   const gen = makeRng(state.seed, state.rng.cursor);
   const rolls = [];
   let destroyed = false;
@@ -12600,7 +12929,7 @@ function applyBuildElevator(state, op, player) {
 
   const wantPay = !!op.hazardPay;
   const finaoPer = finaoPerFor(state, player);
-  if (wantPay && finaoPer > (player.aqua | 0)) return fail('insufficient_aqua');
+  if (wantPay && finaoPer > finaoFunds(state, player)) return fail('insufficient_aqua');
   if (op.debug) {
     return { ok: true, state, log: '', calc: { pair: pair.key, factoryEnd, otherEnd, wouldPay: wantPay, performer: cubeKind, free: !!iceworms } };
   }
@@ -12947,7 +13276,7 @@ function applyEpicHazard(state, op, player) {
   // The Epic Hazard roll (or FINAO).
   const wantPay = !!op.hazardPay;
   const finaoPer = finaoPerFor(state, player);
-  if (wantPay && finaoPer > (player.aqua | 0) - aquaCost) return fail('insufficient_aqua');
+  if (wantPay && finaoPer > finaoFunds(state, player) - aquaCost) return fail('insufficient_aqua');
   let rolled = false, d6 = null, failed = false;
   if (wantPay) {
     payFinao(state, player, finaoPer);
@@ -13076,6 +13405,7 @@ const FUNCTIONAL = {
   FULFILL_CONTRACT: applyFulfillContract,
   ABANDON_CONTRACT: applyAbandonContract,
   IMPLANT: applyImplant,
+  INSIGHT: applyInsight,
   PAY_LATE_FEE: applyPayLateFee,
   FUNDRAISE: applyFundraise,
   PROMOTE: applyPromote,
@@ -13216,7 +13546,7 @@ function pickPayload(op) {
     case 'LOAD_FUEL': return { cardId: op.cardId, holder: op.holder };
     case 'DUMP_FUEL_CARD': return { cardId: op.cardId, holder: op.holder };
     case 'FREE_MARKET': return { cardId: op.cardId, cardIds: op.cardIds, leoCardId: op.leoCardId, leoCardIds: op.leoCardIds };
-    case 'FUNDRAISE': return { place: op.place, moveFrom: op.moveFrom, moveTo: op.moveTo, freeDelegate: op.freeDelegate, discard: op.discard, star: op.star, ...(op.arbiterDouble ? { arbiterDouble: true } : {}) };
+    case 'FUNDRAISE': return { place: op.place, moveFrom: op.moveFrom, moveTo: op.moveTo, freeDelegate: op.freeDelegate, discard: op.discard, star: op.star, ...(op.arbiterDouble ? { arbiterDouble: true } : {}), ...(op.enterprise ? { enterprise: op.enterprise } : {}), ...(op.moveFrom2 ? { moveFrom2: op.moveFrom2, moveTo2: op.moveTo2 } : {}) };
     // rabbleRouser MUST ride along: without it an UNDO/REDO replay would re-run
     // the Lobby with the rouse dropped and quietly lose the Anarchy flip.
     case 'LOBBY': return { ideology: op.ideology, ...(op.rabbleRouser ? { rabbleRouser: true } : {}), ...(op.ambassador ? { ambassador: true } : {}) };
@@ -13250,9 +13580,9 @@ function pickPayload(op) {
     case 'SET_ROUTE': return { segments: op.segments, ...(op.unit ? { unit: op.unit } : {}) };
     case 'SET_WIRING': return { wiring: op.wiring, ...(op.stackId ? { stackId: op.stackId } : {}) };
     case 'SET_CARD_GROUPS': return { groups: op.groups };
-    case 'FULFILL_CONTRACT': return { cardId: op.cardId };
+    case 'FULFILL_CONTRACT': return { cardId: op.cardId, ...(op.ideology ? { ideology: op.ideology, delegates: op.delegates } : {}) };
     case 'ABANDON_CONTRACT': return { cardId: op.cardId };
-    case 'IMPLANT': return { bernal: op.bernal, implants: op.implants, remove: op.remove };
+    case 'IMPLANT': return { bernal: op.bernal, colony: op.colony, implants: op.implants, remove: op.remove };
     case 'PAY_LATE_FEE': return { cardId: op.cardId, amount: op.amount };
     case 'CLEAR_ROUTE': return op.unit ? { unit: op.unit } : {};
     default:
@@ -13359,8 +13689,12 @@ function openTurnFor(state, player) {
     player.contractAuctionDone = false;
     player.lateFeePaidThisTurn = 0;
     player.implantFreeUsed = false;
+    if (player.transportUsed) delete player.transportUsed;
     player.turnStartedLate = !!(player.timepiece && player.timepiece.deadbeat);
-    if (player.rocket) player.rocket.enteredThisTurn = [];
+    if (player.rocket) {
+      player.rocket.enteredThisTurn = [];
+      if (player.rocket.hazardRolledThisTurn) delete player.rocket.hazardRolledThisTurn;
+    }
   }
   // M1: the Freighter is a second independent mover - it gets its own one move
   // per turn, separate from the rocket's. Only consumable while a freighter is
@@ -13386,6 +13720,10 @@ function openTurnFor(state, player) {
   player.thermalLabsUsed = false;
   player.shuttlesUsed = false;
   player.cavitationUsed = false;
+  if (player.tophatUsed) delete player.tophatUsed;   // M4 tophat: once per turn
+  if (player.newHorizonsUsed) delete player.newHorizonsUsed;   // M4 New Horizons: 1/spacecraft/turn
+  delete player.insightUsed;                          // M4 Insight: once per auction turn
+  delete player.insightPending;
   player.wsbCoastUsed = false;
   player.arbiterTallied = false;
   player.emissaryLaws = [];
@@ -13738,6 +14076,8 @@ function noteSirenUranianLanding(state, player) {
 }
 
 function applyEndTurn(state, _op, player) {
+  // M4 Insight: the research auction it announced must be started this turn.
+  if (player.insightPending) return fail('insight_auction_due');
   if (mustExomigrate(state, player)) return fail('must_exomigrate');
   // BLUE PLANET: settle the coming aerobrake hazard now, before the turn passes.
   let bluePlanetNote = '';
@@ -14171,7 +14511,7 @@ function computeFinalScores(state) {
   // unfulfilled contract claims the default chit as part of scoring).
   const contractRows = contractScoring(state);
   const scores = state.players.map((p, idx) => {
-    const cubeVp = m0 ? playerDelegatesPlaced(asm, p.profileId) : 0;
+    const cubeVp = m0 ? playerDelegatesPlaced(asm, p.profileId) + partnerDelegateCount(state, p.profileId) : 0;
     const awardVp = (m0 && winnerKey) ? ideologyAwardVp(state, p, winnerKey) : 0;
     // state.colonies is keyed BY site slug, so entries() (not values()) - the
     // slug is what tells a Sirenian dome whether it sits at an aerostat.
@@ -14260,7 +14600,7 @@ function ceoSoloScore(state, player) {
   const outposts = player.outposts ? Object.keys(player.outposts).length : 0;
   const rocket = (player.rocket && Array.isArray(player.rocket.stack) && player.rocket.stack.length > 0) ? 1 : 0;
   const gloryVp = playerGloryVp(player);
-  const cubeVp = m0 ? playerDelegatesPlaced(asm, player.profileId) : 0;
+  const cubeVp = m0 ? playerDelegatesPlaced(asm, player.profileId) + partnerDelegateCount(state, player.profileId) : 0;
   // Anchored Bernals + Futures stars count toward the live CEO tally too, so the
   // board KPI reflects ALL current game pieces (user 2026-07-05). Score the
   // stars through futureStarScore, the SAME helper the endgame tally and the
@@ -14425,7 +14765,7 @@ export function assemblyVpByPlayer(state) {
   const winnerKey = (state.finalVote && state.finalVote.winner) || null;
   for (const p of state.players) {
     out[p.profileId] = {
-      cubeVp: asm ? playerDelegatesPlaced(asm, p.profileId) : 0,
+      cubeVp: asm ? playerDelegatesPlaced(asm, p.profileId) + partnerDelegateCount(state, p.profileId) : 0,
       awardVp: (asm && winnerKey) ? ideologyAwardVp(state, p, winnerKey) : 0,
     };
   }
@@ -14461,7 +14801,7 @@ export function liveScoreboard(state) {
     const rocket = (p.rocket && Array.isArray(p.rocket.stack) && p.rocket.stack.length > 0) ? 1 : 0;
     const firstPlayer = idx === firstIdx ? 1 : 0;
     const gloryVp = playerGloryVp(p);
-    const cubeVp = asm ? playerDelegatesPlaced(asm, p.profileId) : 0;
+    const cubeVp = asm ? playerDelegatesPlaced(asm, p.profileId) + partnerDelegateCount(state, p.profileId) : 0;
     const bernalBd = m2 ? bernalScoreBreakdown(state, p) : { vp: 0, rows: [] };
     const bernalVp = bernalBd.vp;
     // Each accomplished Future scores its OWN current value (the same re-check +
@@ -15187,6 +15527,31 @@ function applyTradePort(state, op, player) {
   };
 }
 
+// INSIGHT (M4 contract ability, 4B2f): "after announcing a research auction
+// (I2), you may initially choose one patent deck and move its top card to the
+// bottom of its deck. Then choose any top card to auction." Announcing commits
+// you: the turn cannot end until AUCTION_START runs. It reveals the next card,
+// so it cannot be undone. Not during Research Grants (O5e). op = { deckType }.
+function applyInsight(state, op, player) {
+  if (!contractAbilityCount(state, player, 'insight')) return fail('no_insight');
+  if (state.auction) return fail('auction_in_progress');
+  if (player.insightPending || player.insightUsed) return fail('insight_used');
+  if (player.opsRemaining <= 0) return fail('no_ops_left');
+  const type = String(op.deckType || '');
+  const decks = [...DECK_TYPES, ...(state.m1 ? M1_DECK_TYPES : []), ...(state.m2 ? M2_DECK_TYPES : [])];
+  if (!decks.includes(type)) return fail('bad_deck');
+  const deck = decksFor(state, player)[type];
+  if (!deck || !deck.length) return fail('deck_empty');
+  const moved = deck.shift();
+  deck.push(moved);
+  player.insightPending = true;
+  player.insightUsed = true;
+  return {
+    ok: true, state, noUndo: true,
+    log: `${player.name} announced a research auction and used Insight: ${(PATENTS_BY_ID[moved] || {}).name || moved} went to the bottom of the ${type} deck.`,
+  };
+}
+
 function applyAuctionStart(state, op, ctx) {
   if (state.auction) return fail('auction_in_progress');
   const player = currentPlayer(state);
@@ -15211,6 +15576,24 @@ function applyAuctionStart(state, op, ctx) {
   // Under a Sirens species split you auction from YOUR OWN library; the other
   // species' decks are not yours to put up (V9b).
   const myDecks = decksFor(state, player);
+  // Insight contract ability (4B2f): after announcing the auction, first send
+  // the top card of any one patent deck to its bottom, then pick the lot. Not
+  // during Research Grants (O5e).
+  let insightNote = '';
+  if (player.insightPending && op.useEquality) return fail('insight_not_in_grants');
+  if (op.insightDeck != null) {
+    if (player.insightPending || player.insightUsed) return fail('insight_used');
+    if (!contractAbilityCount(state, player, 'insight')) return fail('no_insight');
+    if (op.useEquality && playerCanUseLaw(state, player, 'equality')) return fail('insight_not_in_grants');
+    const iType = String(op.insightDeck);
+    if (!auctionableDecks.includes(iType)) return fail('bad_deck');
+    const iDeck = myDecks[iType];
+    if (!iDeck || !iDeck.length) return fail('deck_empty');
+    const moved = iDeck.shift();
+    iDeck.push(moved);
+    player.insightUsed = true;
+    insightNote = `${player.name} used Insight to send ${(PATENTS_BY_ID[moved] || {}).name || moved} to the bottom of the ${iType} deck. `;
+  }
   const deck = myDecks[deckType];
   if (!deck || !deck.length) return fail('deck_empty');
   // Can't initiate a research auction for a card type you're already at the
@@ -15278,9 +15661,10 @@ function applyAuctionStart(state, op, ctx) {
     state.turnRedo = [];
     const tc = PATENTS_BY_ID[cardId];
     const bonusTail = bonusIds.length ? ` plus ${bonusIds.length} bonus support${bonusIds.length === 1 ? '' : 's'}` : '';
+    delete player.insightPending;
     return {
       ok: true, state,
-      log: `${player.name} took ${tc ? tc.name : cardId} from the ${deckType} deck${bonusTail} for ${cost} aqua${dealTail}.`,
+      log: `${insightNote}${player.name} took ${tc ? tc.name : cardId} from the ${deckType} deck${bonusTail} for ${cost} aqua${dealTail}.`,
     };
   }
 
@@ -15351,7 +15735,8 @@ function applyAuctionStart(state, op, ctx) {
   // auctioneer's phase, so the "Keep (no bids)" button is live immediately.
   recomputeAuction(state);
   const card = PATENTS_BY_ID[cardId];
-  return { ok: true, state, log: `${player.name} put ${card ? card.name : cardId} up for auction.` };
+  delete player.insightPending;
+  return { ok: true, state, log: `${insightNote}${player.name} put ${card ? card.name : cardId} up for auction.` };
 }
 
 function applyAuctionBid(state, op, ctx) {
@@ -15603,7 +15988,12 @@ function contractDebt(player, cardId) {
 // Pair decks a player may auction from: sharing an ideology with a law in force
 // (4B3c). Unity can switch several laws on at once.
 function contractPairsOpenTo(state, player) {
-  return Object.keys(CONTRACT_PAIRS).filter((pair) => CONTRACT_PAIRS[pair].some((k) => playerCanUseLaw(state, player, k)));
+  // Connections contract ability (4B2f): also any deck where you have a
+  // delegate in one of its two ideologies.
+  const connections = contractAbilityCount(state, player, 'connections') > 0;
+  const asm = connections ? assemblyOf(state) : null;
+  return Object.keys(CONTRACT_PAIRS).filter((pair) => CONTRACT_PAIRS[pair].some((k) => playerCanUseLaw(state, player, k)
+    || (connections && playerDelegatesInPlace(asm, k, player.profileId) > 0)));
 }
 // May this player bid on this contract? Timepiece in the Reserve (4B3b), and the
 // default chit bars manned contracts (4B2d / 4B6c).
@@ -15616,23 +16006,65 @@ function contractBidBlock(state, player, cardId) {
 // Every stack location a contract card can sit in, with where that stack is.
 function findContractSlot(state, player, cardId) {
   const inLeo = (player.leo || []).findIndex((s) => s.id === cardId);
-  if (inLeo >= 0) return { arr: player.leo, idx: inLeo, where: { siteId: null, atLeo: true, entered: [] }, label: 'LEO' };
+  if (inLeo >= 0) return { arr: player.leo, idx: inLeo, where: { siteId: null, atLeo: true, entered: [], stack: player.leo }, label: 'LEO' };
   const st = (player.rocket && player.rocket.stack) || [];
   const inRocket = st.findIndex((s) => s.id === cardId);
   if (inRocket >= 0) {
     const atLeo = rocketAtLeo(state, player);
     return {
       arr: st, idx: inRocket, label: 'rocket',
-      where: { siteId: atLeo ? null : player.rocket.siteId, atLeo, entered: player.rocket.enteredThisTurn || [] },
+      where: {
+        siteId: atLeo ? null : player.rocket.siteId, atLeo, entered: player.rocket.enteredThisTurn || [],
+        stack: st, glitched: !!player.rocket.glitch, rolled: !!player.rocket.hazardRolledThisTurn,
+      },
     };
+  }
+  // Any other stack of yours carrying it (4B4b: the stack holding the contract
+  // fulfils): an Outpost, or the Freighter (M1). Neither tracks a pass-through
+  // list, so only the space it stands on counts.
+  for (const o of Object.values(player.outposts || {})) {
+    const i = (o.cards || []).findIndex((s) => s.id === cardId);
+    if (i >= 0) {
+      return { arr: o.cards, idx: i, label: `Outpost ${o.letter}`,
+        where: { siteId: o.siteId, atLeo: false, entered: [], stack: o.cards, glitched: !!o.glitch } };
+    }
+  }
+  const fr = player.freighter;
+  if (fr && Array.isArray(fr.stack)) {
+    const i = fr.stack.findIndex((s) => s.id === cardId);
+    if (i >= 0) {
+      const atLeo = fr.siteId == null || fr.siteId === leoSlug();
+      return { arr: fr.stack, idx: i, label: 'Freighter',
+        where: { siteId: atLeo ? null : fr.siteId, atLeo, entered: [], stack: fr.stack, glitched: !!fr.glitched } };
+    }
   }
   return null;
 }
-function contractCtx(state) {
+function contractCtx(state, player = null, where = {}) {
+  const unexplored = (id) => !state.discs[id] && !state.factories[id];
+  const cards = where.stack || [];
   return {
     site: (id) => siteById(id),
-    size: (site) => nodeSizeNumber(site.id),
-    unexplored: (id) => !state.discs[id] && !state.factories[id],
+    // By the map slug: a curated record's own id (venus_aerostat_xity) is not a node.
+    size: (site, slug) => nodeSizeNumber(slug || site.id),
+    unexplored,
+    // 4A7d: a site a coloured route leads to.
+    signposted: (id) => SIGNPOSTED_SITES.includes(id),
+    noUnexploredSignposted: () => !SIGNPOSTED_SITES.some(unexplored),
+    // Next to a crash hazard (a skull space), one edge away.
+    adjacentHazard: (id) => neighborSlugs(id).some((n) => hazardKind(n) === 'skull'),
+    busted: (id) => !!(state.discs[id] && state.discs[id].outcome === 'fail'),
+    ownFactory: (id) => !!(player && state.factories[id] && state.factories[id].ownerId === player.profileId),
+    // The farthest zone from the Sun in which any player has claimed a glory chit.
+    farthestGloryZone: () => [...ZONE_ORDER].reverse().find((z) => zoneChitTaken(state, z)) || null,
+    stackHuman: () => stackHasHuman(state, cards),
+    // Operational: the card is in the carrying stack and the stack is not glitched.
+    stackOperational: (type) => !where.glitched && cards.some((s) => {
+      const c = PATENTS_BY_ID[s.id];
+      return c && c.type === type;
+    }),
+    hazardRolled: () => !!where.rolled,
+    nodeHazard: (n) => hazardKind(n),
     gloryUnclaimed: (zone) => !zoneChitTaken(state, zone),
     atmospheric: (id) => isAtmosphericSite(id),
     submarine: (id) => isSubmarineSite(id),
@@ -15811,12 +16243,12 @@ function applyFulfillContract(state, op, player) {
   if (meta.default) return fail('contract_in_default');
   const loc = findContractSlot(state, player, cardId);
   if (!loc) return fail('contract_not_boosted');
-  const ctx = contractCtx(state);
+  const ctx = contractCtx(state, player, loc.where);
   const done = [];
   let why = null;
   while (meta.progress.done < face.steps.length) {
     const step = face.steps[meta.progress.done];
-    const r = stepSatisfied(step, loc.where, meta.progress, ctx);
+    const r = stepSatisfied(step, loc.where, meta.progress, ctx, meta.progress.done > 0 ? face.steps[meta.progress.done - 1] : null);
     if (!r.ok) { why = r; break; }
     meta.progress.sites.push(r.siteId || null);
     meta.progress.done += 1;
@@ -15827,6 +16259,9 @@ function applyFulfillContract(state, op, player) {
   if (meta.progress.done < steps) {
     return { ok: true, state, log: `${player.name} announced step ${meta.progress.done} of ${steps} of ${face.name}${loc.where.siteId ? ` at ${(siteById(loc.where.siteId) || {}).name || loc.where.siteId}` : ''}.` };
   }
+  // The Site the last step was announced at (the "destination Site" a When
+  // Fulfilling effect names).
+  const destSlug = meta.progress.sites[meta.progress.sites.length - 1] || loc.where.siteId || null;
   // Fulfilled (4B4f): off the stack into the fulfilled splay, timepiece home,
   // any late-fee payments discarded.
   loc.arr.splice(loc.idx, 1);
@@ -15835,8 +16270,68 @@ function applyFulfillContract(state, op, player) {
   const late = !!(player.timepiece && player.timepiece.contractId === cardId && player.timepiece.deadbeat);
   if (player.timepiece && player.timepiece.contractId === cardId) player.timepiece = null;
   delete player.contractMeta[cardId];
-  const ability = face.fulfilledAbility ? ` Fulfilled ability: ${face.fulfilledAbility}` : '';
-  return { ok: true, state, log: `${player.name} fulfilled ${face.name}${late ? ' (late)' : ''} for ${face.vp} VP.${ability}` };
+  // "When Fulfilling" effects (4B4f), enacted as free actions.
+  let when = '';
+  const fx = face.onFulfill || {};
+  if (fx.gainAqua) {
+    player.aqua = (player.aqua | 0) + fx.gainAqua;
+    when += ` When fulfilling: gained ${fx.gainAqua} aqua.`;
+  } else if (fx.bustAndDelegates) {
+    when += planetaryProtection(state, player, destSlug, op);
+  } else if (fx.beehive) {
+    when += beehiveProspect(state, player, destSlug);   // its die is an undo barrier (rng cursor)
+  } else if (face.whenFulfilling) {
+    when += ` When fulfilling (not yet automated): ${face.whenFulfilling}`;
+  }
+  return { ok: true, state, log: `${player.name} fulfilled ${face.name}${late ? ' (late)' : ''} (+${face.vp} VP).${when}` };
+}
+
+// Planetary Protection (When Fulfilling): "Bust the destination Site & place up
+// to 2 delegates in any 1 Ideology." op.ideology picks the Ideology, op.delegates
+// how many (0-2, default 2). The bust is a busted disc in the player's name.
+function planetaryProtection(state, player, slug, op) {
+  const bits = [];
+  const nm = (siteById(slug) || {}).name || slug;
+  if (slug && !(state.discs[slug] && state.discs[slug].outcome === 'success')) {
+    state.discs[slug] = { outcome: 'fail', roll: null, by: player.name, ownerId: player.profileId,
+      turn: state.turn | 0, round: state.round | 0, canReroll: false, protected: true };
+    bits.push(`${nm} is busted`);
+  }
+  const ideo = String(op.ideology || '');
+  const want = Math.max(0, Math.min(2, op.delegates == null ? 2 : Number(op.delegates) | 0));
+  if (state.m0 && IDEOLOGY_BY_KEY[ideo] && want) {
+    let placed = 0;
+    for (let i = 0; i < want; i++) if (grantDelegate(state, player, ideo)) placed++;
+    if (placed) {
+      bits.push(`${placed} delegate${placed === 1 ? '' : 's'} join${placed === 1 ? 's' : ''} ${IDEOLOGY_BY_KEY[ideo].name}`);
+      const starMoved = quietVoteTally(state, player);
+      if (starMoved) bits.push(`the active-law star moves to ${starMoved}`);
+    }
+  }
+  return bits.length ? ` When fulfilling: ${bits.join('; ')}.` : '';
+}
+// Beehive (When Fulfilling): "Remove Busted disk; prospect here at ISRU 0
+// w/reroll." The busted disc comes off and the Site is prospected at once (ISRU
+// 0 always reads it); a failed size roll may be re-rolled this turn.
+function beehiveProspect(state, player, slug) {
+  const site = siteById(slug);
+  if (!site) return '';
+  const old = state.discs[slug];
+  if (old && old.outcome === 'success') return '';
+  delete state.discs[slug];
+  const threshold = prospectThreshold(site);
+  const autoSize = threshold > 5;
+  const gen = makeRng(state.seed, state.rng.cursor);
+  const roll = autoSize ? null : gen.d6();
+  state.rng.cursor = gen.cursor;
+  const success = autoSize || roll <= threshold;
+  state.discs[slug] = {
+    outcome: success ? 'success' : 'fail', roll, threshold, kind: 'beehive',
+    ...(autoSize ? { auto: true } : {}),
+    by: player.name, ownerId: player.profileId, turn: state.turn | 0, round: state.round | 0,
+    canReroll: !success,
+  };
+  return ` When fulfilling: the busted disc comes off ${site.name}; prospected at ISRU 0, ${autoSize ? 'no roll' : `rolled ${roll} vs ${threshold}`}: ${success ? 'claim struck' : 'dry (may re-roll)'}.`;
 }
 
 // PAY_LATE_FEE (4B5b): a free action, up to the contract's late fee per turn,
@@ -15970,13 +16465,17 @@ function contractScoring(state) {
 // Gated on state.m4 AND state.m2 (colonists, Bernals and colonies are Module 2).
 // A faction owns ONE augmentation chit of each of the six cybernetics shapes
 // (4C4d), recorded as player.augments[shape] = { colonistId, side } once it is
-// implanted. Its portfolio is the cybernetics icons on its fulfilled contracts
-// (4B8d; partner enterprises are later).
+// implanted. Its portfolio is the cybernetics icons on its enterprises (its
+// fulfilled contracts) and its partner enterprises (other players' fulfilled
+// contracts carrying its delegate), 4B8d.
 const AUG_SHAPES = ['heart', 'jar', 'hexagon', 'splat', 'battery', 'triangle'];
-function portfolioShapes(player) {
+function portfolioShapes(state, player) {
   const out = new Set();
-  for (const f of (player.fulfilledContracts || [])) {
-    for (const s of ((contractFace(f.id, f.side) || {}).cybernetics || [])) out.add(s);
+  const add = (f) => { for (const s of ((contractFace(f.id, f.side) || {}).cybernetics || [])) out.add(s); };
+  for (const f of (player.fulfilledContracts || [])) add(f);
+  for (const q of (state.players || [])) {
+    if (q.profileId === player.profileId) continue;
+    for (const f of (q.fulfilledContracts || [])) if ((f.partners || []).includes(player.profileId)) add(f);
   }
   return out;
 }
@@ -15996,7 +16495,7 @@ function colonistAugCount(player, colonistId) {
 // Industrialist Colonist there makes it a once-per-turn free action (4C4g).
 function applyImplant(state, op, player) {
   if (!state.m4) return fail('not_m4');
-  if (!state.m2) return fail('m2_off');
+  if (!state.m2) return applyImplantAtColony(state, op, player);
   const bn = (player.bernals || [])[Number(op.bernal) || 0];
   if (!bn) return fail('no_bernal');
   if (!bn.anchored) return fail('bernal_not_anchored');
@@ -16019,7 +16518,7 @@ function applyImplant(state, op, player) {
     delete player.augments[shape];
     parts.push(`took the ${shape} chit off ${cardNameOf(a.colonistId)}`);
   }
-  const portfolio = portfolioShapes(player);
+  const portfolio = portfolioShapes(state, player);
   for (const imp of implants) {
     const shape = String(imp && imp.shape || '');
     const colonistId = String(imp && imp.colonistId || '');
@@ -16028,7 +16527,8 @@ function applyImplant(state, op, player) {
     if (!portfolio.has(shape)) return fail('not_in_portfolio', { shape });
     if (!ids.has(colonistId)) return fail('colonist_not_here');
     if (player.augments[shape]) return fail('chit_in_use', { shape, on: player.augments[shape].colonistId });
-    // The heart's Parenthood side (4C5) is not playable yet: implant side 2.
+    // The heart's Parenthood side (4C5) needs M2 (owner 2026-11-18), and M4 does
+    // not run with M2 yet: implant side 2.
     if (shape === 'heart' && side === 1) return fail('parenthood_not_yet');
     player.augments[shape] = { colonistId, side };
     parts.push(`implanted the ${shape} augmentation (side ${side}) in ${cardNameOf(colonistId)}`);
@@ -16037,6 +16537,44 @@ function applyImplant(state, op, player) {
   else player.opsRemaining -= 1;
   const where = (siteById(bn.siteId) || {}).name || 'the Bernal';
   return { ok: true, state, log: `${player.name} ${parts.join(' and ')} at ${where}${free ? ' (Industrialist: free)' : ''}.` };
+}
+// IMPLANT without Module 2 (user ruling 2026-11-17: "augmentations without m2
+// use regular colonies instead of bernal"): there are no Colonists or Bernals,
+// so the chits go on one of your Colonies (the Crew who settled it), at that
+// Colony. Having the Colony is the BEO Colony. Juggling only moves a chit off
+// this same Colony.
+function applyImplantAtColony(state, op, player) {
+  const siteId = String(op.colony || '');
+  const col = (state.colonies || {})[siteId];
+  if (!col || col.ownerId !== player.profileId) return fail('no_colony');
+  if (player.opsRemaining <= 0) return fail('no_ops_left');
+  player.augments = player.augments || {};
+  const removes = Array.isArray(op.remove) ? op.remove.map(String) : [];
+  const implants = Array.isArray(op.implants) ? op.implants : [];
+  if (!removes.length && !implants.length) return fail('nothing_to_implant');
+  const where = (siteById(siteId) || {}).name || siteId;
+  const parts = [];
+  for (const shape of removes) {
+    const a = player.augments[shape];
+    if (!a) return fail('no_such_chit', { shape });
+    if (a.colonySite !== siteId) return fail('chit_not_colocated', { shape });
+    delete player.augments[shape];
+    parts.push(`took the ${shape} chit off`);
+  }
+  const portfolio = portfolioShapes(state, player);
+  for (const imp of implants) {
+    const shape = String(imp && imp.shape || '');
+    const side = Number(imp && imp.side) === 1 ? 1 : 2;
+    if (!AUG_SHAPES.includes(shape)) return fail('bad_shape');
+    if (!portfolio.has(shape)) return fail('not_in_portfolio', { shape });
+    if (player.augments[shape]) return fail('chit_in_use', { shape });
+    if (shape === 'heart' && side === 1) return fail('parenthood_not_yet');
+    player.augments[shape] = { colonySite: siteId, side };
+    parts.push(`implanted ${shape} (side ${side})`);
+  }
+  player.opsRemaining -= 1;
+  syncCrewAugmentMarks(state);
+  return { ok: true, state, log: `${player.name} ${parts.join(' and ')} at the ${where} Colony.` };
 }
 // ===== end Module 4 augmentations ============================================
 
@@ -16143,6 +16681,9 @@ function normTradeSide(raw) {
     handCardIds: ids(raw.handCardIds),
     cargoCardIds: ids(raw.cargoCardIds),
     leoCardIds: ids(raw.leoCardIds),
+    // M4 contracts (4B2g): an unfulfilled contract in the hand (anywhere) or on
+    // the LEO Stack (a LEO meeting); its timepiece and late-fee aquas go with it.
+    contractIds: ids(raw.contractIds),
     abilities,
     // Luna Treaty access can ride a deal: the FIRST PLAYER grants the other
     // party permission to prospect Luna as an atomic trade term (sealed with the
@@ -16156,8 +16697,16 @@ function sideHasInSpace(side) {
 }
 function sideIsEmpty(side) {
   return !side.aqua && !side.water && !side.handCardIds.length
-    && !side.cargoCardIds.length && !(side.leoCardIds || []).length && !side.abilities.length && !side.lunaGrant;
+    && !side.cargoCardIds.length && !(side.leoCardIds || []).length && !side.abilities.length && !side.lunaGrant
+    && !(side.contractIds || []).length;
 }
+// Where a contract the giver trades sits: 'hand' | 'leo' | null.
+function contractTradeWhere(giver, id) {
+  if ((giver.contractHand || []).includes(id)) return 'hand';
+  if ((giver.leo || []).some((sl) => sl && sl.id === id && sl.kind === 'contract')) return 'leo';
+  return null;
+}
+const sideHasLeoContract = (giver, side) => (side.contractIds || []).some((id) => contractTradeWhere(giver, id) === 'leo');
 function sideHasLeoStack(side) {
   return (side.leoCardIds || []).length > 0;
 }
@@ -16178,7 +16727,8 @@ function leoSlotTradeRefusal(slot) {
 // both at once (it is struck at exactly one place).
 function tradeMeetingError(state, a, b, give, receive) {
   const inSpace = sideHasInSpace(give) || sideHasInSpace(receive);
-  const leoStack = sideHasLeoStack(give) || sideHasLeoStack(receive);
+  const leoStack = sideHasLeoStack(give) || sideHasLeoStack(receive)
+    || sideHasLeoContract(a, give) || sideHasLeoContract(b, receive);
   const cross = tradeCrossesSpecies(state, a, b);
   const location = (inSpace || cross) ? sharedUnitLocation(a, b) : (leoStack ? 'leo' : null);
   if (cross && !location) return { error: 'species_needs_meeting' };
@@ -16224,6 +16774,13 @@ function validateTradeSide(state, owner, side) {
   for (const g of side.abilities) {
     if (!playerOwnsAbility(owner, g.ability)) return 'ability_not_held';
   }
+  for (const id of (side.contractIds || [])) {
+    if (!state.m4) return 'not_m4';
+    const meta = (owner.contractMeta || {})[id];
+    if (!meta) return 'not_your_contract';
+    if (meta.default) return 'contract_in_default';
+    if (!contractTradeWhere(owner, id)) return 'contract_not_in_hand_or_leo';
+  }
   // Only the first player can grant Luna prospecting access (Luna Treaty), so a
   // lunaGrant term is deliverable only from the first player's side of the deal.
   if (side.lunaGrant) {
@@ -16238,7 +16795,13 @@ function validateTradeSide(state, owner, side) {
 // auction limit of 4. That limit still gates auctions, so an over-full hand
 // just can't start / join one until it's reduced. Water still needs tank room;
 // in-space cargo lands in the rocket and is unbounded.
-function validateTradeReceipt(receiver, side) {
+function validateTradeReceipt(receiver, side, giver = null) {
+  // 4B2g: the receiver's timepiece replaces the giver's on a contract that has
+  // one, so it must be free (and only one such contract per deal).
+  if (giver) {
+    const timed = (side.contractIds || []).filter((id) => giver.timepiece && giver.timepiece.contractId === id);
+    if (timed.length && receiver.timepiece) return 'receiver_timepiece_in_use';
+  }
   if (side.water > 0) {
     // Traded water mixes into the receiver's tank at the lower grade, as long
     // as their active thruster can still burn the result.
@@ -16301,6 +16864,28 @@ function executeTradeSide(giver, receiver, side) {
     receiver.rocket.tank = (receiver.rocket.tank || 0) + side.water;
     setRocketGrade(receiver.rocket, grade);
   }
+  // 4B2g: the contract, its meta (progress and the late-fee aquas paid onto
+  // it), and the timepiece - the receiver's replaces the giver's.
+  for (const id of (side.contractIds || [])) {
+    const where = contractTradeWhere(giver, id);
+    if (where === 'hand') {
+      giver.contractHand = giver.contractHand.filter((x) => x !== id);
+      receiver.contractHand = Array.isArray(receiver.contractHand) ? receiver.contractHand : [];
+      receiver.contractHand.push(id);
+    } else if (where === 'leo') {
+      const i = giver.leo.findIndex((sl) => sl && sl.id === id && sl.kind === 'contract');
+      const [slot] = giver.leo.splice(i, 1);
+      receiver.leo = Array.isArray(receiver.leo) ? receiver.leo : [];
+      receiver.leo.push(slot);
+    } else continue;
+    receiver.contractMeta = receiver.contractMeta || {};
+    receiver.contractMeta[id] = giver.contractMeta[id];
+    delete giver.contractMeta[id];
+    if (giver.timepiece && giver.timepiece.contractId === id) {
+      receiver.timepiece = { ...giver.timepiece };
+      giver.timepiece = null;
+    }
+  }
   for (const g of side.abilities) {
     receiver.borrowedAbilities = Array.isArray(receiver.borrowedAbilities) ? receiver.borrowedAbilities : [];
     receiver.borrowedAbilities.push({ ability: g.ability, fromPlayerId: giver.profileId, turnsRemaining: g.turns });
@@ -16336,11 +16921,38 @@ function tradeSideSummary(state, side) {
   for (const id of side.handCardIds) { const c = PATENTS_BY_ID[id]; parts.push(c ? c.name : id); }
   for (const id of side.cargoCardIds) { const c = PATENTS_BY_ID[id]; parts.push(c ? c.name : id); }
   for (const id of (side.leoCardIds || [])) { const c = PATENTS_BY_ID[id]; parts.push(`${c ? c.name : id} (LEO)`); }
+  for (const id of (side.contractIds || [])) {
+    const holder = (state.players || []).find((p) => p.contractMeta && p.contractMeta[id]);
+    const f = contractFace(id, (holder && holder.contractMeta[id].side) || 'blue');
+    parts.push(`the ${f ? f.name : id} contract`);
+  }
   for (const g of side.abilities) {
     parts.push(`${abilityLabel(g.ability)} (${g.turns == null ? 'permanent' : g.turns + ' turns'})`);
   }
   if (side.lunaGrant) parts.push('Luna prospecting access');
   return parts.length ? parts.join(' + ') : 'nothing';
+}
+
+// Can `player` ask for a partner seat on `req` = { ownerId, cardId, give }?
+// Returns { owner, cardId, face, give, location } or { error }.
+function enterpriseRequestRefusal(state, player, req, { place = null } = {}) {
+  if (!state.m4) return { error: 'not_m4' };
+  if (state.war) return { error: 'enterprise_needs_peace' };
+  if (place) return { error: 'enterprise_or_assembly' };
+  if (state.trade) return { error: 'trade_in_progress' };
+  const owner = playerByProfile(state, Number(req.ownerId));
+  if (!owner || owner.profileId === player.profileId) return { error: 'bad_enterprise_owner' };
+  const cardId = String(req.cardId || '');
+  const f = (owner.fulfilledContracts || []).find((x) => x.id === cardId);
+  if (!f) return { error: 'not_an_enterprise' };
+  if ((f.partners || []).includes(player.profileId)) return { error: 'already_partner' };
+  if (cubesInPlay(state, player.profileId) >= FACTORY_CUBES) return { error: 'no_cubes_left' };
+  const give = normTradeSide(req.give);
+  const bad = validateTradeSide(state, player, give);
+  if (bad) return { error: bad };
+  const meet = tradeMeetingError(state, player, owner, give, normTradeSide({}));
+  if (meet.error) return { error: meet.error };
+  return { owner, cardId, face: contractFace(cardId, f.side) || { name: cardId }, give, location: meet.location };
 }
 
 function applyTradeOffer(state, op, ctx) {
@@ -16406,7 +17018,7 @@ function applyTradeCounter(state, op, ctx) {
   let give = normTradeSide(op.give);
   let receive = normTradeSide(op.receive);
   if (callerRole === 'partner') { const tmp = give; give = receive; receive = tmp; }
-  if (sideIsEmpty(give) && sideIsEmpty(receive)) return fail('empty_trade');
+  if (sideIsEmpty(give) && sideIsEmpty(receive) && !t.enterprise) return fail('empty_trade');
 
   const initiator = playerByProfile(state, t.initiatorId);
   const partner = playerByProfile(state, t.partnerId);
@@ -16447,8 +17059,19 @@ function applyTradeAccept(state, op, ctx) {
     || tradeCrossesSpecies(state, initiator, partner);
   if (needsColo && sharedUnitLocation(initiator, partner) !== t.location) return fail('not_colocated');
   let err = validateTradeSide(state, initiator, t.give) || validateTradeSide(state, partner, t.receive)
-    || validateTradeReceipt(partner, t.give) || validateTradeReceipt(initiator, t.receive);
+    || validateTradeReceipt(partner, t.give, initiator) || validateTradeReceipt(initiator, t.receive, partner);
   if (err) return fail(err);
+  // A Partner Enterprise request (4B8): the owner's acceptance seats the
+  // fundraiser's delegate on the contract. Re-checked against the live board.
+  let entSlot = null;
+  if (t.enterprise) {
+    if (state.war) return fail('enterprise_needs_peace');
+    const owner = playerByProfile(state, t.enterprise.ownerId);
+    entSlot = owner && (owner.fulfilledContracts || []).find((x) => x.id === t.enterprise.cardId);
+    if (!entSlot) return fail('not_an_enterprise');
+    if ((entSlot.partners || []).includes(initiator.profileId)) return fail('already_partner');
+    if (cubesInPlay(state, initiator.profileId) >= FACTORY_CUBES) return fail('no_cubes_left');
+  }
 
   // Atomic swap. Both sides resolved off the same pre-swap balances above.
   executeTradeSide(initiator, partner, t.give);
@@ -16462,6 +17085,13 @@ function applyTradeAccept(state, op, ctx) {
 
   const giveSum = tradeSideSummary(state, t.give);
   const recvSum = tradeSideSummary(state, t.receive);
+  let entNote = '';
+  if (entSlot) {
+    entSlot.partners = [...(entSlot.partners || []), initiator.profileId];
+    const owner = playerByProfile(state, t.enterprise.ownerId);
+    const face = contractFace(entSlot.id, entSlot.side) || { name: entSlot.id };
+    entNote = `${initiator.name} partners on ${owner.name}'s ${face.name}`;
+  }
   state.trade = null;
   // A trade may re-open an auction for a priced-out bidder (aqua moved, and
   // the aqua auto-pass is dynamic): recompute the phase so `awaiting` flips
@@ -16470,7 +17100,9 @@ function applyTradeAccept(state, op, ctx) {
   if (state.auction) recomputeAuction(state);
   return {
     ok: true, state,
-    log: `${initiator.name} traded ${giveSum} to ${partner.name} for ${recvSum}.`,
+    log: t.enterprise
+      ? `${entNote}${giveSum !== 'nothing' ? ` (${giveSum}` : ''}${recvSum !== 'nothing' ? `${giveSum !== 'nothing' ? '; ' : ' ('}${partner.name} gave ${recvSum}` : ''}${giveSum !== 'nothing' || recvSum !== 'nothing' ? ')' : ''}.`
+      : `${initiator.name} traded ${giveSum} to ${partner.name} for ${recvSum}.`,
   };
 }
 
@@ -16484,7 +17116,9 @@ function applyTradeDecline(state, op, ctx) {
   state.trade = null;
   return {
     ok: true, state,
-    log: `${caller.name} called off the trade with ${other ? other.name : 'the other player'}.`,
+    log: t.enterprise
+      ? `${caller.name} declined the partner seat.`
+      : `${caller.name} called off the trade with ${other ? other.name : 'the other player'}.`,
   };
 }
 
@@ -17045,6 +17679,7 @@ export function applyOperation(prevState, op, ctx) {
   const clonePrev = () => {
     const st = clone(prevState);
     preRepair = [...repairSirensAssembly(st), ...repairSpeciesDeckSplit(st)];
+    syncCrewAugmentMarks(st);
     // Outposts store their water canned, so fold any an outpost still carries
     // loose from before that rule into a can. Here rather than after the op for
     // the same reason as the repairs above: the read path cans it for display,
@@ -17329,6 +17964,8 @@ export function applyOperation(prevState, op, ctx) {
     if (res.state.m4 && op.kind === 'MOVE' && !op.unit && !op.debug && Array.isArray(op.segments)) {
       const r = playerByProfile(res.state, player.profileId).rocket;
       r.enteredThisTurn = [...(r.enteredThisTurn || []), ...op.segments.map((sg) => String(sg.to))];
+      // ... and whether it made a hazard roll this turn (Extreme Sports).
+      if (res.rolled || res.state.rng.cursor !== cursorBefore) r.hazardRolledThisTurn = true;
     }
     // Settlement notes a handler queued mid-op (Power Brokers' FINAO rebate).
     if (res.state && res.state.__opNotes) {

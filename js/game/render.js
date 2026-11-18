@@ -10,6 +10,7 @@ import { makePlanetTexture, PlanetSphere, PlanetRings, GLSpheres } from './plane
 import { fleetLabel } from '../../data/fleet-tags.js';
 import { NODE_TAGS, spriteForTags } from '../../data/node-tags.js';
 import { serverTagLabels, tagInfo } from '../../data/node-labels.js';
+import { lagrangeLabel } from '../../data/lagrange-labels.js';
 import { nodeLabelOf, MAP_LABELS } from '../../data/map-labels.js';
 import { SIGNPOST_COLORS, SIGNPOST_DARK_TEXT, BOARD_SOLID_ONE_WAY, signpostColorsOf } from '../../data/signpost-routes.js';
 import { BUGGY_ROAD_GROUPS } from '../../data/buggy-roam.js';
@@ -3680,9 +3681,11 @@ export class MapRenderer {
         if (sx < -20 || sx > hostW + 20 || sy < -20 || sy > hostH + 20) continue;
         // LEO's "L" scales with the enlarged node so the letter
         // doesn't look lost inside the bigger circle.
-        const fontPx = isLeoWaypoint(w) ? 18 : 10;
+        // A numbered ring (L1 to L5) shows its number, as printed on the board.
+        const num = lagrangeLabel(w.id2);
+        const fontPx = isLeoWaypoint(w) ? 18 : (num ? (num.length > 2 ? 7 : 8) : 10);
         ctx.font = `700 ${fontPx}px ui-sans-serif, system-ui, sans-serif`;
-        ctx.fillText('L', sx, sy + 0.5);
+        ctx.fillText(num || 'L', sx, sy + 0.5);
       }
     }
 

@@ -194,8 +194,8 @@ implementation right now:
   Uranus. Open to every host: the create-lobby route reads `body.sirens`
   straight, and both wizards show its entry. It was the last variant
   behind the admin OR `tester_profiles` gate, so that gate
-  (`variantsAllowed`) is gone and the alpha-tester banner is hidden
-  (nothing is in testing). Do not re-gate it. If a new variant ships to
+  (`variantsAllowed`) is gone. Do not re-gate it. (The alpha-tester banner
+  now names M4, which went to testers 2026-11-18.) If a new variant ships to
   testers first, bring the gate back for that flag alone and name it on
   the banner.
 
@@ -230,16 +230,28 @@ per room and carried into the game state as a boolean (`state.m0`,
   (corrected 2026-07-30). `m2` is plumbed as a structural mirror of `m1` (db
   column, `createInitialState` -> `state.m2`, client `isM2()`/`setM2()` + tags)
   but adds NO decks (unlike M1's two Terawatt decks). Both flags are still fixed
-  at room creation, default OFF, with no retroactive apply. **Rat Frontier and
-  the M4 preview (below) are the features behind `profileIsAdmin`.**
-- **M4 (Exodus) - ADMIN-ONLY PREVIEW, in development (user 2026-11-15).**
+  at room creation, default OFF, with no retroactive apply. **Rat Frontier is
+  behind `profileIsAdmin`; the M4 preview (below) is behind admin OR tester.**
+- **M4 (Exodus) - PREVIEW for admins AND playtesters (admin-only 2026-11-15;
+  opened to the tester list 2026-11-18).**
   `state.m4`, plumbed like `m2` (`lobbies.m4` column, `createInitialState` ->
   `state.m4`, client `isM4()` / `setM4()`, M4 lobby tag). The create and
-  settings routes only write it for `profileIsAdmin`; everyone else is forced
-  to 0, and the create-form / solo-wizard / room-settings rows show for admins
-  only. M4 REQUIRES M0 (4A1a) and forces it on. It does not combine with a
-  variant yet (`m4_no_variants`; CEO Solitaire's own M4 rules, 4G, are not
-  wired). Stages and the contract card-data columns: `docs/module-m4-plan.md`.
+  settings routes only write it for `m4Allowed(req)` (server/index.js:
+  `profileIsAdmin` OR `isTester`); everyone else is forced to 0, and the
+  create-form / solo-wizard / room-settings rows show on the same admin-OR-tester
+  signal (`js/main.js#syncM4Rows`, `lobby.js#setM4Allowed`). The alpha-tester
+  banner names M4. Without M2, Parenthood (heart side 1) and the Promotion
+  counts are unavailable (owner 2026-11-18). M4 REQUIRES M0 (4A1a) and forces it on. It does not combine with a
+  variant yet (`m4_no_variants`). The 4G solitaire rules are DONE: CEO
+  Solitaire (V6) implements them, including the 4G3 Solitaire Assembly (owner
+  2026-11-17); only the gate refusing M4 in a CEO Solitaire room remains. M4 is not played with M2 for now (`m4_no_m2` on create AND settings),
+  and contracts whose destination needs a piece the game lacks (Bernals,
+  colonists, freighters, the isobank) are dealt out of the decks
+  (`data/contracts.js#faceUnplayable`; owner 2026-11-17). Lagrange ring
+  numbers (L1-L5) read off the board live in `data/lagrange-labels.js`.
+  Without M2 there are no Colonists or Bernals, so IMPLANT puts augmentation
+  chits on one of your Colonies instead (owner ruling 2026-11-17).
+  Stages and the contract card-data columns: `docs/module-m4-plan.md`.
   Releasing it later follows the checklist below.
 - **Promo crew (data/crew.js#PROMO_CREW) - RELEASED to every player
   (user 2026-11-14).** No admin check (the old `promo_crew_admin_only` is
@@ -287,8 +299,9 @@ worse, the reverse).
    means dropping the guard to a plain `body.<flag> ? 1 : 0`. The client control
    is only UI; this line is what decides. Leave `variantsAllowed` /
    `profileIsAdmin` / `isTester` in place if ANY sibling is still gated.
-   (Nothing is gated today: Sirens, the last, released 2026-11-14 and took
-   `variantsAllowed` with it.)
+   (No variant is gated today: Sirens, the last, released 2026-11-14 and took
+   `variantsAllowed` with it. M4 is the one module behind a gate:
+   `m4Allowed`, admins and testers.)
 2. **Reveal the control, per entry, not per group.** `js/main.js#syncVariantRows`
    (variants) and `#setAdminModuleRows` (modules) hide their controls. Un-hide
    the released one UNCONDITIONALLY and keep the still-gated siblings on the
@@ -1263,6 +1276,14 @@ produce a log line that lands in it. This is not console logging - a
   fine. Pre-existing arrows in old comments / UI labels are not
   worth a rewrite sweep; just do not add new ones. (User
   directive 2026-07-01.)
+- **Minimal UI text: the player already knows the game.** (User directive,
+  repeated many times, recorded 2026-11-17.) Our players play HF4 at the table:
+  never explain a rule, term or mechanic in the UI (what an Enterprise is, what
+  a contract does, why a step matters). Labels are a word or two, buttons a
+  verb, modals carry the card / number / name and nothing else. No intro
+  paragraphs, no "(optional)", no "now active", no restating what a glyph or
+  card already shows. Rules explanations belong in tooltips at most, and only
+  when the board itself does not show it. If in doubt, cut it.
 - **Navigate-to is always the LAST button in a site popup.** It's
   a pure inspection affordance (no game state changes), so any
   real game actions (Plan rocket route, Prospect, Refuel, etc.)
@@ -1345,6 +1366,10 @@ dress a rule-based hold up as a context problem.
 
 ## Don'ts
 
+- **Owner questions go in the survey page, not in chat.** M4 questions live in
+  the M4 Exodus Tracker (`docs/design/m4-tracker.html`, link in
+  `docs/design/README.md`), built with the `html-survey` skill. Build the
+  recommended option while a question is open.
 - **NEVER change a live game without the admin's explicit approval. Ever.**
   (User directive 2026-11-09.) An agent with access to production - a read
   token, an MCP connection, an admin session, a player token, the database -

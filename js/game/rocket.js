@@ -53,17 +53,22 @@ import { isOnline, isM1 } from './online-mode.js';
 // afterburn, dirt}` block and the prospector is a `prospector`
 // string), so synthesize a patent-like view of the chosen crew
 // face. `faceKey` is the picked faction face carried on the slot.
-function synthCrew(crew, faceKey) {
+function synthCrew(crew, faceKey, slot = null) {
   const key = faceKey === 'secondary' ? 'secondary' : 'primary';
   const cf = (crew.faces && (crew.faces[key] || crew.faces.primary)) || {};
+  // M4 augmentations counting for the Crew (marks set by the game, mirror of
+  // the engine): Jar side 1 makes it 0 Mass; Hexagon makes its prospector a
+  // Raygun (ISRU 1) or Buggy (ISRU 2).
+  const aug = slot ? slot.augProspector : null;
+  const mass = slot && slot.massless ? 0 : cf.mass;
   const face = {
     name: cf.name,
-    mass: cf.mass,
+    mass,
     radHardness: cf.radHardness,
-    isru: cf.isru,
+    isru: aug ? aug.isru : cf.isru,
     // Map the crew prospector kind onto the patent property shape
     // getProspectorKind() scans (raygun / buggy / missile).
-    properties: cf.prospector ? [{ key: cf.prospector, value: true }] : [],
+    properties: aug ? [{ key: aug.kind, value: true }] : (cf.prospector ? [{ key: cf.prospector, value: true }] : []),
   };
   if (cf.thruster) {
     face.thrust = cf.thruster.thrust;
@@ -75,7 +80,7 @@ function synthCrew(crew, faceKey) {
     id: crew.id,
     name: cf.name || crew.id,
     type: 'crew',
-    mass: cf.mass,
+    mass,
     radHardness: cf.radHardness,
     faces: { primary: face },
   };
@@ -99,7 +104,7 @@ function cardForSlot(slot) {
   const bn = BERNALS_BY_ID[slot.id];
   if (bn) return bn;
   const crew = CREW_BY_ID[slot.id];
-  return crew ? synthCrew(crew, slot.face) : null;
+  return crew ? synthCrew(crew, slot.face, slot) : null;
 }
 
 // Synthesize a card-shaped object for a fuel cargo slot ({ id, kind:'fuel',

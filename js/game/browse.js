@@ -130,13 +130,14 @@ import { fuelTankCylinderMarkup, fuelTransferSectionMarkup } from './fuel-tank-v
 // hand/stack rendering, the Bernal modal) resolves a boosted/auctioned Bernal.
 // Keyed reads only; Bernals only surface in m2 games, so nothing else changes.
 // M4 contract cards are stack slots too (only ever present in an m4 game).
-import { CONTRACTS_BY_ID } from '../../data/contracts.js';
+import { CONTRACTS, CONTRACTS_BY_ID, contractFace, acetyleneTerms } from '../../data/contracts.js';
+import { renderContractCard } from './contract-card.js';
 const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...BERNALS_BY_ID, ...COLONISTS_BY_ID, ...CONTRACTS_BY_ID };
 import { renderAssemblyPanel, renderAssemblyLaws } from './assembly.js';
 import { uiIcon, cardPileBadge } from './ui-icons.js';
 import { SITE_TAGS, normaliseTag, tagDisplay } from '../../data/site-tags.js';
 import { NODE_TAGS } from '../../data/node-tags.js';
-import { hazardFlavorOf } from '../../data/hazard-flavors.js';
+import { hazardFlavorOf, hazardCaptionMentions } from '../../data/hazard-flavors.js';
 import { NODE_LABELS, MAP_LABELS } from '../../data/map-labels.js';
 import { routeFlewAerobrake } from '../../data/lander-burn.js';
 import { nodeSeason, seasonEntryBlocked } from '../../data/season-gate.js';
@@ -163,7 +164,7 @@ import { walkBlackDown, walkRedUp, redStepsBetween, rocketDryMass } from '../../
 import { isBuggyRoadPair } from '../../data/buggy-roam.js';
 import { syncTutorialOverlay, showTutorialWrongStep, removeTutorialOverlay } from './tutorial-overlay.js';
 import { tutorialStepAt } from './tutorial-steps.js';
-import { isAtmosphericSite } from '../../data/site-categories.js';
+import { isAtmosphericSite, isSpaceElevatorSite } from '../../data/site-categories.js';
 import { facePower, rerollSpentThisTurn } from '../../data/card-abilities.js';
 import { aeroHopAllowed } from '../../data/aerobrake-direction.js';
 import { MILESTONES } from '../../data/glory.js';
@@ -250,7 +251,7 @@ import {
 // Multiplayer glue (the sandbox map, driven from a server game). These
 // are inert until mountBrowse({ online:true }) flips _online on; the
 // solo path never touches them.
-import { setOnline, isOnline, setM1, isM1, setM2, isM2, setM4, setSirens, isSirens, setFutures, isFutures,
+import { setOnline, isOnline, setM1, isM1, setM2, isM2, setM4, isM4, setSirens, isSirens, setFutures, isFutures,
   setHermes, isHermes, setAltruism, setMySpecies, mySpecies, homeLabel, homeSiteId, isMySiren } from './online-mode.js';
 import {
   buildIdMaps, hydrateFromSnapshot, toServerId, toPlannerId,
@@ -2267,7 +2268,9 @@ function playerHasPrivilege(player, key) {
   // An anchored Bernal ability may grant a faction privilege (Collimator ->
   // Powersat, Pharmaceutics -> Skunkworks). Like a card grant it is an Ability,
   // not suspended by Anarchy; a HOME grant counts only at the Home Bernal.
-  return playerBernalPrivilege(player, key);
+  if (playerBernalPrivilege(player, key)) return true;
+  // A fulfilled M4 contract's ability (Sun-fired Laser: Powersat).
+  return contractAbilityListOf(player, 'privilege').includes(key);
 }
 // Any-seat mirror of the server's hasPrivilegeBernal: does this snapshot player
 // hold `key` from an anchored Bernal's ability?
@@ -2881,6 +2884,12 @@ function sharedUnitLocation(a, b) {
   return leo ? 'leo' : null;
 }
 const tradeSharedLocation = sharedUnitLocation;
+// A contract's name on the side it is held (any seat's contract meta).
+function contractTradeName(id) {
+  const holder = ((_onlineSnapshot && _onlineSnapshot.players) || []).find((p) => p.contractMeta && p.contractMeta[id]);
+  const f = contractFace(id, (holder && holder.contractMeta[id].side) || 'blue');
+  return f ? f.name : id;
+}
 function cardLabel(id) {
   const c = PATENTS_BY_ID[id] || CREW_BY_ID[id];
   return c ? c.name : id;
@@ -2889,6 +2898,24 @@ function cardLabel(id) {
 // Pop the full card so a player can assess it before trading. Click anywhere to
 // close. Layered above the builder modal.
 function openCardPreview(id) {
+  // A contract (an enterprise in a partner request) previews as its card too.
+  if (CONTRACTS_BY_ID[id] && !PATENTS_BY_ID[id]) {
+    let side = 'blue';
+    for (const q of ((_onlineSnapshot && _onlineSnapshot.players) || [])) {
+      const f = (q.fulfilledContracts || []).find((x) => x.id === id);
+      if (f) side = f.side;
+    }
+    const back = document.createElement('div');
+    back.className = 'mp-modal-back mp-card-preview-back';
+    const box = document.createElement('div');
+    box.className = 'mp-card-preview';
+    const el = renderContractCard(id, side);
+    if (el) box.appendChild(el);
+    back.appendChild(box);
+    back.addEventListener('click', () => back.remove());
+    document.body.appendChild(back);
+    return;
+  }
   const card = PATENTS_BY_ID[id] || CREW_BY_ID[id];
   if (!card) return;
   const back = document.createElement('div');
@@ -3008,6 +3035,30 @@ function buildTradeColumn(title, owner, context, opts = {}) {
     : cardGroup('LEO Stack',
       (owner.leo || []).filter(leoSlotTradeable).map((s) => s.id),
       'No tradeable cards in the LEO Stack.');
+  // M4 contracts (4B2g): unfulfilled, not in default, in the hand (anywhere) or
+  // on the LEO Stack (a LEO meeting). Its timepiece and late-fee aquas go along.
+  const contractChecks = [];
+  if (isM4()) {
+    const meta = owner.contractMeta || {};
+    const ids = (owner.contractHand || []).concat(atSite ? []
+      : (owner.leo || []).filter((sl) => sl && sl.kind === 'contract').map((sl) => sl.id))
+      .filter((id) => meta[id] && !meta[id].default);
+    if (ids.length) {
+      const lbl = document.createElement('div');
+      lbl.className = 'mp-trade-sub';
+      lbl.textContent = 'Contracts';
+      col.appendChild(lbl);
+      for (const id of ids) {
+        const f = contractFace(id, meta[id].side || 'blue');
+        const w = document.createElement('label');
+        w.className = 'mp-trade-check';
+        const cb = document.createElement('input'); cb.type = 'checkbox'; cb.value = id;
+        w.append(cb, document.createTextNode(` ${f ? f.name : id}${owner.timepiece && owner.timepiece.contractId === id ? ' ⏱' : ''}`));
+        col.appendChild(w);
+        contractChecks.push(cb);
+      }
+    }
+  }
 
   // Crew ability grant (abstract). Pick one ability + a term.
   const abilities = grantableAbilitiesOf(owner);
@@ -3057,6 +3108,7 @@ function buildTradeColumn(title, owner, context, opts = {}) {
       handCardIds: handChecks.filter((c) => c.checked).map((c) => c.value),
       cargoCardIds: cargoChecks.filter((c) => c.checked).map((c) => c.value),
       leoCardIds: leoChecks.filter((c) => c.checked).map((c) => c.value),
+      contractIds: contractChecks.filter((c) => c.checked).map((c) => c.value),
       abilities: [],
       lunaGrant: !!(lunaChk && lunaChk.checked),
     };
@@ -3194,8 +3246,9 @@ function openTradeBuilder(opts = {}) {
     send.addEventListener('click', async () => {
       const give = giveCol.read();
       const receive = recvCol.read();
-      const empty = (s) => !s.aqua && !s.water && !s.handCardIds.length && !s.cargoCardIds.length && !s.leoCardIds.length && !s.abilities.length && !s.lunaGrant;
-      if (empty(give) && empty(receive)) { err.textContent = 'Put at least one item on the table.'; return; }
+      const empty = (s) => !s.aqua && !s.water && !s.handCardIds.length && !s.cargoCardIds.length && !s.leoCardIds.length && !s.abilities.length && !s.lunaGrant && !(s.contractIds || []).length;
+      const entTrade = opts.isCounter && _onlineSnapshot && _onlineSnapshot.trade && _onlineSnapshot.trade.enterprise;
+      if (empty(give) && empty(receive) && !entTrade) { err.textContent = 'Put at least one item on the table.'; return; }
       send.disabled = true;
       const op = opts.isCounter
         ? { kind: 'TRADE_COUNTER', give, receive }
@@ -3224,6 +3277,7 @@ function tradeSideText(side) {
   for (const id of (side.handCardIds || [])) parts.push(cardLabel(id));
   for (const id of (side.cargoCardIds || [])) parts.push(cardLabel(id));
   for (const id of (side.leoCardIds || [])) parts.push(`${cardLabel(id)} (LEO)`);
+  for (const id of (side.contractIds || [])) parts.push(`📜 ${contractTradeName(id)}`);
   for (const g of (side.abilities || [])) {
     parts.push(`${abilityLabel(g.ability)} (${g.turns == null ? 'permanent' : g.turns + ' turns'})`);
   }
@@ -3247,6 +3301,7 @@ function tradeSideEl(side) {
     b.addEventListener('click', () => openCardPreview(id));
     nodes.push(b);
   }
+  for (const id of (side.contractIds || [])) nodes.push(document.createTextNode(`📜 ${contractTradeName(id)}`));
   for (const g of (side.abilities || [])) {
     nodes.push(document.createTextNode(`${abilityLabel(g.ability)} (${g.turns == null ? 'permanent' : g.turns + ' turns'})`));
   }
@@ -3296,6 +3351,19 @@ function renderMpTradeBlock(snapshot, host, { embedded = false } = {}) {
     return row;
   };
   deal.append(mkRow('You give', myGive), mkRow('You receive', myReceive));
+  // M4 Partner Enterprise request: what accepting seats, and where.
+  if (trade.enterprise) {
+    const owner = (snapshot.players || []).find((p) => p.profileId === trade.enterprise.ownerId) || {};
+    const f = (owner.fulfilledContracts || []).find((x) => x.id === trade.enterprise.cardId) || {};
+    const face = contractFace(trade.enterprise.cardId, f.side || 'blue') || { name: trade.enterprise.cardId };
+    const row = document.createElement('div');
+    row.className = 'mp-trade-deal-row mp-trade-enterprise';
+    row.innerHTML = `<span class="mp-trade-deal-label">🤝 Partner</span> `
+      + `<button type="button" class="mp-trade-cardname">${esc(face.name)}</button>`;
+    const nameBtn = row.querySelector('.mp-trade-cardname');
+    if (nameBtn) nameBtn.addEventListener('click', () => openCardPreview(trade.enterprise.cardId));
+    deal.appendChild(row);
+  }
   block.appendChild(deal);
 
   const status = document.createElement('div');
@@ -7095,7 +7163,8 @@ function myCubesFree(snapshot, profileId) {
   const players = snapshot.players || [];
   const fp = players[snapshot.firstPlayerIndex || 0];
   const sunspot = (!snapshot.ceoSolo && fp && fp.profileId === myId) ? 1 : 0;
-  return Math.max(0, FACTORY_CUBES - delegates - facs - sunspot);
+  const partners = partnerDelegatesOf(snapshot, myId);
+  return Math.max(0, FACTORY_CUBES - delegates - facs - sunspot - partners);
 }
 // Glance read-out: active laws + how many cubes I still have free. Shown in both
 // the sidebar and the modal.
@@ -7437,6 +7506,8 @@ function fundraiseMyPlaces(snapshot) {
   for (const p of ASSEMBLY_PLACES) {
     let n = (dmap[p] || {})[myId] | 0;
     if (_fr && _fr.place === p) n += 1;
+    if (_fr && _fr.move1 && _fr.move1.from === p) n -= 1;   // Heart: the first move already left
+    if (_fr && _fr.move1 && _fr.move1.to === p) n += 1;
     if (n > 0) set.add(p);
   }
   return set;
@@ -7519,6 +7590,7 @@ function fundraiseProjectedWinners(snapshot) {
   };
   bump(_fr.freeDelegate, -1);   // a cube freed to allow the placement
   bump(_fr.place, +1);
+  if (_fr.move1) { bump(_fr.move1.from, -1); bump(_fr.move1.to, +1); }
   bump(_fr.moveFrom, -1);
   bump(_fr.moveTo, +1);
   // ARBITER: the holder's own tally may count their delegates twice.
@@ -7564,6 +7636,8 @@ function renderAssemblyFundraise(body, snapshot) {
     else promptText = 'Step 3 - Tie vote! Click which tied ideology gets the active-law star.';
   } else if (_fr.moveFrom) {
     promptText = `Step 2 - Move: click a highlighted adjacent space to move your ${esc((ASSEMBLY_IDEOLOGY_BY_KEY[_fr.moveFrom] || {}).name || _fr.moveFrom)} delegate.`;
+  } else if (_fr.move1) {
+    promptText = 'Step 2 - Heart: second move, or skip.';
   } else {
     promptText = 'Step 2 - Move one space: click one of your glowing cubes to pick it up, or skip.';
   }
@@ -7571,6 +7645,7 @@ function renderAssemblyFundraise(body, snapshot) {
   prompt.innerHTML = `<strong>Fundraise</strong> &middot; <span>${promptText}</span>`
     + (_fr.freeDelegate ? `<div class="assembly-fr-chosen">Freed a cube from ${esc((ASSEMBLY_IDEOLOGY_BY_KEY[_fr.freeDelegate] || {}).name || _fr.freeDelegate)}.</div>` : '')
     + (_fr.place ? `<div class="assembly-fr-chosen">Placing on ${esc((ASSEMBLY_IDEOLOGY_BY_KEY[_fr.place] || {}).name || _fr.place)}.</div>` : '')
+    + (_fr.enterprise ? `<div class="assembly-fr-chosen">🤝 ${enterpriseRequestText(snapshot, _fr.enterprise)}</div>` : '')
     + (_fr.discard ? `<div class="assembly-fr-chosen">⚔ Martial Law: discarding ${esc(fundraiseDiscardLabel(snapshot))}.</div>` : '');
 
   // Board with the interaction wired for the current step.
@@ -7595,6 +7670,12 @@ function renderAssemblyFundraise(body, snapshot) {
   if (_fr.place) view.delegates[_fr.place] = [...(view.delegates[_fr.place] || []), myColor];
   // Once a move is chosen (we are on the tally step), preview it too so the vote
   // standing the player is starring reflects the move they just made.
+  if (_fr.move1) {
+    const from = view.delegates[_fr.move1.from] || [];
+    const idx = from.indexOf(myColor);
+    if (idx >= 0) view.delegates[_fr.move1.from] = [...from.slice(0, idx), ...from.slice(idx + 1)];
+    view.delegates[_fr.move1.to] = [...(view.delegates[_fr.move1.to] || []), myColor];
+  }
   if (_fr.moveFrom && _fr.moveTo) {
     const from = view.delegates[_fr.moveFrom] || [];
     const idx = from.indexOf(myColor);
@@ -7642,6 +7723,11 @@ function renderAssemblyFundraise(body, snapshot) {
     return;
   }
   if (step === 'place') {
+    // M4 Partner Enterprise (4B3a): the new delegate may go on an opponent's
+    // fulfilled contract instead, asking the owner's permission (a negotiation).
+    if (enterpriseAvailable(snapshot) && inHand > 0 && !_fr.freeDelegate) {
+      btns.append(mkBtn('🤝 Enterprise', 'modal-btn', () => openEnterprisePicker(snapshot)));
+    }
     btns.append(
       mkBtn('Skip placement', 'modal-btn', () => { _fr.step = 'move'; refreshAssemblyModal(); }),
       mkBtn(_fr.place ? 'Next: move →' : 'Next →', 'modal-btn primary', () => { _fr.step = 'move'; refreshAssemblyModal(); }),
@@ -7749,7 +7835,19 @@ function onFundraiseCell(snapshot, place, available) {
   if (place === _fr.moveFrom) { _fr.moveFrom = null; refreshAssemblyModal(); return; }   // put it back
   if (!available.has(place)) { _onlineToast('Move only to an adjacent space.', 'error'); return; }
   _fr.moveTo = place;
+  // Heart augmentation, side 2 (M4): a second one-space delegate move.
+  if (!_fr.move1 && heartSecondMove(snapshot)) {
+    _fr.move1 = { from: _fr.moveFrom, to: _fr.moveTo };
+    _fr.moveFrom = null; _fr.moveTo = null;
+    refreshAssemblyModal();
+    return;
+  }
   fundraiseAdvanceToStar(snapshot);
+}
+function heartSecondMove(snapshot) {
+  const me = snapshot && snapshot.m4 ? (snapshot.players || []).find((p) => p.profileId === mySeatId()) : null;
+  const a = me && me.augments && me.augments.heart;
+  return !!(a && a.side === 2);
 }
 // Step back ONE action in the guided Fundraise: the inverse of the forward
 // clicks, popped newest-first (the star tally -> the move destination -> the
@@ -7764,8 +7862,9 @@ function fundraiseUndo() {
     if (_fr.moveTo) _fr.moveTo = null;   // undo the destination, keep the picked cube to re-aim
     else _fr.moveFrom = null;            // tally was reached via "Skip move", so drop to cube-pick
   } else if (_fr.step === 'move') {
-    if (_fr.moveFrom) _fr.moveFrom = null;   // put the picked-up cube back down
-    else _fr.step = 'place';                 // back to the placement step
+    if (!_fr.moveFrom && _fr.move1) { _fr.moveFrom = _fr.move1.from; _fr.move1 = null; }   // reopen the first move
+    else if (_fr.moveFrom) _fr.moveFrom = null;   // put the picked-up cube back down
+    else { _fr.step = 'place'; _fr.enterprise = null; }   // back to the placement step
   } else if (_fr.place) {
     _fr.place = null;                        // unselect the placed delegate
   } else if (_fr.freeDelegate) {
@@ -7779,11 +7878,107 @@ function fundraiseCanUndo() {
   if (!_fr) return false;
   return _fr.step !== 'place' || !!_fr.place || !!_fr.freeDelegate;
 }
+// ---- M4 Partner Enterprise (4B3a / 4B8) ----------------------------------------
+// My delegates sitting on other players' fulfilled contracts (each is a cube).
+function partnerDelegatesOf(snapshot, pid) {
+  if (!snapshot || !snapshot.m4) return 0;
+  let n = 0;
+  for (const q of snapshot.players || []) {
+    for (const f of q.fulfilledContracts || []) n += (f.partners || []).filter((x) => x === pid).length;
+  }
+  return n;
+}
+// Opponents' fulfilled contracts I could ask to partner on (peace only, no
+// trade already on the table, not already seated there).
+function enterpriseTargets(snapshot) {
+  const myId = mySeatId();
+  if (!snapshot || !snapshot.m4 || snapshot.war || snapshot.trade) return [];
+  const out = [];
+  for (const q of snapshot.players || []) {
+    if (q.profileId === myId) continue;
+    for (const f of q.fulfilledContracts || []) {
+      if ((f.partners || []).includes(myId)) continue;
+      out.push({ owner: q, f });
+    }
+  }
+  return out;
+}
+function enterpriseAvailable(snapshot) { return enterpriseTargets(snapshot).length > 0; }
+function enterpriseRequestText(snapshot, ent) {
+  const owner = (snapshot.players || []).find((q) => q.profileId === ent.ownerId) || {};
+  const f = (owner.fulfilledContracts || []).find((x) => x.id === ent.cardId) || {};
+  const face = contractFace(ent.cardId, f.side || 'blue') || { name: ent.cardId };
+  const offer = tradeSideText(ent.give || {});
+  return `<span class="player-name" style="--player-color:${esc(owner.color || 'currentColor')}">@${esc(owner.name || '?')}</span>`
+    + `: ${esc(face.name)}${offer !== 'nothing' ? ` (${esc(offer)})` : ''}`;
+}
+// Pick the enterprise and attach any offer. The owner answers it like a trade:
+// accept, counter, or turn it down.
+function openEnterprisePicker(snapshot) {
+  const back = document.createElement('div');
+  back.className = 'mp-modal-back enterprise-picker';
+  const modal = document.createElement('div');
+  modal.className = 'mp-trade-builder-modal enterprise-modal';
+  back.appendChild(modal);
+  const close = () => back.remove();
+  back.addEventListener('click', (e) => { if (e.target === back) close(); });
+  const me = mySnapshotPlayer();
+  let picked = null;
+  const render = () => {
+    modal.innerHTML = '';
+    const h = document.createElement('h3');
+    h.textContent = '🤝 Enterprise';
+    const grid = document.createElement('div');
+    grid.className = 'enterprise-grid';
+    for (const { owner, f } of enterpriseTargets(snapshot)) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'enterprise-pick' + (picked && picked.f.id === f.id && picked.owner.profileId === owner.profileId ? ' is-picked' : '');
+      const card = renderContractCard(f.id, f.side);
+      if (card) b.appendChild(card);
+      const who = document.createElement('div');
+      who.className = 'enterprise-owner';
+      who.innerHTML = `<span class="player-name" style="--player-color:${esc(owner.color || 'currentColor')}">@${esc(owner.name)}</span>`
+        + ((f.partners || []).length ? ` · ${(f.partners || []).length} partner${(f.partners || []).length === 1 ? '' : 's'}` : '');
+      b.appendChild(who);
+      b.addEventListener('click', () => { picked = { owner, f }; render(); });
+      grid.appendChild(b);
+    }
+    modal.append(h, grid);
+    let offerCol = null;
+    if (picked && me) {
+      offerCol = buildTradeColumn('Offer', me, { kind: 'leo' });
+      offerCol.el.classList.add('enterprise-offer');
+      modal.appendChild(offerCol.el);
+    }
+    const btns = document.createElement('div');
+    btns.className = 'mp-trade-btns';
+    btns.append(mkBtn('Cancel', 'modal-btn', close));
+    const ok = mkBtn('Ask', 'modal-btn primary', () => {
+      if (!picked) return;
+      _fr.enterprise = { ownerId: picked.owner.profileId, cardId: picked.f.id, give: offerCol ? offerCol.read() : {} };
+      _fr.place = null;
+      _fr.step = 'move';
+      close();
+      refreshAssemblyModal();
+    });
+    ok.disabled = !picked;
+    btns.append(ok);
+    modal.appendChild(btns);
+  };
+  render();
+  document.body.appendChild(back);
+}
+
 function commitFundraise() {
   const op = { kind: 'FUNDRAISE' };
   if (_fr.place) op.place = _fr.place;
+  if (_fr.enterprise) op.enterprise = _fr.enterprise;
   if (_fr.freeDelegate) op.freeDelegate = _fr.freeDelegate;
-  if (_fr.moveFrom && _fr.moveTo) { op.moveFrom = _fr.moveFrom; op.moveTo = _fr.moveTo; }
+  if (_fr.move1) {
+    op.moveFrom = _fr.move1.from; op.moveTo = _fr.move1.to;
+    if (_fr.moveFrom && _fr.moveTo) { op.moveFrom2 = _fr.moveFrom; op.moveTo2 = _fr.moveTo; }
+  } else if (_fr.moveFrom && _fr.moveTo) { op.moveFrom = _fr.moveFrom; op.moveTo = _fr.moveTo; }
   if (_fr.star) op.star = _fr.star;
   if (_fr.arbiterDouble) op.arbiterDouble = true;
   // Martial Law (Authority): discard an opponent's delegate. The server
@@ -8263,6 +8458,7 @@ function buildMpConfigBlock(snapshot) {
   if (snapshot.m0) tags.push(['tag-m0', '🏛 M0 Politics']);
   if (snapshot.m1) tags.push(['tag-m1', '🚛 M1 Terawatt']);
   if (snapshot.m2) tags.push(['tag-m2', '🔮 M2 Colonization']);
+  if (snapshot.m4) tags.push(['tag-m4', '📜 M4 Exodus (preview)']);
   if (snapshot.sirens) tags.push(['tag-sirens', '🧜 V9 Sirens']);
   if (snapshot.hermes) tags.push(['tag-hermes', '☄️ V5 Hermes Fall']);
   if (snapshot.hotSeat) tags.push(['tag-hot-seat', '👥 Hot seat']);
@@ -8543,7 +8739,8 @@ function renderComponentRow(p, snapshot) {
   // and clicking it breaks down where each cube sits.
   const facUsed = ownedSiteCount(snapshot.factories, p.profileId);
   const dmap = (snapshot.assembly && snapshot.assembly.delegates) || {};
-  const delegateUsed = ASSEMBLY_PLACES.reduce((s, pl) => s + ((dmap[pl] || {})[p.profileId] | 0), 0);
+  const delegateUsed = ASSEMBLY_PLACES.reduce((s, pl) => s + ((dmap[pl] || {})[p.profileId] | 0), 0)
+    + partnerDelegatesOf(snapshot, p.profileId);
   const players = snapshot.players || [];
   const fp = players[snapshot.firstPlayerIndex || 0];
   const sunspotUsed = (!(_onlineSnapshot && _onlineSnapshot.ceoSolo) && fp && fp.profileId === p.profileId) ? 1 : 0;
@@ -8713,7 +8910,9 @@ function renderAbilityBadges(p) {
     && own !== 'POWERSAT'
     && !borrowed.some((g) => g && g.ability === 'POWERSAT');
   const beamer = playerPowersatBeamedBy(p);
-  if (!own && !borrowed.length && !showPowersat && !beamer) return null;
+  // M4: the abilities of this player's fulfilled contracts (4B2f), one chip each.
+  const contractAbilities = (_onlineSnapshot && _onlineSnapshot.m4) ? contractAbilityChips(p) : [];
+  if (!own && !borrowed.length && !showPowersat && !beamer && !contractAbilities.length) return null;
   const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
   const row = document.createElement('div');
   row.className = 'mp-ability-badges';
@@ -8748,7 +8947,47 @@ function renderAbilityBadges(p) {
       + (perm ? ' (permanent, irreversible)' : `, ${g.turnsRemaining} turn(s) left`);
     row.appendChild(b);
   }
+  for (const c of contractAbilities) {
+    const b = document.createElement('span');
+    b.className = 'mp-ability contract';
+    b.textContent = '📜 ' + c.label;
+    b.title = `${c.label} - fulfilled contract ability (${c.from}): ${c.text}`;
+    row.appendChild(b);
+  }
   return row;
+}
+
+// The fulfilled-contract abilities a player holds, as short chip labels. The
+// printed ability text rides along for the tooltip (transcription notes in
+// [brackets] stripped). A defaulted contract's abilities are off (4B6b), and a
+// defaulted contract is never in the fulfilled splay.
+function contractAbilityChips(p) {
+  const out = [];
+  for (const f of (p.fulfilledContracts || [])) {
+    const face = contractFace(f.id, f.side);
+    if (!face || !face.fulfilledAbility) continue;
+    const ab = face.abilities || {};
+    const text = String(face.fulfilledAbility).replace(/\[[^\]]*\]\s*/g, '').trim();
+    let label = null;
+    for (const k of ['shielded', 'bailout', 'secured', 'insight', 'connections', 'transport']) {
+      if (ab[k]) label = k[0].toUpperCase() + k.slice(1);
+    }
+    if (!label && ab.hazardIgnore) label = `Ignore ${ab.hazardIgnore.map((w) => `"${w}"`).join(' / ')} hazards`;
+    if (!label && ab.aerobrakeIgnore) label = `Ignore ${ab.aerobrakeIgnore.map((w) => `"${w}"`).join(' / ')} aerobrakes`;
+    if (!label && ab.fundraiseAqua) label = `+${ab.fundraiseAqua} aqua fundraising`;
+    if (!label && ab.skullNearFactory) label = 'Ignore hazards by Factories';
+    if (!label && ab.aerobrakeZones) label = `Ignore ${ab.aerobrakeZones.join(' / ')} aerobrakes`;
+    if (!label && ab.privilege === 'POWERSAT') label = 'Powersat';
+    if (!label && ab.lunaFree) label = 'Luna without permission';
+    if (!label && ab.isruBody) label = `-${ab.isruBody.n} ISRU on ${ab.isruBody.body}`;
+    if (!label && ab.beltFlyby) label = '+1 belt flyby';
+    if (!label && ab.murderSuicide) label = 'Murder/Suicide';
+    if (!label && ab.acetyleneFactories) label = 'Acetylene at your Factories';
+    if (!label && ab.elevatorLanderBurns) label = 'Elevator assist';
+    if (!label) label = text.length > 28 ? text.slice(0, 26).replace(/\s+\S*$/, '') + '...' : text;
+    out.push({ label, text, from: face.name });
+  }
+  return out;
 }
 
 // Read-only rocket context for a snapshot rocket: the same thrust / fuel / mass
@@ -9465,8 +9704,15 @@ function humanizeOnlineOpError(code, detail) {
     fundraise_first: 'A contract auction is the last step of a Fundraise: fundraise first.',
     contract_auction_done: 'You already held this turn\'s contract auction.',
     timepiece_in_use: 'Your timepiece is already on the Sunspot Cycle: fulfill or repay that contract first.',
+    receiver_timepiece_in_use: 'The receiving player\'s timepiece is already on the Sunspot Cycle.',
+    contract_not_in_hand_or_leo: 'A contract trades from the hand, or from the LEO Stack at LEO.',
     contract_auction_prohibited: 'No contract auctions during War or Anarchy.',
-    deck_not_open: 'That deck shares no ideology with an Active Law.',
+    deck_not_open: 'That deck shares no ideology with an Active Law (nor, with Connections, with one of your delegates).',
+    target_secured: 'That player holds a Secured contract: immune to Felonies during Anarchy.',
+    no_insight: 'Insight comes from a fulfilled contract with the Insight ability.',
+    insight_used: 'You already used Insight this turn.',
+    insight_auction_due: 'Insight announced a research auction: start it before ending your turn.',
+    insight_not_in_grants: 'Insight does not work with Research Grants: auction a card instead.',
     default_stigma: 'The default chit bars you from bidding on manned contracts.',
     bid_too_high: `You must bid the same as or lower than the low bid${detail && detail.low != null ? ` (${detail.low} years)` : ''}.`,
     bidders_pending: 'Not everyone has bid or passed yet.',
@@ -9489,11 +9735,17 @@ function humanizeOnlineOpError(code, detail) {
     military_contract_cannot_abandon: 'A military contract can never be abandoned.',
     needs_beo_colony: 'Implanting needs a BEO Colony: one of your Bernals anchored Dirtside (not your Home Bernal).',
     no_colonist_here: 'No Colonist is aboard that Bernal.',
+    no_colony: 'Not your Colony.',
+    enterprise_needs_peace: 'Not during War.',
+    enterprise_or_assembly: 'Assembly or Enterprise, not both.',
+    not_an_enterprise: 'Not a fulfilled contract.',
+    already_partner: 'Already a partner there.',
+    bad_enterprise_owner: 'Pick an opponent\'s contract.',
     colonist_not_here: 'That Colonist is not aboard the Bernal.',
     not_in_portfolio: `None of your fulfilled contracts shows that cybernetics icon${detail && detail.shape ? ` (${detail.shape})` : ''}.`,
     chit_in_use: 'You only have one chit of that shape, and it is implanted elsewhere: juggle it off a Colonist aboard first.',
     chit_not_colocated: 'That chit is on a Colonist who is not aboard this Bernal.',
-    parenthood_not_yet: 'The heart\'s Parenthood side is not playable yet: implant its other side.',
+    parenthood_not_yet: 'Parenthood needs M2: implant the heart\'s other side.',
     needs_augmentation: 'This Colonist needs at least one augmentation to Promote.',
     nothing_to_implant: 'Choose an augmentation to implant.',
   };
@@ -11361,10 +11613,23 @@ function appendElevatorRideButtons(container, unit, close, className = 'rocket-s
     container.appendChild(btn);
   }
 }
+// M4 Transport contract ability (4B2f): one cargo transfer a turn along a
+// buggy road, so a road-linked stack counts as a destination until it is used.
+function transportRoadLink(a, b) {
+  if (!_online || !_onlineSnapshot || !_onlineSnapshot.m4 || !a || !b || a === b) return false;
+  const me = mySnapshotPlayer();
+  if (!me || me.transportUsed) return false;
+  const has = (me.fulfilledContracts || []).some((f) => { const face = contractFace(f.id, f.side); return !!(face && face.abilities && face.abilities.transport); });
+  if (!has) return false;
+  const sa = toServerId(_onlineMaps, a) || a;
+  const sb = toServerId(_onlineMaps, b) || b;
+  return isBuggyRoadPair(sa, sb);
+}
 function getColocatedDestinations(sourceId) {
   const sourceSite = getStackSiteId(sourceId);
   if (!sourceSite) return [];
-  const colo = (siteId) => siteId === sourceSite || elevatorColocatedClient(siteId, sourceSite);
+  const colo = (siteId) => siteId === sourceSite || elevatorColocatedClient(siteId, sourceSite)
+    || transportRoadLink(siteId, sourceSite);
   const dests = [];
   // LEO is always at LEO. If source is at LEO and not LEO
   // itself, LEO is a destination. Skip when source IS LEO.
@@ -11724,7 +11989,11 @@ async function decommissionSelectedToHand(stackId, ids, onDone) {
     else parts.push(`<strong>${crew}</strong> crew stay put (a felony needs Anarchy)`);
   }
   if (humanCol) {
-    if (felony) parts.push(`<strong>${humanCol}</strong> Human colonist${humanCol === 1 ? '' : 's'} recall${humanCol === 1 ? 's' : ''} home to LEO / your Home Bernal (felony)`);
+    // Murder/Suicide: a felony, or allowed outright (Collective Bargaining,
+    // Rescue Team).
+    const murder = felony || playerHasPrivilege(mySnapshotPlayer(), 'COLLECTIVE_BARGAINING')
+      || contractAbilityListOf(mySnapshotPlayer(), 'murderSuicide').length > 0;
+    if (murder) parts.push(`<strong>${humanCol}</strong> Human colonist${humanCol === 1 ? '' : 's'} recall${humanCol === 1 ? 's' : ''} home to LEO / your Home Bernal (felony)`);
     else parts.push(`<strong>${humanCol}</strong> Human colonist${humanCol === 1 ? '' : 's'} stay${humanCol === 1 ? 's' : ''} put (a felony needs Anarchy)`);
   }
   if (fuelCards) {
@@ -12173,6 +12442,12 @@ function myCrewReactorKinds() {
     if (pw.crewOnBoardReactorHome && !isHomeBernalUnit(bn)) continue;
     kinds = kinds ? Array.from(new Set([...kinds, ...pw.crewOnBoardReactor])) : [...pw.crewOnBoardReactor];
   }
+  // M4 Battery on your Crew (engine batteryCrewKinds): side 1 e electric,
+  // side 2 antimatter. Augments exist only in M4, which never runs with M2.
+  const bat = (mySnapshotPlayer() || {}).augments;
+  const b = bat && bat.battery;
+  const bk = b ? (b.side === 1 ? ['gen-electric'] : b.side === 2 ? ['reactor-antimatter'] : []) : [];
+  if (bk.length) kinds = Array.from(new Set([...(kinds || []), ...bk]));
   return kinds;
 }
 // A freighter / Bernal unit's rad-hardness (installed face) - the belt-roll
@@ -19375,12 +19650,99 @@ function routeHazards(segments) {
 // share an arrival and split the route at the boundaries between them.
 // `liftoffAssist` / `landingAssist` are null or {site, glyph, label},
 // already gated by the caller (needsRoll, not colony-waived).
-function buildOrderedHazardItems({ turn1Segs, hz, curSite, safeAeroOnline, liftoffAssist, landingAssist, liftoffAssistActive, chaosImmune = false, cavitationFree = false }) {
+// The hazard words a player's fulfilled M4 contracts ignore (4B2f), mirror of
+// the engine's contractIgnoreWords. Null outside M4.
+// A merged list of a fulfilled-contract ability over this player's contracts
+// (engine contractAbilityList). [] outside M4.
+function contractAbilityListOf(p, key) {
+  if (!isM4() || !p) return [];
+  const out = [];
+  for (const f of (p.fulfilledContracts || [])) {
+    const face = contractFace(f.id, f.side);
+    const v = face && face.abilities && face.abilities[key];
+    if (v == null || v === false) continue;
+    for (const x of (Array.isArray(v) ? v : [v])) if (!out.includes(x)) out.push(x);
+  }
+  return out;
+}
+// Closest Planet: -N ISRU prospecting a body (engine contractIsruBonusAt).
+function contractIsruBonusOf(p, site) {
+  const rec = site && (SITES_BY_ID[site.id2] || SITES_BY_ID[site.id] || site);
+  const body = String((rec && rec.body) || '');
+  return contractAbilityListOf(p, 'isruBody').reduce((n, x) => n + ((x && x.body === body) ? (x.n | 0) : 0), 0);
+}
+// Plasma Intrusion Laboratory: Radiation Belt flyby bonuses per spacecraft per turn.
+function contractBeltFlybyOf(p) {
+  return contractAbilityListOf(p, 'beltFlyby').reduce((n, x) => n + (Number(x) || 0), 0);
+}
+// Acetylene liftoff terms here, Equatorial Launch Railway included
+// (engine acetyleneTermsFor).
+function acetyleneTermsHere(site, factory, wetMass) {
+  const me = mySnapshotPlayer();
+  return acetyleneTerms({
+    atmospheric: isAtmosphericSite(site.id2) || isAtmosphericSite(site.id) || siteIsAerostat(site),
+    ownFactory: !!(factory && me && String(factory.ownerId) === String(me.profileId)),
+    railway: contractAbilityListOf(me, 'acetyleneFactories').length > 0,
+    wetMass,
+  });
+}
+function contractIgnoreWordsOf(p) {
+  if (!isM4() || !p) return null;
+  const skull = new Set(); const aero = new Set();
+  for (const f of (p.fulfilledContracts || [])) {
+    const face = contractFace(f.id, f.side);
+    const ab = (face && face.abilities) || {};
+    for (const w of (ab.hazardIgnore || [])) skull.add(w);
+    for (const w of (ab.aerobrakeIgnore || [])) aero.add(w);
+  }
+  const zones = contractAbilityListOf(p, 'aerobrakeZones');
+  // New Horizons: skull hazards next to an industrialized Site, N per
+  // spacecraft per turn (the engine's newHorizonsUsed ledger).
+  const per = contractAbilityListOf(p, 'skullNearFactory').reduce((n, x) => n + (Number(x) || 0), 0);
+  const used = (p.newHorizonsUsed && p.newHorizonsUsed.rocket) | 0;
+  const nearFactory = Math.max(0, per - used);
+  return (skull.size || aero.size || zones.length || nearFactory)
+    ? { skull: [...skull], aero: [...aero], zones, nearFactory } : null;
+}
+// Does a contract ability pass this hazard on the route? `left` tracks New
+// Horizons' remaining uses ({ n }). Mirror of the engine's contractIgnoresHazard
+// + newHorizonsIgnores, in the same order.
+function contractPassesHazard(ign, h, left) {
+  if (!ign) return false;
+  const slug = plannerIdToSlug(h.site.id);
+  if (hazardCaptionMentions(slug, h.aero ? ign.aero : ign.skull, [h.aero ? 'aero' : 'skull'])) return true;
+  if (h.aero && ign.zones && ign.zones.length
+    && ign.zones.includes(ZONE_ASSIGNMENTS[String(h.site.id2 != null ? h.site.id2 : slug)])) return true;
+  if (!h.aero && left && left.n > 0) {
+    const neigh = _activeData && _activeData.neighbors;
+    const around = (neigh && neigh.get(h.site.id)) || [];
+    if ([...around].some((pid) => getFactory(pid))) { left.n--; return true; }
+  }
+  return false;
+}
+// M4 tophat (4B2e), mirror of the engine's stackHasActiveTophat: the rocket
+// carries a tophat contract that is not in default, and has not used it this turn.
+function rocketTophatFree(p) {
+  return !!(p && p.rocket) && stackTophatFree(p, p.rocket.stack, 'rocket');
+}
+// Tophat (4B2e): any stack carrying it, once per stack per turn (owner R4).
+function stackTophatFree(p, stack, key) {
+  if (!isM4() || !p || (p.tophatUsed && p.tophatUsed[key])) return false;
+  return (stack || []).some((slot) => {
+    if (!slot || slot.kind !== 'contract') return false;
+    const meta = (p.contractMeta || {})[slot.id];
+    const face = contractFace(slot.id, (meta && meta.side) || slot.face || 'blue');
+    return !!(face && face.tophat && !(meta && meta.default));
+  });
+}
+function buildOrderedHazardItems({ turn1Segs, hz, curSite, safeAeroOnline, liftoffAssist, landingAssist, liftoffAssistActive, chaosImmune = false, cavitationFree = false, ignoreWords = null, tophatFree = false }) {
   const items = [];
   // Promo crew waivers, mirrored so the pay / roll checklist lines up with the
   // hazards that actually roll: POWER SERIES CHAOS MODEL passes every geyser /
   // ring / spin / wind hazard, CAVITATION ENGINEERS the turn's first aerobrake.
   let cavitationLeft = !!cavitationFree;
+  let tophatLeft = !!tophatFree;
+  const nhLeft = { n: (ignoreWords && ignoreWords.nearFactory) | 0 };
   if (liftoffAssist) items.push({ ...liftoffAssist, segIndex: 0 });
   // H6c Crash Hazard: a factory-assist liftoff ignores the hazard on the FIRST
   // space it moves into (turn1Segs[0].to). Mirror of the server; the assist's own
@@ -19393,11 +19755,15 @@ function buildOrderedHazardItems({ turn1Segs, hz, curSite, safeAeroOnline, lifto
     if (h.site.type === 'radhaz') continue;
     if (safeAeroOnline && h.aero) continue;
     if (chaosImmune && hazardFlavorOf(plannerIdToSlug(h.site.id))) continue;
+    // M4 Hazard / Aerobrake Ignore contracts (4B2f), mirrored from the engine.
+    if (contractPassesHazard(ignoreWords, h, turn1Segs.some((sg) => sg.to === h.site.id) ? nhLeft : null)) continue;
     if (cavitationLeft && h.aero && turn1Segs.some((sg) => sg.to === h.site.id)) { cavitationLeft = false; continue; }
     if (crashSpaceId && h.site.id === crashSpaceId && !isLanderBurnNodeClient(plannerIdToSlug(h.site.id))) continue;
     if (liftoffColonyWaives(curSite, h.site)) continue;
     const segIndex = turn1Segs.findIndex((s) => s.to === h.site.id);
     if (segIndex < 0) continue;
+    // M4 tophat (4B2e): the first hazard left is entered safely, free.
+    if (tophatLeft) { tophatLeft = false; continue; }
     items.push({ site: h.site, glyph: h.glyph, label: h.label, aero: !!h.aero, segIndex });
   }
   if (landingAssist) items.push({ ...landingAssist, segIndex: turn1Segs.length - 1 });
@@ -19444,6 +19810,18 @@ onTurnChange(() => {
 // when the balance can't cover the bill. The wording leans hard
 // on "cannot be undone" because the rulebook commits the dice as
 // soon as they hit the table - same idiom here.
+// Jar side 2 (owner answer A1): whole water across your tanks and Outpost cans
+// pays FINAO after aqua. Mirror of the engine's finaoFunds.
+function jarFinaoWater() {
+  const me = _online && _onlineSnapshot && _onlineSnapshot.m4 ? mySnapshotPlayer() : null;
+  const a = me && me.augments && me.augments.jar;
+  if (!a || a.side !== 2) return 0;
+  let n = 0;
+  if (me.rocket && (me.rocket.tankGrade || 'water') === 'water') n += Math.floor(me.rocket.tank || 0);
+  if (me.freighter && (me.freighter.tankGrade || 'water') === 'water') n += Math.floor(me.freighter.tank || 0);
+  for (const o of Object.values(me.outposts || {})) for (const c of ((o && o.cards) || [])) if (c && c.kind === 'fuel' && c.grade === 'water') n += Math.floor(c.amount || 0);
+  return n;
+}
 function hazardConfirmModal(hazards, { allowStepwise = false } = {}) {
   return new Promise((resolve) => {
     document.querySelector('.confirm-modal-overlay')?.remove();
@@ -19462,7 +19840,8 @@ function hazardConfirmModal(hazards, { allowStepwise = false } = {}) {
 
     const n = hazards.length;
     const cost = n * finaoPer();
-    const have = getAqua();
+    // Jar augmentation, side 2 (M4): your water counts toward FINAO.
+    const have = getAqua() + jarFinaoWater();
     const canPay = have >= cost;
     const list = hazards.map((h, i) =>
       `<li><span class="haz-order">${i + 1}.</span> <span class="haz-glyph">${h.glyph}</span> `
@@ -20510,7 +20889,11 @@ function maneuverGate(site, netThrust, opts = {}) {
   // opts.bernalLanderBurnWaived. Mirror of the server maneuverGate.
   if (siteHasLanderBurn(site) && !opts.acetylene) {
     const bernalWaived = (opts.bernalLanderBurnWaived != null)
-      ? !!opts.bernalLanderBurnWaived : myBernalWaivesLanderBurn();
+      ? !!opts.bernalLanderBurnWaived
+      : (myBernalWaivesLanderBurn()
+        // Tsiolkovsky Elevator Lab (M4): the same waiver at Elevator Sites.
+        || (contractAbilityListOf(mySnapshotPlayer(), 'elevatorLanderBurns').length > 0
+          && isSpaceElevatorSite(site.id2 != null ? site.id2 : site.id)));
     if (!bernalWaived) return { ok: false, assist: false, needsRoll: false, size, landerBurn: true };
   }
   const factory = site && getFactory(site.id);
@@ -24825,7 +25208,7 @@ function doProspect(site, prosp) {
   // Defence-in-depth in case the popup button somehow ends up
   // enabled with a stale read. Includes the colocated ISRU modifier.
   const isAerostatSiteHere = siteIsAerostat(site);
-  const prospIsru = Math.max(0, prosp.isru + colocatedIsruMod({ isAerostat: isAerostatSiteHere }));
+  const prospIsru = Math.max(0, prosp.isru + colocatedIsruMod({ isAerostat: isAerostatSiteHere }) - contractIsruBonusOf(mySnapshotPlayer(), site));
   const rSite = getRocketSite();
   const colocScoopHere = isAerostatSiteHere && rSite && rSite.id === site.id && stackHasPower('aerostatHydration2');
   const baseWaterHere = Number.isFinite(site.hydration) ? site.hydration : 0;
@@ -26761,7 +27144,6 @@ async function commitFreighterMoveOnline() {
       : maneuverGate(frSite, myFreighterThrust(), { powersat: playerHasPowersat(mySnapshotPlayer()), isFreighter: true, liftoff: true });
     if (!frLiftG.ok) frLiftG = myPromotedFreighterSelfAssist(frSite) || frLiftG;
     if (!frLiftG.ok && frLiftG.landerBurn) {
-      const atmospheric = isAtmosphericSite(frSite.id2) || isAtmosphericSite(frSite.id) || siteIsAerostat(frSite);
       const factoryHere = getFactory(frSite.id);
       // A freighter's wet mass: its own card + its cargo + its tank.
       // bernalSlotMass is the module-scope slot-mass read (it honours a radiator's
@@ -26770,16 +27152,17 @@ async function commitFreighterMoveOnline() {
       const frCargoMass = (frUnit0.stack || []).reduce((m, sl) => m + (bernalSlotMass(sl) || 0), 0);
       // Dry mass never drops below 1, so even a bare zero-mass freighter lifts at wet mass 1.
       const frWet = rocketDryMass(((frFace0 && frFace0.mass) | 0) + frCargoMass) + (Number(frUnit0.tank) || 0);
-      const frCost = Math.ceil(2 * frWet);
+      const frTerms = acetyleneTermsHere(frSite, factoryHere, frWet);
+      const frCost = frTerms.cost;
       const siteWater = siteStoredWater(frSite.id);
-      if (atmospheric && iCanUseFactory(factoryHere)) {
+      if (frTerms.allowed && iCanUseFactory(factoryHere)) {
         if (siteWater < frCost) {
-          _onlineToast(`Acetylene liftoff needs ${frCost} water stored here (2 x wet mass ${frWet}). You have ${siteWater}.`, 'error');
+          _onlineToast(`Acetylene liftoff needs ${frCost} water stored here (wet mass ${frWet}). You have ${siteWater}.`, 'error');
           return false;
         }
         const go = await confirmModal({
           title: '🚀 Acetylene Rocketplane Liftoff',
-          body: `Burn ${frCost} water stored here (2 x wet mass ${frWet}). The first lander burn out is free.`,
+          body: `Burn ${frCost} water stored here (wet mass ${frWet}). The first lander burn out is free.`,
           yes: `Lift off (${frCost} water)`,
           no: 'Cancel move',
         });
@@ -26836,6 +27219,9 @@ async function commitFreighterMoveOnline() {
     liftoffAssist: (frLiftGate && frLiftGate.needsRoll) ? { site: frSite, glyph: '🏭', label: 'liftoff assist' } : null,
     landingAssist: (landG.needsRoll && destSite) ? { site: destSite, glyph: '🏭', label: 'landing assist' } : null,
     liftoffAssistActive: !!(frLiftGate && frLiftGate.assist),
+    chaosImmune: playerHasPrivilege(mySnapshotPlayer(), 'POWER_SERIES_CHAOS_MODEL'),
+    ignoreWords: contractIgnoreWordsOf(mySnapshotPlayer()),
+    tophatFree: (() => { const meF = mySnapshotPlayer(); return !!(meF && meF.freighter) && stackTophatFree(meF, meF.freighter.stack, 'freighter'); })(),
   });
   let hazardPay = false;
   if (payable.length) {
@@ -27355,22 +27741,21 @@ async function moveRocket() {
       // the atmosphere carry the ship out through the lander burns. Costs
       // water equal to 2 x the ship's wet mass, paid from your stored water AT
       // the site (outpost tanks), and the first lander burn out is free.
-      const atmospheric = isAtmosphericSite(curSite.id2) || isAtmosphericSite(curSite.id)
-        || siteIsAerostat(curSite);
       const factoryHere = getFactory(curSite.id);
       const acetTotals = getStackTotals();
       const acetWet = rocketDryMass(acetTotals.dryMass || 0) + getTankWater();   // dry mass floors at 1
-      const acetCost = Math.ceil(2 * acetWet);
+      const acetTerms = acetyleneTermsHere(curSite, factoryHere, acetWet);
+      const acetCost = acetTerms.cost;
       const siteWater = siteStoredWater(curSite.id);
-      if (atmospheric && iCanUseFactory(factoryHere)) {
+      if (acetTerms.allowed && iCanUseFactory(factoryHere)) {
         if (siteWater < acetCost) {
-          _onlineToast(`Acetylene liftoff needs ${acetCost} water stored here (2 x wet mass ${acetWet}). You have ${siteWater}.`, 'error');
+          _onlineToast(`Acetylene liftoff needs ${acetCost} water stored here (wet mass ${acetWet}). You have ${siteWater}.`, 'error');
           return false;
         }
         if (!acetArmed) {
           const go = await confirmModal({
             title: '🚀 Acetylene Rocketplane Liftoff',
-            body: `Burn ${acetCost} water stored here (2 x wet mass ${acetWet}). The first lander burn out is free.`,
+            body: `Burn ${acetCost} water stored here (wet mass ${acetWet}). The first lander burn out is free.`,
             yes: `Lift off (${acetCost} water)`,
             no: 'Cancel move',
           });
@@ -27424,6 +27809,8 @@ async function moveRocket() {
       liftoffAssistActive: !!liftG.assist,
       chaosImmune: playerHasPrivilege(meHz, 'POWER_SERIES_CHAOS_MODEL'),
       cavitationFree: playerHasPrivilege(meHz, 'CAVITATION_ENGINEERS') && !(meHz && meHz.cavitationUsed),
+      ignoreWords: contractIgnoreWordsOf(meHz),
+      tophatFree: rocketTophatFree(meHz),
     });
     let hazardPay = false;
     let hazardChoices = null;
@@ -29126,8 +29513,11 @@ function showSitePopupFor(site) {
       const thrA = getActiveThrusterStats();
       const ntA = thrA && Number.isFinite(thrA.thrust) ? thrA.thrust : 0;
       const plainGate = maneuverGate(acetSite, ntA);
-      const atmospheric = isAtmosphericSite(acetSite.id2) || isAtmosphericSite(acetSite.id)
-        || siteIsAerostat(acetSite);
+      const factoryHere = getFactory(acetSite.id);
+      const totalsA = getStackTotals();
+      const wetA = rocketDryMass(totalsA.dryMass || 0) + getTankWater();   // dry mass floors at 1
+      // Equatorial Launch Railway (M4) also offers it at any of your Factories.
+      const termsA = acetyleneTermsHere(acetSite, factoryHere, wetA);
       // An ATMOSPHERIC site ALWAYS shows it (user 2026-08-07) - the boosters are
       // refined from the air, so the air is what decides whether the option
       // exists at all. It used to also require "!plainGate.ok &&
@@ -29135,11 +29525,8 @@ function showSitePopupFor(site) {
       // ship's thrust: a player who used it once could not find it again and
       // read that as the feature being removed. Somewhere with no atmosphere it
       // stays absent rather than showing a permanently dead button.
-      if (atmospheric) {
-        const factoryHere = getFactory(acetSite.id);
-        const totalsA = getStackTotals();
-        const wetA = rocketDryMass(totalsA.dryMass || 0) + getTankWater();   // dry mass floors at 1
-        const costA = Math.ceil(2 * wetA);
+      if (termsA.allowed) {
+        const costA = termsA.cost;
         const siteWaterA = siteStoredWater(acetSite.id);
         const canUseF = iCanUseFactory(factoryHere);
         const eligible = canUseF && siteWaterA >= costA;
@@ -29150,9 +29537,9 @@ function showSitePopupFor(site) {
         const tip = !canUseF
           ? 'Needs a factory here you can use - it builds the winged boosters.'
           : siteWaterA < costA
-            ? `Needs ${costA} water stored here (2 x wet mass ${wetA}). You have ${siteWaterA}.`
+            ? `Needs ${costA} water stored here (wet mass ${wetA}). You have ${siteWaterA}.`
             : `${notNeeded ? 'Optional: your thrust already clears this liftoff. ' : ''}`
-              + `Burn ${costA} water stored here (2 x wet mass ${wetA}) to lift off. The first lander burn out is free.`;
+              + `Burn ${costA} water stored here (wet mass ${wetA}) to lift off. The first lander burn out is free.`;
         // A push-to-arm toggle: tap to activate the boosters for the next
         // planned move, tap again to stand down. The tooltip / tap-tip always
         // spells out what the liftoff needs (factory + atmosphere + stored
@@ -29258,7 +29645,7 @@ function showSitePopupFor(site) {
       // 0 / missing clears the gate. Colocated ISRU modifier (subsystem 3)
       // scans the PROSPECTING stack, matching the server gate so a prospect the
       // popup offers is never rejected.
-      const prospIsru = Math.max(0, prosp.isru + colocatedIsruMod({ isAerostat }, unit.slots));
+      const prospIsru = Math.max(0, prosp.isru + colocatedIsruMod({ isAerostat }, unit.slots) - contractIsruBonusOf(mySnapshotPlayer(), site));
       // Atmospheric Scoop (subsystem 5): an aerostat site the prospecting stack
       // is parked at counts as hydration 2 (colocated; adjacency is server-side).
       const colocScoop = isAerostat && unit.fromSite === site.id && stackHasPower('aerostatHydration2', unit.slots);
@@ -30587,7 +30974,8 @@ function showSitePopupFor(site) {
           onClick: () => { submitLunaOp({ kind: 'DENY_LUNA_PROSPECT', granteeId: pid }); _renderer.clearSitePopup(); },
         });
       }
-    } else if (!grants[mySeatId()]) {
+    } else if (!grants[mySeatId()] && !contractAbilityListOf(mySnapshotPlayer(), 'lunaFree').length) {
+      // (Artemis, M4: no permission needed.)
       if (reqs[mySeatId()]) {
         actions.push({
           label: '⏳ Luna permission requested', variant: 'secondary', offTurn: true, disabled: true,
@@ -30696,7 +31084,7 @@ function showSitePopupFor(site) {
   const popupBaseWater = Number.isFinite(site.hydration) ? site.hydration : 0;
   const popupWater = (popupAero && stackHasPower('aerostatHydration2')) ? Math.max(popupBaseWater, 2) : popupBaseWater;
   _renderer.setPopupRocketInfo(prosp
-    ? { isru: Math.max(0, prosp.isru + colocatedIsruMod({ isAerostat: popupAero })), water: popupWater, kind: prosp.kind }
+    ? { isru: Math.max(0, prosp.isru + colocatedIsruMod({ isAerostat: popupAero }) - contractIsruBonusOf(mySnapshotPlayer(), site)), water: popupWater, kind: prosp.kind }
     : null);
   _renderer.setSitePopup(site, actions);
   _renderer.onPopupClose(() => {
@@ -31200,6 +31588,7 @@ function planFreighterRouteTo(destSite) {
     metricPriority: routeMetricPriority(),
     solarSeason: nowSeason || 'red',
     freePivots: freighterBonusPivots(),
+    beltFlyby: contractBeltFlybyOf(mySnapshotPlayer()),
   });
   if (!result || !result.segments.length) {
     setStatus(`No freighter route found to <strong>${esc(destSite.name)}</strong>.`);
@@ -31334,6 +31723,7 @@ function planRocketRouteTo(destSite) {
     // credit a free burn per radiation belt so the sail can ride belts to reach
     // further (mirrors the server's beltsEntered credit).
     beltBonusBurn: !!(thrStats && thrStats.bonusBurnPerBelt),
+    beltFlyby: contractBeltFlybyOf(mySnapshotPlayer()),
     // C3b Synodic Comets: an activated TW thruster (a promoted GW) may enter a
     // Synodic Comet in any season, so the search stops treating those comets as
     // off the board. Every other seasonal space still gates normally.
@@ -32015,11 +32405,20 @@ function doAuctionCard(card) {
   // player who holds the Equality law (active or lobbied this turn) may skip the
   // auction and take the deck top straight to Hand for 1 aqua. CEO Solitaire runs
   // Subsidized Research instead (priced through ceoTakePricing above).
-  const researchGrants = online && !ceoSolo && iCanUseLaw('equality');
   // O5e: Equality IN FORCE makes Research Grants mandatory (no auction button).
   const grantsOnly = online && !ceoSolo && lawInForceNow('equality');
+  // M4 Insight (4B2f): announce the auction, send one deck top to the bottom,
+  // then choose any top card. Not with Research Grants.
+  const meIns = online ? mySnapshotPlayer() : null;
+  const insightPending = !!(meIns && meIns.insightPending);
+  const insight = !grantsOnly && !!(online && isM4() && meIns && !meIns.insightUsed && (meIns.fulfilledContracts || [])
+    .some((f) => { const fc = contractFace(f.id, f.side); return !!(fc && fc.abilities && fc.abilities.insight); }));
+  const researchGrants = online && !ceoSolo && iCanUseLaw('equality') && !insightPending;
   openAuctionConfirmModal({
     grantsOnly,
+    insight,
+    insightPending,
+    onInsight: () => submitOnlineOp({ kind: 'INSIGHT', deckType: card.type }),
     card,
     mode,
     ceoSolo,
@@ -32163,13 +32562,16 @@ function renderPatents() {
   // a non-M2 game never sees the categories. Both are a white-front /
   // purple-promoted class loaded from data/colonists.js + data/bernals.js.
   const m2Types = isM2() ? ['colonist', 'bernal'] : [];
-  const types = [...PATENT_TYPES, 'supports', 'crew', ...expansionTypes, ...m2Types];
+  // M4 contracts: their own tab, only in an M4 game.
+  const m4Types = isM4() ? ['contract'] : [];
+  const types = [...PATENT_TYPES, 'supports', 'crew', ...expansionTypes, ...m2Types, ...m4Types];
   const counts = Object.fromEntries(PATENT_TYPES.map((t) => [t, patentsByType(t).length]));
   for (const t of expansionTypes) counts[t] = patentsByType(t).length;
   counts.crew = CREW_FACES.length;
   counts.supports = patentsThatSupply(supplyKinds).length;
   counts.colonist = COLONISTS.length;
   counts.bernal = BERNALS.length;
+  counts.contract = CONTRACTS.length;
   // Drop the "(soon)" suffix once M1 is live; the cards are playable then.
   const m1Live = isM1();
   const TYPE_LABEL = {
@@ -32178,6 +32580,7 @@ function renderPatents() {
     'supports': 'Supports',
     'colonist': 'Colonists',
     'bernal': 'Bernals',
+    'contract': 'Contracts',
   };
   // Seed initial active tab from a pending programmatic open
   // (openPatentsSupports), falling back to the first type.
@@ -32296,6 +32699,28 @@ function renderPatents() {
   const grid = document.createElement('div');
   grid.className = 'card-grid';
   host.appendChild(grid);
+  // A contract tile: the side the library's side toggle shows (blue / gold;
+  // Exodus contracts have one side). Inspect-only, tap for the full card.
+  const contractSideOf = (c) => (c.exodus ? 'exodus' : (librarySide === 'secondary' ? 'gold' : 'blue'));
+  const contractLibraryTile = (c) => {
+    const side = contractSideOf(c);
+    const el = renderContractCard(c.id, side) || document.createElement('div');
+    el.dataset.cardId = c.id;
+    el.classList.add('is-inspectable');
+    el.addEventListener('click', () => {
+      const back = document.createElement('div');
+      back.className = 'mp-modal-back mp-card-preview-back';
+      const box = document.createElement('div');
+      box.className = 'mp-card-preview';
+      const big = renderContractCard(c.id, side);
+      if (big) box.appendChild(big);
+      back.appendChild(box);
+      back.addEventListener('click', () => back.remove());
+      document.body.appendChild(back);
+    });
+    return el;
+  };
+  const contractTileMatches = (c, q) => [c.faces.primary, c.faces.secondary].some((f) => f && String(f.name || '').toLowerCase().includes(q));
 
   // Each physical card exists in exactly one location: deck,
   // hand, or rocket. The library grid decorates every tile with
@@ -32477,6 +32902,7 @@ function renderPatents() {
       for (const c of CREW_FACES) if (cardMatchesQuery(c, q)) { grid.appendChild(decorateForHand(c, 'crew')); hits++; }
       if (isM2()) for (const c of COLONISTS) if (cardMatchesQuery(c, q)) { grid.appendChild(decorateForHand(c, 'colonist')); hits++; }
       if (isM2()) for (const c of BERNALS) if (cardMatchesQuery(c, q)) { grid.appendChild(decorateForHand(c, 'bernal')); hits++; }
+      if (isM4()) for (const c of CONTRACTS) if (contractTileMatches(c, q)) { grid.appendChild(contractLibraryTile(c)); hits++; }
       if (!hits) {
         const empty = document.createElement('p');
         empty.className = 'muted patent-search-empty';
@@ -32504,6 +32930,10 @@ function renderPatents() {
     if (filter === 'bernal') {
       // M2 Bernal (space-colony) cards (white working face / purple promoted face).
       for (const c of BERNALS) grid.appendChild(decorateForHand(c, 'bernal'));
+      return;
+    }
+    if (filter === 'contract') {
+      for (const c of CONTRACTS) grid.appendChild(contractLibraryTile(c));
       return;
     }
     if (filter === 'supports') {
@@ -34324,7 +34754,7 @@ const MP_LOG_ICONS = {
   AUCTION_START: '🎯', AUCTION_BID: '💰', AUCTION_PASS: '🚫',
   // M4 contracts (4B): the auction is in years, the timepiece is a clock.
   AUCTION_CONTRACT_START: '📜', AUCTION_CONTRACT_BID: '⏳', AUCTION_CONTRACT_PASS: '🚫', AUCTION_CONTRACT_CLOSE: '⏱',
-  FULFILL_CONTRACT: '🏁', PAY_LATE_FEE: '⏰', IMPLANT: '🦾', ABANDON_CONTRACT: '🗑',
+  FULFILL_CONTRACT: '🏁', PAY_LATE_FEE: '⏰', IMPLANT: '🦾', ABANDON_CONTRACT: '🗑', INSIGHT: '🔎',
   AUCTION_RESET: '↺', AUCTION_SELL: '✅',
   PICK_CREW: '🧑‍🚀', SET_SPECIES: '\u{1F9DC}', SET_FIRST_PLAYER: '🥇', FREE_CUBE: '🧊',
   END_TURN: '⏭', MOVE: '🛸', BURN: '🔥',
@@ -35250,4 +35680,9 @@ initContractsUi({
   submitAuctionOp: (op) => submitMpAuctionOp(op),
   toast: (msg, level) => { if (_onlineToast) _onlineToast(msg, level); },
   confirm: (opts) => confirmModal(opts),
+  // The name a player reads for a map space (a site, a Lagrange point, a hazard).
+  spaceName: (slug) => {
+    const n = _activeData && _activeData.sites ? _activeData.sites.find((x) => x.id2 === slug) : null;
+    return n ? (n.name || null) : null;
+  },
 });

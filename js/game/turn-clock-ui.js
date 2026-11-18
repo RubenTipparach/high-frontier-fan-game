@@ -232,20 +232,38 @@ function seasonArc(from, to, innerR, outerR) {
 // pointer still at the OLD slot, then a JS tween moves it to the
 // new slot). Without it, the pointer would flash at the new slot
 // for one frame before snapping back to animate.
-function wheelSvg(displayTurn = null) {
+// The same dial, with extras the M4 contract auction lays on it (4B3e: bids are
+// years counted from the Sunspot Cube):
+//   band    { from, to, color }  a highlighted run of slots (the time a bid buys)
+//   markers [{ slot, svg, title }] glyphs parked just outside the ring (the
+//           timepieces); several on one slot step outwards
+//   pick    { from, to }  slots the viewer may click (data-slot on a hit wedge)
+// The turn tracker calls it with none of these, so it draws exactly as before.
+export function sunspotDialSvg(opts = {}) {
+  return wheelSvg(null, opts);
+}
+
+function wheelSvg(displayTurn = null, opts = {}) {
   const outerR = WHEEL_R;
   const innerR = WHEEL_R - WHEEL_RING_W;
   const labelR = (outerR + innerR) / 2;
-  const turn = getTurn();
+  const turn = opts.turn != null ? opts.turn : getTurn();
   const pointerSlot = displayTurn !== null ? displayTurn : turn;
   const lastEvent = getLastEvent();
 
-  let svg = `<svg class="turn-wheel" viewBox="0 0 ${WHEEL_VIEW} ${WHEEL_VIEW}">`;
+  // Room outside the ring for timepiece markers when there are any.
+  const pad = (opts.markers && opts.markers.length) ? 54 : 0;
+  let svg = `<svg class="turn-wheel${opts.className ? ' ' + opts.className : ''}" viewBox="${-pad} ${-pad} ${WHEEL_VIEW + pad * 2} ${WHEEL_VIEW + pad * 2}">`;
   // Season wedges.
   for (const season of SEASONS) {
     svg += `<path d="${seasonArc(season.from, season.to, innerR, outerR)}"
       fill="${season.color}" fill-opacity="0.22"
       stroke="${season.color}" stroke-opacity="0.75" stroke-width="1.4" />`;
+  }
+  // The band: the run of slots a bid buys, from the Cube to the deadline.
+  if (opts.band) {
+    const b = opts.band;
+    svg += `<path d="${seasonArc(b.from, b.to, innerR - 10, innerR - 2)}" fill="${b.color || '#fde047'}" fill-opacity="0.85" />`;
   }
   // Slot dividers + numbers.
   for (let i = 0; i < SLOTS; i++) {
@@ -303,6 +321,35 @@ function wheelSvg(displayTurn = null) {
   const fpc = getFirstPlayerColor();
   // CEO Solitaire (4G3 setup): a BUSTED DISK rides the Sunspot Cycle, not a cube.
   if (fpc) svg += getCeoSolo() ? sunspotDiscSvg(tp.x, tp.y, 12, fpc) : sunspotCubeSvg(tp.x, tp.y, 11, fpc);
+  // Centre lines (the auction reads out the turn and the deadline here).
+  if (opts.center && opts.center.length) {
+    const lines = opts.center;
+    const y0 = WHEEL_CY - ((lines.length - 1) * 17) / 2;
+    // A line is a string or { text, color }: bids read in their bidder's colour.
+    lines.forEach((ln, i) => {
+      const text = typeof ln === 'string' ? ln : ln.text;
+      const o = typeof ln === 'object' ? ln : {};
+      const fill = o.color || (i === 0 ? '#f8fafc' : 'rgba(226,232,240,0.82)');
+      const weight = i === 0 || o.strong ? 800 : 500;
+      svg += `<text x="${WHEEL_CX}" y="${(y0 + i * 17).toFixed(1)}" text-anchor="middle" dominant-baseline="middle"
+        font-size="${i === 0 ? 15 : 13}" font-weight="${weight}" fill="${fill}"${o.strong ? ' text-decoration="underline"' : ''}>${text}</text>`;
+    });
+  }
+  // Clickable slots (a contract bid): one transparent wedge per pickable slot.
+  if (opts.pick) {
+    const span = ((opts.pick.to - opts.pick.from + SLOTS) % SLOTS) + 1;
+    for (let k = 0; k < span; k++) {
+      const slot = (opts.pick.from + k) % SLOTS;
+      svg += `<path class="dial-hit" data-slot="${slot}" d="${seasonArc(slot, slot, innerR - 12, outerR + 30)}" fill="#ffffff" fill-opacity="0" style="cursor:pointer"><title>${opts.pick.title ? opts.pick.title(slot) : ''}</title></path>`;
+    }
+  }
+  // Markers just outside the ring, stepping outwards when they share a slot.
+  const perSlot = {};
+  for (const m of (opts.markers || [])) {
+    const n = perSlot[m.slot] = (perSlot[m.slot] || 0) + 1;
+    const mp = pointOnRing(m.slot, outerR + 40 + (n - 1) * 30);
+    svg += `<g transform="translate(${mp.x.toFixed(2)},${mp.y.toFixed(2)})" style="pointer-events:none">${m.svg}${m.title ? `<title>${m.title}</title>` : ''}</g>`;
+  }
   svg += '</svg>';
   return svg;
 }

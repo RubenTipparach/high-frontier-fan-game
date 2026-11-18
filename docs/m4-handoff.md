@@ -96,10 +96,13 @@ Read CLAUDE.md first, then `docs/module-m4-plan.md` (the stage plan and the
 
 ## Next work, roughly in order
 
-1. **Contract abilities (rest of Stage 1).** tophat (one free hazard per turn),
-   Hazard / Aerobrake Ignore, Shielded (-2 belt and CME), Insight, Secured,
-   Bailout, Connections, and the "When Fulfilling" effects. A contract in
-   default has all its abilities switched off (4B6b). Each one needs a check.
+1. **Contract abilities (rest of Stage 1).** DONE 2026-11-16 for tophat
+   (rocket), Hazard Ignore (quoted words), Shielded, Insight, Secured, Bailout,
+   Connections, "Gain N Aquas" When Fulfilling and Rivalry's fundraise Aqua;
+   see "Stage 1 status" in `docs/module-m4-plan.md`. Still open: the
+   conditional ignores written as prose, Transport, the one-off fulfilled
+   abilities, the non-aqua When Fulfilling effects, and the tophat on
+   Freighter / Bernal stacks.
 2. **Rest of Stage 1:**
    - contract negotiation (4B2g);
    - a tie-winner picker in the auction overlay (the engine accepts `winnerId`);
@@ -120,7 +123,10 @@ Read CLAUDE.md first, then `docs/module-m4-plan.md` (the stage plan and the
 5. **Stage 3:** isotope monetization, the isobank and isobanker, gold-side
    upheaval, Exodus contracts, the starship launch.
 6. **Release later** with the four-step checklist in CLAUDE.md. Before that,
-   look at CEO Solitaire's own M4 rules (4G), which are not wired.
+   note the 4G solitaire rules are already implemented by CEO Solitaire (V6),
+   including the 4G3 Solitaire Assembly (owner 2026-11-17); M4 inside a CEO
+   Solitaire room is still refused (`m4_no_variants`; `createInitialState`
+   drops m4 with ceoSolo).
 
 ## Open questions for the user
 

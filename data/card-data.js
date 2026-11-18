@@ -4171,7 +4171,7 @@ export const CARD_DATA = {
         "Cybernetics": "jar",
         "Destination": "Site Adjacent to Hazard Space & Return.",
         "Fulfilled Ability": "Bailout.",
-        "Destination Steps": "manual:site adjacent to a Hazard space"
+        "Destination Steps": "site adjacent=hazard ; return"
       },
       "tier2": {
         "Name": "Rivalry",
@@ -4190,7 +4190,7 @@ export const CARD_DATA = {
         "Destination": "Site in farthest zone with an claimed glory chit & Return.",
         "Fulfilled Ability": "Gain 1 additional Aqua when fundraising.",
         "Transcription Notes": "Destination printed verbatim as 'with an claimed glory chit' (likely a misprint; could be meant as 'unclaimed' or 'a claimed').",
-        "Destination Steps": "manual:farthest zone with a claimed glory chit"
+        "Destination Steps": "site farthestglory ; return"
       }
     },
     {
@@ -4272,7 +4272,7 @@ export const CARD_DATA = {
         "Destination": "With Human, enter Hazard, make a Hazard Roll, and land at your Factory in the same Turn.",
         "Fulfilled Ability": "+1 VP per glory chit.",
         "When Fulfilling": "Flip one of your glory chits on your playmat face-up.",
-        "Destination Steps": "manual:Human through a Hazard Roll to your Factory in one turn"
+        "Destination Steps": "site ownfactory human rolled"
       }
     },
     {
@@ -4520,7 +4520,7 @@ export const CARD_DATA = {
         "Destination": "Mercury L1 to Mercury L3 in 1 Turn (7:30, 1:50 [Mercury]).",
         "Fulfilled Ability": "[black circle with white beam/play triangle icon] (Negotiable).",
         "Transcription Notes": "Fulfilled ability is an icon only: a black disc with a white right-pointing triangle and a small arc on its right (looks like a beam-emitter / power-beaming icon), followed by '(Negotiable).'.",
-        "Destination Steps": "manual:Mercury L1 to Mercury L3 in one turn"
+        "Destination Steps": "enter:lag-jkgud ; enter:lag-skyvt sameturn"
       },
       "tier2": {
         "Name": "Daedalus Starship Research",
@@ -4671,7 +4671,7 @@ export const CARD_DATA = {
         "Destination": "Operational robonaut & refinery at Busted Size 1 Site.",
         "When Fulfilling": "Remove Busted disk; prospect here at ISRU 0 w/reroll.",
         "Transcription Notes": "This card has no FULFILLED ABILITY box (only WHEN FULFILLING).",
-        "Destination Steps": "manual:Operational robonaut and refinery at a busted Size 1 site"
+        "Destination Steps": "site busted size=1 robonaut refinery"
       },
       "tier2": {
         "Name": "Ring Industrialization",
@@ -4709,7 +4709,7 @@ export const CARD_DATA = {
         "Destination": "Unexplored Signposted (4A7d) Site.",
         "When Fulfilling": "Bust the destination Site & place up to 2 delegates in any 1 Ideology.",
         "Transcription Notes": "This card has no FULFILLED ABILITY box (only WHEN FULFILLING).",
-        "Destination Steps": "manual:Signposted site (4A7d)"
+        "Destination Steps": "site signposted unexplored orany"
       },
       "tier2": {
         "Name": "Planetary Rail Network",
@@ -4783,7 +4783,7 @@ export const CARD_DATA = {
         "Cybernetics": "hexagon",
         "Destination": "Hazard Space adjacent to Comet Phaethon (8:30 [Earth], Season Yellow).",
         "Fulfilled Ability": "[green hazard icon: skull and crossbones with a check mark] \"spin\"",
-        "Destination Steps": "manual:Hazard space adjacent to Comet Phaethon"
+        "Destination Steps": "at:lag-q4yka"
       },
       "tier2": {
         "Name": "Ring Rain",
@@ -4931,7 +4931,7 @@ export const CARD_DATA = {
         "Cybernetics": "hexagon",
         "Destination": "Human Crew/ Colonist at Site beyond Mars zone or Size 9+.",
         "Fulfilled Ability": "You are allowed Murder/Suicide.",
-        "Destination Steps": "manual:Human at a site beyond Mars zone or Size 9+"
+        "Destination Steps": "site human either=beyond=Mars,size>=9"
       },
       "tier2": {
         "Name": "Mercury Sunset Convoy",
@@ -5024,7 +5024,7 @@ export const CARD_DATA = {
         "Destination": "Aerobrake Space beyond Jupiter zone.",
         "Fulfilled Ability": "[air-eater icon: black circle with white scoop/figure and green ring + green check mark] gained. Air-eater refueling is a 1/Turn free action.",
         "Transcription Notes": "Icon before 'gained.' is small; read as the air-eater card-property icon in a green 'gained' ring with check mark. Exact pictogram not fully legible.",
-        "Destination Steps": "manual:Aerobrake space beyond Jupiter zone"
+        "Destination Steps": "space aero beyond=Jupiter"
       }
     },
     {
@@ -5278,7 +5278,7 @@ export const CARD_DATA = {
         "Cybernetics": "battery",
         "Destination": "Mars Site, then Sol-Mars L1 (2:05 [Mars]).",
         "Fulfilled Ability": "Shielded.",
-        "Destination Steps": "site body=Mars ; manual:Sol-Mars L1"
+        "Destination Steps": "site body=Mars ; at:lag-vnzy7"
       },
       "tier2": {
         "Name": "Ice Phase Research",

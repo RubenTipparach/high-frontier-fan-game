@@ -12,7 +12,7 @@ import { ws } from './ws.js';
 import { isBatterySave, setBatterySave, applyBatterySaveClass, isHalloweenTheme, setHalloweenTheme, applyHalloweenClass, isHolidayTheme, setHolidayTheme, applyHolidayClass } from './prefs.js';
 import {
   initLobby, refreshLobbyList, openLobby, exitToLobbyList, createSoloRoom,
-  pinGlobalChatBottom,
+  pinGlobalChatBottom, setM4Allowed,
 } from './lobby.js';
 import {
   initInvites, refreshInvitesList, subscribeInvitesForProfile,
@@ -858,7 +858,7 @@ function initNewGameModal() {
     // still runs without M2 (the server forces it off).
     const m1 = !!document.getElementById('solo-m1')?.checked;
     const m2 = !!document.getElementById('solo-m2')?.checked;
-    // M4 (admin preview) runs in the plain sandbox only; it needs M0.
+    // M4 (preview, admins and playtesters) runs in the plain sandbox only; it needs M0.
     const m4 = !ceoSolo && !hermes && !sirens && !altruism && !!document.getElementById('solo-m4')?.checked;
     const name = document.getElementById('solo-name')?.value || '';
     soloCreate.disabled = true;
@@ -914,13 +914,23 @@ let _isTesterCache = false;
 // not on the list, so a signed-out or ordinary player never sees it flash
 // during boot.
 function syncAlphaBanner() {
-  // Nothing is in testing right now: V9 The Sirens, the last thing the banner
-  // named, released 2026-11-14. A banner with nothing in it would thank a
-  // tester for scouting ahead of everyone on something everyone already has,
-  // so it stays hidden. Re-enable it (and name the feature) when something new
-  // ships to testers first.
+  // In testing: Module 4 Exodus (opened to testers 2026-11-18). Shown only to
+  // players actually on the tester list.
   const el = document.getElementById('alpha-tester-banner');
-  if (el) el.classList.add('hidden');
+  if (el) el.classList.toggle('hidden', !_isTesterCache);
+}
+// Module 4 (Exodus) preview rows: admins OR playtesters (user 2026-11-18;
+// admin-only from 2026-11-15). Cleared when hidden so a stale tick can never
+// ride along (the server forces m4 off for anyone else regardless).
+function syncM4Rows() {
+  const allowed = _adminAllowedCache || _testerAllowedCache;
+  setM4Allowed(allowed);
+  for (const id of ['create-m4-row', 'solo-m4-row']) {
+    const row = document.getElementById(id);
+    if (!row) continue;
+    row.classList.toggle('hidden', !allowed);
+    if (!allowed) { const cb = row.querySelector('input'); if (cb) cb.checked = false; }
+  }
 }
 
 // Reveal module toggles. M1 (Terawatt) and M2 (Colonization + Futures) are both
@@ -929,15 +939,8 @@ function syncAlphaBanner() {
 // `allowed` arg is ignored for these released rows) so a future admin-only
 // module can slot back in.
 function setAdminModuleRows(allowed) {
-  // Module 4 (Exodus) is an ADMIN-ONLY preview (user 2026-11-15). Its rows show
-  // for admins only, and are cleared when hidden so a stale tick can never ride
-  // along (the server forces m4 off for anyone else regardless).
-  for (const id of ['create-m4-row', 'solo-m4-row']) {
-    const row = document.getElementById(id);
-    if (!row) continue;
-    row.classList.toggle('hidden', !allowed);
-    if (!allowed) { const cb = row.querySelector('input'); if (cb) cb.checked = false; }
-  }
+  // Module 4 (Exodus) rides admin OR tester: see syncM4Rows (called from
+  // syncVariantRows, which runs whenever either signal resolves).
   for (const id of ['create-m2-row', 'solo-m2-row']) {
     const el = document.getElementById(id);
     if (el) el.classList.remove('hidden');
@@ -959,6 +962,7 @@ function setAdminModuleRows(allowed) {
 // off for anyone who is neither, regardless of what the client sends, so this
 // is only the UI half of the gate.
 function syncVariantRows() {
+  syncM4Rows();
   // Every scenario is RELEASED: V5 Hermes Fall (2026-08-07), V4 Altruism and,
   // last, V9 The Sirens (2026-11-14). So the scenario group and every entry in
   // it show for every host. When a new scenario ships behind a gate, hide just
