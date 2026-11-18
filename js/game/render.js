@@ -6754,6 +6754,25 @@ export class MapRenderer {
     const sy = this.pan.y + this._popupSite.y * eff;
     el.style.left = `${sx}px`;
     el.style.top  = `${sy}px`;
+    this._clearPopupOfBars(el);
+  }
+
+  // The popup normally sits above its site. Anything floating along the map's
+  // top edge (the toolbar, the collapsed panel pill on a phone) would cover its
+  // top rows, so near the top it slides down to sit just under the bar.
+  _clearPopupOfBars(el) {
+    el.style.transform = '';
+    const hb = this.host.getBoundingClientRect();
+    let clear = hb.top;
+    for (const bar of document.querySelectorAll('.map-toolbar, #browse-sidepanel')) {
+      const r = bar.getBoundingClientRect();
+      if (!r.width || !r.height || r.height > 160 || r.top > hb.top + 160) continue;
+      if (r.right <= hb.left || r.left >= hb.right) continue;
+      clear = Math.max(clear, r.bottom);
+    }
+    const pr = el.getBoundingClientRect();
+    if (!pr.height || pr.top >= clear + 4) return;
+    el.style.transform = `translate(-50%, calc(-100% - 40px + ${toLayoutPx(clear + 4 - pr.top)}px))`;
   }
 
   onPopupClose(fn) { this._onPopupClose = fn || null; }

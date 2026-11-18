@@ -121,7 +121,7 @@ import { futureGoalForCard, checkFutureGoal, CENTAUR_SITE_IDS, GREEK_CAMP_IDS, T
 // M2 Colonist powers (FINAO halved etc.) - the same flags the engine reads.
 import { colonistPower } from '../../data/colonist-abilities.js';
 import { openBernalStackModal, openBernalFuelTank } from './bernal-modal.js';
-import { initContractsUi, closeContractsPanel, contractSpaceName, refreshContractsUi, abandonBlock, contractFeeDue, payContractFee, abandonContract, timepieceBadge, renderContractAuctionStep, openCompletedContracts } from './contracts-ui.js';
+import { initContractsUi, closeContractsPanel, contractSpaceName, contractsBeforeEndTurn, refreshContractsUi, abandonBlock, contractFeeDue, payContractFee, abandonContract, timepieceBadge, renderContractAuctionStep, openCompletedContracts } from './contracts-ui.js';
 import { getBernalSprite } from './bernal-sprite.js';
 import { fuelTankCylinderMarkup, fuelTransferSectionMarkup } from './fuel-tank-view.js';
 // One client card-lookup: patents PLUS the M2 Bernal cards (which live in
@@ -16618,6 +16618,7 @@ function ensureMapShell(host) {
       }
       if (hasRocket && (getMovesRemaining() > 0 || getOpsRemaining() > 0)
         && !(await confirmEndTurn())) return;
+      if (isM4() && !(await contractsBeforeEndTurn())) return;
       await submitOnlineOp({ kind: 'END_TURN', ...(bluePlanet ? { bluePlanet: true } : {}) });
       // Turn just passed - refresh the "Next table" list now so the button can
       // offer a jump to another game that needs me without waiting for a poll.
@@ -17794,7 +17795,21 @@ function wireMapInsets(renderer) {
     // gBCR is visual (zoomed) px; the renderer's screen space is layout px.
     const handH    = hand    ? toLayoutPx(hand.getBoundingClientRect().height)   : 0;
     const sideW    = sidebar ? toLayoutPx(sidebar.getBoundingClientRect().width) : 0;
+    // A bar floating over the map's top edge (the collapsed panel pill on a
+    // phone) hides what's under it, so the view centres below it.
+    let topH = 0;
+    const mapEl = document.getElementById('browse-map-canvas');
+    if (mapEl) {
+      const mr = mapEl.getBoundingClientRect();
+      for (const bar of document.querySelectorAll('.map-toolbar, #browse-sidepanel')) {
+        const b = bar.getBoundingClientRect();
+        if (!b.width || !b.height || b.height > 160 || b.top > mr.top + 160) continue;
+        if (b.right <= mr.left || b.left >= mr.right) continue;
+        topH = Math.max(topH, toLayoutPx(b.bottom - mr.top));
+      }
+    }
     r.setInsets({
+      top: topH,
       bottom: handH,
       right:  isMobile ? 0 : sideW,
     });
@@ -22035,6 +22050,7 @@ async function passTurn() {
       if (me) openExomigrateModal(me);
       return;
     }
+    if (isM4() && !(await contractsBeforeEndTurn())) return;
     let bluePlanet = false;
     try { bluePlanet = await bluePlanetChoice(); } catch { bluePlanet = false; }
     await submitOnlineOp({ kind: 'END_TURN', ...(bluePlanet ? { bluePlanet: true } : {}) });
@@ -35863,6 +35879,12 @@ initContractsUi({
   myTurn: () => isOnlineMyTurn(),
   submitTurnOp: (op) => submitOnlineOp(op),
   submitAuctionOp: (op) => submitMpAuctionOp(op),
+  // A rules dry run of an op (nothing changes): { ok, log } or { ok:false, error }.
+  dryRun: async (op) => {
+    if (!_online || !_onlineGameId || !_onlineMe) return null;
+    const r = await submitSeatOp(_onlineGameId, { ...op, debug: true }, _onlineMe.token);
+    return r && r.ok ? r.data : null;
+  },
   toast: (msg, level) => { if (_onlineToast) _onlineToast(msg, level); },
   confirm: (opts) => confirmModal(opts),
   // The name a player reads for a map space (a site, a Lagrange point, a hazard).
