@@ -1764,8 +1764,12 @@ function colonistSizeRollModAt(state, player, siteId) {
 // season-blue event), halved again (fractions dropped) by a Frankenstein
 // Navigator / Josephson Implants colonist in play. Mirror the client's
 // finaoPer (browse.js) if the order ever changes.
-function finaoPerFor(state, player) {
+export function finaoPerFor(state, player) {
   let per = hasPrivilege(state, player, 'OPEN_SOURCE_FINAO') ? 3 : HAZARD_COST_PER;
+  // 3B5a / 4D1a: once isotope is monetized, FINAO costs are permanently doubled
+  // for everyone, Open Source included. Wired for M4 rooms only for now, so an
+  // M1 game already in flight does not double mid-game.
+  if (state.m4 && state.isotopeMonetized) per *= 2;
   if (state.internationalAssistance) per = Math.floor(per / 2);
   if (playerHasColonistPower(state, player, 'finaoHalved')) per = Math.floor(per / 2);
   return Math.max(1, per);
@@ -7423,6 +7427,78 @@ function applyCashWater(state, op, player) {
   // Cashing the rocket's last water from an empty stack decommissions it.
   recallIfEmpty(player);
   return { ok: true, state, log: `${player.name} cashed ${amt} water back to aqua (aqua ${player.aqua}).` };
+}
+
+// ===== M4 isotope monetization (3B5, 4D1) ======================================
+// Gold beads (Isotopes) stored at your Bank are currency worth 10 Aquas each
+// (3B5). 4D1d Blue/Gold Exchange: transport gold beads to your Bank; as a free
+// action sell 1 Isotope for 10 Aquas (it goes, unowned, to the Earth market), or
+// buy an unowned Isotope from the Earth market into your Bank for 10 Aquas.
+// A bead in the Bank has no spectral: it becomes your isostandard when it
+// leaves (4D1e). player.isotopes = beads at the Bank; state.earthMarket = the
+// unowned beads on Earth. Module 4 only.
+export const ISOTOPE_AQUA = 10;
+// op = { action: 'deposit', amount?, cardId?, holder? }  - whole isotope units
+//        from an isotope fuel can (cardId in holder, default the LEO Stack) or
+//        from the rocket's isotope tank, at your Bank (LEO / your Home Bernal).
+//      { action: 'sell', amount }  - Bank beads to the Earth market, +10 aqua each.
+//      { action: 'buy', amount }   - Earth market beads to your Bank, -10 aqua each.
+function applyIsotopeExchange(state, op, player) {
+  if (!state.m4) return fail('not_m4');
+  const action = String(op.action || '');
+  const want = op.amount == null ? null : Math.floor(Number(op.amount));
+  if (want != null && (!Number.isFinite(want) || want <= 0)) return fail('bad_amount');
+  player.isotopes = Math.max(0, player.isotopes | 0);
+  state.earthMarket = Math.max(0, state.earthMarket | 0);
+  if (action === 'deposit') {
+    if (op.cardId != null) {
+      const holderId = typeof op.holder === 'string' ? op.holder : 'leo';
+      const arr = stackArrayOf(player, holderId);
+      if (!arr) return fail('bad_holder');
+      const site = stackEndpointSite(player, holderId);
+      if (site === undefined) return fail('bad_holder');
+      if (!(site == null || siteIsRefuelDepot(player, site))) return fail('not_at_bank');
+      const idx = arr.findIndex((sl) => isFuelCardSlot(sl) && sl.id === String(op.cardId));
+      if (idx < 0) return fail('no_fuel_card');
+      const can = arr[idx];
+      if (can.grade !== 'isotope') return fail('not_isotope');
+      const have = Math.max(0, Math.floor(Number(can.amount) || 0));
+      const n = Math.min(want == null ? have : want, have);
+      if (n <= 0) return fail('no_isotope');
+      can.amount = have - n;
+      if (can.amount <= 0) arr.splice(idx, 1);
+      if (holderId === 'rocket') recallIfEmpty(player);
+      player.isotopes += n;
+      return { ok: true, state, log: `${player.name} brought ${n} isotope${n === 1 ? '' : 's'} from a can in ${stackLabel(holderId)} to their Bank (${player.isotopes} at the Bank, worth ${player.isotopes * ISOTOPE_AQUA} aqua).` };
+    }
+    if (!rocketAtRefuelDepot(state, player)) return fail('not_at_bank');
+    if (tankGradeOf(player.rocket) !== 'isotope') return fail('not_isotope');
+    // Whole units only; the sub-1 remainder stays in the tank.
+    const have = Math.floor(Number(player.rocket.tank) || 0);
+    const n = Math.min(want == null ? have : want, have);
+    if (n <= 0) return fail('no_isotope');
+    player.rocket.tank = round6((Number(player.rocket.tank) || 0) - n);
+    player.isotopes += n;
+    recallIfEmpty(player);
+    return { ok: true, state, log: `${player.name} brought ${n} isotope${n === 1 ? '' : 's'} from the rocket's tank to their Bank (${player.isotopes} at the Bank, worth ${player.isotopes * ISOTOPE_AQUA} aqua).` };
+  }
+  if (want == null) return fail('bad_amount');
+  if (action === 'sell') {
+    if (player.isotopes < want) return fail('no_isotope');
+    player.isotopes -= want;
+    state.earthMarket += want;
+    player.aqua = (player.aqua | 0) + want * ISOTOPE_AQUA;
+    return { ok: true, state, log: `${player.name} sold ${want} isotope${want === 1 ? '' : 's'} to the Earth market for ${want * ISOTOPE_AQUA} aqua (aqua ${player.aqua}; ${state.earthMarket} on the Earth market).` };
+  }
+  if (action === 'buy') {
+    if (state.earthMarket < want) return fail('earth_market_short');
+    if ((player.aqua | 0) < want * ISOTOPE_AQUA) return fail('insufficient_aqua');
+    state.earthMarket -= want;
+    player.aqua -= want * ISOTOPE_AQUA;
+    player.isotopes += want;
+    return { ok: true, state, log: `${player.name} bought ${want} isotope${want === 1 ? '' : 's'} from the Earth market for ${want * ISOTOPE_AQUA} aqua (${player.isotopes} at the Bank; aqua ${player.aqua}).` };
+  }
+  return fail('bad_action');
 }
 
 // Jettison fuel from the tank (Internal Tankage free action - destroyed for
@@ -13499,6 +13575,7 @@ const FUNCTIONAL = {
   CONVERT_OUTPOST: applyConvertOutpost,
   REFUEL: applyRefuel,
   CASH_WATER: applyCashWater,
+  ISOTOPE_EXCHANGE: applyIsotopeExchange,
   DUMP: applyDump,
   CAN_FUEL: applyCanFuel,
   LOAD_FUEL: applyLoadFuel,
@@ -13587,6 +13664,7 @@ function pickPayload(op) {
     case 'CASH_WATER': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}),
       ...(op.cardId != null ? { cardId: op.cardId, holder: op.holder } : {}) };
     case 'DUMP': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
+    case 'ISOTOPE_EXCHANGE': return { action: op.action, amount: op.amount, ...(op.cardId != null ? { cardId: op.cardId, holder: op.holder } : {}) };
     case 'CAN_FUEL': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
     // TRANSFER_FUEL_CARD and LOAD_FREIGHTER_WATER were MISSING here, so they
     // recorded an empty payload and an UNDO later in the same turn replayed them

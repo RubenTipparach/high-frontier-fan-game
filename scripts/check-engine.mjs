@@ -16,7 +16,7 @@
 // Run locally: node scripts/check-engine.mjs
 
 import { createInitialState, seasonForSlot } from '../server/game/state.js';
-import { auctionWaitingOn } from '../server/game/engine.js';
+import { auctionWaitingOn, finaoPerFor } from '../server/game/engine.js';
 import { hotSeatWaitingOn, resolveHotSeatActor } from '../data/hot-seat.js';
 import { applyOperation, slotMass, autoFixGlitches, liveScoreboard, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, repairSpeciesDeckSplit, cycleMarketDecks, rocketSolarZone, activeNetThrust, outpostWater, buildFutureCtx, resolveSunspotEvent, computeFinalScores } from '../server/game/engine.js';
 import { BERNALS } from '../data/bernals.js';
@@ -12158,6 +12158,36 @@ check('Hot seat: an open auction hands the device to a seat that owes an answer,
   const next = auctionWaitingOn(pass.state).map((p) => p.profileId);
   assert(hotSeatWaitingOn(pass.state, next) === auc.profileId, 'after the pass the device should go to the auctioneer to close');
   return 'skips the full-hand seat, then hands over to the auctioneer to close';
+});
+
+check('M4 isotope monetization: a can at LEO banks as gold beads, sells and buys at 10 aqua, FINAO doubles (4D1)', () => {
+  const st = startedGame({ m4: true, m1: true, m2: true });
+  const P = currentPlayerOf(st);
+  P.aqua = 5;
+  P.leo = [...(P.leo || []), { id: 'fuel-iso-1', kind: 'fuel', grade: 'isotope', spectral: 'S', amount: 3, face: 'primary' }];
+  let r = op(st, 'ISOTOPE_EXCHANGE', P.profileId, { action: 'deposit', cardId: 'fuel-iso-1', holder: 'leo' });
+  assert(r.ok, `deposit: ${r.error}`);
+  let Q = pl(r.state, P.profileId);
+  assert(Q.isotopes === 3 && !(Q.leo || []).some((x) => x.id === 'fuel-iso-1'), `bank ${Q.isotopes}, can gone`);
+  r = op(r.state, 'ISOTOPE_EXCHANGE', P.profileId, { action: 'sell', amount: 2 });
+  Q = pl(r.state, P.profileId);
+  assert(r.ok && Q.isotopes === 1 && Q.aqua === 25 && r.state.earthMarket === 2, `sell: ${r.error} bank ${Q.isotopes} aqua ${Q.aqua} market ${r.state.earthMarket}`);
+  r = op(r.state, 'ISOTOPE_EXCHANGE', P.profileId, { action: 'buy', amount: 1 });
+  Q = pl(r.state, P.profileId);
+  assert(r.ok && Q.isotopes === 2 && Q.aqua === 15 && r.state.earthMarket === 1, `buy: ${r.error}`);
+  const short = op(r.state, 'ISOTOPE_EXCHANGE', P.profileId, { action: 'buy', amount: 2 });
+  assert(!short.ok && short.error === 'earth_market_short', `buying past the market: ${short.error}`);
+  const before = finaoPerFor(r.state, Q);
+  r.state.isotopeMonetized = true;
+  assert(finaoPerFor(r.state, Q) === before * 2, `FINAO ${before} -> ${finaoPerFor(r.state, Q)}`);
+  // Zero bleed-through: no exchange, no doubling, outside M4.
+  const m1 = startedGame({ m1: true });
+  const M = currentPlayerOf(m1);
+  const no = op(m1, 'ISOTOPE_EXCHANGE', M.profileId, { action: 'buy', amount: 1 });
+  const m1Before = finaoPerFor(m1, M);
+  m1.isotopeMonetized = true;
+  assert(!no.ok && finaoPerFor(m1, M) === m1Before, `outside M4: ${no.error}, FINAO ${m1Before} -> ${finaoPerFor(m1, M)}`);
+  return `3 beads banked, sold 2 for 20, bought 1 back; FINAO ${before} -> ${before * 2}; M1 alone untouched`;
 });
 
 // The smoke verdict above runs before the checks added below it; this one

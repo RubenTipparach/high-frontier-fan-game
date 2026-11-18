@@ -319,6 +319,7 @@ function renderPanel() {
   const auctionOpen = false;   // the auction starts only in the Fundraise window
   if (s.defaultChit) market.push(`<p class="muted">🏷 Default chit: ${esc(nameOf(s.defaultChit.profileId))} (${s.defaultChit.side === 'gold' ? -6 : -3} VP)</p>`);
   market.push(decksHtml(s, p, auctionOpen));
+  market.push(isotopesHtml(s, p, myTurn));
 
   // Contracts in hand live in the Hand area (4B3h: a won contract is a Hand
   // Card), so the panel only points there; boosted and fulfilled ones are here.
@@ -366,6 +367,28 @@ function renderPanel() {
   el.querySelector('.m4c-close').addEventListener('click', closePanel);
   el.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { _tab = b.dataset.tab; renderPanel(); }));
   el.querySelectorAll('button[data-act]').forEach((b) => b.addEventListener('click', () => onAct(b)));
+}
+
+// ---- isotope monetization (3B5, 4D1) ------------------------------------------------
+// Gold beads at your Bank are worth 10 aqua each. Blue/Gold Exchange: sell one to
+// the Earth market for 10 aqua, or buy one from it for 10 aqua (free actions).
+function isotopesHtml(s, p, myTurn) {
+  const bank = Math.max(0, p.isotopes | 0);
+  const market = Math.max(0, s.earthMarket | 0);
+  const r = p.rocket || {};
+  const tankIso = (r.tankGrade === 'isotope') ? Math.floor(Number(r.tank) || 0) : 0;
+  const status = s.isotopeMonetized
+    ? 'Isotope is monetized: FINAO costs are doubled.'
+    : 'Isotope is not monetized yet: the first gold bead refined monetizes it.';
+  const btn = (act, label, ok, tip) => `<button type="button" data-act="${act}"${ok ? '' : ' disabled'} data-tip="${esc(tip)}">${label}</button>`;
+  return `<h4>Isotopes</h4>
+    <p class="muted">${status}</p>
+    <p>🟡 At your Bank: <b>${bank}</b> (worth ${bank * 10} aqua) · Earth market: <b>${market}</b></p>
+    <div class="m4c-controls">
+      ${btn('iso-sell', 'Sell 1 for 10 aqua', myTurn && bank > 0, 'Sell a gold bead to the Earth market for 10 aqua. Free action.')}
+      ${btn('iso-buy', 'Buy 1 for 10 aqua', myTurn && market > 0 && (p.aqua | 0) >= 10, 'Buy a gold bead from the Earth market into your Bank. Free action.')}
+      ${tankIso > 0 ? btn('iso-tank', `Bring ${tankIso} from the tank to the Bank`, myTurn, 'Unload the whole isotope units in your rocket tank into your Bank. Your rocket must be at your Bank (LEO or your Home Bernal).') : ''}
+    </div>`;
 }
 
 // ---- augmentations (4C) ------------------------------------------------------------
@@ -446,6 +469,9 @@ async function onAct(b) {
     }
   }
   else if (act === 'augment') { openAugmentWizard(b.dataset.shape); return; }
+  else if (act === 'iso-sell') await D.submitTurnOp({ kind: 'ISOTOPE_EXCHANGE', action: 'sell', amount: 1 });
+  else if (act === 'iso-buy') await D.submitTurnOp({ kind: 'ISOTOPE_EXCHANGE', action: 'buy', amount: 1 });
+  else if (act === 'iso-tank') await D.submitTurnOp({ kind: 'ISOTOPE_EXCHANGE', action: 'deposit' });
   else if (act === 'pay') await payContractFee(id);
   else if (act === 'abandon') await abandonContract(id);
   if (act === 'auction') closePanel();
