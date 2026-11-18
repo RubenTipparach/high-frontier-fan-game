@@ -374,7 +374,32 @@ function playerHasAtmoScoop(player, stack) {
 // M2 yet, so that placement is not read here.)
 function augmentSideAt(player, shape, side, slug) {
   const a = player && player.augments && player.augments[shape];
-  return !!(a && a.side === side && slug != null && a.colonySite === String(slug));
+  if (!(a && a.side === side && slug != null)) return false;
+  // A chit on a Crew card works wherever that Crew is (owner 2026-11-18); an
+  // older chit placed on a Colony works at that Colony.
+  if (a.crewId) return augHolderSite(player, a.crewId) === String(slug);
+  return a.colonySite === String(slug);
+}
+// The map space a player's card sits in: its stack's site ('leo' at LEO), or
+// undefined when the card is in none of the player's stacks.
+function augHolderSite(player, cardId) {
+  const id = String(cardId);
+  const has = (arr) => (arr || []).some((sl) => sl && String(sl.id) === id);
+  if (player.rocket && has(player.rocket.stack)) return player.rocket.siteId == null ? 'leo' : String(player.rocket.siteId);
+  if (has(player.leo)) return 'leo';
+  for (const o of Object.values(player.outposts || {})) if (o && has(o.cards)) return o.siteId == null ? 'leo' : String(o.siteId);
+  if (player.freighter && has(player.freighter.stack)) return player.freighter.siteId == null ? 'leo' : String(player.freighter.siteId);
+  for (const bn of (player.bernals || [])) if (bn && has(bn.stack)) return bn.siteId == null ? 'leo' : String(bn.siteId);
+  return undefined;
+}
+// A chit comes off its Crew only when that Crew founds a Colony or leaves play
+// (owner 2026-11-18); a Crew death keeps it, since the Crew respawns at LEO.
+function dropAugmentsOn(player, cardId) {
+  const gone = [];
+  for (const [shape, a] of Object.entries(player.augments || {})) {
+    if (a && a.crewId && String(a.crewId) === String(cardId)) { delete player.augments[shape]; gone.push(shape); }
+  }
+  return gone;
 }
 // Without M2, Jar 1, Hexagon and Battery count for your Crew (owner ruling
 // 2026-11-17). Mass and prospecting are read per slot on BOTH the client and
@@ -393,14 +418,27 @@ function playerSlotArrays(p) {
 function syncCrewAugmentMarks(st) {
   if (!st || !st.m4 || st.m2) return;
   for (const p of st.players || []) {
-    const massless = hasAugmentSide(p, 'jar', 1);
-    const hex = p.augments && p.augments.hexagon;
-    const pro = hex ? (hex.side === 1 ? { kind: 'raygun', isru: 1 } : { kind: 'buggy', isru: 2 }) : null;
+    // A chit whose Crew has left play comes back.
+    for (const [shape, a] of Object.entries(p.augments || {})) {
+      if (a && a.crewId && augHolderSite(p, a.crewId) === undefined) delete p.augments[shape];
+    }
+    // Each mark applies to the Crew the chit is on (an older Colony chit, to
+    // every Crew of the player).
+    const on = (shape, side, s) => {
+      const a = p.augments && p.augments[shape];
+      if (!a || (side && a.side !== side)) return false;
+      return a.crewId ? String(a.crewId) === String(s.id) : true;
+    };
     for (const arr of playerSlotArrays(p)) {
       for (const s of arr) {
         if (!s || !CREW_BY_ID[s.id]) continue;
-        if (massless) s.massless = true; else delete s.massless;
-        if (pro) s.augProspector = pro; else delete s.augProspector;
+        if (on('jar', 1, s)) s.massless = true; else delete s.massless;
+        const hex = on('hexagon', 0, s) ? p.augments.hexagon : null;
+        if (hex) s.augProspector = hex.side === 1 ? { kind: 'raygun', isru: 1 } : { kind: 'buggy', isru: 2 };
+        else delete s.augProspector;
+        const bat = on('battery', 0, s) ? p.augments.battery : null;
+        if (bat && bat.crewId) s.augSupplies = bat.side === 1 ? ['gen-electric'] : ['reactor-antimatter'];
+        else delete s.augSupplies;
       }
     }
   }
@@ -408,7 +446,9 @@ function syncCrewAugmentMarks(st) {
 // The support kinds a Battery chit gives your Crew (M4; never with M2).
 function batteryCrewKinds(player) {
   const a = player && player.augments && player.augments.battery;
-  if (!a) return [];
+  // A Battery on one Crew card supplies through that slot (slot.augSupplies);
+  // only an older Colony chit powers every Crew.
+  if (!a || a.crewId) return [];
   return a.side === 1 ? ['gen-electric'] : a.side === 2 ? ['reactor-antimatter'] : [];
 }
 function hasAugmentSide(player, shape, side) {
@@ -3531,6 +3571,7 @@ function chainCardsFromRocket(rocket, crewReactorKinds = null) {
     const pw = powerOfSlot(s);
     let supplies = (f && f.supplies) || (c && c.supplies) || [];
     if (isCrewSlot(s) && crewReactorKinds) supplies = [...supplies, ...crewReactorKinds];
+    if (isCrewSlot(s) && Array.isArray(s.augSupplies)) supplies = [...supplies, ...s.augSupplies];
     return {
       id: s.id,
       type,
@@ -3638,6 +3679,7 @@ function bernalChainCards(bn, crewReactorKinds = null) {
     const noBernalSupport = !!(pw && pw.safeAerobrakeNoBernalOrIndustrialize);
     let supplies = noBernalSupport ? [] : ((f && f.supplies) || (c && c.supplies) || []);
     if (isCrewSlot(s) && crewReactorKinds) supplies = [...supplies, ...crewReactorKinds];
+    if (isCrewSlot(s) && Array.isArray(s.augSupplies)) supplies = [...supplies, ...s.augSupplies];
     cards.push({
       id: s.id,
       type,
@@ -12132,6 +12174,8 @@ function applyBuildColony(state, op, player) {
   // lowest side). Without this the chit wrongly followed the recovered crew back
   // to LEO and stayed in play.
   const colonyGloryNotes = homeOrphanedGloryChits(state);
+  // M4: a Crew that founds a Colony gives up its augmentation chits.
+  const augFreed = state.m4 ? dropAugmentsOn(player, cardId) : [];
   let m2ColonyLog = '';
   if (settlerIsColonist) {
     // A settled colonist retires out of play (2A4b's model; 2C2a routes a
@@ -12176,6 +12220,7 @@ function applyBuildColony(state, op, player) {
   const crewName = crew ? ((crew.faces && crew.faces[slot.face === 'secondary' ? 'secondary' : 'primary'] || {}).name || crew.id) : cardNameOf(cardId);
   let log = `${player.name} founded a Colony at ${site.name} (settled ${crewName}).${m2ColonyLog}`;
   if (colonyGloryNotes.length) log += ' ' + colonyGloryNotes.join(' ');
+  if (augFreed.length) log += ` The ${augFreed.join(' and ')} chit${augFreed.length === 1 ? ' returns' : 's return'} to the portfolio.`;
   return { ok: true, state, log };
 }
 
@@ -16495,7 +16540,7 @@ function colonistAugCount(player, colonistId) {
 // Industrialist Colonist there makes it a once-per-turn free action (4C4g).
 function applyImplant(state, op, player) {
   if (!state.m4) return fail('not_m4');
-  if (!state.m2) return applyImplantAtColony(state, op, player);
+  if (!state.m2) return op.colony ? applyImplantAtColony(state, op, player) : applyImplantOnCrew(state, op, player);
   const bn = (player.bernals || [])[Number(op.bernal) || 0];
   if (!bn) return fail('no_bernal');
   if (!bn.anchored) return fail('bernal_not_anchored');
@@ -16575,6 +16620,45 @@ function applyImplantAtColony(state, op, player) {
   player.opsRemaining -= 1;
   syncCrewAugmentMarks(state);
   return { ok: true, state, log: `${player.name} ${parts.join(' and ')} at the ${where} Colony.` };
+}
+// The Augment operation without Module 2 (owner 2026-11-18): a chit goes on a
+// Crew card standing at a BEO Colony (any Colony's site), and during the
+// operation you may take chits off anyone and put chits on anyone, as many as
+// you like, for the one operation. Outside it a chit leaves its Crew only when
+// that Crew founds a Colony or leaves play; a Crew death keeps it.
+// op = { remove: [shape], implants: [{ shape, side, crewId }] }.
+function applyImplantOnCrew(state, op, player) {
+  if (player.opsRemaining <= 0) return fail('no_ops_left');
+  player.augments = player.augments || {};
+  const removes = Array.isArray(op.remove) ? [...new Set(op.remove.map(String))] : [];
+  const implants = Array.isArray(op.implants) ? op.implants : [];
+  if (!removes.length && !implants.length) return fail('nothing_to_implant');
+  const parts = [];
+  for (const shape of removes) {
+    const a = player.augments[shape];
+    if (!a) return fail('no_such_chit', { shape });
+    delete player.augments[shape];
+    parts.push(`took the ${shape} chit off ${a.crewId ? cardNameOf(a.crewId) : 'its Colony'}`);
+  }
+  const portfolio = portfolioShapes(state, player);
+  for (const imp of implants) {
+    const shape = String(imp && imp.shape || '');
+    const side = Number(imp && imp.side) === 1 ? 1 : 2;
+    const crewId = String(imp && imp.crewId || '');
+    if (!AUG_SHAPES.includes(shape)) return fail('bad_shape');
+    if (!portfolio.has(shape)) return fail('not_in_portfolio', { shape });
+    if (player.augments[shape]) return fail('chit_in_use', { shape });
+    if (shape === 'heart' && side === 1) return fail('parenthood_not_yet');
+    if (!CREW_BY_ID[crewId]) return fail('not_a_crew');
+    const at = augHolderSite(player, crewId);
+    if (at === undefined) return fail('not_your_crew');
+    if (at === 'leo' || !(state.colonies || {})[at]) return fail('crew_not_at_colony');
+    player.augments[shape] = { crewId, side, colonySite: at };
+    parts.push(`augmented ${cardNameOf(crewId)} with ${shape} (side ${side}) at the ${(siteById(at) || {}).name || at} Colony`);
+  }
+  player.opsRemaining -= 1;
+  syncCrewAugmentMarks(state);
+  return { ok: true, state, log: `${player.name} ${parts.join('; ')}.` };
 }
 // ===== end Module 4 augmentations ============================================
 

@@ -22,6 +22,7 @@ import { sunspotDialSvg } from './turn-clock-ui.js';
 import { isM4, isM2 } from './online-mode.js';
 import { COLONISTS_BY_ID } from '../../data/colonists.js';
 import { IDEOLOGY_ORDER, IDEOLOGY_BY_KEY } from '../../data/assembly.js';
+import { CREW_BY_ID } from '../../data/crew.js';
 
 let D = null;               // deps from browse.js (snapshot readers + submitters)
 let _panelOpen = false;
@@ -204,6 +205,7 @@ function cardThumb(id, side) {
 }
 
 function locationOf(p, id) {
+  if ((p.contractHand || []).includes(id)) return 'Hand';
   if ((p.leo || []).some((s) => s.id === id)) return 'LEO';
   const r = p.rocket || {};
   if ((r.stack || []).some((s) => s.id === id)) return r.siteId ? `Rocket at ${spaceName(r.siteId)}` : 'Rocket at LEO';
@@ -212,7 +214,40 @@ function locationOf(p, id) {
   }
   const fr = p.freighter;
   if (fr && (fr.stack || []).some((s) => s.id === id)) return fr.siteId ? `Freighter at ${spaceName(fr.siteId)}` : 'Freighter at LEO';
+  for (const bn of (p.bernals || [])) {
+    if (bn && (bn.stack || []).some((s) => s.id === id)) return bn.siteId ? `Bernal at ${spaceName(bn.siteId)}` : 'Bernal at LEO';
+  }
   return null;
+}
+
+// The timepiece badge (turn bar): the contract on the clock, and where it is.
+export function timepieceBadge() {
+  const s = snap(); const p = me();
+  if (!s || !s.m4 || !p || !p.timepiece) return null;
+  const id = p.timepiece.contractId;
+  const left = yearsFromNow(s, p.timepiece.slot);
+  return {
+    label: p.timepiece.deadbeat ? '⏱ Late' : `⏱ ${left} turn${left === 1 ? '' : 's'} left`,
+    meta: (faceOf(p, id) || {}).name || '',
+    late: !!p.timepiece.deadbeat,
+    onClick: () => showContractWhere(id),
+  };
+}
+export function showContractWhere(id) {
+  const p = me();
+  if (!p || !(p.contractMeta || {})[id]) return;
+  document.getElementById('m4-contract-where')?.remove();
+  const meta = p.contractMeta[id];
+  const ov = document.createElement('div');
+  ov.id = 'm4-contract-where';
+  ov.className = 'm4c-overlay';
+  ov.innerHTML = `<div class="m4c-modal m4c-where" role="dialog" aria-label="Contract">
+    <div class="m4c-head"><h3>⏱ ${esc((faceOf(p, id) || {}).name || '')}</h3><button type="button" class="m4c-close" aria-label="Close">✕</button></div>
+    <div class="m4c-where-body">${cardThumb(id, meta.side)}<div class="m4c-where-loc">📍 ${esc(locationOf(p, id) || 'In a stack')}</div></div></div>`;
+  const close = () => ov.remove();
+  ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+  ov.querySelector('.m4c-close').addEventListener('click', close);
+  document.body.appendChild(ov);
 }
 
 function renderPanel() {
@@ -275,7 +310,6 @@ function renderPanel() {
 
   // Contracts in hand live in the Hand area (4B3h: a won contract is a Hand
   // Card), so the panel only points there; boosted and fulfilled ones are here.
-  const inHand = (p.contractHand || []).length;
   const boosted = Object.keys(p.contractMeta || {}).filter((id) => !(p.contractHand || []).includes(id)).map((id) => {
     const meta = p.contractMeta[id];
     const f = faceOf(p, id);
@@ -299,13 +333,12 @@ function renderPanel() {
       if ((x.partners || []).includes(p.profileId)) partnered.push(`<div class="m4c-item">${cardThumb(x.id, x.side)}<div class="m4c-note">@${esc(q.name)}</div></div>`);
     }
   }
-  parts.push(`<h4>In hand</h4><p class="muted">${inHand
-    ? `${inHand} in your Hand.`
-    : 'none'}</p>`);
-  parts.push(`<h4>Boosted</h4><div class="m4c-row">${boosted || '<span class="muted">none</span>'}</div>`);
-  parts.push(`<h4>Fulfilled</h4><div class="m4c-row">${fulfilled || '<span class="muted">none yet</span>'}</div>`);
-  if (partnered.length) parts.push(`<h4>Partner</h4><div class="m4c-row">${partnered.join('')}</div>`);
+  // No In hand section (the Hand shows them; the timepiece badge finds the one
+  // on the clock), and empty sections are left out (owner 2026-11-18).
+  if (boosted) parts.push(`<h4>Boosted</h4><div class="m4c-row">${boosted}</div>`);
   parts.push(augmentationsHtml(s, p, myTurn));
+  if (fulfilled) parts.push(`<h4>Fulfilled</h4><div class="m4c-row">${fulfilled}</div>`);
+  if (partnered.length) parts.push(`<h4>Partner</h4><div class="m4c-row">${partnered.join('')}</div>`);
 
   el.innerHTML = `<div class="m4c-modal" role="dialog" aria-label="Contracts">
     <div class="m4c-head"><h3>📜 Contracts</h3><button type="button" class="m4c-close" aria-label="Close">✕</button></div>
@@ -335,25 +368,20 @@ function augmentationsHtml(s, p, myTurn) {
   const colName = (id) => (COLONISTS_BY_ID[id] || {}).name || id;
   const chips = SHAPES.map((sh) => {
     const a = aug[sh];
-    const on = a && (a.colonySite ? `${spaceName(a.colonySite)} Colony` : colName(a.colonistId));
-    const st = a ? `${esc(on)} (side ${a.side}: ${esc(sideText(sh, a.side))})`
-      : (portfolio.has(sh) ? 'ready' : '');
-    return `<div class="m4c-aug ${portfolio.has(sh) ? 'have' : 'lack'}">${augmentGlyph(sh, { size: 26 })}<span><b>${AUGMENTS[sh].name}</b> ${st}</span></div>`;
+    const have = portfolio.has(sh);
+    const on = a && (a.crewId ? crewName(a.crewId) : a.colonySite ? `${spaceName(a.colonySite)} Colony` : colName(a.colonistId));
+    const st = a ? `<span class="m4c-aug-tag">Augmented</span> ${esc(on)} · side ${a.side}` : (have ? 'ready' : '');
+    // Without M2, any chit in your possession opens the Augment operation.
+    const click = !s.m2 && myTurn && have;
+    return `<${click ? 'button type="button" data-act="augment" data-shape="' + sh + '"' : 'div'} class="m4c-aug ${have ? 'have' : 'lack'}${a ? ' on' : ''}"${a ? ` data-tip="${esc(sideText(sh, a.side))}"` : ''}>${augmentGlyph(sh, { size: 26 })}<span><b>${AUGMENTS[sh].name}</b> ${st}</span></${click ? 'button' : 'div'}>`;
   }).join('');
   const opts = [...portfolio].map((sh) => `<option value="${sh}">${AUGMENTS[sh].name}</option>`).join('');
   const controls = (key, attrs) => (myTurn && opts ? `<div class="m4c-controls"><select data-shape-for="${key}">${opts}</select>
     <select data-side-for="${key}"><option value="2">side 2</option><option value="1">side 1</option></select>
     <button type="button" data-act="implant" ${attrs}>Implant</button></div>` : '');
-  // Without Module 2 (no Colonists / Bernals) chits go on your Colonies (user
-  // ruling 2026-11-17).
-  if (!s.m2) {
-    const mine = Object.entries(s.colonies || {}).filter(([, c]) => c && c.ownerId === p.profileId).map(([site]) => site);
-    const rows = mine.map((site) => {
-      const here = SHAPES.filter((sh) => aug[sh] && aug[sh].colonySite === site).map((sh) => augmentGlyph(sh, { size: 22 })).join('');
-      return `<div class="m4c-col"><b>${esc(spaceName(site))} Colony</b> ${here}${controls(site, `data-col="${esc(site)}" data-colony="1"`)}</div>`;
-    }).join('');
-    return `<h4>Augmentations</h4><div class="m4c-augs">${chips}</div>${rows || '<p class="muted">No Colony.</p>'}`;
-  }
+  // Without Module 2 a chit goes on a Crew at a BEO Colony (owner 2026-11-18):
+  // click a chit you hold to start the Augment operation.
+  if (!s.m2) return `<h4>Augmentations</h4><div class="m4c-augs">${chips}</div>`;
   const bns = (p.bernals || []).map((bn, i) => ({ bn, i })).filter((x) => x.bn.anchored);
   let station = '<p class="muted">No anchored Bernal.</p>';
   if (bns.length) {
@@ -397,6 +425,7 @@ async function onAct(b) {
       await D.submitTurnOp({ kind: 'IMPLANT', bernal: Number(b.dataset.bernal), remove, implants: [{ colonistId: col, shape, side }] });
     }
   }
+  else if (act === 'augment') { openAugmentWizard(b.dataset.shape); return; }
   else if (act === 'pay') await payContractFee(id);
   else if (act === 'abandon') await abandonContract(id);
   if (act === 'auction' || act === 'discard-auction') closePanel();
@@ -578,4 +607,104 @@ export function renderContractAuction(a) {
     else if (act === 'pass') await D.submitAuctionOp({ kind: 'AUCTION_CONTRACT_PASS' });
     else if (act === 'close') await D.submitAuctionOp({ kind: 'AUCTION_CONTRACT_CLOSE', ...(b.dataset.winner ? { winnerId: Number(b.dataset.winner) } : {}) });
   }));
+}
+
+// ---- the Augment operation (4C4, without Module 2) ---------------------------------
+// Owner 2026-11-18: click a chit you hold to begin. A chit goes on a Crew card
+// standing at a BEO Colony; during the operation you may take chits off anyone
+// and put them on anyone, as many as you like, for the one operation.
+function crewSlotsOf(p) {
+  const out = [];
+  const add = (arr, site, where) => {
+    for (const sl of (arr || [])) if (sl && CREW_BY_ID[sl.id]) out.push({ slot: sl, site: site == null ? 'leo' : String(site), where });
+  };
+  if (p.rocket) add(p.rocket.stack, p.rocket.siteId, 'Rocket');
+  add(p.leo, null, 'LEO');
+  for (const o of Object.values(p.outposts || {})) if (o) add(o.cards, o.siteId, `Outpost ${o.letter}`);
+  if (p.freighter) add(p.freighter.stack, p.freighter.siteId, 'Freighter');
+  for (const bn of (p.bernals || [])) if (bn) add(bn.stack, bn.siteId, 'Bernal');
+  return out;
+}
+function crewName(id) {
+  const p = me();
+  const e = p && crewSlotsOf(p).find((x) => String(x.slot.id) === String(id));
+  const card = CREW_BY_ID[id];
+  if (!card) return String(id);
+  const face = card.faces && card.faces[e && e.slot.face === 'secondary' ? 'secondary' : 'primary'];
+  return (face && face.name) || card.name || String(id);
+}
+let _aug = null;   // { shape, plan: { [shape]: { crewId, side } | null } }
+export function openAugmentWizard(shape) {
+  const p = me();
+  if (!p) return;
+  const plan = {};
+  for (const [sh, a] of Object.entries(p.augments || {})) plan[sh] = a ? { crewId: a.crewId || null, side: a.side, colonySite: a.colonySite || null } : null;
+  _aug = { shape, plan };
+  renderAugmentWizard();
+}
+function renderAugmentWizard() {
+  const s = snap(); const p = me();
+  if (!s || !p || !_aug) return;
+  let ov = document.getElementById('m4-augment-wizard');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'm4-augment-wizard';
+    ov.className = 'm4c-overlay';
+    ov.addEventListener('click', (e) => { if (e.target === ov) closeAugmentWizard(); });
+    document.body.appendChild(ov);
+  }
+  const portfolio = portfolioOf(p);
+  const cur = p.augments || {};
+  const { shape, plan } = _aug;
+  const same = (a, b) => (!a && !b) || (a && b && a.crewId === b.crewId && a.side === b.side && (a.crewId || a.colonySite === b.colonySite));
+  const changes = SHAPES.filter((sh) => !same(cur[sh] ? { crewId: cur[sh].crewId || null, side: cur[sh].side, colonySite: cur[sh].colonySite || null } : null, plan[sh] || null));
+  const chits = SHAPES.filter((sh) => portfolio.has(sh)).map((sh) => {
+    const pl = plan[sh];
+    const tag = pl ? (pl.crewId ? crewName(pl.crewId) : `${spaceName(pl.colonySite)} Colony`) : '';
+    return `<button type="button" class="m4c-aw-chit${sh === shape ? ' sel' : ''}${pl ? ' on' : ''}${changes.includes(sh) ? ' changed' : ''}" data-aw-shape="${sh}">
+      ${augmentGlyph(sh, { size: 30 })}<span>${AUGMENTS[sh].name}</span>${pl ? `<small>${esc(tag)}</small>` : ''}</button>`;
+  }).join('');
+  // Targets: Crew at a Colony (not LEO). The chit's current Crew stays listed.
+  const crews = crewSlotsOf(p).filter((x) => x.site !== 'leo' && (s.colonies || {})[x.site]);
+  const pl = plan[shape] || null;
+  const targets = crews.map((x) => `<button type="button" class="m4c-aw-target${pl && pl.crewId === x.slot.id ? ' sel' : ''}" data-aw-crew="${esc(x.slot.id)}">
+      <b>${esc(crewName(x.slot.id))}</b><small>${esc(x.where)} · ${esc(spaceName(x.site))} Colony</small></button>`).join('')
+    || '<p class="muted">No Crew at a Colony.</p>';
+  const sides = [1, 2].map((n) => {
+    const blocked = shape === 'heart' && n === 1;   // Parenthood needs M2
+    return `<button type="button" class="m4c-aw-side${pl && pl.side === n ? ' sel' : ''}" data-aw-side="${n}" ${!pl || blocked ? 'disabled' : ''}${blocked ? ' data-tip="Needs M2"' : ''}>
+      <b>Side ${n}</b><small>${esc(sideText(shape, n))}</small></button>`;
+  }).join('');
+  ov.innerHTML = `<div class="m4c-modal m4c-aw" role="dialog" aria-label="Augment">
+    <div class="m4c-head"><h3>Augment</h3><button type="button" class="m4c-close" aria-label="Close">✕</button></div>
+    <div class="m4c-aw-chits">${chits}</div>
+    <div class="m4c-aw-step"><h4>${AUGMENTS[shape].name}: Crew</h4><div class="m4c-aw-targets">${targets}
+      ${pl ? '<button type="button" class="m4c-aw-target off" data-aw-off="1"><b>Unaugment</b></button>' : ''}</div></div>
+    <div class="m4c-aw-step"><h4>Side</h4><div class="m4c-aw-sides">${sides}</div></div>
+    <div class="m4c-btns m4c-aw-go"><button type="button" data-aw-cancel>Cancel</button>
+      <button type="button" class="primary" data-aw-submit ${changes.length ? '' : 'disabled'}>Augment${changes.length > 1 ? ` (${changes.length} chits)` : ''}</button></div>
+  </div>`;
+  ov.querySelector('.m4c-close').addEventListener('click', closeAugmentWizard);
+  ov.querySelector('[data-aw-cancel]').addEventListener('click', closeAugmentWizard);
+  ov.querySelectorAll('[data-aw-shape]').forEach((b) => b.addEventListener('click', () => { _aug.shape = b.dataset.awShape; renderAugmentWizard(); }));
+  ov.querySelectorAll('[data-aw-crew]').forEach((b) => b.addEventListener('click', () => {
+    const prev = plan[shape];
+    plan[shape] = { crewId: b.dataset.awCrew, side: prev && prev.side ? prev.side : 2, colonySite: null };
+    renderAugmentWizard();
+  }));
+  ov.querySelector('[data-aw-off]')?.addEventListener('click', () => { plan[shape] = null; renderAugmentWizard(); });
+  ov.querySelectorAll('[data-aw-side]').forEach((b) => b.addEventListener('click', () => {
+    if (plan[shape]) { plan[shape] = { ...plan[shape], side: Number(b.dataset.awSide) }; renderAugmentWizard(); }
+  }));
+  ov.querySelector('[data-aw-submit]').addEventListener('click', async () => {
+    const remove = changes.filter((sh) => cur[sh]);
+    const implants = changes.filter((sh) => plan[sh] && plan[sh].crewId).map((sh) => ({ shape: sh, side: plan[sh].side, crewId: plan[sh].crewId }));
+    closeAugmentWizard();
+    await D.submitTurnOp({ kind: 'IMPLANT', remove, implants });
+    if (_panelOpen) renderPanel();
+  });
+}
+function closeAugmentWizard() {
+  _aug = null;
+  document.getElementById('m4-augment-wizard')?.remove();
 }

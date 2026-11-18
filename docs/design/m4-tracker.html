@@ -285,6 +285,9 @@ const SECTIONS = [
       { id: 'A3', q: 'Battery on your Crew: "pulse generator" and "exotic reactor" are not supports any card in our set uses (cards need X fission, ∿ fusion, 💣 antimatter, e electric, or radioisotope). Which do they supply?',
         options: ['Pulse = e electric; exotic = 💣 antimatter', 'Pulse = radioisotope; exotic = any reactor', 'Something else (note)'], rec: 0,
         why: 'Closest printed supports.' },
+      { id: 'A4', q: 'Augment operation: the Crew must stand at a BEO Colony. Whose Colony counts?',
+        options: ['Any Colony (any player\'s)', 'Only one of your own Colonies'], rec: 0,
+        why: 'You said "some BEO colony".' },
       { id: 'A1', q: 'Jar side 2: "FTs may be spent for FINAO". Whose water?',
         options: ['The tank of the stack taking the hazard', 'Any of your water'], rec: 0,
         why: 'Same as paying at the hazard.' },
@@ -308,6 +311,8 @@ const SECTIONS = [
 const DECIDED = [
   // Newest first: { text: 'What was decided, with the owner\'s words', where: 'Where it landed' },
   { text: 'Parenthood on the heart chit is unavailable without M2; Promotion does not work without M2 (2026-11-18).', where: 'M4 + M2 section' },
+  { text: 'Augment: click a chit you hold; it goes on a Crew at a BEO Colony, says Augmented, and comes off only when that Crew founds a Colony or leaves play (a Crew death keeps it). During the operation you may unaugment or augment anyone (2026-11-18).', where: 'IMPLANT, Augment wizard' },
+  { text: 'Contracts panel: no In hand section, no empty sections; a timepiece badge by the turn label shows turns left and opens the contract and its location (2026-11-18).', where: 'contracts-ui.js' },
   { text: 'Secured blocks Factory Hijack as well as Claim Jump (2026-11-17).', where: 'ET_PRODUCE' },
   { text: 'Transport: cargo transfer along a buggy road, 1/turn (reference card).', where: 'TRANSFER' },
   { text: 'Without M2, Jar 1, Hexagon and Battery count for your Crew (2026-11-17).', where: 'Augmentations' },

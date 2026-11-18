@@ -121,7 +121,7 @@ import { futureGoalForCard, checkFutureGoal, CENTAUR_SITE_IDS, GREEK_CAMP_IDS, T
 // M2 Colonist powers (FINAO halved etc.) - the same flags the engine reads.
 import { colonistPower } from '../../data/colonist-abilities.js';
 import { openBernalStackModal, openBernalFuelTank } from './bernal-modal.js';
-import { initContractsUi, refreshContractsUi, abandonBlock, contractFeeDue, payContractFee, abandonContract } from './contracts-ui.js';
+import { initContractsUi, refreshContractsUi, abandonBlock, contractFeeDue, payContractFee, abandonContract, timepieceBadge } from './contracts-ui.js';
 import { getBernalSprite } from './bernal-sprite.js';
 import { fuelTankCylinderMarkup, fuelTransferSectionMarkup } from './fuel-tank-view.js';
 // One client card-lookup: patents PLUS the M2 Bernal cards (which live in
@@ -565,6 +565,11 @@ export function refreshRoomOverlays() {
   syncCardDraftOverlay(_online ? _onlineSnapshot : null);
   renderOnlineAuction(_online && _onlineSnapshot ? _onlineSnapshot.auction : null);
   renderOnlineTrade(_online && _onlineSnapshot ? _onlineSnapshot.trade : null);
+  renderTimepieceBadge();
+}
+function renderTimepieceBadge() {
+  const b = _online && !_spectator && isM4() ? timepieceBadge() : null;
+  setMpTurnAction('timepiece', b ? { label: b.label, meta: b.meta, needsAction: b.late, calm: !b.late, onClick: b.onClick } : null);
 }
 
 export function mountBrowse(opts = {}) {
@@ -1114,6 +1119,9 @@ function applySnapshot(snapshot, seq) {
   // parties act on. Idempotent - appears when a deal opens, clears when it
   // resolves or is declined.
   renderOnlineTrade(snapshot.trade);
+  // M4: my timepiece's countdown, docked beside the turn label; tap for the
+  // contract and where it is.
+  renderTimepieceBadge();
   // Factory-access requests on my Factories: dock a pulsing chip + auto-open a
   // Grant / Deny prompt when a new one arrives (like a trade proposal).
   renderFactoryRequests(snapshot);
@@ -12446,7 +12454,9 @@ function myCrewReactorKinds() {
   // side 2 antimatter. Augments exist only in M4, which never runs with M2.
   const bat = (mySnapshotPlayer() || {}).augments;
   const b = bat && bat.battery;
-  const bk = b ? (b.side === 1 ? ['gen-electric'] : b.side === 2 ? ['reactor-antimatter'] : []) : [];
+  // A Battery on one Crew card supplies through that slot (slot.augSupplies);
+  // only an older Colony chit powers every Crew.
+  const bk = (b && !b.crewId) ? (b.side === 1 ? ['gen-electric'] : b.side === 2 ? ['reactor-antimatter'] : []) : [];
   if (bk.length) kinds = Array.from(new Set([...(kinds || []), ...bk]));
   return kinds;
 }

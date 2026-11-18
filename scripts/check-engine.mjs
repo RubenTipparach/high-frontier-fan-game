@@ -11632,6 +11632,58 @@ const conFace = (pred) => {
 };
 const fulfilledWith = (p, ...cs) => { p.fulfilledContracts = cs.map((c) => ({ id: c.id, side: c.side, round: 1 })); };
 
+check('Augment operation (no M2): chits go on a Crew at a Colony, follow it, juggle in one op, leave only when it settles', () => {
+  const withShape = (sh) => conFace((f) => (f.cybernetics || []).includes(sh));
+  const st = startedGame({ m4: true });
+  st.activeIndex = 0;
+  const me = st.players[0];
+  const crewId = me.faction.cardId;
+  fulfilledWith(me, withShape('jar'), withShape('triangle'));
+  st.colonies = { ceres: { ownerId: 'someone' } };
+  me.rocket.siteId = 'vesta';
+  me.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }, { id: crewId, kind: 'crew', face: 'primary' }];
+  me.rocket.activeThrusterId = thruster.id;
+  me.opsRemaining = 4;
+  const imp = (s, body) => applyOperation(s, { kind: 'IMPLANT', ...body }, { profileId: me.profileId });
+  const away = imp(st, { implants: [{ shape: 'jar', side: 1, crewId }] });
+  assert(!away.ok && away.error === 'crew_not_at_colony', `crew away from a Colony: ${away.error || 'accepted'}`);
+  me.rocket.siteId = 'ceres';
+  let r = imp(st, { implants: [{ shape: 'jar', side: 1, crewId }] });
+  assert(r.ok, `implant on the Crew: ${r.error}`);
+  let P = pl(r.state, me.profileId);
+  assert(P.augments.jar && P.augments.jar.crewId === crewId, `chit: ${JSON.stringify(P.augments)}`);
+  assert(P.rocket.stack.find((x) => x.id === crewId).massless, 'Jar 1 did not mark the Crew');
+  // It follows the Crew: fly off, and the mark stays.
+  P.rocket.siteId = 'vesta';
+  r = op(r.state, 'INCOME', me.profileId, {});
+  P = pl(r.state, me.profileId);
+  assert(P.augments.jar && P.rocket.stack.find((x) => x.id === crewId).massless, 'the chit fell off when the Crew moved');
+  // A Crew death (it respawns at LEO) keeps it.
+  const dead = JSON.parse(JSON.stringify(r.state));
+  const D = pl(dead, me.profileId);
+  D.rocket.stack = D.rocket.stack.filter((x) => x.id !== crewId);
+  D.leo = [...(D.leo || []), { id: crewId, kind: 'crew', face: 'primary' }];
+  D.opsRemaining = 2;
+  const afterDeath = op(dead, 'INCOME', me.profileId, {});
+  assert(afterDeath.ok && pl(afterDeath.state, me.profileId).augments.jar, 'a Crew death removed the chit');
+  // One operation: take Jar off and put Triangle on (back at the Colony).
+  P.rocket.siteId = 'ceres'; P.opsRemaining = 2;
+  r = imp(r.state, { remove: ['jar'], implants: [{ shape: 'triangle', side: 2, crewId }] });
+  assert(r.ok, `juggle: ${r.error}`);
+  P = pl(r.state, me.profileId);
+  assert(!P.augments.jar && P.augments.triangle && P.augments.triangle.crewId === crewId, `after juggle: ${JSON.stringify(P.augments)}`);
+  assert(!P.rocket.stack.find((x) => x.id === crewId).massless, 'the Jar mark stayed after the chit came off');
+  // Settling a Colony with that Crew frees the chit.
+  const st2 = JSON.parse(JSON.stringify(r.state));
+  const Q = pl(st2, me.profileId);
+  st2.factories = { vesta: { ownerId: me.profileId, spectralType: 'V' } };
+  Q.rocket.siteId = 'vesta';
+  const col = applyOperation(st2, { kind: 'BUILD_COLONY', cardId: crewId, siteId: 'vesta', colonyType: 'Atmospheric' }, { profileId: me.profileId });
+  assert(col.ok, `colony: ${col.error}`);
+  assert(!pl(col.state, me.profileId).augments.triangle && /portfolio/.test(col.log), `chit not freed: ${col.log}`);
+  return 'refused away from a Colony; on the Crew at Ceres; follows it; survives a death; Jar off + Triangle on in one op; freed by settling';
+});
+
 check('contract abilities are read off the printed Fulfilled Ability text', () => {
   const count = {};
   for (const c of CONTRACTS) for (const f of [c.faces.primary, c.faces.secondary]) {

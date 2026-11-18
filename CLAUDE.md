@@ -249,8 +249,17 @@ per room and carried into the game state as a boolean (`state.m0`,
   colonists, freighters, the isobank) are dealt out of the decks
   (`data/contracts.js#faceUnplayable`; owner 2026-11-17). Lagrange ring
   numbers (L1-L5) read off the board live in `data/lagrange-labels.js`.
-  Without M2 there are no Colonists or Bernals, so IMPLANT puts augmentation
-  chits on one of your Colonies instead (owner ruling 2026-11-17).
+  Without M2 the Augment operation (IMPLANT, `applyImplantOnCrew`) puts a chit
+  on a Crew card standing at a BEO Colony (owner 2026-11-18, replacing the
+  2026-11-17 "on a Colony" ruling; old Colony chits still work). During the one
+  operation a player may take chits off anyone and put them on anyone. The chit
+  then rides that Crew wherever it goes (side abilities that act "here" follow
+  it), survives a Crew death (it respawns at LEO), and comes off only when that
+  Crew founds a Colony or leaves play. Its marks (Jar 1 0 Mass, Hexagon
+  prospector, Battery `augSupplies`) sit on that Crew's slot only. UI: click a
+  chit you hold in the Contracts panel to open the Augment wizard; the turn bar
+  carries a timepiece badge ("N turns left") that opens the contract and where
+  it is.
   Stages and the contract card-data columns: `docs/module-m4-plan.md`.
   Releasing it later follows the checklist below.
 - **Promo crew (data/crew.js#PROMO_CREW) - RELEASED to every player
