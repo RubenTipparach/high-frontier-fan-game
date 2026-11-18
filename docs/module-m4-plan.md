@@ -215,3 +215,31 @@ already pairs rows this way). 36 cards, 12 per ideology pair. Columns:
 
 Also useful: a card image link per side (hf4map has the Contracts deck) so the
 art and layout can be matched.
+
+## Stage 3 status (2026-11-18)
+
+STARTED on `claude/nodeploy-m4-m2-isotopes` (owner 2026-11-18: "start building
+m4 + m2 and iso monetization"):
+- **M4 + M2 in one room.** The `m4_no_m2` refusal is gone from the create and
+  settings routes. With M2 an augmentation chit rides a Colonist (4C4):
+  `augmentSideAt` reads `colonistId`, and the Jar 1 / Hexagon / Battery marks
+  go on the Colonist's slot (server `syncCrewAugmentMarks`, client
+  `rocket.js#installedFace`).
+- **Isotope monetization (3B5, 4D1).** `monetizeIsotope` runs on the first
+  isotope refuel (both paths). In M4: FINAO doubles (`finaoPerFor`, client
+  `finaoPer`; M1-only games are left alone so a game in flight does not
+  double), and the free action `ISOTOPE_EXCHANGE` moves gold beads:
+  `deposit` (an isotope can or the rocket's isotope tank, whole units, at your
+  Bank) into `player.isotopes`; `sell` to `state.earthMarket` for 10 aqua;
+  `buy` back for 10 aqua. Client: the Isotopes block on the Contracts panel,
+  "To the Bank" on isotope cans.
+- **Isobank Contract Upheaval (4B1b).** The same first gold bead flips the
+  three non-Exodus decks (bottom on top) and sets `state.contractSide = 'gold'`;
+  auctions deal that side. Gold faces the engine cannot check are dealt out.
+
+STILL TO DO in Stage 3: paying with beads directly (auction bids, FINAO) instead
+of selling first; withdrawing a bead from the Bank as your isostandard (4D1e)
+and debasement (4D1b); the other 4D1a triggers (Lofstrom Loop / GEO Elevator
+Home Bernal, ET Home Bernal); the isobank and isobanker (4D2), Exodus contracts,
+the starship. Open question for the owner: should FINAO doubling also apply to
+M1 games without M4 (3B5a is an M1 rule)?
