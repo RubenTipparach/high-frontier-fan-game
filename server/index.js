@@ -1660,7 +1660,7 @@ app.post('/lobbies/:id/kick', requireProfile, (req, res) => {
 app.post('/lobbies/:id/settings', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
-  const lobby = db.prepare('SELECT host_id, status, hermes, sirens, max_players, hot_seat, m2, m4 FROM lobbies WHERE id = ?').get(id);
+  const lobby = db.prepare('SELECT host_id, status, hermes, sirens, altruism, ceo_solo, tutorial, max_players, hot_seat, m2, m4 FROM lobbies WHERE id = ?').get(id);
   if (!lobby) return res.status(404).json({ error: 'not_found' });
   if (lobby.host_id !== req.profile.id) return res.status(403).json({ error: 'not_host' });
   if (lobby.status !== 'waiting') return res.status(409).json({ error: 'already_started' });
@@ -1727,6 +1727,11 @@ app.post('/lobbies/:id/settings', requireProfile, (req, res) => {
   const m4After = (body.m4 !== undefined && m4Allowed(req)) ? !!body.m4 : !!lobby.m4;
   const m2After = body.m2 !== undefined ? !!body.m2 : !!lobby.m2;
   if (m4After && m2After) return res.status(400).json({ error: 'm4_no_m2' });
+  // M4 does not combine with a variant (V9 Sirens included, owner 2026-11-18):
+  // the same refusal the create route gives.
+  if (m4After && (lobby.sirens || lobby.hermes || lobby.altruism || lobby.ceo_solo || lobby.tutorial)) {
+    return res.status(400).json({ error: 'm4_no_variants' });
+  }
   if (body.m2 !== undefined) { sets.push('m2 = ?'); args.push(body.m2 ? 1 : 0); }
   // M4 is a preview for admins and playtesters: anyone else's toggle is ignored.
   // Turning it on also turns M0 on (M4 requires it, 4A1a).

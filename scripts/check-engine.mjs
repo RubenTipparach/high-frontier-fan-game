@@ -11793,6 +11793,35 @@ check('a "Gain N Aquas" When Fulfilling effect pays on fulfilment; Rivalry adds 
   return `${riv.face.name}: fundraise +${gained}`;
 });
 
+check('contract decks open by the laws in force: each ideology, Centrist, Anarchy, and Unity\'s several active laws', () => {
+  const openPairs = (star, delegates = {}, extra = {}) => {
+    let st = startedGame({ seats: 2, m4: true });
+    const me = currentPlayerOf(st);
+    const r = fundraise(st, me.profileId);
+    assert(r.ok, `fundraise: ${r.error}`);
+    st = r.state;
+    st.activeLawStar = star;
+    st.assembly.delegates = delegates;
+    Object.assign(st, extra);
+    return Object.keys(CONTRACT_PAIRS).filter((pair) =>
+      applyOperation(JSON.parse(JSON.stringify(st)), { kind: 'AUCTION_CONTRACT_START', pair }, { profileId: me.profileId }).ok);
+  };
+  const want = (got, exp, what) => assert(JSON.stringify([...got].sort()) === JSON.stringify([...exp].sort()), `${what}: open ${got.join(',') || 'none'}, expected ${exp.join(',') || 'none'}`);
+  const pairOf = (k) => Object.keys(CONTRACT_PAIRS).find((p) => CONTRACT_PAIRS[p].includes(k));
+  for (const k of IDEOLOGY_ORDER) {
+    if (k === 'unity') continue;
+    want(openPairs(k, { [k]: { 99: 1 } }), [pairOf(k)], k);
+  }
+  want(openPairs('centrist'), [], 'centrist');
+  want(openPairs('freedom', { freedom: { 99: 1 } }, { anarchy: true }), [], 'anarchy');
+  // Unity: every ideology with 2+ delegates is active too.
+  want(openPairs('unity', { unity: { 99: 1 }, freedom: { 99: 2 }, equality: { 98: 1, 99: 1 }, authority: { 99: 1 } }),
+    ['HU', 'IF', 'EA'], 'unity + freedom 2 + equality 2');
+  want(openPairs('unity', { unity: { 99: 1 }, authority: { 99: 2 }, individuality: { 99: 1 } }),
+    ['HU', 'EA'], 'unity + authority 2 (individuality 1 stays shut)');
+  return 'each ideology opens its pair; Centrist and Anarchy open none; Unity opens every pair with a 2+ ideology';
+});
+
 check('Connections opens a contract deck where you hold a delegate', () => {
   const con = conFace((f) => f.abilities && f.abilities.connections);
   const start = (connections) => {

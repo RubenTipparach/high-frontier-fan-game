@@ -1983,3 +1983,8 @@ button.m4c-aug:hover { border-color: #60a5fa; background: #232838; }
 .m4c-where-body { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 14px; }
 .m4c-where-loc { font-weight: 600; }
 .m4c-aw-go button:not(.primary) { background: #374151; }
+
+/* Contracts panel tabs: Market / Your contracts. */
+.m4c-tabs { display: flex; gap: 4px; margin: 0 auto 0 18px; }
+.m4c-tabs button { background: #1d2130; color: #cbd5e1; border: 1px solid #2f3546; border-radius: 8px; padding: 6px 14px; cursor: pointer; font: inherit; font-size: 14px; }
+.m4c-tabs button.sel { background: #2563eb; border-color: #2563eb; color: #fff; }
