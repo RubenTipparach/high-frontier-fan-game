@@ -93,7 +93,10 @@ function ensureTag() {
     tag.id = 'turn-tag-contracts';
     tag.className = 'turn-tag';
     tag.title = 'Your contracts: timepiece, auction, boost, fulfill, late fees';
-    tag.addEventListener('click', () => { _panelOpen = true; renderPanel(); });
+    tag.addEventListener('click', () => {
+      if (canAuctionNow(snap(), me(), D.myTurn())) { openAuctionPicker(); return; }
+      _panelOpen = true; renderPanel();
+    });
     host.appendChild(tag);
   }
   return tag;
@@ -110,12 +113,20 @@ export function refreshContractsUi() {
       const p = me();
       const tp = p && p.timepiece;
       const late = tp && tp.deadbeat;
-      const canAuction = p && D.myTurn() && p.fundraisedThisTurn && !p.contractAuctionDone && !tp;
+      const canAuction = canAuctionNow(s, p, D.myTurn());
       tag.textContent = late ? '⏰ contract LATE' : (canAuction ? '📜 contract auction' : '📜 contracts');
       tag.classList.toggle('turn-tag-alert', !!(late || canAuction));
     }
   }
-  if (!on) { closePanel(); renderContractAuction(null); _seenFulfilled = null; return; }
+  if (!on) { closePanel(); closeAuctionPicker(); renderContractAuction(null); _seenFulfilled = null; return; }
+  // The Fundraise just landed: open the auction picker, once per turn.
+  {
+    const p = me();
+    const key = `${s.round}:${s.turn}`;
+    if (canAuctionNow(s, p, D.myTurn())) {
+      if (_pickerSeen !== key) { _pickerSeen = key; closePanel(); openAuctionPicker(); }
+    } else closeAuctionPicker();
+  }
   announceFulfilled(s);
   renderContractAuction(s.auction && s.auction.kind === 'contract' ? s.auction : null);
   if (_panelOpen) renderPanel();
@@ -180,26 +191,6 @@ function timepieceMarkers(s, skipId) {
 }
 const turnLine = (s) => `Turn ${(s.turn | 0) + 1}`;
 
-// The Contracts panel's own dial: your timepiece on its deadline, a band from
-// the Cube to it, and everyone else's timepieces.
-function panelDial(s, p) {
-  const tp = p.timepiece;
-  const turn = s.turn | 0;
-  const markers = timepieceMarkers(s, p.profileId);
-  let center = [turnLine(s), 'Timepiece', 'in Reserve'];
-  let band = null;
-  if (tp) {
-    const slot = ((tp.slot % SLOTS) + SLOTS) % SLOTS;
-    const left = yearsFromNow(s, tp.slot);
-    markers.push({ slot, svg: timepieceDialGlyph({ color: p.color || '#e5e7eb', size: DIAL_GLYPH, deadbeat: !!tp.deadbeat }), title: 'Your timepiece' });
-    if (tp.deadbeat) center = [turnLine(s), 'LATE'];
-    else {
-      center = [turnLine(s), `${left} yr left`];
-      if (left > 0) band = { from: (turn + 1) % SLOTS, to: slot, color: '#fbbf24' };
-    }
-  }
-  return `<div class="m4c-dial">${sunspotDialSvg({ turn, markers, band, center })}</div>`;
-}
 
 // ---- the panel --------------------------------------------------------------------
 function closePanel() {
@@ -261,6 +252,56 @@ export function showContractWhere(id) {
 
 let _tab = null;        // 'market' | 'yours'
 let _tabForced = false; // the Market was opened for a pending auction
+// May the viewer start a contract auction now (the end of their Fundraise)?
+function canAuctionNow(s, p, myTurn) {
+  return !!(s && p && myTurn && p.fundraisedThisTurn && !p.contractAuctionDone && !p.timepiece && !s.auction
+    && !s.anarchy && !s.war);
+}
+// The three pair decks, top card up. A deck you may auction carries one
+// Auction button; one you may not is greyed out with none (owner 2026-11-18).
+function decksHtml(s, p, auctionOpen) {
+  const laws = lawKeys(s, p);
+  return `<div class="m4c-decks">${Object.keys(CONTRACT_PAIRS).map((pair) => {
+    const deck = (s.contractDecks || {})[pair] || [];
+    const byLaw = CONTRACT_PAIRS[pair].some((k) => laws.has(k));
+    const byConnections = !byLaw && hasContractAbility(p, 'connections')
+      && CONTRACT_PAIRS[pair].some((k) => delegateIn(s, k, p.profileId));
+    const top = deck[0];
+    const open = (byLaw || byConnections) && !!top;
+    const btn = auctionOpen && open
+      ? `<div class="m4c-btns"><button type="button" data-act="auction" data-pair="${pair}">Auction</button></div>` : '';
+    return `<div class="m4c-deck ${open ? 'open' : 'closed'}" ${open ? '' : 'aria-disabled="true"'}>
+      <div class="m4c-deck-head"><b>${CONTRACT_PAIR_NAMES[pair]}</b>
+        <span>${deck.length} left</span>
+        <span class="m4c-law">${byLaw ? 'Active Law' : byConnections ? 'Connections' : ''}</span></div>
+      ${top ? cardThumb(top, 'blue') : '<div class="muted">empty</div>'}${btn}</div>`;
+  }).join('')}</div>`;
+}
+// The contract auction picker: the last step of a Fundraise (owner 2026-11-18).
+// Opens by itself once per turn when the Fundraise lands, and from the toolbar
+// tag; closing it skips the auction.
+let _pickerSeen = null;
+export function openAuctionPicker() {
+  const s = snap(); const p = me();
+  if (!canAuctionNow(s, p, D.myTurn())) return;
+  document.getElementById('m4-auction-picker')?.remove();
+  const ov = document.createElement('div');
+  ov.id = 'm4-auction-picker';
+  ov.className = 'm4c-overlay';
+  ov.innerHTML = `<div class="m4c-modal m4c-picker" role="dialog" aria-label="Contract auction">
+    <div class="m4c-head"><h3>📜 Contract auction</h3><button type="button" class="m4c-close" aria-label="Close">✕</button></div>
+    <div class="m4c-body">${decksHtml(s, p, true)}</div></div>`;
+  const close = () => ov.remove();
+  ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+  ov.querySelector('.m4c-close').addEventListener('click', close);
+  ov.querySelectorAll('button[data-act="auction"]').forEach((b) => b.addEventListener('click', async () => {
+    close();
+    await D.submitTurnOp({ kind: 'AUCTION_CONTRACT_START', pair: b.dataset.pair });
+  }));
+  document.body.appendChild(ov);
+}
+function closeAuctionPicker() { document.getElementById('m4-auction-picker')?.remove(); }
+
 function renderPanel() {
   const s = snap();
   const p = me();
@@ -280,48 +321,11 @@ function renderPanel() {
   // in play sit at the top, with their Fulfill buttons).
   const market = [];
   const parts = [];
-  // Timepiece + default chit
-  let tpLine = 'Timepiece in Reserve.';
-  if (tp) {
-    const f = faceOf(p, tp.contractId);
-    const tmeta = (p.contractMeta || {})[tp.contractId] || {};
-    const owed = (f.advance * (tmeta.boosted ? 1 : 2)) - (tmeta.paid | 0);
-    tpLine = tmeta.default
-      ? `<b class="m4c-late">DEFAULT</b> ${esc(f.name)}: ${owed} aqua owed.`
-      : tp.deadbeat
-      ? `<b class="m4c-late">LATE</b> ${esc(f.name)}: ${f.lateFee} aqua due.`
-      : `${esc(f.name)}: ${yearsFromNow(s, tp.slot)} yr left.`;
-  }
-  const chit = s.defaultChit
-    ? `Default chit: ${esc(nameOf(s.defaultChit.profileId))} (${s.defaultChit.side === 'gold' ? -6 : -3} VP).`
-    : 'Default chit: unclaimed.';
-  market.push(`<div class="m4c-status-row">${panelDial(s, p)}<div class="m4c-status"><div>⏱ ${tpLine}</div><div>🏷 ${chit}</div></div></div>`);
-
-  // Contract auction (the Fundraise's final step)
-  const laws = lawKeys(s, p);
-  const auctionOpen = myTurn && p.fundraisedThisTurn && !p.contractAuctionDone && !tp && !s.auction;
-  const decks = Object.keys(CONTRACT_PAIRS).map((pair) => {
-    const deck = (s.contractDecks || {})[pair] || [];
-    const byLaw = CONTRACT_PAIRS[pair].some((k) => laws.has(k));
-    const byConnections = !byLaw && hasContractAbility(p, 'connections')
-      && CONTRACT_PAIRS[pair].some((k) => delegateIn(s, k, p.profileId));
-    const open = byLaw || byConnections;
-    const top = deck[0];
-    const btns = auctionOpen && open && top ? `
-      <div class="m4c-btns">
-        <button type="button" data-act="auction" data-pair="${pair}">Auction it</button>
-        <button type="button" data-act="discard-auction" data-pair="${pair}">Discard, auction next</button>
-        <button type="button" data-act="walk" data-pair="${pair}">Walk away</button>
-      </div>` : '';
-    return `<div class="m4c-deck ${open ? 'open' : 'closed'}">
-      <div class="m4c-deck-head"><b>${CONTRACT_PAIR_NAMES[pair]}</b>
-        <span>${deck.length} left</span>
-        <span class="m4c-law">${byLaw ? 'Active Law' : byConnections ? 'Connections' : ''}</span></div>
-      ${top ? cardThumb(top, 'blue') : '<div class="muted">empty</div>'}${btns}</div>`;
-  }).join('');
-  const auctionNote = auctionOpen
-    ? '' : (tp ? 'Timepiece out.' : '');
-  market.push(`${auctionNote ? `<p class="muted">${auctionNote}</p>` : ''}<div class="m4c-decks">${decks}</div>`);
+  // Market contracts: the three decks only (owner 2026-11-18: the dial shows in
+  // the auction itself). A claimed default chit is named.
+  const auctionOpen = canAuctionNow(s, p, myTurn);
+  if (s.defaultChit) market.push(`<p class="muted">🏷 Default chit: ${esc(nameOf(s.defaultChit.profileId))} (${s.defaultChit.side === 'gold' ? -6 : -3} VP)</p>`);
+  market.push(decksHtml(s, p, auctionOpen));
 
   // Contracts in hand live in the Hand area (4B3h: a won contract is a Hand
   // Card), so the panel only points there; boosted and fulfilled ones are here.
@@ -431,8 +435,6 @@ async function onAct(b) {
   const id = b.dataset.id;
   const pair = b.dataset.pair;
   if (act === 'auction') await D.submitTurnOp({ kind: 'AUCTION_CONTRACT_START', pair });
-  else if (act === 'discard-auction') await D.submitTurnOp({ kind: 'AUCTION_CONTRACT_START', pair, discardTop: true });
-  else if (act === 'walk') await D.submitTurnOp({ kind: 'AUCTION_CONTRACT_START', pair, abandon: true });
   else if (act === 'boost') await D.submitTurnOp({ kind: 'BOOST', cardIds: [id] });
   else if (act === 'fulfill') await fulfillContract(id);
   else if (act === 'implant') {
@@ -455,7 +457,7 @@ async function onAct(b) {
   else if (act === 'augment') { openAugmentWizard(b.dataset.shape); return; }
   else if (act === 'pay') await payContractFee(id);
   else if (act === 'abandon') await abandonContract(id);
-  if (act === 'auction' || act === 'discard-auction') closePanel();
+  if (act === 'auction') closePanel();
   else if (_panelOpen) renderPanel();
 }
 
@@ -610,7 +612,7 @@ export function renderContractAuction(a) {
       : `<div class="m4c-btns"><button type="button" data-act="close" ${settled ? '' : 'disabled'}>Close</button></div>`;
   }
   el.innerHTML = `<div class="m4c-modal" role="dialog" aria-label="Contract auction">
-    <div class="m4c-head"><h3>📜 Contract auction</h3><span class="muted">${CONTRACT_PAIR_NAMES[a.pair] || ''}</span></div>
+    <div class="m4c-head"><h3>📜 Auction</h3><span class="muted">${CONTRACT_PAIR_NAMES[a.pair] || ''}</span></div>
     <div class="m4c-auction-body">
       <div class="m4c-auction-card">${cardThumb(a.cardId, a.side || 'blue')}</div>
       <div class="m4c-auction-play">
