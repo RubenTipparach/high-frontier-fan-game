@@ -11293,6 +11293,39 @@ check('Beehive: an operational robonaut and refinery at a busted size-1 site', (
   return `busted Eureka ok; unbusted, no refinery, glitched and size-2 ${two} refused`;
 });
 
+check('When fulfilling: Planetary Protection busts the site and seats 2 delegates; Beehive prospects the busted site', () => {
+  const t = destContract('M4N237F');
+  t.st.m0 = true;
+  const before = Object.values(t.st.assembly.delegates || {}).reduce((n, m) => n + ((m || {})[t.P.profileId] | 0), 0);
+  t.at('ceres');
+  const r = op(t.st, 'FULFILL_CONTRACT', t.P.profileId, { cardId: t.c.id, ideology: 'equality', delegates: 2 });
+  assert(t.isDone(r), `Planetary Protection: ${r.error}`);
+  const d = r.state.discs.ceres;
+  assert(d && d.outcome === 'fail' && d.ownerId === t.P.profileId, `Ceres not busted: ${JSON.stringify(d)}`);
+  const eq = (r.state.assembly.delegates.equality || {})[t.P.profileId] | 0;
+  const after = Object.values(r.state.assembly.delegates || {}).reduce((n, m) => n + ((m || {})[t.P.profileId] | 0), 0);
+  assert(eq >= 2 && after === before + 2, `delegates: equality ${eq}, total ${before} -> ${after}`);
+  assert(/busted/.test(r.log) && /Equality/.test(r.log), `log: ${r.log}`);
+  // Beehive: the busted disc comes off and the size-1 site is prospected.
+  const kit = [{ id: 'rob_blackbody_pumped_laser', kind: 'patent', face: 'primary' }, { id: 'ref_atomic_layer_deposition', kind: 'patent', face: 'primary' }];
+  let struck = 0, dry = 0;
+  for (let i = 0; i < 12; i++) {
+    const b = destContract('M4N236F');
+    b.st.rng.cursor = (b.st.rng.cursor | 0) + i;
+    pl(b.st, b.P.profileId).rocket.stack.push(...kit.map((x) => ({ ...x })));
+    b.st.discs.eureka = { ownerId: 99, outcome: 'fail' };
+    b.at('eureka');
+    const rb = b.fulfil();
+    assert(b.isDone(rb), `Beehive: ${rb.error}`);
+    const nd = rb.state.discs.eureka;
+    assert(nd && nd.ownerId === b.P.profileId && nd.kind === 'beehive', `Beehive disc: ${JSON.stringify(nd)}`);
+    if (nd.outcome === 'success') { struck++; assert(!nd.canReroll, 'a struck claim offers a re-roll'); }
+    else { dry++; assert(nd.canReroll, 'a dry Beehive prospect offers no re-roll'); }
+  }
+  assert(struck && dry, `Beehive outcomes: ${struck} struck, ${dry} dry`);
+  return `Ceres busted + 2 Equality delegates; Beehive at Eureka struck ${struck} / dry ${dry} (re-roll offered)`;
+});
+
 check('a late contract: pay the fee each turn or default; debt repayment discards it with the chit', () => {
   let st = m4Game();
   const res = winContract(st, 'M4N228F', { years: 0 });

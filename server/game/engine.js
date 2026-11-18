@@ -13569,7 +13569,7 @@ function pickPayload(op) {
     case 'SET_ROUTE': return { segments: op.segments, ...(op.unit ? { unit: op.unit } : {}) };
     case 'SET_WIRING': return { wiring: op.wiring, ...(op.stackId ? { stackId: op.stackId } : {}) };
     case 'SET_CARD_GROUPS': return { groups: op.groups };
-    case 'FULFILL_CONTRACT': return { cardId: op.cardId };
+    case 'FULFILL_CONTRACT': return { cardId: op.cardId, ...(op.ideology ? { ideology: op.ideology, delegates: op.delegates } : {}) };
     case 'ABANDON_CONTRACT': return { cardId: op.cardId };
     case 'IMPLANT': return { bernal: op.bernal, colony: op.colony, implants: op.implants, remove: op.remove };
     case 'PAY_LATE_FEE': return { cardId: op.cardId, amount: op.amount };
@@ -16248,6 +16248,9 @@ function applyFulfillContract(state, op, player) {
   if (meta.progress.done < steps) {
     return { ok: true, state, log: `${player.name} announced step ${meta.progress.done} of ${steps} of ${face.name}${loc.where.siteId ? ` at ${(siteById(loc.where.siteId) || {}).name || loc.where.siteId}` : ''}.` };
   }
+  // The Site the last step was announced at (the "destination Site" a When
+  // Fulfilling effect names).
+  const destSlug = meta.progress.sites[meta.progress.sites.length - 1] || loc.where.siteId || null;
   // Fulfilled (4B4f): off the stack into the fulfilled splay, timepiece home,
   // any late-fee payments discarded.
   loc.arr.splice(loc.idx, 1);
@@ -16262,10 +16265,62 @@ function applyFulfillContract(state, op, player) {
   if (fx.gainAqua) {
     player.aqua = (player.aqua | 0) + fx.gainAqua;
     when += ` When fulfilling: gained ${fx.gainAqua} aqua.`;
+  } else if (fx.bustAndDelegates) {
+    when += planetaryProtection(state, player, destSlug, op);
+  } else if (fx.beehive) {
+    when += beehiveProspect(state, player, destSlug);   // its die is an undo barrier (rng cursor)
   } else if (face.whenFulfilling) {
     when += ` When fulfilling (not yet automated): ${face.whenFulfilling}`;
   }
   return { ok: true, state, log: `${player.name} fulfilled ${face.name}${late ? ' (late)' : ''} (+${face.vp} VP).${when}` };
+}
+
+// Planetary Protection (When Fulfilling): "Bust the destination Site & place up
+// to 2 delegates in any 1 Ideology." op.ideology picks the Ideology, op.delegates
+// how many (0-2, default 2). The bust is a busted disc in the player's name.
+function planetaryProtection(state, player, slug, op) {
+  const bits = [];
+  const nm = (siteById(slug) || {}).name || slug;
+  if (slug && !(state.discs[slug] && state.discs[slug].outcome === 'success')) {
+    state.discs[slug] = { outcome: 'fail', roll: null, by: player.name, ownerId: player.profileId,
+      turn: state.turn | 0, round: state.round | 0, canReroll: false, protected: true };
+    bits.push(`${nm} is busted`);
+  }
+  const ideo = String(op.ideology || '');
+  const want = Math.max(0, Math.min(2, op.delegates == null ? 2 : Number(op.delegates) | 0));
+  if (state.m0 && IDEOLOGY_BY_KEY[ideo] && want) {
+    let placed = 0;
+    for (let i = 0; i < want; i++) if (grantDelegate(state, player, ideo)) placed++;
+    if (placed) {
+      bits.push(`${placed} delegate${placed === 1 ? '' : 's'} join${placed === 1 ? 's' : ''} ${IDEOLOGY_BY_KEY[ideo].name}`);
+      const starMoved = quietVoteTally(state, player);
+      if (starMoved) bits.push(`the active-law star moves to ${starMoved}`);
+    }
+  }
+  return bits.length ? ` When fulfilling: ${bits.join('; ')}.` : '';
+}
+// Beehive (When Fulfilling): "Remove Busted disk; prospect here at ISRU 0
+// w/reroll." The busted disc comes off and the Site is prospected at once (ISRU
+// 0 always reads it); a failed size roll may be re-rolled this turn.
+function beehiveProspect(state, player, slug) {
+  const site = siteById(slug);
+  if (!site) return '';
+  const old = state.discs[slug];
+  if (old && old.outcome === 'success') return '';
+  delete state.discs[slug];
+  const threshold = prospectThreshold(site);
+  const autoSize = threshold > 5;
+  const gen = makeRng(state.seed, state.rng.cursor);
+  const roll = autoSize ? null : gen.d6();
+  state.rng.cursor = gen.cursor;
+  const success = autoSize || roll <= threshold;
+  state.discs[slug] = {
+    outcome: success ? 'success' : 'fail', roll, threshold, kind: 'beehive',
+    ...(autoSize ? { auto: true } : {}),
+    by: player.name, ownerId: player.profileId, turn: state.turn | 0, round: state.round | 0,
+    canReroll: !success,
+  };
+  return ` When fulfilling: the busted disc comes off ${site.name}; prospected at ISRU 0, ${autoSize ? 'no roll' : `rolled ${roll} vs ${threshold}`}: ${success ? 'claim struck' : 'dry (may re-roll)'}.`;
 }
 
 // PAY_LATE_FEE (4B5b): a free action, up to the contract's late fee per turn,

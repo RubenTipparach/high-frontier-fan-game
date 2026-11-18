@@ -21,6 +21,7 @@ import { augmentGlyph, AUGMENTS, timepieceDialGlyph } from './contract-glyphs.js
 import { sunspotDialSvg } from './turn-clock-ui.js';
 import { isM4, isM2 } from './online-mode.js';
 import { COLONISTS_BY_ID } from '../../data/colonists.js';
+import { IDEOLOGY_ORDER, IDEOLOGY_BY_KEY } from '../../data/assembly.js';
 
 let D = null;               // deps from browse.js (snapshot readers + submitters)
 let _panelOpen = false;
@@ -378,7 +379,7 @@ async function onAct(b) {
   else if (act === 'discard-auction') await D.submitTurnOp({ kind: 'AUCTION_CONTRACT_START', pair, discardTop: true });
   else if (act === 'walk') await D.submitTurnOp({ kind: 'AUCTION_CONTRACT_START', pair, abandon: true });
   else if (act === 'boost') await D.submitTurnOp({ kind: 'BOOST', cardIds: [id] });
-  else if (act === 'fulfill') await D.submitTurnOp({ kind: 'FULFILL_CONTRACT', cardId: id });
+  else if (act === 'fulfill') await fulfillContract(id);
   else if (act === 'implant') {
     const col = b.dataset.col;
     const panel = document.getElementById('m4-contracts-panel');
@@ -420,6 +421,44 @@ export function contractFeeDue(id) {
   const meta = (p.contractMeta || {})[id] || {};
   const tp = p.timepiece;
   return !!(meta.default || (tp && tp.contractId === id && tp.deadbeat));
+}
+// FULFILL_CONTRACT. Planetary Protection's last step also seats up to 2
+// delegates in one Ideology (M0), so pick it first.
+async function fulfillContract(id) {
+  const p = me();
+  const f = p && faceOf(p, id);
+  const meta = (p && (p.contractMeta || {})[id]) || {};
+  const last = f && Array.isArray(f.steps) && ((meta.progress && meta.progress.done) | 0) >= f.steps.length - 1;
+  const s = snap();
+  if (f && last && f.onFulfill && f.onFulfill.bustAndDelegates && s && s.m0 !== false) {
+    const ideology = await pickIdeology(f.name);
+    if (ideology === undefined) return;
+    await D.submitTurnOp({ kind: 'FULFILL_CONTRACT', cardId: id, ...(ideology ? { ideology, delegates: 2 } : {}) });
+    return;
+  }
+  await D.submitTurnOp({ kind: 'FULFILL_CONTRACT', cardId: id });
+}
+// One Ideology for 2 delegates, or none. Resolves the key, null (none) or
+// undefined (cancelled).
+function pickIdeology(title) {
+  return new Promise((resolve) => {
+    const ov = document.createElement('div');
+    ov.className = 'card-modal-overlay confirm-modal-overlay';
+    ov.innerHTML = `<div class="turn-confirm-panel m4-ideo-pick" role="dialog" aria-label="${esc(title)}">
+      <h3>${esc(title)}</h3><p>2 delegates:</p>
+      <div class="m4-ideo-row">${IDEOLOGY_ORDER.map((k) => `<button type="button" data-ideo="${k}" style="--ideo:${IDEOLOGY_BY_KEY[k].color}">${esc(IDEOLOGY_BY_KEY[k].name)}</button>`).join('')}</div>
+      <div class="turn-confirm-actions"><button type="button" class="popup-btn" data-ideo="">None</button><button type="button" class="popup-btn" data-cancel>Cancel</button></div>
+    </div>`;
+    const done = (v) => { ov.remove(); resolve(v); };
+    ov.addEventListener('click', (e) => {
+      if (e.target === ov) return done(undefined);
+      const b = e.target.closest('button');
+      if (!b) return;
+      if (b.hasAttribute('data-cancel')) return done(undefined);
+      done(b.dataset.ideo || null);
+    });
+    document.body.appendChild(ov);
+  });
 }
 export async function payContractFee(id) {
   const p = me();

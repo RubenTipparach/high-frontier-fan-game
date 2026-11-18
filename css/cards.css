@@ -1944,3 +1944,8 @@
 .hand-slot.is-contract.is-default .card.m4-contract { transform: translate(0, 280px) rotate(-90deg) scale(0.77); }
 .hand-slot.is-contract.is-default { width: 270px; }
 .hand-slot .hand-q.is-blocked { opacity: .4; }
+
+/* Planetary Protection: pick one Ideology for 2 delegates. */
+.m4-ideo-pick .m4-ideo-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 8px 0 12px; }
+.m4-ideo-pick .m4-ideo-row button { border: 2px solid var(--ideo); background: color-mix(in srgb, var(--ideo) 18%, transparent); color: inherit; border-radius: 6px; padding: 8px 4px; cursor: pointer; font-weight: 600; }
+.m4-ideo-pick .m4-ideo-row button:hover { background: color-mix(in srgb, var(--ideo) 35%, transparent); }

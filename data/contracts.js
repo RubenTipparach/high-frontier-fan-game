@@ -136,6 +136,10 @@ export function parseWhenFulfilling(text) {
   const fx = {};
   const g = t.match(/^Gain (\d+) Aquas?\.?$/i);
   if (g) fx.gainAqua = Number(g[1]);
+  //   bustAndDelegates : true  (Planetary Protection)
+  //   beehive : true           (remove the Busted disk, prospect at ISRU 0 w/reroll)
+  if (/^Bust the destination Site & place up to 2 delegates in any 1 Ideology/i.test(t)) fx.bustAndDelegates = true;
+  if (/^Remove Busted disk; prospect here at ISRU 0 w\/reroll/i.test(t)) fx.beehive = true;
   return fx;
 }
 
