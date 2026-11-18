@@ -11632,6 +11632,58 @@ const conFace = (pred) => {
 };
 const fulfilledWith = (p, ...cs) => { p.fulfilledContracts = cs.map((c) => ({ id: c.id, side: c.side, round: 1 })); };
 
+check('Augment operation (no M2): chits go on a Crew at a Colony, follow it, juggle in one op, leave only when it settles', () => {
+  const withShape = (sh) => conFace((f) => (f.cybernetics || []).includes(sh));
+  const st = startedGame({ m4: true });
+  st.activeIndex = 0;
+  const me = st.players[0];
+  const crewId = me.faction.cardId;
+  fulfilledWith(me, withShape('jar'), withShape('triangle'));
+  st.colonies = { ceres: { ownerId: 'someone' } };
+  me.rocket.siteId = 'vesta';
+  me.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }, { id: crewId, kind: 'crew', face: 'primary' }];
+  me.rocket.activeThrusterId = thruster.id;
+  me.opsRemaining = 4;
+  const imp = (s, body) => applyOperation(s, { kind: 'IMPLANT', ...body }, { profileId: me.profileId });
+  const away = imp(st, { implants: [{ shape: 'jar', side: 1, crewId }] });
+  assert(!away.ok && away.error === 'crew_not_at_colony', `crew away from a Colony: ${away.error || 'accepted'}`);
+  me.rocket.siteId = 'ceres';
+  let r = imp(st, { implants: [{ shape: 'jar', side: 1, crewId }] });
+  assert(r.ok, `implant on the Crew: ${r.error}`);
+  let P = pl(r.state, me.profileId);
+  assert(P.augments.jar && P.augments.jar.crewId === crewId, `chit: ${JSON.stringify(P.augments)}`);
+  assert(P.rocket.stack.find((x) => x.id === crewId).massless, 'Jar 1 did not mark the Crew');
+  // It follows the Crew: fly off, and the mark stays.
+  P.rocket.siteId = 'vesta';
+  r = op(r.state, 'INCOME', me.profileId, {});
+  P = pl(r.state, me.profileId);
+  assert(P.augments.jar && P.rocket.stack.find((x) => x.id === crewId).massless, 'the chit fell off when the Crew moved');
+  // A Crew death (it respawns at LEO) keeps it.
+  const dead = JSON.parse(JSON.stringify(r.state));
+  const D = pl(dead, me.profileId);
+  D.rocket.stack = D.rocket.stack.filter((x) => x.id !== crewId);
+  D.leo = [...(D.leo || []), { id: crewId, kind: 'crew', face: 'primary' }];
+  D.opsRemaining = 2;
+  const afterDeath = op(dead, 'INCOME', me.profileId, {});
+  assert(afterDeath.ok && pl(afterDeath.state, me.profileId).augments.jar, 'a Crew death removed the chit');
+  // One operation: take Jar off and put Triangle on (back at the Colony).
+  P.rocket.siteId = 'ceres'; P.opsRemaining = 2;
+  r = imp(r.state, { remove: ['jar'], implants: [{ shape: 'triangle', side: 2, crewId }] });
+  assert(r.ok, `juggle: ${r.error}`);
+  P = pl(r.state, me.profileId);
+  assert(!P.augments.jar && P.augments.triangle && P.augments.triangle.crewId === crewId, `after juggle: ${JSON.stringify(P.augments)}`);
+  assert(!P.rocket.stack.find((x) => x.id === crewId).massless, 'the Jar mark stayed after the chit came off');
+  // Settling a Colony with that Crew frees the chit.
+  const st2 = JSON.parse(JSON.stringify(r.state));
+  const Q = pl(st2, me.profileId);
+  st2.factories = { vesta: { ownerId: me.profileId, spectralType: 'V' } };
+  Q.rocket.siteId = 'vesta';
+  const col = applyOperation(st2, { kind: 'BUILD_COLONY', cardId: crewId, siteId: 'vesta', colonyType: 'Atmospheric' }, { profileId: me.profileId });
+  assert(col.ok, `colony: ${col.error}`);
+  assert(!pl(col.state, me.profileId).augments.triangle && /portfolio/.test(col.log), `chit not freed: ${col.log}`);
+  return 'refused away from a Colony; on the Crew at Ceres; follows it; survives a death; Jar off + Triangle on in one op; freed by settling';
+});
+
 check('contract abilities are read off the printed Fulfilled Ability text', () => {
   const count = {};
   for (const c of CONTRACTS) for (const f of [c.faces.primary, c.faces.secondary]) {
@@ -11739,6 +11791,35 @@ check('a "Gain N Aquas" When Fulfilling effect pays on fulfilment; Rivalry adds 
   const gained = (pl(r.state, me.profileId).aqua | 0) - before;
   assert(gained === 2 && /from a fulfilled contract/.test(r.log), `Rivalry fundraise gained ${gained}: ${r.log}`);
   return `${riv.face.name}: fundraise +${gained}`;
+});
+
+check('contract decks open by the laws in force: each ideology, Centrist, Anarchy, and Unity\'s several active laws', () => {
+  const openPairs = (star, delegates = {}, extra = {}) => {
+    let st = startedGame({ seats: 2, m4: true });
+    const me = currentPlayerOf(st);
+    const r = fundraise(st, me.profileId);
+    assert(r.ok, `fundraise: ${r.error}`);
+    st = r.state;
+    st.activeLawStar = star;
+    st.assembly.delegates = delegates;
+    Object.assign(st, extra);
+    return Object.keys(CONTRACT_PAIRS).filter((pair) =>
+      applyOperation(JSON.parse(JSON.stringify(st)), { kind: 'AUCTION_CONTRACT_START', pair }, { profileId: me.profileId }).ok);
+  };
+  const want = (got, exp, what) => assert(JSON.stringify([...got].sort()) === JSON.stringify([...exp].sort()), `${what}: open ${got.join(',') || 'none'}, expected ${exp.join(',') || 'none'}`);
+  const pairOf = (k) => Object.keys(CONTRACT_PAIRS).find((p) => CONTRACT_PAIRS[p].includes(k));
+  for (const k of IDEOLOGY_ORDER) {
+    if (k === 'unity') continue;
+    want(openPairs(k, { [k]: { 99: 1 } }), [pairOf(k)], k);
+  }
+  want(openPairs('centrist'), [], 'centrist');
+  want(openPairs('freedom', { freedom: { 99: 1 } }, { anarchy: true }), [], 'anarchy');
+  // Unity: every ideology with 2+ delegates is active too.
+  want(openPairs('unity', { unity: { 99: 1 }, freedom: { 99: 2 }, equality: { 98: 1, 99: 1 }, authority: { 99: 1 } }),
+    ['HU', 'IF', 'EA'], 'unity + freedom 2 + equality 2');
+  want(openPairs('unity', { unity: { 99: 1 }, authority: { 99: 2 }, individuality: { 99: 1 } }),
+    ['HU', 'EA'], 'unity + authority 2 (individuality 1 stays shut)');
+  return 'each ideology opens its pair; Centrist and Anarchy open none; Unity opens every pair with a 2+ ideology';
 });
 
 check('Connections opens a contract deck where you hold a delegate', () => {

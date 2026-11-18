@@ -121,7 +121,7 @@ import { futureGoalForCard, checkFutureGoal, CENTAUR_SITE_IDS, GREEK_CAMP_IDS, T
 // M2 Colonist powers (FINAO halved etc.) - the same flags the engine reads.
 import { colonistPower } from '../../data/colonist-abilities.js';
 import { openBernalStackModal, openBernalFuelTank } from './bernal-modal.js';
-import { initContractsUi, refreshContractsUi, abandonBlock, contractFeeDue, payContractFee, abandonContract } from './contracts-ui.js';
+import { initContractsUi, refreshContractsUi, abandonBlock, contractFeeDue, payContractFee, abandonContract, timepieceBadge, renderContractAuctionStep, openCompletedContracts } from './contracts-ui.js';
 import { getBernalSprite } from './bernal-sprite.js';
 import { fuelTankCylinderMarkup, fuelTransferSectionMarkup } from './fuel-tank-view.js';
 // One client card-lookup: patents PLUS the M2 Bernal cards (which live in
@@ -180,7 +180,7 @@ import {
   renderCard, thrustVisual, thrustModVisual, attachTipsTo,
   REQUIREMENT_VIS, REQ_SUPPLIER_TYPE,
   svgSunChip, svgBallerinaChip, cardGlanceSummary, setRadBoostSideHook,
-  isSirenRadZero,
+  isSirenRadZero, setAugChitHook,
 } from './card-ui.js';
 import { supportIconSvg } from './support-icons.js';
 import {
@@ -565,6 +565,11 @@ export function refreshRoomOverlays() {
   syncCardDraftOverlay(_online ? _onlineSnapshot : null);
   renderOnlineAuction(_online && _onlineSnapshot ? _onlineSnapshot.auction : null);
   renderOnlineTrade(_online && _onlineSnapshot ? _onlineSnapshot.trade : null);
+  renderTimepieceBadge();
+}
+function renderTimepieceBadge() {
+  const b = _online && !_spectator && isM4() ? timepieceBadge() : null;
+  setMpTurnAction('timepiece', b ? { label: b.label, meta: b.meta, needsAction: b.late, calm: !b.late, onClick: b.onClick } : null);
 }
 
 export function mountBrowse(opts = {}) {
@@ -1114,6 +1119,9 @@ function applySnapshot(snapshot, seq) {
   // parties act on. Idempotent - appears when a deal opens, clears when it
   // resolves or is declined.
   renderOnlineTrade(snapshot.trade);
+  // M4: my timepiece's countdown, docked beside the turn label; tap for the
+  // contract and where it is.
+  renderTimepieceBadge();
   // Factory-access requests on my Factories: dock a pulsing chip + auto-open a
   // Grant / Deny prompt when a new one arrives (like a trade proposal).
   renderFactoryRequests(snapshot);
@@ -7266,6 +7274,7 @@ function refreshAssemblyModal() {
   const body = overlay.querySelector('.assembly-modal-body');
   body.innerHTML = '';
   if (_assemblyMode === 'fundraise') renderAssemblyFundraise(body, snap);
+  else if (_assemblyMode === 'contract') renderFundraiseContractStep(body);
   else renderAssemblyView(body, snap);
 }
 // On a narrow screen the callout-ring ('compact') board overlaps badly, so the
@@ -7984,10 +7993,32 @@ function commitFundraise() {
   // Martial Law (Authority): discard an opponent's delegate. The server
   // re-validates the law + that the cube is still there, so a stale pick no-ops.
   if (_fr.discard) op.discard = { profileId: _fr.discard.profileId, place: _fr.discard.place };
-  _assemblyMode = 'view';
   _fr = null;
+  // M4: the Fundraise ends with the contract auction (owner 2026-11-18), so the
+  // window stays open on that step once the Fundraise lands.
+  if (_onlineSnapshot && _onlineSnapshot.m4) {
+    _assemblyMode = 'contract';
+    refreshAssemblyModal();
+    submitOnlineOp(op).then((ok) => {
+      if (!ok || _assemblyMode !== 'contract') { if (_assemblyMode === 'contract') closeAssemblyModal(); return; }
+      refreshAssemblyModal();
+    });
+    return;
+  }
+  _assemblyMode = 'view';
   submitOnlineOp(op);
   // The snapshot apply will refresh the modal in view mode (or it can be closed).
+  closeAssemblyModal();
+}
+// The Fundraise's last step in M4: pick a contract deck to auction (or none).
+// Until the Fundraise lands the step waits; if no auction is possible the
+// window closes.
+function renderFundraiseContractStep(body) {
+  if (renderContractAuctionStep(body, closeAssemblyModal)) return;
+  // Not landed yet: wait for it. Landed but no auction possible (timepiece out,
+  // Anarchy, already held): nothing to pick, so the window closes.
+  const me = mySnapshotPlayer();
+  if (_onlineBusy || !(me && me.fundraisedThisTurn)) { body.innerHTML = '<p class="muted">…</p>'; return; }
   closeAssemblyModal();
 }
 
@@ -11138,6 +11169,15 @@ function renderStackSwitcher() {
       siteAvailable: true,
       isEmpty: false,
     },
+    // M4: once you have completed contracts, a Contracts chip beside the LEO
+    // Stack opens them (owner 2026-11-18).
+    ...(() => {
+      const done = (isM4() && (mySnapshotPlayer() || {}).fulfilledContracts) || [];
+      return done.length ? [{
+        id: 'contracts', glyphHtml: '<span class="chip-emoji">📜</span>', sub: 'Contracts', cards: done.length,
+        title: `Completed contracts - ${done.length}`, siteAvailable: false, isEmpty: false, noPin: true,
+      }] : [];
+    })(),
     {
       id: 'rocket', icon: 'rocket', sub: 'Rocket', cards: rocketStack.length,
       title: rocketStack.length
@@ -11272,7 +11312,7 @@ function renderStackSwitcher() {
         <span class="chip-glyph">${s.glyphHtml || uiIcon(s.icon)}${s.water ? waterDot : ''}</span>
         <span class="chip-sub">${esc(s.sub)}</span>${pile}
       </button>
-      <button type="button" class="hand-stack-pin" title="Fly map to ${esc(s.sub)}" ${s.siteAvailable ? '' : 'disabled'}>📍</button>
+      ${s.noPin ? '' : `<button type="button" class="hand-stack-pin" title="Fly map to ${esc(s.sub)}" ${s.siteAvailable ? '' : 'disabled'}>📍</button>`}
     </span>`;
   }).join('');
 
@@ -11290,6 +11330,7 @@ function renderStackSwitcher() {
 // modal is the affordance that explains the empty state.
 function focusAndOpenStack(id) {
   if (!id) return;
+  if (id === 'contracts') { openCompletedContracts(); return; }
   // The promoted Freighter waiting in hand has no stack to open: its chip
   // offers the Big Cube Swap that launches it again.
   if (id === 'freighter' && myWaitingFreighterPromotion()) {
@@ -12446,7 +12487,9 @@ function myCrewReactorKinds() {
   // side 2 antimatter. Augments exist only in M4, which never runs with M2.
   const bat = (mySnapshotPlayer() || {}).augments;
   const b = bat && bat.battery;
-  const bk = b ? (b.side === 1 ? ['gen-electric'] : b.side === 2 ? ['reactor-antimatter'] : []) : [];
+  // A Battery on one Crew card supplies through that slot (slot.augSupplies);
+  // only an older Colony chit powers every Crew.
+  const bk = (b && !b.crewId) ? (b.side === 1 ? ['gen-electric'] : b.side === 2 ? ['reactor-antimatter'] : []) : [];
   if (bk.length) kinds = Array.from(new Set([...(kinds || []), ...bk]));
   return kinds;
 }
@@ -35672,6 +35715,18 @@ export const STATS = {
 // M4 contracts UI (contracts-ui.js): reads the cached snapshot, routes on-turn
 // actions through submitOnlineOp and auction bids (any seat) through the
 // auction submitter, exactly like the patent auction.
+// M4 augmentation chits drawn on Crew cards (any seat's crew: augments are
+// open information).
+setAugChitHook((cardId) => {
+  if (!isM4() || !_onlineSnapshot) return null;
+  const out = [];
+  for (const p of (_onlineSnapshot.players || [])) {
+    for (const [shape, a] of Object.entries(p.augments || {})) {
+      if (a && a.crewId && String(a.crewId) === String(cardId)) out.push([shape, a.side]);
+    }
+  }
+  return out;
+});
 initContractsUi({
   snapshot: () => _onlineSnapshot,
   me: () => mySnapshotPlayer(),

@@ -21,7 +21,9 @@ import { augmentGlyph, AUGMENTS, timepieceDialGlyph } from './contract-glyphs.js
 import { sunspotDialSvg } from './turn-clock-ui.js';
 import { isM4, isM2 } from './online-mode.js';
 import { COLONISTS_BY_ID } from '../../data/colonists.js';
-import { IDEOLOGY_ORDER, IDEOLOGY_BY_KEY } from '../../data/assembly.js';
+import { IDEOLOGY_ORDER, IDEOLOGY_BY_KEY, activeLaws, usesSoloAssembly, voteWinners } from '../../data/assembly.js';
+import { CREW_BY_ID } from '../../data/crew.js';
+import { augmentSideSvg } from './augment-sides.js';
 
 let D = null;               // deps from browse.js (snapshot readers + submitters)
 let _panelOpen = false;
@@ -57,10 +59,19 @@ const me = () => (D && D.me()) || null;
 const nameOf = (id) => ((snap() && snap().players || []).find((p) => p.profileId === id) || {}).name || 'a player';
 const playerById = (id) => (snap() && snap().players || []).find((p) => p.profileId === id) || null;
 const faceOf = (p, id) => contractFace(id, ((p.contractMeta || {})[id] || {}).side || 'blue');
-const lawKeys = (s) => {
+// The laws this player may use right now: the engine's playerCanUseLaw read,
+// off the same shared resolver (the Active Law, every law Unity also activates,
+// a law they lobbied this turn, and Emissaries' tied ideologies on their turn).
+const lawKeys = (s, p) => {
   const out = new Set();
-  if (s && s.activeLawStar) out.add(s.activeLawStar);
-  for (const k of (s && s.activeLaws) || []) out.add(k);
+  if (!s) return out;
+  const asm = s.assembly || { delegates: {} };
+  for (const k of activeLaws(asm, s.activeLawStar, usesSoloAssembly(s), !!s.anarchy).active) out.add(k);
+  for (const k of ((p && p.lobbiedLaws) || [])) out.add(k);
+  if (p && Array.isArray(p.emissaryLaws) && p.emissaryLaws.length && D && D.myTurn()) {
+    const tied = voteWinners(asm);
+    if (tied.length >= 2) for (const k of p.emissaryLaws) if (tied.includes(k)) out.add(k);
+  }
   return out;
 };
 const yearsFromNow = (s, slot) => ((slot - (s.turn | 0)) + SLOTS) % SLOTS;
@@ -100,9 +111,10 @@ export function refreshContractsUi() {
       const p = me();
       const tp = p && p.timepiece;
       const late = tp && tp.deadbeat;
-      const canAuction = p && D.myTurn() && p.fundraisedThisTurn && !p.contractAuctionDone && !tp;
-      tag.textContent = late ? '⏰ contract LATE' : (canAuction ? '📜 contract auction' : '📜 contracts');
-      tag.classList.toggle('turn-tag-alert', !!(late || canAuction));
+      // The contract auction lives only in the Fundraise window (owner
+      // 2026-11-18), so the tag never advertises it.
+      tag.textContent = late ? '⏰ contract LATE' : '📜 contracts';
+      tag.classList.toggle('turn-tag-alert', !!late);
     }
   }
   if (!on) { closePanel(); renderContractAuction(null); _seenFulfilled = null; return; }
@@ -170,26 +182,6 @@ function timepieceMarkers(s, skipId) {
 }
 const turnLine = (s) => `Turn ${(s.turn | 0) + 1}`;
 
-// The Contracts panel's own dial: your timepiece on its deadline, a band from
-// the Cube to it, and everyone else's timepieces.
-function panelDial(s, p) {
-  const tp = p.timepiece;
-  const turn = s.turn | 0;
-  const markers = timepieceMarkers(s, p.profileId);
-  let center = [turnLine(s), 'Timepiece', 'in Reserve'];
-  let band = null;
-  if (tp) {
-    const slot = ((tp.slot % SLOTS) + SLOTS) % SLOTS;
-    const left = yearsFromNow(s, tp.slot);
-    markers.push({ slot, svg: timepieceDialGlyph({ color: p.color || '#e5e7eb', size: DIAL_GLYPH, deadbeat: !!tp.deadbeat }), title: 'Your timepiece' });
-    if (tp.deadbeat) center = [turnLine(s), 'LATE'];
-    else {
-      center = [turnLine(s), `${left} yr left`];
-      if (left > 0) band = { from: (turn + 1) % SLOTS, to: slot, color: '#fbbf24' };
-    }
-  }
-  return `<div class="m4c-dial">${sunspotDialSvg({ turn, markers, band, center })}</div>`;
-}
 
 // ---- the panel --------------------------------------------------------------------
 function closePanel() {
@@ -204,6 +196,7 @@ function cardThumb(id, side) {
 }
 
 function locationOf(p, id) {
+  if ((p.contractHand || []).includes(id)) return 'Hand';
   if ((p.leo || []).some((s) => s.id === id)) return 'LEO';
   const r = p.rocket || {};
   if ((r.stack || []).some((s) => s.id === id)) return r.siteId ? `Rocket at ${spaceName(r.siteId)}` : 'Rocket at LEO';
@@ -212,8 +205,95 @@ function locationOf(p, id) {
   }
   const fr = p.freighter;
   if (fr && (fr.stack || []).some((s) => s.id === id)) return fr.siteId ? `Freighter at ${spaceName(fr.siteId)}` : 'Freighter at LEO';
+  for (const bn of (p.bernals || [])) {
+    if (bn && (bn.stack || []).some((s) => s.id === id)) return bn.siteId ? `Bernal at ${spaceName(bn.siteId)}` : 'Bernal at LEO';
+  }
   return null;
 }
+
+// The Completed contracts tab, opened from the Contracts chip in the stack row.
+export function openCompletedContracts() {
+  _tab = 'yours';
+  _panelOpen = true;
+  renderPanel();
+}
+// The timepiece badge (turn bar): the contract on the clock, and where it is.
+export function timepieceBadge() {
+  const s = snap(); const p = me();
+  if (!s || !s.m4 || !p || !p.timepiece) return null;
+  const id = p.timepiece.contractId;
+  const left = yearsFromNow(s, p.timepiece.slot);
+  return {
+    label: p.timepiece.deadbeat ? '⏱ Late' : `⏱ ${left} turn${left === 1 ? '' : 's'} left`,
+    meta: (faceOf(p, id) || {}).name || '',
+    late: !!p.timepiece.deadbeat,
+    onClick: () => showContractWhere(id),
+  };
+}
+export function showContractWhere(id) {
+  const p = me();
+  if (!p || !(p.contractMeta || {})[id]) return;
+  document.getElementById('m4-contract-where')?.remove();
+  const meta = p.contractMeta[id];
+  const ov = document.createElement('div');
+  ov.id = 'm4-contract-where';
+  ov.className = 'm4c-overlay';
+  ov.innerHTML = `<div class="m4c-modal m4c-where" role="dialog" aria-label="Contract">
+    <div class="m4c-head"><h3>⏱ ${esc((faceOf(p, id) || {}).name || '')}</h3><button type="button" class="m4c-close" aria-label="Close">✕</button></div>
+    <div class="m4c-where-body">${cardThumb(id, meta.side)}<div class="m4c-where-loc">📍 ${esc(locationOf(p, id) || 'In a stack')}</div></div></div>`;
+  const close = () => ov.remove();
+  ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+  ov.querySelector('.m4c-close').addEventListener('click', close);
+  document.body.appendChild(ov);
+}
+
+let _tab = null;        // 'market' | 'yours'
+// May the viewer start a contract auction now (the end of their Fundraise)?
+function canAuctionNow(s, p, myTurn) {
+  return !!(s && p && myTurn && p.fundraisedThisTurn && !p.contractAuctionDone && !p.timepiece && !s.auction
+    && !s.anarchy && !s.war);
+}
+// The three pair decks, top card up. A deck you may auction carries one
+// Auction button; one you may not is greyed out with none (owner 2026-11-18).
+function decksHtml(s, p, auctionOpen) {
+  const laws = lawKeys(s, p);
+  return `<div class="m4c-decks">${Object.keys(CONTRACT_PAIRS).map((pair) => {
+    const deck = (s.contractDecks || {})[pair] || [];
+    const byLaw = CONTRACT_PAIRS[pair].some((k) => laws.has(k));
+    const byConnections = !byLaw && hasContractAbility(p, 'connections')
+      && CONTRACT_PAIRS[pair].some((k) => delegateIn(s, k, p.profileId));
+    const top = deck[0];
+    const open = (byLaw || byConnections) && !!top;
+    const btn = auctionOpen && open
+      ? `<div class="m4c-btns"><button type="button" data-act="auction" data-pair="${pair}">Auction</button></div>` : '';
+    return `<div class="m4c-deck ${open ? 'open' : 'closed'}" ${open ? '' : 'aria-disabled="true"'}>
+      <div class="m4c-deck-head"><b>${CONTRACT_PAIR_NAMES[pair]}</b>
+        <span>${deck.length} left</span>
+        <span class="m4c-law">${byLaw ? 'Active Law' : byConnections ? 'Connections' : ''}</span></div>
+      ${top ? cardThumb(top, 'blue') : '<div class="muted">empty</div>'}${btn}</div>`;
+  }).join('')}</div>`;
+}
+// The contract auction step of a Fundraise (owner 2026-11-18: the auction is
+// part of the Fundraise). The Fundraise window renders it into `host` once the
+// Fundraise lands; `done` closes the window (picking nothing skips the auction).
+export function canStartContractAuction() { return canAuctionNow(snap(), me(), D && D.myTurn()); }
+export function renderContractAuctionStep(host, done) {
+  const s = snap(); const p = me();
+  host.innerHTML = '';
+  if (!canAuctionNow(s, p, D.myTurn())) return false;
+  const wrap = document.createElement('div');
+  wrap.className = 'm4c-fr-step';
+  wrap.innerHTML = `<h4>📜 Contract auction</h4>${decksHtml(s, p, true)}
+    <div class="m4c-btns m4c-fr-skip"><button type="button" data-skip>No auction</button></div>`;
+  wrap.querySelectorAll('button[data-act="auction"]').forEach((b) => b.addEventListener('click', async () => {
+    done();
+    await D.submitTurnOp({ kind: 'AUCTION_CONTRACT_START', pair: b.dataset.pair });
+  }));
+  wrap.querySelector('[data-skip]').addEventListener('click', done);
+  host.appendChild(wrap);
+  return true;
+}
+
 
 function renderPanel() {
   const s = snap();
@@ -229,53 +309,19 @@ function renderPanel() {
   }
   const myTurn = D.myTurn();
   const tp = p.timepiece;
+  // Two tabs (owner 2026-11-18): Market contracts (dial + decks) and Completed
+  // contracts (fulfilled, enterprises, the augmentations they give; boosted ones
+  // in play sit at the top, with their Fulfill buttons).
+  const market = [];
   const parts = [];
-  // Timepiece + default chit
-  let tpLine = 'Timepiece in Reserve.';
-  if (tp) {
-    const f = faceOf(p, tp.contractId);
-    const tmeta = (p.contractMeta || {})[tp.contractId] || {};
-    const owed = (f.advance * (tmeta.boosted ? 1 : 2)) - (tmeta.paid | 0);
-    tpLine = tmeta.default
-      ? `<b class="m4c-late">DEFAULT</b> ${esc(f.name)}: ${owed} aqua owed.`
-      : tp.deadbeat
-      ? `<b class="m4c-late">LATE</b> ${esc(f.name)}: ${f.lateFee} aqua due.`
-      : `${esc(f.name)}: ${yearsFromNow(s, tp.slot)} yr left.`;
-  }
-  const chit = s.defaultChit
-    ? `Default chit: ${esc(nameOf(s.defaultChit.profileId))} (${s.defaultChit.side === 'gold' ? -6 : -3} VP).`
-    : 'Default chit: unclaimed.';
-  parts.push(`<div class="m4c-status-row">${panelDial(s, p)}<div class="m4c-status"><div>⏱ ${tpLine}</div><div>🏷 ${chit}</div></div></div>`);
-
-  // Contract auction (the Fundraise's final step)
-  const laws = lawKeys(s);
-  const auctionOpen = myTurn && p.fundraisedThisTurn && !p.contractAuctionDone && !tp && !s.auction;
-  const decks = Object.keys(CONTRACT_PAIRS).map((pair) => {
-    const deck = (s.contractDecks || {})[pair] || [];
-    const byLaw = CONTRACT_PAIRS[pair].some((k) => laws.has(k));
-    const byConnections = !byLaw && hasContractAbility(p, 'connections')
-      && CONTRACT_PAIRS[pair].some((k) => delegateIn(s, k, p.profileId));
-    const open = byLaw || byConnections;
-    const top = deck[0];
-    const btns = auctionOpen && open && top ? `
-      <div class="m4c-btns">
-        <button type="button" data-act="auction" data-pair="${pair}">Auction it</button>
-        <button type="button" data-act="discard-auction" data-pair="${pair}">Discard, auction next</button>
-        <button type="button" data-act="walk" data-pair="${pair}">Walk away</button>
-      </div>` : '';
-    return `<div class="m4c-deck ${open ? 'open' : 'closed'}">
-      <div class="m4c-deck-head"><b>${CONTRACT_PAIR_NAMES[pair]}</b>
-        <span>${deck.length} left</span>
-        <span class="m4c-law">${byLaw ? 'Active Law' : byConnections ? 'Connections' : ''}</span></div>
-      ${top ? cardThumb(top, 'blue') : '<div class="muted">empty</div>'}${btns}</div>`;
-  }).join('');
-  const auctionNote = auctionOpen
-    ? '' : (tp ? 'Timepiece out.' : '');
-  parts.push(`<h4>Contract decks</h4>${auctionNote ? `<p class="muted">${auctionNote}</p>` : ''}<div class="m4c-decks">${decks}</div>`);
+  // Market contracts: the three decks only (owner 2026-11-18: the dial shows in
+  // the auction itself). A claimed default chit is named.
+  const auctionOpen = false;   // the auction starts only in the Fundraise window
+  if (s.defaultChit) market.push(`<p class="muted">🏷 Default chit: ${esc(nameOf(s.defaultChit.profileId))} (${s.defaultChit.side === 'gold' ? -6 : -3} VP)</p>`);
+  market.push(decksHtml(s, p, auctionOpen));
 
   // Contracts in hand live in the Hand area (4B3h: a won contract is a Hand
   // Card), so the panel only points there; boosted and fulfilled ones are here.
-  const inHand = (p.contractHand || []).length;
   const boosted = Object.keys(p.contractMeta || {}).filter((id) => !(p.contractHand || []).includes(id)).map((id) => {
     const meta = p.contractMeta[id];
     const f = faceOf(p, id);
@@ -296,21 +342,29 @@ function renderPanel() {
   for (const q of (s.players || [])) {
     if (q.profileId === p.profileId) continue;
     for (const x of (q.fulfilledContracts || [])) {
-      if ((x.partners || []).includes(p.profileId)) partnered.push(`<div class="m4c-item">${cardThumb(x.id, x.side)}<div class="m4c-note">@${esc(q.name)}</div></div>`);
+      if ((x.partners || []).includes(p.profileId)) partnered.push(`<div class="m4c-item">${cardThumb(x.id, x.side)}<div class="m4c-note"><span class="player-name" style="--player-color:${esc(q.color || 'currentColor')}">@${esc(q.name)}</span> · no VP</div></div>`);
     }
   }
-  parts.push(`<h4>In hand</h4><p class="muted">${inHand
-    ? `${inHand} in your Hand.`
-    : 'none'}</p>`);
-  parts.push(`<h4>Boosted</h4><div class="m4c-row">${boosted || '<span class="muted">none</span>'}</div>`);
-  parts.push(`<h4>Fulfilled</h4><div class="m4c-row">${fulfilled || '<span class="muted">none yet</span>'}</div>`);
-  if (partnered.length) parts.push(`<h4>Partner</h4><div class="m4c-row">${partnered.join('')}</div>`);
+  // No In hand section (the Hand shows them; the timepiece badge finds the one
+  // on the clock), and empty sections are left out (owner 2026-11-18).
+  if (boosted) parts.push(`<h4>Boosted</h4><div class="m4c-row">${boosted}</div>`);
   parts.push(augmentationsHtml(s, p, myTurn));
+  if (fulfilled) parts.push(`<h4>Fulfilled</h4><div class="m4c-row">${fulfilled}</div>`);
+  if (partnered.length) parts.push(`<h4>Enterprises</h4><div class="m4c-row">${partnered.join('')}</div>`);
 
+  // The tab the player last chose (Completed contracts at first).
+  const tab = _tab || 'yours';
+  if (!parts.length) parts.push('<p class="muted">None yet.</p>');
   el.innerHTML = `<div class="m4c-modal" role="dialog" aria-label="Contracts">
-    <div class="m4c-head"><h3>📜 Contracts</h3><button type="button" class="m4c-close" aria-label="Close">✕</button></div>
-    <div class="m4c-body">${parts.join('')}</div></div>`;
+    <div class="m4c-head"><h3>📜 Contracts</h3>
+      <div class="m4c-tabs" role="tablist">
+        <button type="button" role="tab" data-tab="market" class="${tab === 'market' ? 'sel' : ''}">Market contracts</button>
+        <button type="button" role="tab" data-tab="yours" class="${tab === 'yours' ? 'sel' : ''}">Completed contracts</button>
+      </div>
+      <button type="button" class="m4c-close" aria-label="Close">✕</button></div>
+    <div class="m4c-body">${(tab === 'market' ? market : parts).join('')}</div></div>`;
   el.querySelector('.m4c-close').addEventListener('click', closePanel);
+  el.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { _tab = b.dataset.tab; renderPanel(); }));
   el.querySelectorAll('button[data-act]').forEach((b) => b.addEventListener('click', () => onAct(b)));
 }
 
@@ -335,25 +389,21 @@ function augmentationsHtml(s, p, myTurn) {
   const colName = (id) => (COLONISTS_BY_ID[id] || {}).name || id;
   const chips = SHAPES.map((sh) => {
     const a = aug[sh];
-    const on = a && (a.colonySite ? `${spaceName(a.colonySite)} Colony` : colName(a.colonistId));
-    const st = a ? `${esc(on)} (side ${a.side}: ${esc(sideText(sh, a.side))})`
-      : (portfolio.has(sh) ? 'ready' : '');
-    return `<div class="m4c-aug ${portfolio.has(sh) ? 'have' : 'lack'}">${augmentGlyph(sh, { size: 26 })}<span><b>${AUGMENTS[sh].name}</b> ${st}</span></div>`;
+    const have = portfolio.has(sh);
+    const on = a && (a.crewId ? crewName(a.crewId) : a.colonySite ? `${spaceName(a.colonySite)} Colony` : colName(a.colonistId));
+    const st = a ? `<span class="m4c-aug-tag">Augmented</span> ${esc(on)} · side ${a.side}` : (have ? 'ready' : '');
+    // Without M2, any chit in your possession opens the Augment operation.
+    const click = !s.m2 && myTurn && have;
+    const glyph = a ? augmentSideSvg(sh, a.side, { size: 34 }) : augmentGlyph(sh, { size: 26 });
+    return `<${click ? 'button type="button" data-act="augment" data-shape="' + sh + '"' : 'div'} class="m4c-aug ${have ? 'have' : 'lack'}${a ? ' on' : ''}"${a ? ` data-tip="${esc(sideText(sh, a.side))}"` : ''}>${glyph}<span><b>${AUGMENTS[sh].name}</b> ${st}</span></${click ? 'button' : 'div'}>`;
   }).join('');
   const opts = [...portfolio].map((sh) => `<option value="${sh}">${AUGMENTS[sh].name}</option>`).join('');
   const controls = (key, attrs) => (myTurn && opts ? `<div class="m4c-controls"><select data-shape-for="${key}">${opts}</select>
     <select data-side-for="${key}"><option value="2">side 2</option><option value="1">side 1</option></select>
     <button type="button" data-act="implant" ${attrs}>Implant</button></div>` : '');
-  // Without Module 2 (no Colonists / Bernals) chits go on your Colonies (user
-  // ruling 2026-11-17).
-  if (!s.m2) {
-    const mine = Object.entries(s.colonies || {}).filter(([, c]) => c && c.ownerId === p.profileId).map(([site]) => site);
-    const rows = mine.map((site) => {
-      const here = SHAPES.filter((sh) => aug[sh] && aug[sh].colonySite === site).map((sh) => augmentGlyph(sh, { size: 22 })).join('');
-      return `<div class="m4c-col"><b>${esc(spaceName(site))} Colony</b> ${here}${controls(site, `data-col="${esc(site)}" data-colony="1"`)}</div>`;
-    }).join('');
-    return `<h4>Augmentations</h4><div class="m4c-augs">${chips}</div>${rows || '<p class="muted">No Colony.</p>'}`;
-  }
+  // Without Module 2 a chit goes on a Crew at a BEO Colony (owner 2026-11-18):
+  // click a chit you hold to start the Augment operation.
+  if (!s.m2) return `<h4>Augmentations</h4><div class="m4c-augs">${chips}</div>`;
   const bns = (p.bernals || []).map((bn, i) => ({ bn, i })).filter((x) => x.bn.anchored);
   let station = '<p class="muted">No anchored Bernal.</p>';
   if (bns.length) {
@@ -376,8 +426,6 @@ async function onAct(b) {
   const id = b.dataset.id;
   const pair = b.dataset.pair;
   if (act === 'auction') await D.submitTurnOp({ kind: 'AUCTION_CONTRACT_START', pair });
-  else if (act === 'discard-auction') await D.submitTurnOp({ kind: 'AUCTION_CONTRACT_START', pair, discardTop: true });
-  else if (act === 'walk') await D.submitTurnOp({ kind: 'AUCTION_CONTRACT_START', pair, abandon: true });
   else if (act === 'boost') await D.submitTurnOp({ kind: 'BOOST', cardIds: [id] });
   else if (act === 'fulfill') await fulfillContract(id);
   else if (act === 'implant') {
@@ -397,9 +445,10 @@ async function onAct(b) {
       await D.submitTurnOp({ kind: 'IMPLANT', bernal: Number(b.dataset.bernal), remove, implants: [{ colonistId: col, shape, side }] });
     }
   }
+  else if (act === 'augment') { openAugmentWizard(b.dataset.shape); return; }
   else if (act === 'pay') await payContractFee(id);
   else if (act === 'abandon') await abandonContract(id);
-  if (act === 'auction' || act === 'discard-auction') closePanel();
+  if (act === 'auction') closePanel();
   else if (_panelOpen) renderPanel();
 }
 
@@ -554,7 +603,7 @@ export function renderContractAuction(a) {
       : `<div class="m4c-btns"><button type="button" data-act="close" ${settled ? '' : 'disabled'}>Close</button></div>`;
   }
   el.innerHTML = `<div class="m4c-modal" role="dialog" aria-label="Contract auction">
-    <div class="m4c-head"><h3>📜 Contract auction</h3><span class="muted">${CONTRACT_PAIR_NAMES[a.pair] || ''}</span></div>
+    <div class="m4c-head"><h3>📜 Auction</h3><span class="muted">${CONTRACT_PAIR_NAMES[a.pair] || ''}</span></div>
     <div class="m4c-auction-body">
       <div class="m4c-auction-card">${cardThumb(a.cardId, a.side || 'blue')}</div>
       <div class="m4c-auction-play">
@@ -578,4 +627,104 @@ export function renderContractAuction(a) {
     else if (act === 'pass') await D.submitAuctionOp({ kind: 'AUCTION_CONTRACT_PASS' });
     else if (act === 'close') await D.submitAuctionOp({ kind: 'AUCTION_CONTRACT_CLOSE', ...(b.dataset.winner ? { winnerId: Number(b.dataset.winner) } : {}) });
   }));
+}
+
+// ---- the Augment operation (4C4, without Module 2) ---------------------------------
+// Owner 2026-11-18: click a chit you hold to begin. A chit goes on a Crew card
+// standing at a BEO Colony; during the operation you may take chits off anyone
+// and put them on anyone, as many as you like, for the one operation.
+function crewSlotsOf(p) {
+  const out = [];
+  const add = (arr, site, where) => {
+    for (const sl of (arr || [])) if (sl && CREW_BY_ID[sl.id]) out.push({ slot: sl, site: site == null ? 'leo' : String(site), where });
+  };
+  if (p.rocket) add(p.rocket.stack, p.rocket.siteId, 'Rocket');
+  add(p.leo, null, 'LEO');
+  for (const o of Object.values(p.outposts || {})) if (o) add(o.cards, o.siteId, `Outpost ${o.letter}`);
+  if (p.freighter) add(p.freighter.stack, p.freighter.siteId, 'Freighter');
+  for (const bn of (p.bernals || [])) if (bn) add(bn.stack, bn.siteId, 'Bernal');
+  return out;
+}
+function crewName(id) {
+  const p = me();
+  const e = p && crewSlotsOf(p).find((x) => String(x.slot.id) === String(id));
+  const card = CREW_BY_ID[id];
+  if (!card) return String(id);
+  const face = card.faces && card.faces[e && e.slot.face === 'secondary' ? 'secondary' : 'primary'];
+  return (face && face.name) || card.name || String(id);
+}
+let _aug = null;   // { shape, plan: { [shape]: { crewId, side } | null } }
+export function openAugmentWizard(shape) {
+  const p = me();
+  if (!p) return;
+  const plan = {};
+  for (const [sh, a] of Object.entries(p.augments || {})) plan[sh] = a ? { crewId: a.crewId || null, side: a.side, colonySite: a.colonySite || null } : null;
+  _aug = { shape, plan };
+  renderAugmentWizard();
+}
+function renderAugmentWizard() {
+  const s = snap(); const p = me();
+  if (!s || !p || !_aug) return;
+  let ov = document.getElementById('m4-augment-wizard');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'm4-augment-wizard';
+    ov.className = 'm4c-overlay';
+    ov.addEventListener('click', (e) => { if (e.target === ov) closeAugmentWizard(); });
+    document.body.appendChild(ov);
+  }
+  const portfolio = portfolioOf(p);
+  const cur = p.augments || {};
+  const { shape, plan } = _aug;
+  const same = (a, b) => (!a && !b) || (a && b && a.crewId === b.crewId && a.side === b.side && (a.crewId || a.colonySite === b.colonySite));
+  const changes = SHAPES.filter((sh) => !same(cur[sh] ? { crewId: cur[sh].crewId || null, side: cur[sh].side, colonySite: cur[sh].colonySite || null } : null, plan[sh] || null));
+  const chits = SHAPES.filter((sh) => portfolio.has(sh)).map((sh) => {
+    const pl = plan[sh];
+    const tag = pl ? (pl.crewId ? crewName(pl.crewId) : `${spaceName(pl.colonySite)} Colony`) : '';
+    return `<button type="button" class="m4c-aw-chit${sh === shape ? ' sel' : ''}${pl ? ' on' : ''}${changes.includes(sh) ? ' changed' : ''}" data-aw-shape="${sh}">
+      ${augmentGlyph(sh, { size: 30 })}<span>${AUGMENTS[sh].name}</span>${pl ? `<small>${esc(tag)}</small>` : ''}</button>`;
+  }).join('');
+  // Targets: Crew at a Colony (not LEO). The chit's current Crew stays listed.
+  const crews = crewSlotsOf(p).filter((x) => x.site !== 'leo' && (s.colonies || {})[x.site]);
+  const pl = plan[shape] || null;
+  const targets = crews.map((x) => `<button type="button" class="m4c-aw-target${pl && pl.crewId === x.slot.id ? ' sel' : ''}" data-aw-crew="${esc(x.slot.id)}">
+      <b>${esc(crewName(x.slot.id))}</b><small>${esc(x.where)} · ${esc(spaceName(x.site))} Colony</small></button>`).join('')
+    || '<p class="muted">No Crew at a Colony.</p>';
+  const sides = [1, 2].map((n) => {
+    const blocked = shape === 'heart' && n === 1;   // Parenthood needs M2
+    return `<button type="button" class="m4c-aw-side${pl && pl.side === n ? ' sel' : ''}" data-aw-side="${n}" ${!pl || blocked ? 'disabled' : ''}${blocked ? ' data-tip="Needs M2"' : ''}>
+      ${augmentSideSvg(shape, n, { size: 44 })}<span><b>Side ${n}</b><small>${esc(sideText(shape, n))}</small></span></button>`;
+  }).join('');
+  ov.innerHTML = `<div class="m4c-modal m4c-aw" role="dialog" aria-label="Augment">
+    <div class="m4c-head"><h3>Augment</h3><button type="button" class="m4c-close" aria-label="Close">✕</button></div>
+    <div class="m4c-aw-chits">${chits}</div>
+    <div class="m4c-aw-step"><h4>${AUGMENTS[shape].name}: Crew</h4><div class="m4c-aw-targets">${targets}
+      ${pl ? '<button type="button" class="m4c-aw-target off" data-aw-off="1"><b>Unaugment</b></button>' : ''}</div></div>
+    <div class="m4c-aw-step"><h4>Side</h4><div class="m4c-aw-sides">${sides}</div></div>
+    <div class="m4c-btns m4c-aw-go"><button type="button" data-aw-cancel>Cancel</button>
+      <button type="button" class="primary" data-aw-submit ${changes.length ? '' : 'disabled'}>Augment${changes.length > 1 ? ` (${changes.length} chits)` : ''}</button></div>
+  </div>`;
+  ov.querySelector('.m4c-close').addEventListener('click', closeAugmentWizard);
+  ov.querySelector('[data-aw-cancel]').addEventListener('click', closeAugmentWizard);
+  ov.querySelectorAll('[data-aw-shape]').forEach((b) => b.addEventListener('click', () => { _aug.shape = b.dataset.awShape; renderAugmentWizard(); }));
+  ov.querySelectorAll('[data-aw-crew]').forEach((b) => b.addEventListener('click', () => {
+    const prev = plan[shape];
+    plan[shape] = { crewId: b.dataset.awCrew, side: prev && prev.side ? prev.side : 2, colonySite: null };
+    renderAugmentWizard();
+  }));
+  ov.querySelector('[data-aw-off]')?.addEventListener('click', () => { plan[shape] = null; renderAugmentWizard(); });
+  ov.querySelectorAll('[data-aw-side]').forEach((b) => b.addEventListener('click', () => {
+    if (plan[shape]) { plan[shape] = { ...plan[shape], side: Number(b.dataset.awSide) }; renderAugmentWizard(); }
+  }));
+  ov.querySelector('[data-aw-submit]').addEventListener('click', async () => {
+    const remove = changes.filter((sh) => cur[sh]);
+    const implants = changes.filter((sh) => plan[sh] && plan[sh].crewId).map((sh) => ({ shape: sh, side: plan[sh].side, crewId: plan[sh].crewId }));
+    closeAugmentWizard();
+    await D.submitTurnOp({ kind: 'IMPLANT', remove, implants });
+    if (_panelOpen) renderPanel();
+  });
+}
+function closeAugmentWizard() {
+  _aug = null;
+  document.getElementById('m4-augment-wizard')?.remove();
 }

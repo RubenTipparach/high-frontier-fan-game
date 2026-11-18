@@ -41,6 +41,18 @@ export function applyM2RoundRule(m2El, roundsSel, warnEl, justToggled) {
 }
 
 let _activeLobby = null;
+// M4 requires M0 (4A1a): ticking M4 ticks M0 and locks it; unticking M4 frees it
+// again, but only if this lock is what disabled it (a variant may lock it too).
+export function lockM0ForM4(m0box, m4On) {
+  if (!m0box) return;
+  if (m4On) {
+    m0box.checked = true;
+    if (!m0box.disabled) { m0box.disabled = true; m0box.dataset.m4Lock = '1'; }
+  } else if (m0box.dataset.m4Lock) {
+    m0box.disabled = false;
+    delete m0box.dataset.m4Lock;
+  }
+}
 // M4 (Exodus) preview: admins and playtesters (user 2026-11-18). Set by
 // main.js once the admin / tester checks resolve; the server is the real gate.
 let _m4Allowed = false;
@@ -105,10 +117,8 @@ export function initLobby({ onShowView, onToast }) {
   // the colonization loop WITHOUT Futures. M0 is mandatory for M2, so checking
   // M2 auto-checks M0 (the server forces it on regardless).
   // M4 requires M0 (4A1a): ticking it ticks M0 (the server forces it anyway).
-  document.getElementById('create-m4')?.addEventListener('change', (e) => {
-    const m0box = document.getElementById('create-m0');
-    if (e.target.checked && m0box) m0box.checked = true;
-  });
+  // M0 is then locked on until M4 is unticked (owner 2026-11-18).
+  document.getElementById('create-m4')?.addEventListener('change', (e) => lockM0ForM4(document.getElementById('create-m0'), e.target.checked));
   const cM2 = document.getElementById('create-m2');
   const cRounds = document.getElementById('create-rounds');
   const cWarn = document.getElementById('create-rounds-warn');
@@ -1533,13 +1543,16 @@ function renderLobbySettings(lobby, iAmHost, me) {
   // refused on save.
   const setM0El = box.querySelector('#set-m0');
   if (setM0El && lobby.sirens) { setM0El.checked = false; setM0El.disabled = true; }
+  if (setM0El && lobby.m4) lockM0ForM4(setM0El, true);
   setM0El?.addEventListener('change', (e) => save({ m0: e.target.checked }));
   // M4 (preview): the row only renders for an admin or playtester host (or a
   // room that already has it); the server ignores the toggle from anyone else. It needs
   // M0, so turning it on ticks M0 too.
   box.querySelector('#set-m4')?.addEventListener('change', (e) => {
     const setM0 = box.querySelector('#set-m0');
-    if (e.target.checked && setM0 && !setM0.checked) { setM0.checked = true; save({ m4: true, m0: true }); return; }
+    const wasOff = setM0 && !setM0.checked;
+    lockM0ForM4(setM0, e.target.checked);
+    if (e.target.checked && wasOff) { save({ m4: true, m0: true }); return; }
     save({ m4: e.target.checked });
   });
   // M1 is open for playtesting: its row shows for every host.

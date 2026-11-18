@@ -241,16 +241,32 @@ per room and carried into the game state as a boolean (`state.m0`,
   create-form / solo-wizard / room-settings rows show on the same admin-OR-tester
   signal (`js/main.js#syncM4Rows`, `lobby.js#setM4Allowed`). The alpha-tester
   banner names M4. Without M2, Parenthood (heart side 1) and the Promotion
-  counts are unavailable (owner 2026-11-18). M4 REQUIRES M0 (4A1a) and forces it on. It does not combine with a
-  variant yet (`m4_no_variants`). The 4G solitaire rules are DONE: CEO
+  counts are unavailable (owner 2026-11-18). M4 REQUIRES M0 (4A1a) and forces it on: ticking M4 ticks and LOCKS the M0
+  box (create form, solo setup, room settings; `lobby.js#lockM0ForM4`), and room
+  settings cannot clear M0 while the room keeps M4. It does not combine with a
+  variant (`m4_no_variants`, on create AND room settings); V9 Sirens in
+  particular is not compatible with M4 (owner 2026-11-18). The 4G solitaire rules are DONE: CEO
   Solitaire (V6) implements them, including the 4G3 Solitaire Assembly (owner
   2026-11-17); only the gate refusing M4 in a CEO Solitaire room remains. M4 is not played with M2 for now (`m4_no_m2` on create AND settings),
   and contracts whose destination needs a piece the game lacks (Bernals,
   colonists, freighters, the isobank) are dealt out of the decks
   (`data/contracts.js#faceUnplayable`; owner 2026-11-17). Lagrange ring
   numbers (L1-L5) read off the board live in `data/lagrange-labels.js`.
-  Without M2 there are no Colonists or Bernals, so IMPLANT puts augmentation
-  chits on one of your Colonies instead (owner ruling 2026-11-17).
+  Without M2 the Augment operation (IMPLANT, `applyImplantOnCrew`) puts a chit
+  on a Crew card standing at a BEO Colony (owner 2026-11-18, replacing the
+  2026-11-17 "on a Colony" ruling; old Colony chits still work). During the one
+  operation a player may take chits off anyone and put them on anyone. The chit
+  then rides that Crew wherever it goes (side abilities that act "here" follow
+  it), survives a Crew death (it respawns at LEO), and comes off only when that
+  Crew founds a Colony or leaves play. Its marks (Jar 1 0 Mass, Hexagon
+  prospector, Battery `augSupplies`) sit on that Crew's slot only. UI: click a
+  chit you hold in the Contracts panel to open the Augment wizard; the chits
+  (`js/game/augment-sides.js`, the side's picture inside the shape) are drawn on
+  the Crew card's right edge (`card-ui.js#setAugChitHook`), fading on hover with
+  a tip. The contract auction is ONLY the last step of the Fundraise window (no
+  toolbar or Market button starts it); the turn bar
+  carries a timepiece badge ("N turns left") that opens the contract and where
+  it is.
   Stages and the contract card-data columns: `docs/module-m4-plan.md`.
   Releasing it later follows the checklist below.
 - **Promo crew (data/crew.js#PROMO_CREW) - RELEASED to every player
