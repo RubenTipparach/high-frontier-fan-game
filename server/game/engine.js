@@ -405,6 +405,12 @@ function syncCrewAugmentMarks(st) {
     }
   }
 }
+// The support kinds a Battery chit gives your Crew (M4; never with M2).
+function batteryCrewKinds(player) {
+  const a = player && player.augments && player.augments.battery;
+  if (!a) return [];
+  return a.side === 1 ? ['gen-electric'] : a.side === 2 ? ['reactor-antimatter'] : [];
+}
 function hasAugmentSide(player, shape, side) {
   const a = player && player.augments && player.augments[shape];
   return !!(a && a.side === side);
@@ -3586,6 +3592,11 @@ function playerCrewReactorKinds(player, { pendingAnchorBn = null } = {}) {
     }
     kinds = kinds ? Array.from(new Set([...kinds, ...pw.crewOnBoardReactor])) : [...pw.crewOnBoardReactor];
   }
+  // M4 Battery augmentation (4C3), counting for your Crew without M2 (owner
+  // ruling 2026-11-17; tracker A3 recommended): side 1 "on-board pulse
+  // generator" supplies e electric, side 2 "on-board exotic reactor" antimatter.
+  const bat = batteryCrewKinds(player);
+  if (bat.length) kinds = Array.from(new Set([...(kinds || []), ...bat]));
   // A crew-granted reactor is a reactor: it meets an "Any Reactor" support too.
   if (kinds && kinds.some((k) => String(k).startsWith('reactor-')) && !kinds.includes('reactor-any')) kinds.push('reactor-any');
   return kinds;
@@ -16669,6 +16680,9 @@ function normTradeSide(raw) {
     handCardIds: ids(raw.handCardIds),
     cargoCardIds: ids(raw.cargoCardIds),
     leoCardIds: ids(raw.leoCardIds),
+    // M4 contracts (4B2g): an unfulfilled contract in the hand (anywhere) or on
+    // the LEO Stack (a LEO meeting); its timepiece and late-fee aquas go with it.
+    contractIds: ids(raw.contractIds),
     abilities,
     // Luna Treaty access can ride a deal: the FIRST PLAYER grants the other
     // party permission to prospect Luna as an atomic trade term (sealed with the
@@ -16682,8 +16696,16 @@ function sideHasInSpace(side) {
 }
 function sideIsEmpty(side) {
   return !side.aqua && !side.water && !side.handCardIds.length
-    && !side.cargoCardIds.length && !(side.leoCardIds || []).length && !side.abilities.length && !side.lunaGrant;
+    && !side.cargoCardIds.length && !(side.leoCardIds || []).length && !side.abilities.length && !side.lunaGrant
+    && !(side.contractIds || []).length;
 }
+// Where a contract the giver trades sits: 'hand' | 'leo' | null.
+function contractTradeWhere(giver, id) {
+  if ((giver.contractHand || []).includes(id)) return 'hand';
+  if ((giver.leo || []).some((sl) => sl && sl.id === id && sl.kind === 'contract')) return 'leo';
+  return null;
+}
+const sideHasLeoContract = (giver, side) => (side.contractIds || []).some((id) => contractTradeWhere(giver, id) === 'leo');
 function sideHasLeoStack(side) {
   return (side.leoCardIds || []).length > 0;
 }
@@ -16704,7 +16726,8 @@ function leoSlotTradeRefusal(slot) {
 // both at once (it is struck at exactly one place).
 function tradeMeetingError(state, a, b, give, receive) {
   const inSpace = sideHasInSpace(give) || sideHasInSpace(receive);
-  const leoStack = sideHasLeoStack(give) || sideHasLeoStack(receive);
+  const leoStack = sideHasLeoStack(give) || sideHasLeoStack(receive)
+    || sideHasLeoContract(a, give) || sideHasLeoContract(b, receive);
   const cross = tradeCrossesSpecies(state, a, b);
   const location = (inSpace || cross) ? sharedUnitLocation(a, b) : (leoStack ? 'leo' : null);
   if (cross && !location) return { error: 'species_needs_meeting' };
@@ -16750,6 +16773,13 @@ function validateTradeSide(state, owner, side) {
   for (const g of side.abilities) {
     if (!playerOwnsAbility(owner, g.ability)) return 'ability_not_held';
   }
+  for (const id of (side.contractIds || [])) {
+    if (!state.m4) return 'not_m4';
+    const meta = (owner.contractMeta || {})[id];
+    if (!meta) return 'not_your_contract';
+    if (meta.default) return 'contract_in_default';
+    if (!contractTradeWhere(owner, id)) return 'contract_not_in_hand_or_leo';
+  }
   // Only the first player can grant Luna prospecting access (Luna Treaty), so a
   // lunaGrant term is deliverable only from the first player's side of the deal.
   if (side.lunaGrant) {
@@ -16764,7 +16794,13 @@ function validateTradeSide(state, owner, side) {
 // auction limit of 4. That limit still gates auctions, so an over-full hand
 // just can't start / join one until it's reduced. Water still needs tank room;
 // in-space cargo lands in the rocket and is unbounded.
-function validateTradeReceipt(receiver, side) {
+function validateTradeReceipt(receiver, side, giver = null) {
+  // 4B2g: the receiver's timepiece replaces the giver's on a contract that has
+  // one, so it must be free (and only one such contract per deal).
+  if (giver) {
+    const timed = (side.contractIds || []).filter((id) => giver.timepiece && giver.timepiece.contractId === id);
+    if (timed.length && receiver.timepiece) return 'receiver_timepiece_in_use';
+  }
   if (side.water > 0) {
     // Traded water mixes into the receiver's tank at the lower grade, as long
     // as their active thruster can still burn the result.
@@ -16827,6 +16863,28 @@ function executeTradeSide(giver, receiver, side) {
     receiver.rocket.tank = (receiver.rocket.tank || 0) + side.water;
     setRocketGrade(receiver.rocket, grade);
   }
+  // 4B2g: the contract, its meta (progress and the late-fee aquas paid onto
+  // it), and the timepiece - the receiver's replaces the giver's.
+  for (const id of (side.contractIds || [])) {
+    const where = contractTradeWhere(giver, id);
+    if (where === 'hand') {
+      giver.contractHand = giver.contractHand.filter((x) => x !== id);
+      receiver.contractHand = Array.isArray(receiver.contractHand) ? receiver.contractHand : [];
+      receiver.contractHand.push(id);
+    } else if (where === 'leo') {
+      const i = giver.leo.findIndex((sl) => sl && sl.id === id && sl.kind === 'contract');
+      const [slot] = giver.leo.splice(i, 1);
+      receiver.leo = Array.isArray(receiver.leo) ? receiver.leo : [];
+      receiver.leo.push(slot);
+    } else continue;
+    receiver.contractMeta = receiver.contractMeta || {};
+    receiver.contractMeta[id] = giver.contractMeta[id];
+    delete giver.contractMeta[id];
+    if (giver.timepiece && giver.timepiece.contractId === id) {
+      receiver.timepiece = { ...giver.timepiece };
+      giver.timepiece = null;
+    }
+  }
   for (const g of side.abilities) {
     receiver.borrowedAbilities = Array.isArray(receiver.borrowedAbilities) ? receiver.borrowedAbilities : [];
     receiver.borrowedAbilities.push({ ability: g.ability, fromPlayerId: giver.profileId, turnsRemaining: g.turns });
@@ -16862,6 +16920,11 @@ function tradeSideSummary(state, side) {
   for (const id of side.handCardIds) { const c = PATENTS_BY_ID[id]; parts.push(c ? c.name : id); }
   for (const id of side.cargoCardIds) { const c = PATENTS_BY_ID[id]; parts.push(c ? c.name : id); }
   for (const id of (side.leoCardIds || [])) { const c = PATENTS_BY_ID[id]; parts.push(`${c ? c.name : id} (LEO)`); }
+  for (const id of (side.contractIds || [])) {
+    const holder = (state.players || []).find((p) => p.contractMeta && p.contractMeta[id]);
+    const f = contractFace(id, (holder && holder.contractMeta[id].side) || 'blue');
+    parts.push(`the ${f ? f.name : id} contract`);
+  }
   for (const g of side.abilities) {
     parts.push(`${abilityLabel(g.ability)} (${g.turns == null ? 'permanent' : g.turns + ' turns'})`);
   }
@@ -16995,7 +17058,7 @@ function applyTradeAccept(state, op, ctx) {
     || tradeCrossesSpecies(state, initiator, partner);
   if (needsColo && sharedUnitLocation(initiator, partner) !== t.location) return fail('not_colocated');
   let err = validateTradeSide(state, initiator, t.give) || validateTradeSide(state, partner, t.receive)
-    || validateTradeReceipt(partner, t.give) || validateTradeReceipt(initiator, t.receive);
+    || validateTradeReceipt(partner, t.give, initiator) || validateTradeReceipt(initiator, t.receive, partner);
   if (err) return fail(err);
   // A Partner Enterprise request (4B8): the owner's acceptance seats the
   // fundraiser's delegate on the contract. Re-checked against the live board.

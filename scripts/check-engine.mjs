@@ -11147,6 +11147,29 @@ check('Without M2, Jar 1 and Hexagon count for your Crew (0 Mass; Raygun ISRU 1)
   return `crew at ${site}: refused at ISRU 4, prospects with Hexagon 1; Jar 1 marks it 0 Mass and the mark lifts`;
 });
 
+check('Without M2, Battery on your Crew supplies e electric (side 1) or antimatter (side 2)', () => {
+  const to = neighborSlugs(leoSlug())[0];
+  const fly = (thrId, augs) => {
+    const st = startedGame({ m4: true });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    const crewId = me.faction.cardId;
+    me.rocket.siteId = null; me.rocket.tank = 12;
+    me.rocket.stack = [{ id: thrId, kind: 'patent', face: 'primary' }, { id: crewId, kind: 'crew', face: me.faction.face || 'primary' }];
+    me.rocket.activeThrusterId = thrId;
+    me.augments = augs;
+    return applyOperation(st, { kind: 'MOVE', segments: [{ from: null, to, burns: 1, turn: 1 }] }, { profileId: me.profileId });
+  };
+  const hall = 'thr_hall_effect';
+  const bare = fly(hall, {});
+  assert(!bare.ok && bare.error === 'thruster_unsupported', `a Hall Effect flew with no e electric supply: ${bare.error || 'accepted'}`);
+  const b1 = fly(hall, { battery: { colonySite: 'ceres', side: 1 } });
+  assert(b1.ok, `Battery 1 did not power the Hall Effect: ${b1.error} ${JSON.stringify(b1.detail || {})}`);
+  const b2 = fly(hall, { battery: { colonySite: 'ceres', side: 2 } });
+  assert(!b2.ok && b2.error === 'thruster_unsupported', `Battery 2 (antimatter) powered an electric thruster: ${b2.error || 'accepted'}`);
+  return `Hall Effect: refused bare (${bare.error}), flies with Battery 1, refused with Battery 2`;
+});
+
 check('Augment Heart side 2: a second delegate move in a Fundraise', () => {
   const { st, me } = colonyAugGame('heart', 2);
   const home = (st.homeIdeology || {})[me.profileId];
@@ -11291,6 +11314,39 @@ check('Beehive: an operational robonaut and refinery at a busted size-1 site', (
   const two = allSiteSlugs().find((s) => nodeSizeNumber(s) === 2);
   assert(run(two) === 'destination_conditions', `size-2 ${two}`);
   return `busted Eureka ok; unbusted, no refinery, glitched and size-2 ${two} refused`;
+});
+
+check('a contract trades in a negotiation with its timepiece and late-fee aquas (4B2g)', () => {
+  const res = winContract(m4Game(), 'M4N228F', { years: 5 });
+  let st = res.st;
+  const holder = pl(st, res.riv);
+  const other = pl(st, res.ini);
+  const id = res.c.id;
+  assert((holder.contractHand || []).includes(id) && holder.timepiece && holder.timepiece.contractId === id, 'the winner holds the contract and its timepiece');
+  holder.contractMeta[id].paid = 3;   // late-fee aquas on the card
+  const tp = { ...holder.timepiece };
+  // The holder must be the one offering; make it their turn.
+  st.activeIndex = st.players.findIndex((p) => p.profileId === holder.profileId);
+  other.aqua = 10;
+  const offer = (s) => applyOperation(s, { kind: 'TRADE_OFFER', partnerId: other.profileId, give: { contractIds: [id] }, receive: { aqua: 4 } }, { profileId: holder.profileId });
+  // The receiver's timepiece must be free.
+  const busy = JSON.parse(JSON.stringify(st));
+  pl(busy, other.profileId).timepiece = { contractId: 'x', due: 1, slot: 1, deadbeat: false };
+  const ob = offer(busy);
+  if (ob.ok) {
+    const ab = applyOperation(ob.state, { kind: 'TRADE_ACCEPT', version: ob.state.trade.version }, { profileId: other.profileId });
+    assert(!ab.ok && ab.error === 'receiver_timepiece_in_use', `busy timepiece: ${ab.error || 'accepted'}`);
+  } else assert(ob.error === 'receiver_timepiece_in_use', `busy timepiece offer: ${ob.error}`);
+  const o = offer(st);
+  assert(o.ok, `contract offer: ${o.error}`);
+  const acc = applyOperation(o.state, { kind: 'TRADE_ACCEPT', version: o.state.trade.version }, { profileId: other.profileId });
+  assert(acc.ok, `accept: ${acc.error}`);
+  const H = pl(acc.state, holder.profileId), O = pl(acc.state, other.profileId);
+  assert(!(H.contractHand || []).includes(id) && (O.contractHand || []).includes(id), 'the card did not change hands');
+  assert(!H.contractMeta[id] && O.contractMeta[id] && O.contractMeta[id].paid === 3, 'the meta / late-fee aquas did not follow');
+  assert(!H.timepiece && O.timepiece && O.timepiece.contractId === id && O.timepiece.due === tp.due, `timepiece: ${JSON.stringify(O.timepiece)}`);
+  assert(/contract/.test(acc.log), `log: ${acc.log}`);
+  return `${res.c.faces.primary.name} traded for 4 aqua: timepiece (due ${tp.due}) and 3 paid aquas went with it`;
 });
 
 check('When fulfilling: Planetary Protection busts the site and seats 2 delegates; Beehive prospects the busted site', () => {

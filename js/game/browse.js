@@ -2884,6 +2884,12 @@ function sharedUnitLocation(a, b) {
   return leo ? 'leo' : null;
 }
 const tradeSharedLocation = sharedUnitLocation;
+// A contract's name on the side it is held (any seat's contract meta).
+function contractTradeName(id) {
+  const holder = ((_onlineSnapshot && _onlineSnapshot.players) || []).find((p) => p.contractMeta && p.contractMeta[id]);
+  const f = contractFace(id, (holder && holder.contractMeta[id].side) || 'blue');
+  return f ? f.name : id;
+}
 function cardLabel(id) {
   const c = PATENTS_BY_ID[id] || CREW_BY_ID[id];
   return c ? c.name : id;
@@ -3029,6 +3035,30 @@ function buildTradeColumn(title, owner, context, opts = {}) {
     : cardGroup('LEO Stack',
       (owner.leo || []).filter(leoSlotTradeable).map((s) => s.id),
       'No tradeable cards in the LEO Stack.');
+  // M4 contracts (4B2g): unfulfilled, not in default, in the hand (anywhere) or
+  // on the LEO Stack (a LEO meeting). Its timepiece and late-fee aquas go along.
+  const contractChecks = [];
+  if (isM4()) {
+    const meta = owner.contractMeta || {};
+    const ids = (owner.contractHand || []).concat(atSite ? []
+      : (owner.leo || []).filter((sl) => sl && sl.kind === 'contract').map((sl) => sl.id))
+      .filter((id) => meta[id] && !meta[id].default);
+    if (ids.length) {
+      const lbl = document.createElement('div');
+      lbl.className = 'mp-trade-sub';
+      lbl.textContent = 'Contracts';
+      col.appendChild(lbl);
+      for (const id of ids) {
+        const f = contractFace(id, meta[id].side || 'blue');
+        const w = document.createElement('label');
+        w.className = 'mp-trade-check';
+        const cb = document.createElement('input'); cb.type = 'checkbox'; cb.value = id;
+        w.append(cb, document.createTextNode(` ${f ? f.name : id}${owner.timepiece && owner.timepiece.contractId === id ? ' ⏱' : ''}`));
+        col.appendChild(w);
+        contractChecks.push(cb);
+      }
+    }
+  }
 
   // Crew ability grant (abstract). Pick one ability + a term.
   const abilities = grantableAbilitiesOf(owner);
@@ -3078,6 +3108,7 @@ function buildTradeColumn(title, owner, context, opts = {}) {
       handCardIds: handChecks.filter((c) => c.checked).map((c) => c.value),
       cargoCardIds: cargoChecks.filter((c) => c.checked).map((c) => c.value),
       leoCardIds: leoChecks.filter((c) => c.checked).map((c) => c.value),
+      contractIds: contractChecks.filter((c) => c.checked).map((c) => c.value),
       abilities: [],
       lunaGrant: !!(lunaChk && lunaChk.checked),
     };
@@ -3215,7 +3246,7 @@ function openTradeBuilder(opts = {}) {
     send.addEventListener('click', async () => {
       const give = giveCol.read();
       const receive = recvCol.read();
-      const empty = (s) => !s.aqua && !s.water && !s.handCardIds.length && !s.cargoCardIds.length && !s.leoCardIds.length && !s.abilities.length && !s.lunaGrant;
+      const empty = (s) => !s.aqua && !s.water && !s.handCardIds.length && !s.cargoCardIds.length && !s.leoCardIds.length && !s.abilities.length && !s.lunaGrant && !(s.contractIds || []).length;
       const entTrade = opts.isCounter && _onlineSnapshot && _onlineSnapshot.trade && _onlineSnapshot.trade.enterprise;
       if (empty(give) && empty(receive) && !entTrade) { err.textContent = 'Put at least one item on the table.'; return; }
       send.disabled = true;
@@ -3246,6 +3277,7 @@ function tradeSideText(side) {
   for (const id of (side.handCardIds || [])) parts.push(cardLabel(id));
   for (const id of (side.cargoCardIds || [])) parts.push(cardLabel(id));
   for (const id of (side.leoCardIds || [])) parts.push(`${cardLabel(id)} (LEO)`);
+  for (const id of (side.contractIds || [])) parts.push(`📜 ${contractTradeName(id)}`);
   for (const g of (side.abilities || [])) {
     parts.push(`${abilityLabel(g.ability)} (${g.turns == null ? 'permanent' : g.turns + ' turns'})`);
   }
@@ -3269,6 +3301,7 @@ function tradeSideEl(side) {
     b.addEventListener('click', () => openCardPreview(id));
     nodes.push(b);
   }
+  for (const id of (side.contractIds || [])) nodes.push(document.createTextNode(`📜 ${contractTradeName(id)}`));
   for (const g of (side.abilities || [])) {
     nodes.push(document.createTextNode(`${abilityLabel(g.ability)} (${g.turns == null ? 'permanent' : g.turns + ' turns'})`));
   }
@@ -9670,6 +9703,8 @@ function humanizeOnlineOpError(code, detail) {
     fundraise_first: 'A contract auction is the last step of a Fundraise: fundraise first.',
     contract_auction_done: 'You already held this turn\'s contract auction.',
     timepiece_in_use: 'Your timepiece is already on the Sunspot Cycle: fulfill or repay that contract first.',
+    receiver_timepiece_in_use: 'The receiving player\'s timepiece is already on the Sunspot Cycle.',
+    contract_not_in_hand_or_leo: 'A contract trades from the hand, or from the LEO Stack at LEO.',
     contract_auction_prohibited: 'No contract auctions during War or Anarchy.',
     deck_not_open: 'That deck shares no ideology with an Active Law (nor, with Connections, with one of your delegates).',
     target_secured: 'That player holds a Secured contract: immune to Felonies during Anarchy.',
@@ -12406,6 +12441,12 @@ function myCrewReactorKinds() {
     if (pw.crewOnBoardReactorHome && !isHomeBernalUnit(bn)) continue;
     kinds = kinds ? Array.from(new Set([...kinds, ...pw.crewOnBoardReactor])) : [...pw.crewOnBoardReactor];
   }
+  // M4 Battery on your Crew (engine batteryCrewKinds): side 1 e electric,
+  // side 2 antimatter. Augments exist only in M4, which never runs with M2.
+  const bat = (mySnapshotPlayer() || {}).augments;
+  const b = bat && bat.battery;
+  const bk = b ? (b.side === 1 ? ['gen-electric'] : b.side === 2 ? ['reactor-antimatter'] : []) : [];
+  if (bk.length) kinds = Array.from(new Set([...(kinds || []), ...bk]));
   return kinds;
 }
 // A freighter / Bernal unit's rad-hardness (installed face) - the belt-roll
