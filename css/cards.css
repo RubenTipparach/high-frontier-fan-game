@@ -2019,7 +2019,7 @@ button.m4c-aug:hover { border-color: #60a5fa; background: #232838; }
 .m4c-fr-step .m4-dest-link, .m4c-fr-step .m4c-deck.closed .m4-dest-link, .enterprise-pick .m4-dest-link {
   cursor: inherit; text-decoration: none; pointer-events: none; }
 .m4c-overlay.m4c-minimized { display: none; }
-.m4-loc-pins { position: fixed; top: calc(var(--vhpx, 1vh) * 14); left: 50%; transform: translateX(-50%); z-index: 95;
+.m4-loc-pins { position: fixed; top: calc(var(--vhpx, 1vh) * 14); left: 50%; /* placed under the map's top bar by browse.js */ transform: translateX(-50%); z-index: 95;
   background: rgba(16, 18, 28, .94); color: #e8e8ee; border: 1px solid #3a3d4c; border-radius: 10px;
   padding: 6px 8px; max-width: min(320px, calc(100% - 32px)); box-shadow: 0 6px 24px rgba(0, 0, 0, .5); }
 .m4-loc-pins-head { display: flex; align-items: center; gap: 10px; font-size: 14px; }

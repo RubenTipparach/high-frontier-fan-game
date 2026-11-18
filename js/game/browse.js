@@ -8270,7 +8270,26 @@ function showContractPins(title, nodes, auctionHidden) {
     box.appendChild(back);
   }
   document.body.appendChild(box);
+  placeContractPins();
 }
+// Sit the pin list on the map, just under whatever floats along the map's top
+// edge (the toolbar, the collapsed panel pill on a phone), centred over the map.
+function placeContractPins() {
+  const box = document.getElementById('m4-loc-pins');
+  if (!box) return;
+  const map = document.getElementById('browse-map-canvas');
+  const mr = map ? map.getBoundingClientRect() : { left: 0, right: window.innerWidth, top: 0 };
+  let top = mr.top;
+  for (const el of document.querySelectorAll('.map-toolbar, #browse-sidepanel')) {
+    const r = el.getBoundingClientRect();
+    // Only a bar floating over the top of the map (not a full-height sidebar).
+    if (!r.width || !r.height || r.height > 160 || r.right <= mr.left || r.left >= mr.right) continue;
+    if (r.top <= mr.top + 160) top = Math.max(top, r.bottom);
+  }
+  box.style.top = `${toLayoutPx(top + 8)}px`;
+  box.style.left = `${toLayoutPx((mr.left + mr.right) / 2)}px`;
+}
+window.addEventListener('resize', placeContractPins);
 function locateContractPlaces(link) {
   const tokens = String(link.dataset.places || '').split('|').filter(Boolean);
   const nodes = contractPlaceNodes(tokens);
