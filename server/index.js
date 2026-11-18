@@ -1711,7 +1711,9 @@ app.post('/lobbies/:id/settings', requireProfile, (req, res) => {
   // seat. Same forced-off treatment as Sirens rather than a hard error, so a
   // host editing an unrelated setting is never stranded by a stale tick.
   const allowM0 = !lobby.sirens && !(lobby.hermes && hermesSeats > 1);
-  if (body.m0 !== undefined) { sets.push('m0 = ?'); args.push((body.m0 && allowM0) ? 1 : 0); }
+  // M4 requires M0 (4A1a): while the room keeps M4, M0 cannot be switched off.
+  const keepsM4 = (body.m4 !== undefined && m4Allowed(req)) ? !!body.m4 : !!lobby.m4;
+  if (body.m0 !== undefined) { sets.push('m0 = ?'); args.push(((body.m0 || keepsM4) && allowM0) ? 1 : 0); }
   else if (!allowM0) {
     // The host did not touch M0, but the seat count they just raised has taken
     // the option away. Clear it in the same save so the lobby never advertises

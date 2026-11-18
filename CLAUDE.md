@@ -241,7 +241,9 @@ per room and carried into the game state as a boolean (`state.m0`,
   create-form / solo-wizard / room-settings rows show on the same admin-OR-tester
   signal (`js/main.js#syncM4Rows`, `lobby.js#setM4Allowed`). The alpha-tester
   banner names M4. Without M2, Parenthood (heart side 1) and the Promotion
-  counts are unavailable (owner 2026-11-18). M4 REQUIRES M0 (4A1a) and forces it on. It does not combine with a
+  counts are unavailable (owner 2026-11-18). M4 REQUIRES M0 (4A1a) and forces it on: ticking M4 ticks and LOCKS the M0
+  box (create form, solo setup, room settings; `lobby.js#lockM0ForM4`), and room
+  settings cannot clear M0 while the room keeps M4. It does not combine with a
   variant (`m4_no_variants`, on create AND room settings); V9 Sirens in
   particular is not compatible with M4 (owner 2026-11-18). The 4G solitaire rules are DONE: CEO
   Solitaire (V6) implements them, including the 4G3 Solitaire Assembly (owner
@@ -258,7 +260,11 @@ per room and carried into the game state as a boolean (`state.m0`,
   it), survives a Crew death (it respawns at LEO), and comes off only when that
   Crew founds a Colony or leaves play. Its marks (Jar 1 0 Mass, Hexagon
   prospector, Battery `augSupplies`) sit on that Crew's slot only. UI: click a
-  chit you hold in the Contracts panel to open the Augment wizard; the turn bar
+  chit you hold in the Contracts panel to open the Augment wizard; the chits
+  (`js/game/augment-sides.js`, the side's picture inside the shape) are drawn on
+  the Crew card's right edge (`card-ui.js#setAugChitHook`), fading on hover with
+  a tip. The contract auction is ONLY the last step of the Fundraise window (no
+  toolbar or Market button starts it); the turn bar
   carries a timepiece badge ("N turns left") that opens the contract and where
   it is.
   Stages and the contract card-data columns: `docs/module-m4-plan.md`.

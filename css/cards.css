@@ -2002,3 +2002,11 @@ button.m4c-aug:hover { border-color: #60a5fa; background: #232838; }
 .m4c-fr-skip button { background: #374151; }
 .hand-stack-chip .chip-emoji { font-size: 18px; line-height: 1; }
 .m4c-deck .m4c-btns { justify-content: center; }
+
+/* M4 augmentation chits on a Crew card: clipped to its right edge. */
+.card-aug-chits { position: absolute; top: 48px; right: -16px; display: flex; flex-direction: column; gap: 4px; z-index: 3; }
+.card-aug-chit { display: block; line-height: 0; cursor: help; transition: opacity .15s; }
+.card-aug-chit:hover { opacity: .5; }
+.card-aug-chits svg { filter: drop-shadow(0 2px 3px rgba(0,0,0,.65)); }
+.m4c-aw-side { flex-direction: row; align-items: center; gap: 10px; }
+.m4c-aw-side > span { display: flex; flex-direction: column; gap: 2px; }

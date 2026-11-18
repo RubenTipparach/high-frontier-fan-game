@@ -86,6 +86,14 @@ const FIT = {
   triangle: { cx: 24, cy: 31, k: 0.6 },
 };
 
+// "Jar, side 1: This Colonist is 0 Mass."
+export function augmentSideTip(shape, side) {
+  const a = AUGMENTS[shape];
+  if (!a) return '';
+  const t = ((a.tip || '').split(' / ')[side - 1] || '').trim();
+  return `${a.name}, side ${side}: ${t}`;
+}
+
 // One side of a chit: the chit IS its white shape (as the Cybernetics icons
 // print on a contract), with the side's ability drawn inside it.
 export function augmentSideSvg(shape, side, { size = 48, title = true } = {}) {

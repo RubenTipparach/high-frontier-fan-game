@@ -23,6 +23,7 @@ import { isM4, isM2 } from './online-mode.js';
 import { COLONISTS_BY_ID } from '../../data/colonists.js';
 import { IDEOLOGY_ORDER, IDEOLOGY_BY_KEY, activeLaws, usesSoloAssembly, voteWinners } from '../../data/assembly.js';
 import { CREW_BY_ID } from '../../data/crew.js';
+import { augmentSideSvg } from './augment-sides.js';
 
 let D = null;               // deps from browse.js (snapshot readers + submitters)
 let _panelOpen = false;
@@ -93,11 +94,7 @@ function ensureTag() {
     tag.id = 'turn-tag-contracts';
     tag.className = 'turn-tag';
     tag.title = 'Your contracts: timepiece, auction, boost, fulfill, late fees';
-    tag.addEventListener('click', () => {
-      // Back to the Fundraise's contract auction step while it is waiting.
-      if (canAuctionNow(snap(), me(), D.myTurn()) && D.openContractStep) { D.openContractStep(); return; }
-      _panelOpen = true; renderPanel();
-    });
+    tag.addEventListener('click', () => { _panelOpen = true; renderPanel(); });
     host.appendChild(tag);
   }
   return tag;
@@ -114,9 +111,10 @@ export function refreshContractsUi() {
       const p = me();
       const tp = p && p.timepiece;
       const late = tp && tp.deadbeat;
-      const canAuction = canAuctionNow(s, p, D.myTurn());
-      tag.textContent = late ? '⏰ contract LATE' : (canAuction ? '📜 contract auction' : '📜 contracts');
-      tag.classList.toggle('turn-tag-alert', !!(late || canAuction));
+      // The contract auction lives only in the Fundraise window (owner
+      // 2026-11-18), so the tag never advertises it.
+      tag.textContent = late ? '⏰ contract LATE' : '📜 contracts';
+      tag.classList.toggle('turn-tag-alert', !!late);
     }
   }
   if (!on) { closePanel(); renderContractAuction(null); _seenFulfilled = null; return; }
@@ -216,7 +214,6 @@ function locationOf(p, id) {
 // The Completed contracts tab, opened from the Contracts chip in the stack row.
 export function openCompletedContracts() {
   _tab = 'yours';
-  _tabForced = true;   // a waiting auction must not pull it back to the Market
   _panelOpen = true;
   renderPanel();
 }
@@ -251,7 +248,6 @@ export function showContractWhere(id) {
 }
 
 let _tab = null;        // 'market' | 'yours'
-let _tabForced = false; // the Market was opened for a pending auction
 // May the viewer start a contract auction now (the end of their Fundraise)?
 function canAuctionNow(s, p, myTurn) {
   return !!(s && p && myTurn && p.fundraisedThisTurn && !p.contractAuctionDone && !p.timepiece && !s.auction
@@ -320,7 +316,7 @@ function renderPanel() {
   const parts = [];
   // Market contracts: the three decks only (owner 2026-11-18: the dial shows in
   // the auction itself). A claimed default chit is named.
-  const auctionOpen = canAuctionNow(s, p, myTurn);
+  const auctionOpen = false;   // the auction starts only in the Fundraise window
   if (s.defaultChit) market.push(`<p class="muted">🏷 Default chit: ${esc(nameOf(s.defaultChit.profileId))} (${s.defaultChit.side === 'gold' ? -6 : -3} VP)</p>`);
   market.push(decksHtml(s, p, auctionOpen));
 
@@ -356,10 +352,7 @@ function renderPanel() {
   if (fulfilled) parts.push(`<h4>Fulfilled</h4><div class="m4c-row">${fulfilled}</div>`);
   if (partnered.length) parts.push(`<h4>Enterprises</h4><div class="m4c-row">${partnered.join('')}</div>`);
 
-  // An auction waiting to be started opens on the Market; otherwise the tab the
-  // player last chose (Your contracts at first).
-  if (auctionOpen && !_tabForced) { _tab = 'market'; _tabForced = true; }
-  if (!auctionOpen) _tabForced = false;
+  // The tab the player last chose (Completed contracts at first).
   const tab = _tab || 'yours';
   if (!parts.length) parts.push('<p class="muted">None yet.</p>');
   el.innerHTML = `<div class="m4c-modal" role="dialog" aria-label="Contracts">
@@ -401,7 +394,8 @@ function augmentationsHtml(s, p, myTurn) {
     const st = a ? `<span class="m4c-aug-tag">Augmented</span> ${esc(on)} · side ${a.side}` : (have ? 'ready' : '');
     // Without M2, any chit in your possession opens the Augment operation.
     const click = !s.m2 && myTurn && have;
-    return `<${click ? 'button type="button" data-act="augment" data-shape="' + sh + '"' : 'div'} class="m4c-aug ${have ? 'have' : 'lack'}${a ? ' on' : ''}"${a ? ` data-tip="${esc(sideText(sh, a.side))}"` : ''}>${augmentGlyph(sh, { size: 26 })}<span><b>${AUGMENTS[sh].name}</b> ${st}</span></${click ? 'button' : 'div'}>`;
+    const glyph = a ? augmentSideSvg(sh, a.side, { size: 34 }) : augmentGlyph(sh, { size: 26 });
+    return `<${click ? 'button type="button" data-act="augment" data-shape="' + sh + '"' : 'div'} class="m4c-aug ${have ? 'have' : 'lack'}${a ? ' on' : ''}"${a ? ` data-tip="${esc(sideText(sh, a.side))}"` : ''}>${glyph}<span><b>${AUGMENTS[sh].name}</b> ${st}</span></${click ? 'button' : 'div'}>`;
   }).join('');
   const opts = [...portfolio].map((sh) => `<option value="${sh}">${AUGMENTS[sh].name}</option>`).join('');
   const controls = (key, attrs) => (myTurn && opts ? `<div class="m4c-controls"><select data-shape-for="${key}">${opts}</select>
@@ -699,7 +693,7 @@ function renderAugmentWizard() {
   const sides = [1, 2].map((n) => {
     const blocked = shape === 'heart' && n === 1;   // Parenthood needs M2
     return `<button type="button" class="m4c-aw-side${pl && pl.side === n ? ' sel' : ''}" data-aw-side="${n}" ${!pl || blocked ? 'disabled' : ''}${blocked ? ' data-tip="Needs M2"' : ''}>
-      <b>Side ${n}</b><small>${esc(sideText(shape, n))}</small></button>`;
+      ${augmentSideSvg(shape, n, { size: 44 })}<span><b>Side ${n}</b><small>${esc(sideText(shape, n))}</small></span></button>`;
   }).join('');
   ov.innerHTML = `<div class="m4c-modal m4c-aw" role="dialog" aria-label="Augment">
     <div class="m4c-head"><h3>Augment</h3><button type="button" class="m4c-close" aria-label="Close">✕</button></div>

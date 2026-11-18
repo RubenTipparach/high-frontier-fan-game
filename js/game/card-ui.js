@@ -10,6 +10,7 @@
 // upside-down when installed.
 
 import { renderContractCard } from './contract-card.js';
+import { augmentSideSvg, augmentSideTip } from './augment-sides.js';
 import { supportIconSvg, thermBadgeSvg, hasSupportIcon, typeIconSvg, pacmanSvg } from './support-icons.js';
 import { toLayoutPx } from '../ui-scale.js';
 import { assetUrl } from '../base.js';
@@ -23,6 +24,11 @@ import { assetUrl } from '../base.js';
 // to persist (it only remembers cards actually in the player's hand).
 let _radBoostSideHook = null;
 export function setRadBoostSideHook(hook) { _radBoostSideHook = hook || null; }
+// M4 augmentation chits on a Crew card: hook(cardId) -> [[shape, side], ...]
+// (set by browse.js from the game; null off M4). The chits are drawn as part of
+// the card, clipped to its right edge, so they travel with it everywhere.
+let _augChitHook = null;
+export function setAugChitHook(hook) { _augChitHook = hook || null; }
 
 // M2 colonist card art (scripts/gen-colonist-art.mjs -> assets/colonists/).
 // Each colonist has a front (White face) + back (Purple/promoted face) SVG
@@ -205,6 +211,21 @@ function fillRadStat(el, printed, cardId) {
   el.append(was, now);
 }
 
+// The M4 augmentation chits a Crew card carries, clipped to its right edge.
+// Hover fades a chit to half so the card shows through, and the tip says what
+// that side does (owner 2026-11-18).
+function addAugChits(el, card) {
+  if (!_augChitHook) return;
+  const chits = _augChitHook(card.srcId || card.id) || [];
+  if (!chits.length) return;
+  const box = document.createElement('div');
+  box.className = 'card-aug-chits';
+  box.innerHTML = chits.map(([shape, side]) => {
+    const tip = augmentSideTip(shape, side);
+    return `<span class="card-aug-chit" data-tip="${tip.replace(/"/g, '&quot;')}">${augmentSideSvg(shape, side, { size: 40, title: false })}</span>`;
+  }).join('');
+  el.appendChild(box);
+}
 export function renderCard(card, { type, supplied, onSupportClick, face, radSide, privilegeDisabled } = {}) {
   // M4: a contract card draws in its own layout, on the side it rides on (the
   // secondary face is the gold side, 4B1b).
@@ -258,6 +279,7 @@ export function renderCard(card, { type, supplied, onSupportClick, face, radSide
     el.dataset.side = showSide;
     inner.appendChild(buildFace(card, showSide, kind, supplied, _crewOpts));
     el.appendChild(inner);
+    addAugChits(el, card);
     addSirenMark(el, card.srcId || card.id);
     attachTipsTo(el);
     return el;

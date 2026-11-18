@@ -180,7 +180,7 @@ import {
   renderCard, thrustVisual, thrustModVisual, attachTipsTo,
   REQUIREMENT_VIS, REQ_SUPPLIER_TYPE,
   svgSunChip, svgBallerinaChip, cardGlanceSummary, setRadBoostSideHook,
-  isSirenRadZero,
+  isSirenRadZero, setAugChitHook,
 } from './card-ui.js';
 import { supportIconSvg } from './support-icons.js';
 import {
@@ -35715,6 +35715,18 @@ export const STATS = {
 // M4 contracts UI (contracts-ui.js): reads the cached snapshot, routes on-turn
 // actions through submitOnlineOp and auction bids (any seat) through the
 // auction submitter, exactly like the patent auction.
+// M4 augmentation chits drawn on Crew cards (any seat's crew: augments are
+// open information).
+setAugChitHook((cardId) => {
+  if (!isM4() || !_onlineSnapshot) return null;
+  const out = [];
+  for (const p of (_onlineSnapshot.players || [])) {
+    for (const [shape, a] of Object.entries(p.augments || {})) {
+      if (a && a.crewId && String(a.crewId) === String(cardId)) out.push([shape, a.side]);
+    }
+  }
+  return out;
+});
 initContractsUi({
   snapshot: () => _onlineSnapshot,
   me: () => mySnapshotPlayer(),
@@ -35723,8 +35735,6 @@ initContractsUi({
   submitAuctionOp: (op) => submitMpAuctionOp(op),
   toast: (msg, level) => { if (_onlineToast) _onlineToast(msg, level); },
   confirm: (opts) => confirmModal(opts),
-  // The Fundraise window's contract auction step (toolbar tag).
-  openContractStep: () => openAssemblyModal('contract'),
   // The name a player reads for a map space (a site, a Lagrange point, a hazard).
   spaceName: (slug) => {
     const n = _activeData && _activeData.sites ? _activeData.sites.find((x) => x.id2 === slug) : null;

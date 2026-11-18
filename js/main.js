@@ -12,7 +12,7 @@ import { ws } from './ws.js';
 import { isBatterySave, setBatterySave, applyBatterySaveClass, isHalloweenTheme, setHalloweenTheme, applyHalloweenClass, isHolidayTheme, setHolidayTheme, applyHolidayClass } from './prefs.js';
 import {
   initLobby, refreshLobbyList, openLobby, exitToLobbyList, createSoloRoom,
-  pinGlobalChatBottom, setM4Allowed,
+  pinGlobalChatBottom, setM4Allowed, lockM0ForM4,
 } from './lobby.js';
 import {
   initInvites, refreshInvitesList, subscribeInvitesForProfile,
@@ -579,10 +579,8 @@ function initNewGameModal() {
   document.getElementById('solo-m1')?.addEventListener('change', refreshSoloAqua);
   document.getElementById('solo-m2')?.addEventListener('change', refreshSoloAqua);
   // M4 requires M0 (4A1a): ticking it ticks M0 (the server forces it anyway).
-  document.getElementById('solo-m4')?.addEventListener('change', (e) => {
-    const m0box = document.getElementById('solo-m0');
-    if (e.target.checked && m0box) m0box.checked = true;
-  });
+  // M0 is then locked on until M4 is unticked (owner 2026-11-18).
+  document.getElementById('solo-m4')?.addEventListener('change', (e) => lockM0ForM4(document.getElementById('solo-m0'), e.target.checked));
   soloBtn.addEventListener('click', () => {
     if (modeSection) modeSection.classList.add('hidden');
     if (soloOpts) soloOpts.classList.remove('hidden');
@@ -763,7 +761,7 @@ function initNewGameModal() {
     if (m0cb) {
       if (ceo) { m0cb.checked = true; m0cb.disabled = true; }
       else if (sirens) { m0cb.checked = false; m0cb.disabled = true; }
-      else { m0cb.disabled = false; }
+      else { m0cb.disabled = false; delete m0cb.dataset.m4Lock; }
     }
     // V5 Hermes Fall may take Module 0, and at one seat it runs the SOLITAIRE
     // Assembly (4G3) - the same law set CEO Solitaire uses, where every ideology
@@ -783,6 +781,8 @@ function initNewGameModal() {
     {
       const m4cb = document.getElementById('solo-m4');
       if (m4cb) { if (ceo || scenario || tutorial) m4cb.checked = false; m4cb.disabled = ceo || scenario || tutorial; }
+      // M4 ticked (sandbox only): M0 stays ticked and locked.
+      if (m4cb && m4cb.checked && !ceo && !sirens) lockM0ForM4(document.getElementById('solo-m0'), true);
     }
     document.getElementById('solo-ceo-note')?.classList.toggle('hidden', !ceo);
     document.getElementById('solo-hermes-note')?.classList.toggle('hidden', !hermes);
