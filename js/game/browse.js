@@ -121,7 +121,7 @@ import { futureGoalForCard, checkFutureGoal, CENTAUR_SITE_IDS, GREEK_CAMP_IDS, T
 // M2 Colonist powers (FINAO halved etc.) - the same flags the engine reads.
 import { colonistPower } from '../../data/colonist-abilities.js';
 import { openBernalStackModal, openBernalFuelTank } from './bernal-modal.js';
-import { initContractsUi, refreshContractsUi, abandonBlock, contractFeeDue, payContractFee, abandonContract, timepieceBadge, renderContractAuctionStep, openCompletedContracts } from './contracts-ui.js';
+import { initContractsUi, closeContractsPanel, contractSpaceName, refreshContractsUi, abandonBlock, contractFeeDue, payContractFee, abandonContract, timepieceBadge, renderContractAuctionStep, openCompletedContracts } from './contracts-ui.js';
 import { getBernalSprite } from './bernal-sprite.js';
 import { fuelTankCylinderMarkup, fuelTransferSectionMarkup } from './fuel-tank-view.js';
 // One client card-lookup: patents PLUS the M2 Bernal cards (which live in
@@ -8206,6 +8206,117 @@ function navigateToChatLocation(siteId) {
   if (narrow) { try { showPane(null); } catch (e) { /* ignore */ } }
   _renderer.flyTo(site, locateZoom(4));
 }
+// M4 contract destination links (contract-card.js#destHtml): one place closes
+// whatever covers the map and flies there; several pin a list of them on the map.
+// Inert while a contract is being picked (the Fundraise deck step, the Enterprise
+// picker): there a tap on the card picks it.
+function contractPlaceNodes(tokens) {
+  if (!_activeData || !_activeData.sites) return [];
+  const out = [];
+  const add = (n) => { if (n && Number.isFinite(n.x) && Number.isFinite(n.y) && !out.includes(n)) out.push(n); };
+  for (const t of tokens) {
+    if (t.startsWith('body:')) {
+      const body = t.slice(5);
+      _activeData.sites.filter((n) => !n.isWaypoint && n.serverId && SITES_BY_ID[n.serverId]
+        && SITES_BY_ID[n.serverId].body === body).forEach(add);
+    } else {
+      add(_activeData.sites.find((n) => n.id2 === t) || (_activeData.byId && _activeData.byId[t]));
+    }
+  }
+  return out;
+}
+function ringContractPlaces(nodes) {
+  if (_renderer && typeof _renderer.setGroupHighlight === 'function') _renderer.setGroupHighlight(nodes && nodes.length ? nodes.map((n) => n.id) : null);
+}
+function closeContractPins() {
+  if (document.getElementById('m4-loc-pins')) ringContractPlaces(null);
+  document.getElementById('m4-loc-pins')?.remove();
+}
+function showContractPins(title, nodes, auctionHidden) {
+  closeContractPins();
+  const box = document.createElement('div');
+  box.id = 'm4-loc-pins';
+  box.className = 'm4-loc-pins';
+  const head = document.createElement('div');
+  head.className = 'm4-loc-pins-head';
+  head.innerHTML = `<b>📍 ${esc(title || 'Destination')}</b>`;
+  const x = document.createElement('button');
+  x.type = 'button'; x.className = 'm4-loc-pins-x'; x.textContent = '✕'; x.setAttribute('aria-label', 'Close');
+  x.addEventListener('click', () => {
+    closeContractPins();
+    document.getElementById('m4-contract-auction')?.classList.remove('m4c-minimized');
+  });
+  head.appendChild(x);
+  box.appendChild(head);
+  const list = document.createElement('div');
+  list.className = 'm4-loc-pins-list';
+  for (const n of nodes) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = contractSpaceName(n.id2 || n.id) || n.name || n.id2;
+    b.addEventListener('click', () => { if (_renderer) _renderer.flyTo(n, locateZoom(4)); });
+    list.appendChild(b);
+  }
+  if (nodes.length > 1) box.appendChild(list);
+  if (auctionHidden) {
+    const back = document.createElement('button');
+    back.type = 'button';
+    back.className = 'm4-loc-pins-back';
+    back.textContent = '↩ Auction';
+    back.addEventListener('click', () => {
+      document.getElementById('m4-contract-auction')?.classList.remove('m4c-minimized');
+      closeContractPins();
+    });
+    box.appendChild(back);
+  }
+  document.body.appendChild(box);
+}
+function locateContractPlaces(link) {
+  const tokens = String(link.dataset.places || '').split('|').filter(Boolean);
+  const nodes = contractPlaceNodes(tokens);
+  if (!nodes.length || !_renderer) return;
+  // Uncover the map: card previews / zooms and the contract panels close; a live
+  // contract auction only steps aside (the pin list brings it back).
+  document.querySelectorAll('.mp-modal-back').forEach((el) => el.remove());
+  for (const x of document.querySelectorAll('.card-modal-overlay .modal-x')) {
+    try { x.click(); } catch (e) { /* ignore */ }
+  }
+  closeContractsPanel();
+  document.getElementById('m4-contract-where')?.remove();
+  const auction = document.getElementById('m4-contract-auction');
+  if (auction) auction.classList.add('m4c-minimized');
+  let narrow = false;
+  try { narrow = window.matchMedia('(max-width: 720px)').matches; } catch (e) { /* ignore */ }
+  if (narrow) { try { showPane(null); } catch (e) { /* ignore */ } }
+  if (nodes.length === 1) {
+    if (auction) showContractPins(link.dataset.contract, nodes, true); else closeContractPins();
+    _renderer.flyTo(nodes[0], locateZoom(4));
+  } else {
+    showContractPins(link.dataset.contract, nodes, !!auction);
+    _renderer.flyToFit(nodes, { maxZoom: locateZoom(4) });
+  }
+  ringContractPlaces(nodes);
+  // A lone place's ring fades on its own; a pinned list keeps them lit.
+  if (!document.getElementById('m4-loc-pins')) {
+    setTimeout(() => { if (!document.getElementById('m4-loc-pins')) ringContractPlaces(null); }, 30000);
+  }
+}
+const CONTRACT_PICKING = '.m4c-fr-step, .enterprise-pick';
+document.addEventListener('click', (e) => {
+  const a = e.target.closest && e.target.closest('.m4-dest-link');
+  if (!a || a.closest(CONTRACT_PICKING)) return;
+  // Capture phase: the card under the link (a hand tile that zooms, a preview
+  // that closes on any click) never sees this tap.
+  e.preventDefault();
+  e.stopPropagation();
+  locateContractPlaces(a);
+}, true);
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  const a = e.target.closest && e.target.closest('.m4-dest-link');
+  if (a && !a.closest(CONTRACT_PICKING)) { e.preventDefault(); locateContractPlaces(a); }
+}, true);
+
 let _chatLocWired = false;
 function wireChatLocLinks() {
   if (_chatLocWired) return;

@@ -42,6 +42,7 @@ export function initContractsUi(deps) {
 }
 // The name a player reads for a map space: the site, the Lagrange point
 // (numbered as on the board), the hazard by its board caption.
+export function contractSpaceName(slug) { return spaceName(slug); }
 function spaceName(slug) {
   const site = SITES_BY_ID[String(slug).replace(/-/g, '_')] || SITES_BY_ID[slug];
   if (site) return site.name;
@@ -184,6 +185,7 @@ const turnLine = (s) => `Turn ${(s.turn | 0) + 1}`;
 
 
 // ---- the panel --------------------------------------------------------------------
+export function closeContractsPanel() { closePanel(); }
 function closePanel() {
   _panelOpen = false;
   const el = document.getElementById('m4-contracts-panel');

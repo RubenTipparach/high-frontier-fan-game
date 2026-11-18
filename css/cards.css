@@ -2010,3 +2010,23 @@ button.m4c-aug:hover { border-color: #60a5fa; background: #232838; }
 .card-aug-chits svg { filter: drop-shadow(0 2px 3px rgba(0,0,0,.65)); }
 .m4c-aw-side { flex-direction: row; align-items: center; gap: 10px; }
 .m4c-aw-side > span { display: flex; flex-direction: column; gap: 2px; }
+
+/* M4 contract destination: a map link (tap to show the place). Inert while a
+   contract is being picked, where a tap on the card picks it. */
+.m4-dest-link { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+.m4-dest-link:hover, .m4-dest-link:focus-visible { color: #ffd166; outline: none; }
+.m4c-deck.closed .m4-dest-link { pointer-events: auto; }
+.m4c-fr-step .m4-dest-link, .m4c-fr-step .m4c-deck.closed .m4-dest-link, .enterprise-pick .m4-dest-link {
+  cursor: inherit; text-decoration: none; pointer-events: none; }
+.m4c-overlay.m4c-minimized { display: none; }
+.m4-loc-pins { position: fixed; top: calc(var(--vhpx, 1vh) * 14); left: 50%; transform: translateX(-50%); z-index: 95;
+  background: rgba(16, 18, 28, .94); color: #e8e8ee; border: 1px solid #3a3d4c; border-radius: 10px;
+  padding: 6px 8px; max-width: min(320px, calc(100% - 32px)); box-shadow: 0 6px 24px rgba(0, 0, 0, .5); }
+.m4-loc-pins-head { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.m4-loc-pins-head b { flex: 1; }
+.m4-loc-pins-x { background: none; border: 0; color: #aaa; font-size: 16px; cursor: pointer; }
+.m4-loc-pins-list { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; max-height: calc(var(--vhpx, 1vh) * 30); overflow-y: auto; }
+.m4-loc-pins-list button, .m4-loc-pins-back { background: #23263a; color: #e8e8ee; border: 1px solid #3f4460;
+  border-radius: 14px; padding: 3px 9px; font-size: 12px; cursor: pointer; }
+.m4-loc-pins-list button:hover { border-color: #ffd166; }
+.m4-loc-pins-back { margin-top: 8px; width: 100%; }
