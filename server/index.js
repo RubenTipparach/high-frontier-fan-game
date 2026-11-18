@@ -7400,6 +7400,10 @@ document.addEventListener('click', function (ev) {
         + '<select class="ge-grade"><option value="water"' + (p.rocket && p.rocket.tankGrade === 'water' ? ' selected' : '') + '>water</option>'
         + '<option value="dirt"' + (p.rocket && p.rocket.tankGrade === 'dirt' ? ' selected' : '') + '>dirt</option></select>'
         + '<button data-act="set_water">Set</button></div>';
+      if (st.auction && st.auction.kind !== 'contract' && String(st.auction.auctioneerId) === String(p.profileId)) {
+        html += '<div class="ge-stats">🔨 Open auction: ' + esc(st.auction.cardId)
+          + ' <button data-act="end_auction_grants" title="Close it the way Research Grants resolves: the lot to this Hand for 1 aqua, no support card.">End as Research Grants (1 aqua)</button></div>';
+      }
       // This turn's remaining budgets. Handing a move back is what lets a
       // reported move bug be reproduced on the spot instead of waiting a turn.
       html += '<div class="ge-stats">🎯 Ops <input type="number" class="ge-ops" min="0" max="99" value="' + (p.opsRemaining || 0) + '">'
@@ -7744,6 +7748,8 @@ document.addEventListener('click', function (ev) {
       var bi = btn.getAttribute('data-bn');
       var bnIn = pEl.querySelector('.ge-bnmoves[data-bn="' + bi + '"]');
       postEdit({ action: 'set_turn_budget', unit: 'bernal:' + bi, profileId: pid, value: Number(bnIn.value) }, 'Bernal moves set.');
+    } else if (act === 'end_auction_grants') {
+      postEdit({ action: 'end_auction_grants', profileId: pid }, 'Auction ended as Research Grants.');
     } else if (act === 'set_aqua') {
       postEdit({ action: 'set_aqua', profileId: pid, value: Number(pEl.querySelector('.ge-aqua').value) }, 'Aqua set.');
     } else if (act === 'set_water') {
@@ -8298,6 +8304,9 @@ app.get('/admin/games/:gameId/ops/export.json', requireAdminRead, (req, res) => 
 //                 promote to purple; promo card types gate on the module)
 //   promote_unit { profileId, unit: 'freighter'|'bernal:<i>', on }
 //   set_aqua    { profileId, value }
+//   end_auction_grants { profileId }   (the auctioneer: end the open research
+//                 auction as Research Grants - the lot to their Hand for 1 aqua,
+//                 no support card. For an auction opened under Equality.)
 //   set_water   { profileId, value, grade? }
 //   teleport    { profileId, node }              (node id/slug OR site name)
 //   create_factory   { profileId, siteId, colony }  (+ claim disc; colony = bool)
@@ -8416,6 +8425,20 @@ app.post('/admin/games/:gameId/edit', requireAdminEdit, (req, res) => {
       bn.movesRemaining = v;
       log = `Correction: ${name}'s ${cardLabel(bn.cardId)} remaining moves set to ${v}.`;
     }
+  } else if (body.action === 'end_auction_grants') {
+    // O5e correction: an auction that should never have opened (Equality in
+    // force) is closed the way Research Grants would have resolved it. The lot
+    // card already left the deck when the auction opened, and the operation was
+    // already spent, so only the card, the aqua and the lot change hands.
+    const a = state.auction;
+    if (!a || a.kind === 'contract') return res.status(400).json({ error: 'no_research_auction' });
+    if (String(a.auctioneerId) !== String(player.profileId)) return res.status(400).json({ error: 'not_auctioneer' });
+    if ((player.aqua | 0) < 1) return res.status(400).json({ error: 'insufficient_aqua' });
+    player.aqua -= 1;
+    (player.hand = player.hand || []).push(a.cardId);
+    state.auction = null;
+    log = `Correction: the ${cardLabel(a.cardId)} auction is ended as Research Grants (Equality). `
+      + `${name} pays 1 aqua and takes ${cardLabel(a.cardId)} to their Hand, with no support card.`;
   } else if (body.action === 'set_aqua') {
     const v = Math.max(0, Math.floor(Number(body.value) || 0));
     player.aqua = v;
