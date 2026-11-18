@@ -41,6 +41,10 @@ export function applyM2RoundRule(m2El, roundsSel, warnEl, justToggled) {
 }
 
 let _activeLobby = null;
+// M4 (Exodus) preview: admins and playtesters (user 2026-11-18). Set by
+// main.js once the admin / tester checks resolve; the server is the real gate.
+let _m4Allowed = false;
+export function setM4Allowed(v) { _m4Allowed = !!v; }
 let _unsubWS = null;
 // Polling fallback for the lobby view: WS push of lobby_update is
 // the primary path, but if the WS is unreachable (user 2026-05-29:
@@ -1185,8 +1189,8 @@ async function onCreateSubmit(ev) {
   // checkboxes for every host.
   const m1 = !!document.getElementById('create-m1')?.checked;
   const m2 = !!document.getElementById('create-m2')?.checked;
-  // M4 (Exodus) is an admin preview: its row only shows for admins, and the
-  // server forces it off for anyone else. It needs M0 (sent on with it).
+  // M4 (Exodus) is a preview for admins and playtesters: its row only shows for
+  // them, and the server forces it off for anyone else. It needs M0 (sent on with it).
   const m4 = !!document.getElementById('create-m4')?.checked;
   // Scenario: at most ONE, so it is a single picked value rather than a set of
   // booleans. Gated to admins + testers while the scenarios get more testing
@@ -1470,9 +1474,9 @@ function renderLobbySettings(lobby, iAmHost, me) {
       <span><strong>Module 1: Terawatt</strong> - experimental (open playtest)</span></label>
     <label class="check-row"><input type="checkbox" id="set-m2"${lobby.m2 ? ' checked' : ''}/>
       <span><strong>Module 2: Colonization + Futures</strong> - experimental (open playtest)</span></label>
-    ${(lobby.m4 || (activeProfile() && activeProfile().isAdmin)) && !lobby.ceoSolo && !lobby.sirens && !lobby.hermes && !lobby.altruism && !lobby.tutorial ? `
+    ${(lobby.m4 || _m4Allowed || (activeProfile() && activeProfile().isAdmin)) && !lobby.ceoSolo && !lobby.sirens && !lobby.hermes && !lobby.altruism && !lobby.tutorial ? `
     <label class="check-row"><input type="checkbox" id="set-m4"${lobby.m4 ? ' checked' : ''}/>
-      <span><strong>Module 4: Exodus</strong> - contracts (admin preview, in development; turns on Module 0)</span></label>` : ''}
+      <span><strong>Module 4: Exodus</strong> - contracts (preview; turns on Module 0)</span></label>` : ''}
     ${lobby.hermes ? '' : `
     <div class="lobby-set-subhead">House rules</div>
     <label class="check-row"><input type="checkbox" id="set-draft"${lobby.draftStart ? ' checked' : ''}/>
@@ -1530,8 +1534,8 @@ function renderLobbySettings(lobby, iAmHost, me) {
   const setM0El = box.querySelector('#set-m0');
   if (setM0El && lobby.sirens) { setM0El.checked = false; setM0El.disabled = true; }
   setM0El?.addEventListener('change', (e) => save({ m0: e.target.checked }));
-  // M4 (admin preview): the row only renders for an admin host (or a room that
-  // already has it); the server ignores the toggle from anyone else. It needs
+  // M4 (preview): the row only renders for an admin or playtester host (or a
+  // room that already has it); the server ignores the toggle from anyone else. It needs
   // M0, so turning it on ticks M0 too.
   box.querySelector('#set-m4')?.addEventListener('change', (e) => {
     const setM0 = box.querySelector('#set-m0');

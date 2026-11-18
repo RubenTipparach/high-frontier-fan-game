@@ -130,6 +130,7 @@ code { font: 500 0.9em var(--mono); }
 .pill.partial { color: var(--brass); background: var(--brass-soft); }
 .pill.todo { color: var(--muted); }
 .pill.design { color: var(--eagle); }
+.pill.m2 { color: var(--muted); font-style: italic; }
 .reels { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
 .reel { background: var(--paper); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; display: grid; min-width: 0; }
 .reel video { width: 100%; max-width: 100%; display: block; background: #0b0d1a; aspect-ratio: 1024 / 640; }
@@ -186,10 +187,10 @@ h2.block { font: 800 34px/1 var(--display); margin: 0; }
 const ART_IMG = '';
 
 // The questions. Answers live in the db collection `answers`, one document per question id.
-// Progress, newest status first within each stage. s: done | partial | design | todo.
+// Progress, newest status first within each stage. s: done | partial | design | todo | m2.
 const PROGRESS = [
   { name: 'Stage 1: Contracts', items: [
-    { s: 'done', t: 'Admin-only M4 rooms', d: 'M4 forces M0 on; no variants, no M2.' },
+    { s: 'done', t: 'M4 rooms for admins and playtesters', d: 'Opened to the tester list 2026-11-18 (alpha banner names it). M4 forces M0 on; no variants, no M2.' },
     { s: 'done', t: 'Contract decks from the card sheet', d: 'Three ideology-pair decks. Contracts needing absent pieces are dealt out.' },
     { s: 'done', t: 'Contract auction', d: 'Fundraise ends with it. Bids in years, lowest wins, finder\'s fee 1 aqua.' },
     { s: 'done', t: 'Ties: the patent auction close', d: 'The initiator awards a tie they are not in.' },
@@ -216,10 +217,14 @@ const PROGRESS = [
     { s: 'done', t: 'IMPLANT', d: 'No M2: on your Colony. M2: on Colonists at your Dirtside Bernal.' },
     { s: 'done', t: 'Enterprises and partner enterprises (4B8)', d: 'Fundraise seats a partner delegate by negotiation.' },
     { s: 'done', t: 'Promotion needs an augmentation (4C7e)', d: 'For Colonists.' },
-    { s: 'partial', t: 'The twelve augmentation abilities (4C3)', d: 'Built: Splat 1, Splat 2, Triangle 2, Heart 2. Open: A1, A2. Heart 1 needs M2; Triangle 1 needs isotopes.' },
-    { s: 'todo', t: 'Parenthood on the heart chit (4C5)', d: 'M2.' },
-    { s: 'todo', t: 'Promotion counts for Freighter, Bernal, GW thruster', d: 'M1 / M2.' },
-    { s: 'design', t: 'Chit and Spaceborn glyphs on colonist cards', d: 'Needs a rendered preview and your sign-off first.' },
+    { s: 'done', t: 'The augmentation abilities (4C3)', d: 'Splat 1 and 2, Triangle 2, Heart 2, Jar 1 and 2, Hexagon 1 and 2, Battery 1 and 2. Triangle 1 needs isotopes (Stage 3); Heart 1 is Parenthood (M2).' },
+  ] },
+  { name: 'M4 + M2', items: [
+    { s: 'm2', t: 'M4 with M2 in one room', d: 'Refused for now (m4_no_m2).' },
+    { s: 'm2', t: 'Parenthood on the heart chit (4C5)', d: 'Not available without M2 (2026-11-18). Until then the heart implants side 2 only.' },
+    { s: 'm2', t: 'Promotion counts for Freighter, Bernal, GW thruster', d: 'Promotion does not work without M2 (2026-11-18).' },
+    { s: 'm2', t: 'Chit and Spaceborn glyphs on colonist cards', d: 'Needs a rendered preview and your sign-off first.' },
+    { s: 'm2', t: 'Contracts that need Bernals, Colonies or Colonists', d: 'Junket, Fugitive, Drug Smuggling, Life Support Reconfig Team and their gold sides: dealt out of M0+M4 games.' },
   ] },
   { name: 'Stage 3: Isotopes and the starship (M4 + M1)', items: [
     { s: 'todo', t: 'Isotope monetization' },
@@ -302,6 +307,7 @@ const SECTIONS = [
 
 const DECIDED = [
   // Newest first: { text: 'What was decided, with the owner\'s words', where: 'Where it landed' },
+  { text: 'Parenthood on the heart chit is unavailable without M2; Promotion does not work without M2 (2026-11-18).', where: 'M4 + M2 section' },
   { text: 'Secured blocks Factory Hijack as well as Claim Jump (2026-11-17).', where: 'ET_PRODUCE' },
   { text: 'Transport: cargo transfer along a buggy road, 1/turn (reference card).', where: 'TRANSFER' },
   { text: 'Without M2, Jar 1, Hexagon and Battery count for your Crew (2026-11-17).', where: 'Augmentations' },
@@ -340,7 +346,7 @@ function el(tag, attrs = {}, ...kids) {
 }
 
 function renderProgress() {
-  const LABEL = { done: 'Built', partial: 'Partly built', design: 'In design', todo: 'To do' };
+  const LABEL = { done: 'Built', partial: 'Partly built', design: 'In design', todo: 'To do', m2: 'Needs M2' };
   const host = document.getElementById('prog');
   for (const st of PROGRESS) {
     const score = st.items.reduce((n, i) => n + (i.s === 'done' ? 1 : i.s === 'partial' ? 0.5 : 0), 0);

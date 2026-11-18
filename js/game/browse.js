@@ -9745,7 +9745,7 @@ function humanizeOnlineOpError(code, detail) {
     not_in_portfolio: `None of your fulfilled contracts shows that cybernetics icon${detail && detail.shape ? ` (${detail.shape})` : ''}.`,
     chit_in_use: 'You only have one chit of that shape, and it is implanted elsewhere: juggle it off a Colonist aboard first.',
     chit_not_colocated: 'That chit is on a Colonist who is not aboard this Bernal.',
-    parenthood_not_yet: 'The heart\'s Parenthood side is not playable yet: implant its other side.',
+    parenthood_not_yet: 'Parenthood needs M2: implant the heart\'s other side.',
     needs_augmentation: 'This Colonist needs at least one augmentation to Promote.',
     nothing_to_implant: 'Choose an augmentation to implant.',
   };

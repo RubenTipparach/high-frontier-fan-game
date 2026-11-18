@@ -302,6 +302,11 @@ function isTester(profile) {
   return !!db.prepare('SELECT 1 FROM testers WHERE discord_id = ?').get(acct.discord_id);
 }
 
+// M4 (Exodus) preview gate: admins and playtesters (user 2026-11-18).
+function m4Allowed(req) {
+  return profileIsAdmin(req.profile, req) || isTester(req.profile);
+}
+
 // Public: does this profile see tester-gated features (the same experimental
 // variants an admin already reaches)? Mirrors /rat-frontier/access exactly, one
 // admin lookup + one tester lookup, both cheap indexed reads. `tester` is
@@ -1081,12 +1086,12 @@ app.post('/lobbies', requireProfile, (req, res) => {
   // the M1 open-release pattern - the admin gate is dropped). Still experimental
   // and fixed at creation. A ceoSolo room may carry M2 too (Futures in solo).
   const m2 = body.m2 ? 1 : 0;
-  // Opt-in Module 4 (Exodus). ADMIN-ONLY preview (user 2026-11-15,
-  // docs/module-m4-plan.md): anyone else's request is forced to 0 regardless of
-  // what the client sends. M4 requires M0 (4A1a), so it turns M0 on. It does not
+  // Opt-in Module 4 (Exodus). A PREVIEW for admins and playtesters (user
+  // 2026-11-15 admin-only; opened to testers 2026-11-18, docs/module-m4-plan.md):
+  // anyone else's request is forced to 0 regardless of what the client sends. M4 requires M0 (4A1a), so it turns M0 on. It does not
   // combine with a variant yet (CEO Solitaire's own M4 rules are not wired), so
   // that combination is refused rather than quietly narrowed.
-  const m4 = (body.m4 && profileIsAdmin(req.profile, req)) ? 1 : 0;
+  const m4 = (body.m4 && m4Allowed(req)) ? 1 : 0;
   if (m4) {
     const withVariant = VARIANT_KEYS.filter((k) => body[k]);
     if (withVariant.length || body.ceoSolo || body.tutorial) {
@@ -1719,13 +1724,13 @@ app.post('/lobbies/:id/settings', requireProfile, (req, res) => {
   // carry it too - Futures in solo).
   // M4 does not combine with M2 for now (owner 2026-11-17): refuse a save that
   // would leave both on.
-  const m4After = (body.m4 !== undefined && profileIsAdmin(req.profile, req)) ? !!body.m4 : !!lobby.m4;
+  const m4After = (body.m4 !== undefined && m4Allowed(req)) ? !!body.m4 : !!lobby.m4;
   const m2After = body.m2 !== undefined ? !!body.m2 : !!lobby.m2;
   if (m4After && m2After) return res.status(400).json({ error: 'm4_no_m2' });
   if (body.m2 !== undefined) { sets.push('m2 = ?'); args.push(body.m2 ? 1 : 0); }
-  // M4 is an ADMIN-ONLY preview: a non-admin host's toggle is ignored. Turning
-  // it on also turns M0 on (M4 requires it, 4A1a).
-  if (body.m4 !== undefined && profileIsAdmin(req.profile, req)) {
+  // M4 is a preview for admins and playtesters: anyone else's toggle is ignored.
+  // Turning it on also turns M0 on (M4 requires it, 4A1a).
+  if (body.m4 !== undefined && m4Allowed(req)) {
     sets.push('m4 = ?'); args.push(body.m4 ? 1 : 0);
     if (body.m4 && body.m0 === undefined) { sets.push('m0 = ?'); args.push(1); }
   }

@@ -16527,7 +16527,8 @@ function applyImplant(state, op, player) {
     if (!portfolio.has(shape)) return fail('not_in_portfolio', { shape });
     if (!ids.has(colonistId)) return fail('colonist_not_here');
     if (player.augments[shape]) return fail('chit_in_use', { shape, on: player.augments[shape].colonistId });
-    // The heart's Parenthood side (4C5) is not playable yet: implant side 2.
+    // The heart's Parenthood side (4C5) needs M2 (owner 2026-11-18), and M4 does
+    // not run with M2 yet: implant side 2.
     if (shape === 'heart' && side === 1) return fail('parenthood_not_yet');
     player.augments[shape] = { colonistId, side };
     parts.push(`implanted the ${shape} augmentation (side ${side}) in ${cardNameOf(colonistId)}`);
