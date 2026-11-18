@@ -12190,6 +12190,47 @@ check('M4 isotope monetization: a can at LEO banks as gold beads, sells and buys
   return `3 beads banked, sold 2 for 20, bought 1 back; FINAO ${before} -> ${before * 2}; M1 alone untouched`;
 });
 
+check('M4: the first gold bead refined monetizes isotope and flips the contract decks to gold (4B1b)', () => {
+  const SITE = 'luna-shackleton-polar-rim', SPACE = 'lag-qofv5';
+  const setup = (m4) => {
+    const st = startedGame({ m0: true, m1: true, m2: true, m4, seats: 2, maxRounds: 7 });
+    const me = st.players[st.activeIndex];
+    st.factories = { [SITE]: { ownerId: me.profileId, spectralType: 'S' } };
+    me.bernals = [{ cardId: 'ber_l4_antimatter_factory', figure: 'stanford', face: 'secondary', promoted: true,
+      siteId: SPACE, anchored: true, tank: 0, wiring: {}, route: [], stack: [] }];
+    me.rocket.siteId = SPACE; me.rocket.turnStartSiteId = SPACE;
+    me.rocket.stack = [{ id: 'gw-_amat_catalyzed_fission_fusion', kind: 'patent', face: 'secondary' }];
+    me.rocket.activeThrusterId = 'gw-_amat_catalyzed_fission_fusion';
+    me.rocket.tank = 0; me.rocket.tankGrade = 'isotope'; me.rocket.tankSpectral = 'S';
+    me.isostandards = ['S']; me.opsRemaining = 1; me.refueledSites = []; st.turnActions = [];
+    return { st, me };
+  };
+  const { st, me } = setup(true);
+  const before = Object.fromEntries(Object.entries(st.contractDecks).map(([k, d]) => [k, d.slice()]));
+  assert(st.contractSide !== 'gold' && !st.isotopeMonetized, 'gold or monetized before any isotope');
+  const r = applyOperation(st, { kind: 'SITE_REFUEL', siteId: SITE, mode: 'isotope' }, { profileId: me.profileId });
+  assert(r.ok, `isotope refuel: ${r.error}`);
+  assert(r.state.isotopeMonetized && r.state.contractSide === 'gold', 'not monetized / not gold');
+  assert(/Upheaval/.test(r.log), `log: ${r.log}`);
+  for (const [pair, d] of Object.entries(r.state.contractDecks)) {
+    const want = before[pair].slice().reverse();
+    assert(d.length && d.every((id, i) => want.indexOf(id) >= 0) && want.indexOf(d[0]) <= want.indexOf(d[d.length - 1]), `${pair} not flipped`);
+    assert(d[0] === want.find((id) => d.includes(id)), `${pair}: the old bottom card is not on top`);
+  }
+  // The next contract auction deals the gold side.
+  const P = pl(r.state, me.profileId);
+  const pair = Object.keys(r.state.contractDecks)[0];
+  P.fundraisedThisTurn = true; P.contractAuctionDone = false; P.timepiece = null;
+  r.state.activeLawStar = r.state.activeLawStar || 'freedom';
+  const open = applyOperation(r.state, { kind: 'AUCTION_CONTRACT_START', pair }, { profileId: me.profileId });
+  if (open.ok) assert(open.state.auction ? open.state.auction.side === 'gold' : true, 'auction dealt the blue side');
+  // Zero bleed-through: the same refinery run without M4 monetizes but leaves no contract decks to flip.
+  const plain = setup(false);
+  const r2 = applyOperation(plain.st, { kind: 'SITE_REFUEL', siteId: SITE, mode: 'isotope' }, { profileId: plain.me.profileId });
+  assert(r2.ok && r2.state.isotopeMonetized && !r2.state.contractSide && !/Upheaval|FINAO/.test(r2.log), `without M4: ${r2.error} ${r2.log}`);
+  return `monetized + decks flipped to gold (${Object.values(r.state.contractDecks).map((d) => d.length).join('/')} cards)${open.ok ? '; the next auction deals gold' : ''}; M1+M2 alone untouched`;
+});
+
 // The smoke verdict above runs before the checks added below it; this one
 // covers every check in the file.
 if (failures) {

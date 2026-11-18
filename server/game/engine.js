@@ -39,7 +39,7 @@ import { COLONISTS_BY_ID } from '../../data/colonists.js';
 // with a mass); they only ever enter play through m4-gated paths.
 import {
   CONTRACTS_BY_ID, CONTRACT_PAIRS, CONTRACT_PAIR_NAMES, CONTRACT_BID_MAX, contractFace, sideFace, stepSatisfied,
-  acetyleneTerms,
+  acetyleneTerms, faceUnplayable,
 } from '../../data/contracts.js';
 const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...BERNALS_BY_ID, ...COLONISTS_BY_ID, ...CONTRACTS_BY_ID };
 import { resolveSupportChain, unmetRequirements, openCycleChainCard } from '../../data/support-chain.js';
@@ -7430,6 +7430,27 @@ function applyCashWater(state, op, player) {
 }
 
 // ===== M4 isotope monetization (3B5, 4D1) ======================================
+// The first gold bead refined for a GW/TW thruster monetizes isotope (3B5) and,
+// with Module 4, sets off the Isobank Contract Upheaval (4B1b): the three
+// non-Exodus contract decks flip so the bottom is on top, and from now on the
+// more ambitious gold side is dealt. A gold face this game cannot check yet is
+// dealt out, as blue ones are. Returns the note for the log line.
+function monetizeIsotope(state) {
+  if (state.isotopeMonetized) return '';
+  state.isotopeMonetized = true;
+  let note = ' Isotope is now monetized.';
+  if (state.m4) note += ' FINAO costs double.' + contractUpheaval(state);
+  return note;
+}
+function contractUpheaval(state) {
+  if (!state.m4 || state.contractSide === 'gold' || !state.contractDecks) return '';
+  state.contractSide = 'gold';
+  for (const pair of Object.keys(state.contractDecks)) {
+    state.contractDecks[pair] = state.contractDecks[pair].slice().reverse()
+      .filter((id) => !faceUnplayable(contractFace(id, 'gold')));
+  }
+  return ' Isobank Contract Upheaval: the contract decks flip to their gold sides.';
+}
 // Gold beads (Isotopes) stored at your Bank are currency worth 10 Aquas each
 // (3B5). 4D1d Blue/Gold Exchange: transport gold beads to your Bank; as a free
 // action sell 1 Isotope for 10 Aquas (it goes, unowned, to the Earth market), or
@@ -11768,8 +11789,7 @@ function applySiteRefuel(state, op, player) {
     else outpost.cards.push({ id: nextFuelCardId(state), kind: 'fuel', grade: 'isotope', spectral: facSpectral, amount: iBase, face: 'primary' });
     player.refueledSites.push(siteId);
     if (!gate.freeRepeat) player.opsRemaining -= 1;
-    let monetizeNote = '';
-    if (!state.isotopeMonetized) { state.isotopeMonetized = true; monetizeNote = ' Isotope is now monetized.'; }
+    const monetizeNote = monetizeIsotope(state);
     const minerTail = gate.freeRepeat ? ' (Miner colonist: extra production)' : '';
     return {
       ok: true, state,
@@ -11888,11 +11908,7 @@ function applySiteRefuel(state, op, player) {
     if (!gateI.freeRepeat) player.opsRemaining -= 1;
     // First isotope ever refined monetizes the substance (M1 economy hook;
     // the price consequences land in a later slice).
-    let monetizeNote = '';
-    if (!state.isotopeMonetized) {
-      state.isotopeMonetized = true;
-      monetizeNote = ' Isotope is now monetized.';
-    }
+    const monetizeNote = monetizeIsotope(state);
     return {
       ok: true, state,
       log: `${player.name}: Isotope Refuel at ${site.name} (+${round6(igain)} isotope; tank ${round6(player.rocket.tank)}).${monetizeNote}`,
@@ -16135,7 +16151,8 @@ function contractPairsOpenTo(state, player) {
 // default chit bars manned contracts (4B2d / 4B6c).
 function contractBidBlock(state, player, cardId) {
   if (player.timepiece) return 'timepiece_in_use';
-  const face = contractFace(cardId, 'blue');
+  const a = state.auction;
+  const face = contractFace(cardId, (a && a.kind === 'contract' && a.cardId === cardId && a.side) || state.contractSide || 'blue');
   if (face && face.manned && state.defaultChit && state.defaultChit.profileId === player.profileId) return 'default_stigma';
   return null;
 }
@@ -16270,9 +16287,11 @@ function applyContractAuctionStart(state, op, ctx) {
   }
   if (op.abandon) return { ok: true, state, log: `${log}${player.name} looked over the ${CONTRACT_PAIR_NAMES[pair]} contracts and walked away.` };
   const cardId = deck.shift();
-  const face = contractFace(cardId, 'blue');
+  // Gold side once the Isobank Contract Upheaval has happened (4B1b).
+  const side = state.contractSide === 'gold' ? 'gold' : 'blue';
+  const face = contractFace(cardId, side);
   state.auction = {
-    kind: 'contract', pair, cardId, side: 'blue',
+    kind: 'contract', pair, cardId, side,
     auctioneerId: player.profileId,
     // The initiator must open at 10 years (4B3f); lower is better for nobody but
     // the winner, so the lowest bid wins.
@@ -16307,7 +16326,7 @@ function applyContractAuctionBid(state, op, ctx) {
   a.passed = a.passed.filter((id) => id !== bidder.profileId);
   // A strictly lower bid puts everyone else back on the clock.
   a.acted = lower ? [bidder.profileId] : [...new Set([...a.acted, bidder.profileId])];
-  return { ok: true, state, log: `${bidder.name} ${lower ? 'bid' : 'matched'} ${years} year${years === 1 ? '' : 's'} on ${contractFace(a.cardId, 'blue').name}.` };
+  return { ok: true, state, log: `${bidder.name} ${lower ? 'bid' : 'matched'} ${years} year${years === 1 ? '' : 's'} on ${contractFace(a.cardId, a.side || 'blue').name}.` };
 }
 function applyContractAuctionPass(state, op, ctx) {
   const a = state.auction;
@@ -16317,7 +16336,7 @@ function applyContractAuctionPass(state, op, ctx) {
   if (!p) return fail('not_a_player');
   if (!a.passed.includes(p.profileId)) a.passed.push(p.profileId);
   if (!a.acted.includes(p.profileId)) a.acted.push(p.profileId);
-  return { ok: true, state, log: `${p.name} passed on ${contractFace(a.cardId, 'blue').name}.` };
+  return { ok: true, state, log: `${p.name} passed on ${contractFace(a.cardId, a.side || 'blue').name}.` };
 }
 // Everyone who CAN bid has bid or passed at the current low.
 function contractAuctionSettled(state) {

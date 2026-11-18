@@ -270,7 +270,7 @@ function decksHtml(s, p, auctionOpen) {
       <div class="m4c-deck-head"><b>${CONTRACT_PAIR_NAMES[pair]}</b>
         <span>${deck.length} left</span>
         <span class="m4c-law">${byLaw ? 'Active Law' : byConnections ? 'Connections' : ''}</span></div>
-      ${top ? cardThumb(top, 'blue') : '<div class="muted">empty</div>'}${btn}</div>`;
+      ${top ? cardThumb(top, s.contractSide === 'gold' ? 'gold' : 'blue') : '<div class="muted">empty</div>'}${btn}</div>`;
   }).join('')}</div>`;
 }
 // The contract auction step of a Fundraise (owner 2026-11-18: the auction is
