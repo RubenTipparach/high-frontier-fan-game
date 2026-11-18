@@ -1993,3 +1993,10 @@ button.m4c-aug:hover { border-color: #60a5fa; background: #232838; }
 .m4c-deck.closed { filter: grayscale(1); opacity: .45; pointer-events: none; }
 .m4c-picker { max-width: 820px; }
 .m4c-picker .m4c-decks { justify-content: center; }
+
+/* The Fundraise's contract auction step (inside the Assembly window). */
+.m4c-fr-step { padding: 8px 4px 4px; }
+.m4c-fr-step h4 { margin: 4px 0 10px; }
+.m4c-fr-step .m4c-decks { justify-content: center; }
+.m4c-fr-skip { justify-content: flex-end; margin-top: 10px; }
+.m4c-fr-skip button { background: #374151; }

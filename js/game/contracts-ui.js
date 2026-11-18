@@ -94,7 +94,8 @@ function ensureTag() {
     tag.className = 'turn-tag';
     tag.title = 'Your contracts: timepiece, auction, boost, fulfill, late fees';
     tag.addEventListener('click', () => {
-      if (canAuctionNow(snap(), me(), D.myTurn())) { openAuctionPicker(); return; }
+      // Back to the Fundraise's contract auction step while it is waiting.
+      if (canAuctionNow(snap(), me(), D.myTurn()) && D.openContractStep) { D.openContractStep(); return; }
       _panelOpen = true; renderPanel();
     });
     host.appendChild(tag);
@@ -118,15 +119,7 @@ export function refreshContractsUi() {
       tag.classList.toggle('turn-tag-alert', !!(late || canAuction));
     }
   }
-  if (!on) { closePanel(); closeAuctionPicker(); renderContractAuction(null); _seenFulfilled = null; return; }
-  // The Fundraise just landed: open the auction picker, once per turn.
-  {
-    const p = me();
-    const key = `${s.round}:${s.turn}`;
-    if (canAuctionNow(s, p, D.myTurn())) {
-      if (_pickerSeen !== key) { _pickerSeen = key; closePanel(); openAuctionPicker(); }
-    } else closeAuctionPicker();
-  }
+  if (!on) { closePanel(); renderContractAuction(null); _seenFulfilled = null; return; }
   announceFulfilled(s);
   renderContractAuction(s.auction && s.auction.kind === 'contract' ? s.auction : null);
   if (_panelOpen) renderPanel();
@@ -277,30 +270,27 @@ function decksHtml(s, p, auctionOpen) {
       ${top ? cardThumb(top, 'blue') : '<div class="muted">empty</div>'}${btn}</div>`;
   }).join('')}</div>`;
 }
-// The contract auction picker: the last step of a Fundraise (owner 2026-11-18).
-// Opens by itself once per turn when the Fundraise lands, and from the toolbar
-// tag; closing it skips the auction.
-let _pickerSeen = null;
-export function openAuctionPicker() {
+// The contract auction step of a Fundraise (owner 2026-11-18: the auction is
+// part of the Fundraise). The Fundraise window renders it into `host` once the
+// Fundraise lands; `done` closes the window (picking nothing skips the auction).
+export function canStartContractAuction() { return canAuctionNow(snap(), me(), D && D.myTurn()); }
+export function renderContractAuctionStep(host, done) {
   const s = snap(); const p = me();
-  if (!canAuctionNow(s, p, D.myTurn())) return;
-  document.getElementById('m4-auction-picker')?.remove();
-  const ov = document.createElement('div');
-  ov.id = 'm4-auction-picker';
-  ov.className = 'm4c-overlay';
-  ov.innerHTML = `<div class="m4c-modal m4c-picker" role="dialog" aria-label="Contract auction">
-    <div class="m4c-head"><h3>📜 Contract auction</h3><button type="button" class="m4c-close" aria-label="Close">✕</button></div>
-    <div class="m4c-body">${decksHtml(s, p, true)}</div></div>`;
-  const close = () => ov.remove();
-  ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
-  ov.querySelector('.m4c-close').addEventListener('click', close);
-  ov.querySelectorAll('button[data-act="auction"]').forEach((b) => b.addEventListener('click', async () => {
-    close();
+  host.innerHTML = '';
+  if (!canAuctionNow(s, p, D.myTurn())) return false;
+  const wrap = document.createElement('div');
+  wrap.className = 'm4c-fr-step';
+  wrap.innerHTML = `<h4>📜 Contract auction</h4>${decksHtml(s, p, true)}
+    <div class="m4c-btns m4c-fr-skip"><button type="button" data-skip>No auction</button></div>`;
+  wrap.querySelectorAll('button[data-act="auction"]').forEach((b) => b.addEventListener('click', async () => {
+    done();
     await D.submitTurnOp({ kind: 'AUCTION_CONTRACT_START', pair: b.dataset.pair });
   }));
-  document.body.appendChild(ov);
+  wrap.querySelector('[data-skip]').addEventListener('click', done);
+  host.appendChild(wrap);
+  return true;
 }
-function closeAuctionPicker() { document.getElementById('m4-auction-picker')?.remove(); }
+
 
 function renderPanel() {
   const s = snap();

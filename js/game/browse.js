@@ -121,7 +121,7 @@ import { futureGoalForCard, checkFutureGoal, CENTAUR_SITE_IDS, GREEK_CAMP_IDS, T
 // M2 Colonist powers (FINAO halved etc.) - the same flags the engine reads.
 import { colonistPower } from '../../data/colonist-abilities.js';
 import { openBernalStackModal, openBernalFuelTank } from './bernal-modal.js';
-import { initContractsUi, refreshContractsUi, abandonBlock, contractFeeDue, payContractFee, abandonContract, timepieceBadge } from './contracts-ui.js';
+import { initContractsUi, refreshContractsUi, abandonBlock, contractFeeDue, payContractFee, abandonContract, timepieceBadge, renderContractAuctionStep } from './contracts-ui.js';
 import { getBernalSprite } from './bernal-sprite.js';
 import { fuelTankCylinderMarkup, fuelTransferSectionMarkup } from './fuel-tank-view.js';
 // One client card-lookup: patents PLUS the M2 Bernal cards (which live in
@@ -7274,6 +7274,7 @@ function refreshAssemblyModal() {
   const body = overlay.querySelector('.assembly-modal-body');
   body.innerHTML = '';
   if (_assemblyMode === 'fundraise') renderAssemblyFundraise(body, snap);
+  else if (_assemblyMode === 'contract') renderFundraiseContractStep(body);
   else renderAssemblyView(body, snap);
 }
 // On a narrow screen the callout-ring ('compact') board overlaps badly, so the
@@ -7992,10 +7993,32 @@ function commitFundraise() {
   // Martial Law (Authority): discard an opponent's delegate. The server
   // re-validates the law + that the cube is still there, so a stale pick no-ops.
   if (_fr.discard) op.discard = { profileId: _fr.discard.profileId, place: _fr.discard.place };
-  _assemblyMode = 'view';
   _fr = null;
+  // M4: the Fundraise ends with the contract auction (owner 2026-11-18), so the
+  // window stays open on that step once the Fundraise lands.
+  if (_onlineSnapshot && _onlineSnapshot.m4) {
+    _assemblyMode = 'contract';
+    refreshAssemblyModal();
+    submitOnlineOp(op).then((ok) => {
+      if (!ok || _assemblyMode !== 'contract') { if (_assemblyMode === 'contract') closeAssemblyModal(); return; }
+      refreshAssemblyModal();
+    });
+    return;
+  }
+  _assemblyMode = 'view';
   submitOnlineOp(op);
   // The snapshot apply will refresh the modal in view mode (or it can be closed).
+  closeAssemblyModal();
+}
+// The Fundraise's last step in M4: pick a contract deck to auction (or none).
+// Until the Fundraise lands the step waits; if no auction is possible the
+// window closes.
+function renderFundraiseContractStep(body) {
+  if (renderContractAuctionStep(body, closeAssemblyModal)) return;
+  // Not landed yet: wait for it. Landed but no auction possible (timepiece out,
+  // Anarchy, already held): nothing to pick, so the window closes.
+  const me = mySnapshotPlayer();
+  if (_onlineBusy || !(me && me.fundraisedThisTurn)) { body.innerHTML = '<p class="muted">…</p>'; return; }
   closeAssemblyModal();
 }
 
@@ -35690,6 +35713,8 @@ initContractsUi({
   submitAuctionOp: (op) => submitMpAuctionOp(op),
   toast: (msg, level) => { if (_onlineToast) _onlineToast(msg, level); },
   confirm: (opts) => confirmModal(opts),
+  // The Fundraise window's contract auction step (toolbar tag).
+  openContractStep: () => openAssemblyModal('contract'),
   // The name a player reads for a map space (a site, a Lagrange point, a hazard).
   spaceName: (slug) => {
     const n = _activeData && _activeData.sites ? _activeData.sites.find((x) => x.id2 === slug) : null;
