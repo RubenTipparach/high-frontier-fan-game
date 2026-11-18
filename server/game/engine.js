@@ -149,6 +149,9 @@ function slotMass(slot) {
   // A fuel cargo card weighs the fuel it holds (fuel has mass), so hauling it
   // costs burns like any cargo. Loading it into a tank is mass-neutral.
   if (slot.kind === 'fuel') return Math.max(0, Math.floor(Number(slot.amount) || 0));
+  // Jar augmentation, side 1 (M4): the Crew card or (with M2) Colonist it rides
+  // weighs nothing. The mark is only ever set on those two kinds of card.
+  if (slot.massless) return 0;
   const p = PATENTS_BY_ID[slot.id];
   if (p) {
     // A radiator's mass depends on the side it deployed on (light vs heavy),
@@ -368,16 +371,16 @@ function playerHasAtmoScoop(player, stack) {
   });
 }
 
-// M4 augmentation abilities (4C3). Without Module 2 a chit sits on one of your
-// Colonies (user ruling 2026-11-17), so a side that works "here" works at that
-// Colony's site. (With M2 the chit rides a Colonist; M4 does not combine with
-// M2 yet, so that placement is not read here.)
+// M4 augmentation abilities (4C3). Without Module 2 a chit sits on a Crew card
+// or one of your Colonies (user rulings 2026-11-17 / 18); with Module 2 it sits
+// on a Colonist (4C4). A side that works "here" works where its holder is.
 function augmentSideAt(player, shape, side, slug) {
   const a = player && player.augments && player.augments[shape];
   if (!(a && a.side === side && slug != null)) return false;
-  // A chit on a Crew card works wherever that Crew is (owner 2026-11-18); an
-  // older chit placed on a Colony works at that Colony.
-  if (a.crewId) return augHolderSite(player, a.crewId) === String(slug);
+  // A chit on a Crew card or a Colonist works wherever that card is (owner
+  // 2026-11-18); an older chit placed on a Colony works at that Colony.
+  const holder = a.crewId || a.colonistId;
+  if (holder) return augHolderSite(player, holder) === String(slug);
   return a.colonySite === String(slug);
 }
 // The map space a player's card sits in: its stack's site ('leo' at LEO), or
@@ -416,28 +419,33 @@ function playerSlotArrays(p) {
   return out;
 }
 function syncCrewAugmentMarks(st) {
-  if (!st || !st.m4 || st.m2) return;
+  if (!st || !st.m4) return;
   for (const p of st.players || []) {
-    // A chit whose Crew has left play comes back.
+    // A chit whose Crew has left play comes back. (A Colonist's chits come back
+    // when it is Decommissioned, which removes them itself: a Colonist can sit
+    // in a Colony, outside every stack, and keeps its chits there.)
     for (const [shape, a] of Object.entries(p.augments || {})) {
       if (a && a.crewId && augHolderSite(p, a.crewId) === undefined) delete p.augments[shape];
     }
     // Each mark applies to the Crew the chit is on (an older Colony chit, to
     // every Crew of the player).
+    // With Module 2 the chit rides a Colonist (4C4) and the marks go on that
+    // Colonist's slot instead.
     const on = (shape, side, s) => {
       const a = p.augments && p.augments[shape];
       if (!a || (side && a.side !== side)) return false;
-      return a.crewId ? String(a.crewId) === String(s.id) : true;
+      const holder = a.crewId || a.colonistId;
+      return holder ? String(holder) === String(s.id) : (!st.m2 && !!CREW_BY_ID[s.id]);
     };
     for (const arr of playerSlotArrays(p)) {
       for (const s of arr) {
-        if (!s || !CREW_BY_ID[s.id]) continue;
+        if (!s || !(CREW_BY_ID[s.id] || COLONISTS_BY_ID[s.id])) continue;
         if (on('jar', 1, s)) s.massless = true; else delete s.massless;
         const hex = on('hexagon', 0, s) ? p.augments.hexagon : null;
         if (hex) s.augProspector = hex.side === 1 ? { kind: 'raygun', isru: 1 } : { kind: 'buggy', isru: 2 };
         else delete s.augProspector;
         const bat = on('battery', 0, s) ? p.augments.battery : null;
-        if (bat && bat.crewId) s.augSupplies = bat.side === 1 ? ['gen-electric'] : ['reactor-antimatter'];
+        if (bat && (bat.crewId || bat.colonistId)) s.augSupplies = bat.side === 1 ? ['gen-electric'] : ['reactor-antimatter'];
         else delete s.augSupplies;
       }
     }
@@ -448,7 +456,7 @@ function batteryCrewKinds(player) {
   const a = player && player.augments && player.augments.battery;
   // A Battery on one Crew card supplies through that slot (slot.augSupplies);
   // only an older Colony chit powers every Crew.
-  if (!a || a.crewId) return [];
+  if (!a || a.crewId || a.colonistId) return [];
   return a.side === 1 ? ['gen-electric'] : a.side === 2 ? ['reactor-antimatter'] : [];
 }
 function hasAugmentSide(player, shape, side) {
@@ -740,6 +748,10 @@ function faceProps(slot) {
 // bug on crew_nasa_isro's ISRO Glavcosmonauts buggy face).
 function prospectorFace(slot) {
   if (!slot || !slot.id) return { properties: [], isru: 0 };
+  // Hexagon augmentation (M4) on a Colonist (with M2): the chit is its prospector.
+  if (slot.augProspector && !CREW_BY_ID[slot.id]) {
+    return { properties: [{ key: slot.augProspector.kind, value: true }], isru: slot.augProspector.isru | 0 };
+  }
   const crew = CREW_BY_ID[slot.id];
   if (crew) {
     const key = slot.face === 'secondary' ? 'secondary' : 'primary';
@@ -775,6 +787,7 @@ function prospectorIsru(slot) {
 // so this can't read prospectorIsru (0 also means "no rig" there).
 function slotHasIsruRig(slot) {
   if (!slot || !slot.id) return false;
+  if (slot.augProspector) return true;
   const crew = CREW_BY_ID[slot.id];
   if (crew) {
     const key = slot.face === 'secondary' ? 'secondary' : 'primary';
@@ -3571,7 +3584,7 @@ function chainCardsFromRocket(rocket, crewReactorKinds = null) {
     const pw = powerOfSlot(s);
     let supplies = (f && f.supplies) || (c && c.supplies) || [];
     if (isCrewSlot(s) && crewReactorKinds) supplies = [...supplies, ...crewReactorKinds];
-    if (isCrewSlot(s) && Array.isArray(s.augSupplies)) supplies = [...supplies, ...s.augSupplies];
+    if (Array.isArray(s.augSupplies)) supplies = [...supplies, ...s.augSupplies];
     return {
       id: s.id,
       type,
@@ -3679,7 +3692,7 @@ function bernalChainCards(bn, crewReactorKinds = null) {
     const noBernalSupport = !!(pw && pw.safeAerobrakeNoBernalOrIndustrialize);
     let supplies = noBernalSupport ? [] : ((f && f.supplies) || (c && c.supplies) || []);
     if (isCrewSlot(s) && crewReactorKinds) supplies = [...supplies, ...crewReactorKinds];
-    if (isCrewSlot(s) && Array.isArray(s.augSupplies)) supplies = [...supplies, ...s.augSupplies];
+    if (Array.isArray(s.augSupplies)) supplies = [...supplies, ...s.augSupplies];
     cards.push({
       id: s.id,
       type,
@@ -16580,6 +16593,7 @@ function applyImplant(state, op, player) {
   }
   if (free) player.implantFreeUsed = true;
   else player.opsRemaining -= 1;
+  syncCrewAugmentMarks(state);
   const where = (siteById(bn.siteId) || {}).name || 'the Bernal';
   return { ok: true, state, log: `${player.name} ${parts.join(' and ')} at ${where}${free ? ' (Industrialist: free)' : ''}.` };
 }

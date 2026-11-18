@@ -11573,6 +11573,21 @@ check('IMPLANT puts a portfolio augmentation on a Colonist at your anchored Bern
   return r.ok ? '' : `${shape} implanted for the operation; ${other} refused (not in the portfolio)`;
 });
 
+check('M4 + M2: Jar 1 and Hexagon on a Colonist work on that Colonist (0 Mass, prospector)', () => {
+  // Owner 2026-11-18: M4 now runs with M2, where a chit rides a Colonist (4C4).
+  const { st, P } = augGame({ contracts: ['M4N222F', 'M4N237F'] });
+  const r = op(st, 'IMPLANT', P.profileId, { bernal: 0, implants: [
+    { colonistId: 'col_biomechs', shape: 'jar', side: 1 },
+    { colonistId: 'col_biomechs', shape: 'hexagon', side: 1 }] });
+  assert(r.ok, `implant: ${r.error}`);
+  const slot = pl(r.state, P.profileId).bernals[0].stack.find((s) => s.id === 'col_biomechs');
+  const bare = pl(r.state, P.profileId).bernals[0].stack.find((s) => s.id === 'col_botany_bay_convicts');
+  assert(slot.massless && slot.augProspector && slot.augProspector.kind === 'raygun', `marks on the Colonist: ${JSON.stringify(slot)}`);
+  assert(slotMass(slot) === 0, `Jar 1 Colonist mass ${slotMass(slot)}`);
+  assert(!bare.massless && !bare.augProspector, 'the other Colonist got marks too');
+  return 'the augmented Colonist weighs 0 and prospects as a Raygun; its neighbour is untouched';
+});
+
 check('IMPLANT needs a Dirtside-anchored Bernal (the BEO Colony) and the Colonist aboard an anchored Bernal', () => {
   const shape = conByCode('M4N242F').faces.primary.cybernetics[0];
   const imp = { bernal: 0, implants: [{ colonistId: 'col_biomechs', shape, side: 2 }] };

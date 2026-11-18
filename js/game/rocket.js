@@ -818,7 +818,7 @@ function collectSupplied(excludeId, slots = _stack, { includeAfterburn = true } 
     // On-board reactor Bernal ability: a Crew card supplies its granted
     // reactor kind(s) here too (see the matching note in isRocketActive).
     if (CREW_BY_ID[slot.id] && _crewReactorKinds) supplies = [...supplies, ..._crewReactorKinds];
-    if (CREW_BY_ID[slot.id] && Array.isArray(slot.augSupplies)) supplies = [...supplies, ...slot.augSupplies];
+    if (Array.isArray(slot.augSupplies)) supplies = [...supplies, ...slot.augSupplies];
     for (const k of supplies) supplied.add(k);
   }
   // Afterburn's Open-Cycle Cooling supplies the thermostat chip for the turn -
@@ -907,7 +907,7 @@ export function isRocketActive(overrideId) {
     // injection or the active/inactive verdict disagrees with the support-
     // chain visualizer, which reads "satisfied" via chainCardsFromStack.
     if (CREW_BY_ID[s.id] && _crewReactorKinds) supplies = [...supplies, ..._crewReactorKinds];
-    if (CREW_BY_ID[s.id] && Array.isArray(s.augSupplies)) supplies = [...supplies, ...s.augSupplies];
+    if (Array.isArray(s.augSupplies)) supplies = [...supplies, ...s.augSupplies];
     for (const k of supplies) supplied.add(k);
   }
   // Afterburn's Open-Cycle Cooling supplies the thermostat chip for the turn.
@@ -1018,7 +1018,7 @@ export function findFunctionalThrusters(stack) {
       // On-board reactor Bernal ability: a Crew card supplies its granted
       // reactor kind(s) here too (see the matching note in isRocketActive).
       if (CREW_BY_ID[stack[j].id] && _crewReactorKinds) sup = [...sup, ..._crewReactorKinds];
-      if (CREW_BY_ID[stack[j].id] && Array.isArray(stack[j].augSupplies)) sup = [...sup, ...stack[j].augSupplies];
+      if (Array.isArray(stack[j].augSupplies)) sup = [...sup, ...stack[j].augSupplies];
       for (const k of sup) supplied.add(k);
     }
     // Group requires by supplier prefix (same OR rule).
@@ -1214,11 +1214,19 @@ function activeFace(card) {
 function installedFace(slot) {
   const c = cardForSlot(slot);
   if (!c) return {};
+  let f = c;
   if (c.faces) {
     const key = (slot && slot.face === 'secondary' && c.faces.secondary) ? 'secondary' : 'primary';
-    return c.faces[key] || c.faces.primary || c;
+    f = c.faces[key] || c.faces.primary || c;
   }
-  return c;
+  // M4 augmentation marks on a Colonist (with M2; a Crew card reads them in
+  // synthCrew): Jar side 1 makes it 0 Mass, Hexagon makes it a Raygun / Buggy.
+  if (slot && COLONISTS_BY_ID[slot.id] && (slot.massless || slot.augProspector)) {
+    f = { ...f };
+    if (slot.massless) f.mass = 0;
+    if (slot.augProspector) { f.properties = [{ key: slot.augProspector.kind, value: true }]; f.isru = slot.augProspector.isru | 0; }
+  }
+  return f;
 }
 
 // Mass of a stack slot, honouring a radiator's deployed side: a radiator's mass
@@ -1423,7 +1431,7 @@ function chainCardsFromStack(slots = _stack) {
     const pw = slotPower(slot);
     let supplies = (f && f.supplies) || (card && card.supplies) || [];
     if (CREW_BY_ID[slot.id] && _crewReactorKinds) supplies = [...supplies, ..._crewReactorKinds];
-    if (CREW_BY_ID[slot.id] && Array.isArray(slot.augSupplies)) supplies = [...supplies, ...slot.augSupplies];
+    if (Array.isArray(slot.augSupplies)) supplies = [...supplies, ...slot.augSupplies];
     return {
       id: slot.id,
       type,
