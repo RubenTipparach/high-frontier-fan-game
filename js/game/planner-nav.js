@@ -90,6 +90,9 @@ function makeDominancePrune() {
     // state that STILL holds it dominates an otherwise-equal one that spent it.
     // Always 0 when acetylene is off, so this term is inert then.
     const acet = node.acet ?? 0;
+    // Radiation Belt flyby bonuses still in hand this turn (M4 Plasma Intrusion
+    // Laboratory): banked like the acetylene pass. Always 0 when off.
+    const belt = node.belt ?? 0;
     const entries = frontier.get(key);
     if (entries) {
       for (const e of entries) {
@@ -97,7 +100,8 @@ function makeDominancePrune() {
             && e.burnsRemaining >= br
             && e.bonus >= bonus
             && e.pivots >= pivots
-            && (e.acet ?? 0) >= acet) {
+            && (e.acet ?? 0) >= acet
+            && (e.belt ?? 0) >= belt) {
           return true;
         }
       }
@@ -106,11 +110,12 @@ function makeDominancePrune() {
           && br >= e.burnsRemaining
           && bonus >= e.bonus
           && pivots >= e.pivots
-          && acet >= (e.acet ?? 0)));
-      kept.push({ weight, burnsRemaining: br, bonus, pivots, acet });
+          && acet >= (e.acet ?? 0)
+          && belt >= (e.belt ?? 0)));
+      kept.push({ weight, burnsRemaining: br, bonus, pivots, acet, belt });
       frontier.set(key, kept);
     } else {
-      frontier.set(key, [{ weight, burnsRemaining: br, bonus, pivots, acet }]);
+      frontier.set(key, [{ weight, burnsRemaining: br, bonus, pivots, acet, belt }]);
     }
     return false;
   };
@@ -120,7 +125,7 @@ function pathId(p) {
   if (p[PATH_ID]) return p[PATH_ID];
   const id = p.done
     ? p.node
-    : `s:${p.node}|${p.dir ?? ''}|${p.bonus}|${p.burnsRemaining}|${p.pivots ?? 0}|${p.wait ? 1 : 0}|${p.acet ?? 0}`;
+    : `s:${p.node}|${p.dir ?? ''}|${p.bonus}|${p.burnsRemaining}|${p.pivots ?? 0}|${p.wait ? 1 : 0}|${p.acet ?? 0}${p.belt ? `|b${p.belt}` : ''}`;
   Object.defineProperty(p, PATH_ID, { value: id });
   return id;
 }
@@ -168,6 +173,11 @@ export function buildPlanner(graph, {
   // reach further. Mirrors the server's beltsEntered credit (engine.js). Off
   // makes the search byte-identical to before.
   beltBonusBurn = false,
+  // M4 Plasma Intrusion Laboratory: "+1 flyby bonus from Radiation Belt
+  // (once/Spacecraft/Turn)". The first `beltFlyby` radiation belts entered each
+  // turn bank one free burn, like a flyby bonus. 0 makes the search
+  // byte-identical to before.
+  beltFlyby = 0,
   // C3b Synodic Comets: an activated TW thruster (the promoted, purple face of
   // a GW thruster) lets the ROCKET enter a Synodic Comet in any season. Only
   // the rocket's own route paths set this; a Freighter / Bernal / mobile
@@ -231,12 +241,13 @@ export function buildPlanner(graph, {
     const { node, dir, bonus, burnsRemaining, wait } = p;
     const pivots = p.pivots ?? 0;
     const acet = p.acet ?? 0;   // acetylene free-lander-burn pass still in hand?
+    const belt = p.belt ?? 0;   // Plasma Intrusion belt bonuses left this turn
     // A route MAY stop on an aerobrake corridor when the player ASKS for it: the
     // "done" (stop here) state is always offered, so an explicitly chosen
     // corridor destination still works and takes the aero roll each turn. What
     // is NOT offered any more is the automatic mid-route pause - see the wait
     // branch below (user 2026-08-30).
-    const ns = [{ node, dir: null, bonus: 0, done: true, burnsRemaining, pivots, acet }];
+    const ns = [{ node, dir: null, bonus: 0, done: true, burnsRemaining, pivots, acet, belt }];
     const venusFlybyAvailable = solarSeason === 'blue';
     // NOTE: an aerobrake does NOT waive any burn (user 2026-07-19). The corridor
     // itself is a 0-burn lagrange hop with a hazard roll, and it drops the
@@ -280,7 +291,7 @@ export function buildPlanner(graph, {
             // is the flyby bonus actually applied to it. planRoute sums
             // them so the UI can show "BURNS - FLY BY = TOTAL".
             ns.push({ node: otherNode, dir: newDir, bonus: bonusAfter, burnsRemaining: brAfter,
-              pivots: pivots - usePivot, acet: acet - acetHere,
+              pivots: pivots - usePivot, acet: acet - acetHere, belt,
               _gross: directionChangeCost, _flyby: bonusUsed });
           }
         }
@@ -313,7 +324,7 @@ export function buildPlanner(graph, {
         || ((waitPoint?.type === 'burn' || waitPoint?.type === 'lagrange') && burnsRemaining === 0))) {
       // Waiting refills the per-turn budget but does NOT restore a spent acetylene
       // pass (it is a one-time liftoff boost, not a per-turn resource).
-      ns.push({ node, dir: null, bonus: 0, wait: true, burnsRemaining: thrust, pivots: freePivots, acet });
+      ns.push({ node, dir: null, bonus: 0, wait: true, burnsRemaining: thrust, pivots: freePivots, acet, belt: beltFlyby });
     }
     // Move to a neighbour (non-Hohmann-pivot path).
     for (const other of neighborsOf(node)) {
@@ -340,7 +351,8 @@ export function buildPlanner(graph, {
       // Mag Sail: entering a radiation belt (radhaz) banks one free burn - it
       // rides the belt's field for thrust. Modelled as a flyby-style bonus so it
       // offsets a downstream burn and extends the reachable range through belts.
-      const beltBoost = (beltBonusBurn && otherPoint.type === 'radhaz') ? 1 : 0;
+      const plasmaHere = (belt > 0 && otherPoint.type === 'radhaz') ? 1 : 0;
+      const beltBoost = ((beltBonusBurn && otherPoint.type === 'radhaz') ? 1 : 0) + plasmaHere;
       const flybyBoost = (rawFlyby === 'thrust' ? thrust : rawFlyby) + beltBoost;
       const bonusUsed = otherPoint.landing ? 0 : Math.min(bonus, entryCost);
       const bonusAfter = Math.max(bonus - bonusUsed + flybyBoost, 0);
@@ -348,7 +360,7 @@ export function buildPlanner(graph, {
         // _gross = entry cost before flyby help, _flyby = bonus applied
         // to it (see the dir-change branch above). Inert for the search.
         ns.push({ node: other, dir: newDir, bonus: bonusAfter, burnsRemaining: burnsRemaining - (entryCost - bonusUsed),
-          pivots, acet: acet - acetHere,
+          pivots, acet: acet - acetHere, belt: belt - plasmaHere,
           _gross: entryCost, _flyby: bonusUsed });
       }
     }
@@ -386,13 +398,13 @@ export function buildPlanner(graph, {
   }
 
   function findPath(fromId) {
-    const source = { node: fromId, dir: null, bonus: 0, burnsRemaining: thrust, pivots: freePivots, acet: acetylene ? 1 : 0 };
+    const source = { node: fromId, dir: null, bonus: 0, burnsRemaining: thrust, pivots: freePivots, acet: acetylene ? 1 : 0, belt: beltFlyby };
     return dijkstra(getNeighbors, nodeWeight, tupleNs, pathId, source, allowed, makeDominancePrune());
   }
 
   function drawPath(pathData, fromId, toId) {
     const { distance, previous } = pathData;
-    const source = { node: fromId, dir: null, bonus: 0, burnsRemaining: thrust, pivots: freePivots, acet: acetylene ? 1 : 0 };
+    const source = { node: fromId, dir: null, bonus: 0, burnsRemaining: thrust, pivots: freePivots, acet: acetylene ? 1 : 0, belt: beltFlyby };
     const target = { node: toId, dir: null, bonus: 0, done: true };
     const targetId = pathId(target);
     if (!(targetId in distance)) return null;
@@ -436,6 +448,22 @@ export function buildPlanner(graph, {
 // 'wait' transitions are NOT emitted as segments (they don't
 // physically move the rocket); they advance the turn counter.
 export function planRoute(graph, fromId, toId, config = {}) {
+  // The belt bonus (Plasma Intrusion Laboratory) adds a resource to the search,
+  // and the search's loop rule is path-dependent, so on a rare route the extra
+  // dimension steers it to a dearer path. The bonus can only ever help, so plan
+  // without it too and keep the cheaper (burns, then turns).
+  if ((config.beltFlyby | 0) > 0) {
+    const withIt = planRouteOnce(graph, fromId, toId, config);
+    const without = planRouteOnce(graph, fromId, toId, { ...config, beltFlyby: 0 });
+    if (!withIt) return without;
+    if (!without) return withIt;
+    const worse = without.totalBurns < withIt.totalBurns
+      || (without.totalBurns === withIt.totalBurns && without.totalTurns < withIt.totalTurns);
+    return worse ? without : withIt;
+  }
+  return planRouteOnce(graph, fromId, toId, config);
+}
+function planRouteOnce(graph, fromId, toId, config) {
   const planner = buildPlanner(graph, config);
   const data = planner.findPath(fromId);
   const path = planner.drawPath(data, fromId, toId);

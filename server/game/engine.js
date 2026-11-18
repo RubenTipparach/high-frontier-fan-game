@@ -39,6 +39,7 @@ import { COLONISTS_BY_ID } from '../../data/colonists.js';
 // with a mass); they only ever enter play through m4-gated paths.
 import {
   CONTRACTS_BY_ID, CONTRACT_PAIRS, CONTRACT_PAIR_NAMES, CONTRACT_BID_MAX, contractFace, sideFace, stepSatisfied,
+  acetyleneTerms,
 } from '../../data/contracts.js';
 const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...BERNALS_BY_ID, ...COLONISTS_BY_ID, ...CONTRACTS_BY_ID };
 import { resolveSupportChain, unmetRequirements, openCycleChainCard } from '../../data/support-chain.js';
@@ -1638,6 +1639,40 @@ function contractAbilityCount(state, player, key) {
   }
   return n;
 }
+// The value of a non-counting contract ability (a list, an object), merged
+// over the player's fulfilled contracts. Lists are unioned; [] outside M4.
+function contractAbilityList(state, player, key) {
+  if (!state || !state.m4 || !player) return [];
+  const out = [];
+  for (const f of (player.fulfilledContracts || [])) {
+    const face = contractFace(f.id, f.side);
+    const v = face && face.abilities && face.abilities[key];
+    if (v == null || v === false) continue;
+    for (const x of (Array.isArray(v) ? v : [v])) if (!out.includes(x)) out.push(x);
+  }
+  return out;
+}
+// A faction-style ability a fulfilled contract grants (Sun-fired Laser: the
+// push icon, Powersat). An Ability, so Anarchy does not suspend it.
+const contractGrantsPrivilege = (state, player, key) => contractAbilityList(state, player, 'privilege').includes(key);
+// Acetylene Rocketplane Liftoff terms at `slug` for this player (Equatorial
+// Launch Railway: from any of your Factories, half cost on atmospheric Sites).
+function acetyleneTermsFor(state, player, slug, wetMass) {
+  const f = state.factories && state.factories[slug];
+  return acetyleneTerms({
+    atmospheric: isAtmosphericSite(slug) || isAerostatSiteId(slug),
+    ownFactory: !!(f && f.ownerId === player.profileId),
+    railway: contractAbilityCount(state, player, 'acetyleneFactories') > 0,
+    wetMass,
+  });
+}
+// "-N ISRU when prospecting <body>" (Closest Planet): the ISRU reduction a
+// player's fulfilled contracts give a prospect of `site`.
+function contractIsruBonusAt(state, player, site) {
+  const body = String((site && site.body) || '');
+  return contractAbilityList(state, player, 'isruBody')
+    .reduce((n, x) => n + ((x && x.body === body) ? (x.n | 0) : 0), 0);
+}
 // Shielded (4B2f): -2 to Belt & CME Rolls to your Stacks, per copy.
 const contractShield = (state, player) => 2 * contractAbilityCount(state, player, 'shielded');
 
@@ -1957,12 +1992,13 @@ function playerOwnsAbility(player, key) {
 function hasPrivilege(state, player, key) {
   return privilegeOf(state, player) === key || hasGrantedPrivilege(player, key)
     || hasBorrowedAbility(player, key) || secondFacePrivilege(state, player) === key
-    || hasPrivilegeBernal(state, player, key);
+    || hasPrivilegeBernal(state, player, key) || contractGrantsPrivilege(state, player, key);
 }
 function playersWithPrivilege(state, key) {
   return (state.players || []).filter((p) => privilegeOf(state, p) === key
     || hasGrantedPrivilege(p, key) || hasBorrowedAbility(p, key)
-    || secondFacePrivilege(state, p) === key || hasPrivilegeBernal(state, p, key));
+    || secondFacePrivilege(state, p) === key || hasPrivilegeBernal(state, p, key)
+    || contractGrantsPrivilege(state, p, key));
 }
 // An anchored Bernal whose ability grants the faction privilege `key` (the L2
 // Collimator Bernal grants POWERSAT, the L4s Pharmaceutics Bernal grants
@@ -2131,8 +2167,27 @@ function stackHasActiveTophat(state, player, stack) {
 function contractIgnoresHazard(state, player, slug) {
   const k = hazardKind(slug);
   if (k === 'skull') return hazardCaptionMentions(slug, contractIgnoreWords(state, player, 'hazardIgnore'), ['skull']);
-  if (k === 'aero') return hazardCaptionMentions(slug, contractIgnoreWords(state, player, 'aerobrakeIgnore'), ['aero']);
+  if (k === 'aero') {
+    if (hazardCaptionMentions(slug, contractIgnoreWords(state, player, 'aerobrakeIgnore'), ['aero'])) return true;
+    // Inner Tour (the Earth-zone corridors into LEO) / HAVOC (Venus zone).
+    const zones = contractAbilityList(state, player, 'aerobrakeZones');
+    return zones.length > 0 && zones.includes(zoneOfSlug(slug));
+  }
   return false;
+}
+// New Horizons (4B2f): a Crash (skull) hazard next to any industrialized Site
+// is ignored, 1 per spacecraft per turn. `stackKey` names the spacecraft
+// ('rocket' / 'freighter'); the use is spent here, and the ledger lifts as the
+// player's next turn opens.
+function newHorizonsIgnores(state, player, slug, stackKey) {
+  if (hazardKind(slug) !== 'skull') return false;
+  const per = contractAbilityCount(state, player, 'skullNearFactory');
+  if (!per) return false;
+  const used = (player.newHorizonsUsed && player.newHorizonsUsed[stackKey]) | 0;
+  if (used >= per) return false;
+  if (!neighborSlugs(slug).some((n) => state.factories && state.factories[n])) return false;
+  player.newHorizonsUsed = { ...(player.newHorizonsUsed || {}), [stackKey]: used + 1 };
+  return true;
 }
 function chaosModelImmune(state, player, slug) {
   return !!hazardFlavorOf(slug) && hasPrivilege(state, player, 'POWER_SERIES_CHAOS_MODEL');
@@ -3936,6 +3991,12 @@ function bernalWaivesLanderBurn(player) {
     && (bn.cardId === GEO_ELEVATOR_BERNAL_ID || bn.cardId === LOFSTROM_LOOP_BERNAL_ID)
     && (bn.promoted || bn.face === 'secondary'));
 }
+// The lander-burn waiver at `slug`: the GEO Elevator / Lofstrom Loop Bernal
+// (anywhere), or the M4 Tsiolkovsky Elevator Lab contract (Elevator Sites only).
+function landerBurnWaivedAt(state, player, slug) {
+  if (bernalWaivesLanderBurn(player)) return true;
+  return !!(slug && contractAbilityCount(state, player, 'elevatorLanderBurns') && isSpaceElevatorSite(slug));
+}
 
 // Liftoff hazard waiver (mirror of browse.js#liftoffColonyWaives). A
 // factory that has a colony makes the launch pad safe: when the rocket
@@ -4404,9 +4465,10 @@ function applyMoveFreighter(state, op, player) {
   let frAcetylene = false;
   let frAcetyleneCost = 0;
   if (op.acetyleneLiftoff && from) {
-    if (!(isAtmosphericSite(from) || isAerostatSiteId(from))) return fail('not_atmospheric');
+    const terms = acetyleneTermsFor(state, player, from, frWetMass);
+    if (!terms.allowed) return fail('not_atmospheric');
     if (!canUseFactoryNonVictory(state, player, state.factories[from])) return fail('no_factory');
-    frAcetyleneCost = Math.ceil(2 * frWetMass);
+    frAcetyleneCost = terms.cost;
     const siteTanks = Object.values(player.outposts || {}).filter((o) => o && o.siteId === from);
     const availWater = siteTanks.reduce((sum, o) => sum + Math.floor(outpostWater(o)), 0);
     if (availWater < frAcetyleneCost) return fail('insufficient_site_water', { need: frAcetyleneCost, have: availWater });
@@ -4463,7 +4525,7 @@ function applyMoveFreighter(state, op, player) {
   const fromSize = nodeSizeNumber(here);
   let liftG = (from == null || fromSize <= 1 || (frNoAssistUnder6 && fromSize < 6))
     ? { ok: true, needsRoll: false }
-    : maneuverGate(state, here, frThrust, { powersat, isFreighter: true, acetylene: frAcetylene, replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player), electiveFor: player });
+    : maneuverGate(state, here, frThrust, { powersat, isFreighter: true, acetylene: frAcetylene, replay: !!op._replay, bernalLanderBurnWaived: landerBurnWaivedAt(state, player, here), electiveFor: player });
   // A promoted Freighter's big cube is a Mobile Factory too (1B6), so it may
   // assist ITSELF off a Site the way a small cube does (1B6b): size 5 or less.
   // Like a parked small cube, it needs no Claim to lift off.
@@ -4493,7 +4555,7 @@ function applyMoveFreighter(state, op, player) {
   const frAeroWaives = op._replay ? isAerobrakeLandableSite(dest) : frFlewCorridor;
   let landG = (frAeroWaives || destSize <= 1 || (frNoAssistUnder6 && destSize < 6))
     ? { ok: true, needsRoll: false }
-    : maneuverGate(state, dest, frThrust, { powersat, isFreighter: true, replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) });
+    : maneuverGate(state, dest, frThrust, { powersat, isFreighter: true, replay: !!op._replay, bernalLanderBurnWaived: landerBurnWaivedAt(state, player, dest) });
   // 1B6b landing: the promoted big cube assists itself down onto a Claim
   // (anyone's), size 5 or less, exactly as a small Mobile Factory cube does.
   if (!landG.ok) landG = promotedFreighterSelfAssist(state, player, dest, { powersat, needClaim: true }) || landG;
@@ -4529,6 +4591,7 @@ function applyMoveFreighter(state, op, player) {
   for (const slug of generic) {
     if (chaosModelImmune(state, player, slug)) { frColonyWaived.push(slug); continue; }
     if (contractIgnoresHazard(state, player, slug)) { frColonyWaived.push(slug); continue; }
+    if (newHorizonsIgnores(state, player, slug, 'freighter')) { frColonyWaived.push(slug); continue; }
     if (frCrashSpace && slug === frCrashSpace && !isLanderBurnNode(slug)) { frCrashIgnored.push(slug); continue; }
     if (liftoffColonyWaives(state, from, slug)) { frColonyWaived.push(slug); continue; }
     if (frTophatFree && !frTophatSlug) { frTophatSlug = slug; frColonyWaived.push(slug); continue; }
@@ -4845,7 +4908,7 @@ function applyMoveBernal(state, op, player) {
   const fromSize = nodeSizeNumber(here);
   const liftG = (from == null || fromSize <= 1)
     ? { ok: true, needsRoll: false }
-    : maneuverGate(state, here, 0, { powersat: hasPowersat(state, player), replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) });
+    : maneuverGate(state, here, 0, { powersat: hasPowersat(state, player), replay: !!op._replay, bernalLanderBurnWaived: landerBurnWaivedAt(state, player, here) });
   if (!liftG.ok) {
     return fail('cannot_liftoff', { siteSize: fromSize, site: here, landerBurn: !!liftG.landerBurn });
   }
@@ -4862,7 +4925,7 @@ function applyMoveBernal(state, op, player) {
     isLanderOf: isLanderBurnNode,
   });
   const bnAeroWaives = op._replay ? isAerobrakeLandableSite(dest) : bnFlewCorridor;
-  const landG = (bnAeroWaives || destSize <= 1) ? { ok: true, needsRoll: false } : maneuverGate(state, dest, 0, { powersat: hasPowersat(state, player), replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) });
+  const landG = (bnAeroWaives || destSize <= 1) ? { ok: true, needsRoll: false } : maneuverGate(state, dest, 0, { powersat: hasPowersat(state, player), replay: !!op._replay, bernalLanderBurnWaived: landerBurnWaivedAt(state, player, dest) });
   // thrust 0: a Bernal crawls, it has no thrust triangle. Stated so the client's
   // cannot_land message reads "yours is 0" rather than "yours is undefined".
   if (!landG.ok) return fail('cannot_land', { thrust: 0, siteSize: destSize, site: dest, landerBurn: !!landG.landerBurn });
@@ -5672,9 +5735,10 @@ function applyMove(state, op, player) {
   let acetylene = false;
   let acetyleneCost = 0;
   if (op.acetyleneLiftoff && from) {
-    if (!(isAtmosphericSite(from) || isAerostatSiteId(from))) return fail('not_atmospheric');
+    const terms = acetyleneTermsFor(state, player, from, wetMass);
+    if (!terms.allowed) return fail('not_atmospheric');
     if (!canUseFactoryNonVictory(state, player, state.factories[from])) return fail('no_factory');
-    acetyleneCost = Math.ceil(2 * wetMass);
+    acetyleneCost = terms.cost;
     const siteTanks = Object.values(player.outposts || {}).filter((o) => o && o.siteId === from);
     const availWater = siteTanks.reduce((s, o) => s + Math.floor(outpostWater(o)), 0);
     if (availWater < acetyleneCost) return fail('insufficient_site_water', { need: acetyleneCost, have: availWater });
@@ -5822,7 +5886,7 @@ function applyMove(state, op, player) {
   // is a hazard roll unless a colony waives it. No factory => hard block.
   // Liftoff gates the origin (skipped at LEO, siteId null); landing gates
   // the destination.
-  const liftG = from ? maneuverGate(state, from, thrust, { powersat, acetylene, isFreighter: asFreighter, replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player), electiveFor: player }) : { ok: true, needsRoll: false };
+  const liftG = from ? maneuverGate(state, from, thrust, { powersat, acetylene, isFreighter: asFreighter, replay: !!op._replay, bernalLanderBurnWaived: landerBurnWaivedAt(state, player, from), electiveFor: player }) : { ok: true, needsRoll: false };
   if (!liftG.ok) return fail('cannot_liftoff', { thrust, siteSize: liftG.size, site: from, landerBurn: !!liftG.landerBurn });
   // Aerobrake landing: a destination that sits next to an aerobrake corridor
   // (the 🪂 symbol) can be reached by parachute - no thrust-to-land
@@ -5861,7 +5925,7 @@ function applyMove(state, op, player) {
     : flewTheCorridor;
   const landG = (aeroWaivesLanding || acetWaivesLanding)
     ? { ok: true, assist: false, needsRoll: false }
-    : maneuverGate(state, dest, thrust, { powersat, isFreighter: asFreighter, replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) });
+    : maneuverGate(state, dest, thrust, { powersat, isFreighter: asFreighter, replay: !!op._replay, bernalLanderBurnWaived: landerBurnWaivedAt(state, player, dest) });
   if (!landG.ok) return fail('cannot_land', { thrust, siteSize: landG.size, site: dest, landerBurn: !!landG.landerBurn });
   // Did the parachute do the work? A size-10 Mars site is unreachable by thrust
   // - nothing in the deck exceeds 6 - so an aerobrake descent is the ONLY way
@@ -5908,6 +5972,7 @@ function applyMove(state, op, player) {
     if (k === 'aero' && safeAero) { safeAeroSlugs.push(slug); continue; }
     if (chaosModelImmune(state, player, slug)) { chaosSlugs.push(slug); continue; }
     if (contractIgnoresHazard(state, player, slug)) { contractIgnoredSlugs.push(slug); continue; }
+    if (newHorizonsIgnores(state, player, slug, 'rocket')) { contractIgnoredSlugs.push(slug); continue; }
     if (k === 'aero' && cavitationIgnores(state, player)) { cavitationSlugs.push(slug); continue; }
     // Factory-assist liftoff ignores the hazard on the first space entered
     // (H6c) - but NEVER when that space is a lander burn (or half-lander burn).
@@ -6090,7 +6155,7 @@ function applyMove(state, op, player) {
     while (j + 1 < segs.length && !(Number(segs[j + 1].burns) > 0)) j += 1;
     if (j === segs.length - 1) {
       if (aeroWaivesLanding || acetWaivesLanding || landG.assist) return arrivals.length;
-      const g0 = maneuverGate(state, dest, 0, { powersat, replay: !!op._replay, bernalLanderBurnWaived: bernalWaivesLanderBurn(player) });
+      const g0 = maneuverGate(state, dest, 0, { powersat, replay: !!op._replay, bernalLanderBurnWaived: landerBurnWaivedAt(state, player, dest) });
       if (g0.ok && !g0.needsRoll) return arrivals.length;
       return Math.max(h, j - 1);
     }
@@ -9554,7 +9619,9 @@ function applyDecommission(state, op, player) {
         // full Felonious privilege - it must NOT also unlock Claim Jump, Luna
         // prospecting, Factory Hijack, or Crew (Human) decommission above, so
         // it's checked here directly rather than folded into mayCommitFelony.
-        if (!mayCommitFelony(state, player) && !hasPrivilege(state, player, 'COLLECTIVE_BARGAINING')) {
+        // Rescue Team (M4 contract ability) allows Murder/Suicide the same way.
+        if (!mayCommitFelony(state, player) && !hasPrivilege(state, player, 'COLLECTIVE_BARGAINING')
+          && !contractAbilityCount(state, player, 'murderSuicide')) {
           blocked++; continue;
         }
         src.splice(idx, 1);
@@ -10195,7 +10262,8 @@ function applyProspect(state, op, player) {
   // Colocated modifier cards (subsystems 2 + 3): scan the PROSPECTING stack (the
   // rocket, or the freighter / bernal / outpost the prospect fires from).
   const colocatedPowers = unit.stack.map(powerOfSlot);
-  const isruMod = sumColocatedIsruMod(colocatedPowers, { isAerostat: isAerostatSite(site) });
+  const isruMod = sumColocatedIsruMod(colocatedPowers, { isAerostat: isAerostatSite(site) })
+    - contractIsruBonusAt(state, player, site);   // Closest Planet: -1 ISRU at Mercury
   const effIsru = Math.max(0, prospectorIsru(provSlot) + isruMod);   // isruMod <= 0 (easier), floored at 0
   // V5 Hermes Fall: prospecting the binary auto-succeeds with a robonaut of ANY
   // ISRU - but SOLO ONLY (user 2026-08-07). Both halves are hydration 0, so the
@@ -10228,7 +10296,9 @@ function applyProspect(state, op, player) {
   if ((state.players || []).length >= 2 && String(site.body || '') === 'Luna') {
     const fp = state.players[state.firstPlayerIndex || 0];
     const isFirst = fp && fp.profileId === player.profileId;
-    const granted = !!(state.lunaGrants && state.lunaGrants[String(player.profileId)]);
+    // Artemis (M4): Luna without the first player's permission.
+    const granted = !!(state.lunaGrants && state.lunaGrants[String(player.profileId)])
+      || contractAbilityCount(state, player, 'lunaFree') > 0;
     if (!isFirst && !granted) {
       if (mayCommitFelony(state, player)) lunaFelony = true;
       else return fail('luna_treaty');
@@ -13640,6 +13710,7 @@ function openTurnFor(state, player) {
   player.shuttlesUsed = false;
   player.cavitationUsed = false;
   if (player.tophatUsed) delete player.tophatUsed;   // M4 tophat: once per turn
+  if (player.newHorizonsUsed) delete player.newHorizonsUsed;   // M4 New Horizons: 1/spacecraft/turn
   delete player.insightUsed;                          // M4 Insight: once per auction turn
   delete player.insightPending;
   player.wsbCoastUsed = false;

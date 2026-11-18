@@ -130,7 +130,7 @@ import { fuelTankCylinderMarkup, fuelTransferSectionMarkup } from './fuel-tank-v
 // hand/stack rendering, the Bernal modal) resolves a boosted/auctioned Bernal.
 // Keyed reads only; Bernals only surface in m2 games, so nothing else changes.
 // M4 contract cards are stack slots too (only ever present in an m4 game).
-import { CONTRACTS, CONTRACTS_BY_ID, contractFace } from '../../data/contracts.js';
+import { CONTRACTS, CONTRACTS_BY_ID, contractFace, acetyleneTerms } from '../../data/contracts.js';
 import { renderContractCard } from './contract-card.js';
 const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...BERNALS_BY_ID, ...COLONISTS_BY_ID, ...CONTRACTS_BY_ID };
 import { renderAssemblyPanel, renderAssemblyLaws } from './assembly.js';
@@ -164,7 +164,7 @@ import { walkBlackDown, walkRedUp, redStepsBetween, rocketDryMass } from '../../
 import { isBuggyRoadPair } from '../../data/buggy-roam.js';
 import { syncTutorialOverlay, showTutorialWrongStep, removeTutorialOverlay } from './tutorial-overlay.js';
 import { tutorialStepAt } from './tutorial-steps.js';
-import { isAtmosphericSite } from '../../data/site-categories.js';
+import { isAtmosphericSite, isSpaceElevatorSite } from '../../data/site-categories.js';
 import { facePower, rerollSpentThisTurn } from '../../data/card-abilities.js';
 import { aeroHopAllowed } from '../../data/aerobrake-direction.js';
 import { MILESTONES } from '../../data/glory.js';
@@ -2268,7 +2268,9 @@ function playerHasPrivilege(player, key) {
   // An anchored Bernal ability may grant a faction privilege (Collimator ->
   // Powersat, Pharmaceutics -> Skunkworks). Like a card grant it is an Ability,
   // not suspended by Anarchy; a HOME grant counts only at the Home Bernal.
-  return playerBernalPrivilege(player, key);
+  if (playerBernalPrivilege(player, key)) return true;
+  // A fulfilled M4 contract's ability (Sun-fired Laser: Powersat).
+  return contractAbilityListOf(player, 'privilege').includes(key);
 }
 // Any-seat mirror of the server's hasPrivilegeBernal: does this snapshot player
 // hold `key` from an anchored Bernal's ability?
@@ -8939,6 +8941,15 @@ function contractAbilityChips(p) {
     if (!label && ab.hazardIgnore) label = `Ignore ${ab.hazardIgnore.map((w) => `"${w}"`).join(' / ')} hazards`;
     if (!label && ab.aerobrakeIgnore) label = `Ignore ${ab.aerobrakeIgnore.map((w) => `"${w}"`).join(' / ')} aerobrakes`;
     if (!label && ab.fundraiseAqua) label = `+${ab.fundraiseAqua} aqua fundraising`;
+    if (!label && ab.skullNearFactory) label = 'Ignore hazards by Factories';
+    if (!label && ab.aerobrakeZones) label = `Ignore ${ab.aerobrakeZones.join(' / ')} aerobrakes`;
+    if (!label && ab.privilege === 'POWERSAT') label = 'Powersat';
+    if (!label && ab.lunaFree) label = 'Luna without permission';
+    if (!label && ab.isruBody) label = `-${ab.isruBody.n} ISRU on ${ab.isruBody.body}`;
+    if (!label && ab.beltFlyby) label = '+1 belt flyby';
+    if (!label && ab.murderSuicide) label = 'Murder/Suicide';
+    if (!label && ab.acetyleneFactories) label = 'Acetylene at your Factories';
+    if (!label && ab.elevatorLanderBurns) label = 'Elevator assist';
     if (!label) label = text.length > 28 ? text.slice(0, 26).replace(/\s+\S*$/, '') + '...' : text;
     out.push({ label, text, from: face.name });
   }
@@ -11942,7 +11953,11 @@ async function decommissionSelectedToHand(stackId, ids, onDone) {
     else parts.push(`<strong>${crew}</strong> crew stay put (a felony needs Anarchy)`);
   }
   if (humanCol) {
-    if (felony) parts.push(`<strong>${humanCol}</strong> Human colonist${humanCol === 1 ? '' : 's'} recall${humanCol === 1 ? 's' : ''} home to LEO / your Home Bernal (felony)`);
+    // Murder/Suicide: a felony, or allowed outright (Collective Bargaining,
+    // Rescue Team).
+    const murder = felony || playerHasPrivilege(mySnapshotPlayer(), 'COLLECTIVE_BARGAINING')
+      || contractAbilityListOf(mySnapshotPlayer(), 'murderSuicide').length > 0;
+    if (murder) parts.push(`<strong>${humanCol}</strong> Human colonist${humanCol === 1 ? '' : 's'} recall${humanCol === 1 ? 's' : ''} home to LEO / your Home Bernal (felony)`);
     else parts.push(`<strong>${humanCol}</strong> Human colonist${humanCol === 1 ? '' : 's'} stay${humanCol === 1 ? 's' : ''} put (a felony needs Anarchy)`);
   }
   if (fuelCards) {
@@ -19595,6 +19610,40 @@ function routeHazards(segments) {
 // already gated by the caller (needsRoll, not colony-waived).
 // The hazard words a player's fulfilled M4 contracts ignore (4B2f), mirror of
 // the engine's contractIgnoreWords. Null outside M4.
+// A merged list of a fulfilled-contract ability over this player's contracts
+// (engine contractAbilityList). [] outside M4.
+function contractAbilityListOf(p, key) {
+  if (!isM4() || !p) return [];
+  const out = [];
+  for (const f of (p.fulfilledContracts || [])) {
+    const face = contractFace(f.id, f.side);
+    const v = face && face.abilities && face.abilities[key];
+    if (v == null || v === false) continue;
+    for (const x of (Array.isArray(v) ? v : [v])) if (!out.includes(x)) out.push(x);
+  }
+  return out;
+}
+// Closest Planet: -N ISRU prospecting a body (engine contractIsruBonusAt).
+function contractIsruBonusOf(p, site) {
+  const rec = site && (SITES_BY_ID[site.id2] || SITES_BY_ID[site.id] || site);
+  const body = String((rec && rec.body) || '');
+  return contractAbilityListOf(p, 'isruBody').reduce((n, x) => n + ((x && x.body === body) ? (x.n | 0) : 0), 0);
+}
+// Plasma Intrusion Laboratory: Radiation Belt flyby bonuses per spacecraft per turn.
+function contractBeltFlybyOf(p) {
+  return contractAbilityListOf(p, 'beltFlyby').reduce((n, x) => n + (Number(x) || 0), 0);
+}
+// Acetylene liftoff terms here, Equatorial Launch Railway included
+// (engine acetyleneTermsFor).
+function acetyleneTermsHere(site, factory, wetMass) {
+  const me = mySnapshotPlayer();
+  return acetyleneTerms({
+    atmospheric: isAtmosphericSite(site.id2) || isAtmosphericSite(site.id) || siteIsAerostat(site),
+    ownFactory: !!(factory && me && String(factory.ownerId) === String(me.profileId)),
+    railway: contractAbilityListOf(me, 'acetyleneFactories').length > 0,
+    wetMass,
+  });
+}
 function contractIgnoreWordsOf(p) {
   if (!isM4() || !p) return null;
   const skull = new Set(); const aero = new Set();
@@ -19604,7 +19653,30 @@ function contractIgnoreWordsOf(p) {
     for (const w of (ab.hazardIgnore || [])) skull.add(w);
     for (const w of (ab.aerobrakeIgnore || [])) aero.add(w);
   }
-  return (skull.size || aero.size) ? { skull: [...skull], aero: [...aero] } : null;
+  const zones = contractAbilityListOf(p, 'aerobrakeZones');
+  // New Horizons: skull hazards next to an industrialized Site, N per
+  // spacecraft per turn (the engine's newHorizonsUsed ledger).
+  const per = contractAbilityListOf(p, 'skullNearFactory').reduce((n, x) => n + (Number(x) || 0), 0);
+  const used = (p.newHorizonsUsed && p.newHorizonsUsed.rocket) | 0;
+  const nearFactory = Math.max(0, per - used);
+  return (skull.size || aero.size || zones.length || nearFactory)
+    ? { skull: [...skull], aero: [...aero], zones, nearFactory } : null;
+}
+// Does a contract ability pass this hazard on the route? `left` tracks New
+// Horizons' remaining uses ({ n }). Mirror of the engine's contractIgnoresHazard
+// + newHorizonsIgnores, in the same order.
+function contractPassesHazard(ign, h, left) {
+  if (!ign) return false;
+  const slug = plannerIdToSlug(h.site.id);
+  if (hazardCaptionMentions(slug, h.aero ? ign.aero : ign.skull, [h.aero ? 'aero' : 'skull'])) return true;
+  if (h.aero && ign.zones && ign.zones.length
+    && ign.zones.includes(ZONE_ASSIGNMENTS[String(h.site.id2 != null ? h.site.id2 : slug)])) return true;
+  if (!h.aero && left && left.n > 0) {
+    const neigh = _activeData && _activeData.neighbors;
+    const around = (neigh && neigh.get(h.site.id)) || [];
+    if ([...around].some((pid) => getFactory(pid))) { left.n--; return true; }
+  }
+  return false;
 }
 // M4 tophat (4B2e), mirror of the engine's stackHasActiveTophat: the rocket
 // carries a tophat contract that is not in default, and has not used it this turn.
@@ -19628,6 +19700,7 @@ function buildOrderedHazardItems({ turn1Segs, hz, curSite, safeAeroOnline, lifto
   // ring / spin / wind hazard, CAVITATION ENGINEERS the turn's first aerobrake.
   let cavitationLeft = !!cavitationFree;
   let tophatLeft = !!tophatFree;
+  const nhLeft = { n: (ignoreWords && ignoreWords.nearFactory) | 0 };
   if (liftoffAssist) items.push({ ...liftoffAssist, segIndex: 0 });
   // H6c Crash Hazard: a factory-assist liftoff ignores the hazard on the FIRST
   // space it moves into (turn1Segs[0].to). Mirror of the server; the assist's own
@@ -19641,7 +19714,7 @@ function buildOrderedHazardItems({ turn1Segs, hz, curSite, safeAeroOnline, lifto
     if (safeAeroOnline && h.aero) continue;
     if (chaosImmune && hazardFlavorOf(plannerIdToSlug(h.site.id))) continue;
     // M4 Hazard / Aerobrake Ignore contracts (4B2f), mirrored from the engine.
-    if (ignoreWords && hazardCaptionMentions(plannerIdToSlug(h.site.id), h.aero ? ignoreWords.aero : ignoreWords.skull, [h.aero ? 'aero' : 'skull'])) continue;
+    if (contractPassesHazard(ignoreWords, h, turn1Segs.some((sg) => sg.to === h.site.id) ? nhLeft : null)) continue;
     if (cavitationLeft && h.aero && turn1Segs.some((sg) => sg.to === h.site.id)) { cavitationLeft = false; continue; }
     if (crashSpaceId && h.site.id === crashSpaceId && !isLanderBurnNodeClient(plannerIdToSlug(h.site.id))) continue;
     if (liftoffColonyWaives(curSite, h.site)) continue;
@@ -20774,7 +20847,11 @@ function maneuverGate(site, netThrust, opts = {}) {
   // opts.bernalLanderBurnWaived. Mirror of the server maneuverGate.
   if (siteHasLanderBurn(site) && !opts.acetylene) {
     const bernalWaived = (opts.bernalLanderBurnWaived != null)
-      ? !!opts.bernalLanderBurnWaived : myBernalWaivesLanderBurn();
+      ? !!opts.bernalLanderBurnWaived
+      : (myBernalWaivesLanderBurn()
+        // Tsiolkovsky Elevator Lab (M4): the same waiver at Elevator Sites.
+        || (contractAbilityListOf(mySnapshotPlayer(), 'elevatorLanderBurns').length > 0
+          && isSpaceElevatorSite(site.id2 != null ? site.id2 : site.id)));
     if (!bernalWaived) return { ok: false, assist: false, needsRoll: false, size, landerBurn: true };
   }
   const factory = site && getFactory(site.id);
@@ -25089,7 +25166,7 @@ function doProspect(site, prosp) {
   // Defence-in-depth in case the popup button somehow ends up
   // enabled with a stale read. Includes the colocated ISRU modifier.
   const isAerostatSiteHere = siteIsAerostat(site);
-  const prospIsru = Math.max(0, prosp.isru + colocatedIsruMod({ isAerostat: isAerostatSiteHere }));
+  const prospIsru = Math.max(0, prosp.isru + colocatedIsruMod({ isAerostat: isAerostatSiteHere }) - contractIsruBonusOf(mySnapshotPlayer(), site));
   const rSite = getRocketSite();
   const colocScoopHere = isAerostatSiteHere && rSite && rSite.id === site.id && stackHasPower('aerostatHydration2');
   const baseWaterHere = Number.isFinite(site.hydration) ? site.hydration : 0;
@@ -27025,7 +27102,6 @@ async function commitFreighterMoveOnline() {
       : maneuverGate(frSite, myFreighterThrust(), { powersat: playerHasPowersat(mySnapshotPlayer()), isFreighter: true, liftoff: true });
     if (!frLiftG.ok) frLiftG = myPromotedFreighterSelfAssist(frSite) || frLiftG;
     if (!frLiftG.ok && frLiftG.landerBurn) {
-      const atmospheric = isAtmosphericSite(frSite.id2) || isAtmosphericSite(frSite.id) || siteIsAerostat(frSite);
       const factoryHere = getFactory(frSite.id);
       // A freighter's wet mass: its own card + its cargo + its tank.
       // bernalSlotMass is the module-scope slot-mass read (it honours a radiator's
@@ -27034,16 +27110,17 @@ async function commitFreighterMoveOnline() {
       const frCargoMass = (frUnit0.stack || []).reduce((m, sl) => m + (bernalSlotMass(sl) || 0), 0);
       // Dry mass never drops below 1, so even a bare zero-mass freighter lifts at wet mass 1.
       const frWet = rocketDryMass(((frFace0 && frFace0.mass) | 0) + frCargoMass) + (Number(frUnit0.tank) || 0);
-      const frCost = Math.ceil(2 * frWet);
+      const frTerms = acetyleneTermsHere(frSite, factoryHere, frWet);
+      const frCost = frTerms.cost;
       const siteWater = siteStoredWater(frSite.id);
-      if (atmospheric && iCanUseFactory(factoryHere)) {
+      if (frTerms.allowed && iCanUseFactory(factoryHere)) {
         if (siteWater < frCost) {
-          _onlineToast(`Acetylene liftoff needs ${frCost} water stored here (2 x wet mass ${frWet}). You have ${siteWater}.`, 'error');
+          _onlineToast(`Acetylene liftoff needs ${frCost} water stored here (wet mass ${frWet}). You have ${siteWater}.`, 'error');
           return false;
         }
         const go = await confirmModal({
           title: '🚀 Acetylene Rocketplane Liftoff',
-          body: `Burn ${frCost} water stored here (2 x wet mass ${frWet}). The first lander burn out is free.`,
+          body: `Burn ${frCost} water stored here (wet mass ${frWet}). The first lander burn out is free.`,
           yes: `Lift off (${frCost} water)`,
           no: 'Cancel move',
         });
@@ -27622,22 +27699,21 @@ async function moveRocket() {
       // the atmosphere carry the ship out through the lander burns. Costs
       // water equal to 2 x the ship's wet mass, paid from your stored water AT
       // the site (outpost tanks), and the first lander burn out is free.
-      const atmospheric = isAtmosphericSite(curSite.id2) || isAtmosphericSite(curSite.id)
-        || siteIsAerostat(curSite);
       const factoryHere = getFactory(curSite.id);
       const acetTotals = getStackTotals();
       const acetWet = rocketDryMass(acetTotals.dryMass || 0) + getTankWater();   // dry mass floors at 1
-      const acetCost = Math.ceil(2 * acetWet);
+      const acetTerms = acetyleneTermsHere(curSite, factoryHere, acetWet);
+      const acetCost = acetTerms.cost;
       const siteWater = siteStoredWater(curSite.id);
-      if (atmospheric && iCanUseFactory(factoryHere)) {
+      if (acetTerms.allowed && iCanUseFactory(factoryHere)) {
         if (siteWater < acetCost) {
-          _onlineToast(`Acetylene liftoff needs ${acetCost} water stored here (2 x wet mass ${acetWet}). You have ${siteWater}.`, 'error');
+          _onlineToast(`Acetylene liftoff needs ${acetCost} water stored here (wet mass ${acetWet}). You have ${siteWater}.`, 'error');
           return false;
         }
         if (!acetArmed) {
           const go = await confirmModal({
             title: '🚀 Acetylene Rocketplane Liftoff',
-            body: `Burn ${acetCost} water stored here (2 x wet mass ${acetWet}). The first lander burn out is free.`,
+            body: `Burn ${acetCost} water stored here (wet mass ${acetWet}). The first lander burn out is free.`,
             yes: `Lift off (${acetCost} water)`,
             no: 'Cancel move',
           });
@@ -29395,8 +29471,11 @@ function showSitePopupFor(site) {
       const thrA = getActiveThrusterStats();
       const ntA = thrA && Number.isFinite(thrA.thrust) ? thrA.thrust : 0;
       const plainGate = maneuverGate(acetSite, ntA);
-      const atmospheric = isAtmosphericSite(acetSite.id2) || isAtmosphericSite(acetSite.id)
-        || siteIsAerostat(acetSite);
+      const factoryHere = getFactory(acetSite.id);
+      const totalsA = getStackTotals();
+      const wetA = rocketDryMass(totalsA.dryMass || 0) + getTankWater();   // dry mass floors at 1
+      // Equatorial Launch Railway (M4) also offers it at any of your Factories.
+      const termsA = acetyleneTermsHere(acetSite, factoryHere, wetA);
       // An ATMOSPHERIC site ALWAYS shows it (user 2026-08-07) - the boosters are
       // refined from the air, so the air is what decides whether the option
       // exists at all. It used to also require "!plainGate.ok &&
@@ -29404,11 +29483,8 @@ function showSitePopupFor(site) {
       // ship's thrust: a player who used it once could not find it again and
       // read that as the feature being removed. Somewhere with no atmosphere it
       // stays absent rather than showing a permanently dead button.
-      if (atmospheric) {
-        const factoryHere = getFactory(acetSite.id);
-        const totalsA = getStackTotals();
-        const wetA = rocketDryMass(totalsA.dryMass || 0) + getTankWater();   // dry mass floors at 1
-        const costA = Math.ceil(2 * wetA);
+      if (termsA.allowed) {
+        const costA = termsA.cost;
         const siteWaterA = siteStoredWater(acetSite.id);
         const canUseF = iCanUseFactory(factoryHere);
         const eligible = canUseF && siteWaterA >= costA;
@@ -29419,9 +29495,9 @@ function showSitePopupFor(site) {
         const tip = !canUseF
           ? 'Needs a factory here you can use - it builds the winged boosters.'
           : siteWaterA < costA
-            ? `Needs ${costA} water stored here (2 x wet mass ${wetA}). You have ${siteWaterA}.`
+            ? `Needs ${costA} water stored here (wet mass ${wetA}). You have ${siteWaterA}.`
             : `${notNeeded ? 'Optional: your thrust already clears this liftoff. ' : ''}`
-              + `Burn ${costA} water stored here (2 x wet mass ${wetA}) to lift off. The first lander burn out is free.`;
+              + `Burn ${costA} water stored here (wet mass ${wetA}) to lift off. The first lander burn out is free.`;
         // A push-to-arm toggle: tap to activate the boosters for the next
         // planned move, tap again to stand down. The tooltip / tap-tip always
         // spells out what the liftoff needs (factory + atmosphere + stored
@@ -29527,7 +29603,7 @@ function showSitePopupFor(site) {
       // 0 / missing clears the gate. Colocated ISRU modifier (subsystem 3)
       // scans the PROSPECTING stack, matching the server gate so a prospect the
       // popup offers is never rejected.
-      const prospIsru = Math.max(0, prosp.isru + colocatedIsruMod({ isAerostat }, unit.slots));
+      const prospIsru = Math.max(0, prosp.isru + colocatedIsruMod({ isAerostat }, unit.slots) - contractIsruBonusOf(mySnapshotPlayer(), site));
       // Atmospheric Scoop (subsystem 5): an aerostat site the prospecting stack
       // is parked at counts as hydration 2 (colocated; adjacency is server-side).
       const colocScoop = isAerostat && unit.fromSite === site.id && stackHasPower('aerostatHydration2', unit.slots);
@@ -30856,7 +30932,8 @@ function showSitePopupFor(site) {
           onClick: () => { submitLunaOp({ kind: 'DENY_LUNA_PROSPECT', granteeId: pid }); _renderer.clearSitePopup(); },
         });
       }
-    } else if (!grants[mySeatId()]) {
+    } else if (!grants[mySeatId()] && !contractAbilityListOf(mySnapshotPlayer(), 'lunaFree').length) {
+      // (Artemis, M4: no permission needed.)
       if (reqs[mySeatId()]) {
         actions.push({
           label: '⏳ Luna permission requested', variant: 'secondary', offTurn: true, disabled: true,
@@ -30965,7 +31042,7 @@ function showSitePopupFor(site) {
   const popupBaseWater = Number.isFinite(site.hydration) ? site.hydration : 0;
   const popupWater = (popupAero && stackHasPower('aerostatHydration2')) ? Math.max(popupBaseWater, 2) : popupBaseWater;
   _renderer.setPopupRocketInfo(prosp
-    ? { isru: Math.max(0, prosp.isru + colocatedIsruMod({ isAerostat: popupAero })), water: popupWater, kind: prosp.kind }
+    ? { isru: Math.max(0, prosp.isru + colocatedIsruMod({ isAerostat: popupAero }) - contractIsruBonusOf(mySnapshotPlayer(), site)), water: popupWater, kind: prosp.kind }
     : null);
   _renderer.setSitePopup(site, actions);
   _renderer.onPopupClose(() => {
@@ -31469,6 +31546,7 @@ function planFreighterRouteTo(destSite) {
     metricPriority: routeMetricPriority(),
     solarSeason: nowSeason || 'red',
     freePivots: freighterBonusPivots(),
+    beltFlyby: contractBeltFlybyOf(mySnapshotPlayer()),
   });
   if (!result || !result.segments.length) {
     setStatus(`No freighter route found to <strong>${esc(destSite.name)}</strong>.`);
@@ -31603,6 +31681,7 @@ function planRocketRouteTo(destSite) {
     // credit a free burn per radiation belt so the sail can ride belts to reach
     // further (mirrors the server's beltsEntered credit).
     beltBonusBurn: !!(thrStats && thrStats.bonusBurnPerBelt),
+    beltFlyby: contractBeltFlybyOf(mySnapshotPlayer()),
     // C3b Synodic Comets: an activated TW thruster (a promoted GW) may enter a
     // Synodic Comet in any season, so the search stops treating those comets as
     // off the board. Every other seasonal space still gates normally.

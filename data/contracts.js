@@ -83,6 +83,12 @@ export function parseSteps(text) {
 //   shielded / bailout / secured / insight / connections / transport : true
 //   hazardIgnore / aerobrakeIgnore : [quoted hazard words]   (4B2f)
 //   fundraiseAqua : N   ("Gain N additional Aqua when fundraising")
+//   skullNearFactory : N (Crash hazards next to an industrialized Site, N/stack/turn)
+//   aerobrakeZones : [zone]  (Aerobrake hazards in that zone are ignored)
+//   privilege : key     (a faction-style ability, e.g. POWERSAT)
+//   lunaFree / murderSuicide / acetyleneFactories / elevatorLanderBurns : true
+//   isruBody : { body, n }   (-n ISRU prospecting that body)
+//   beltFlyby : N       (+1 flyby bonus from the first N Radiation Belts/turn)
 export function parseFulfilledAbility(text) {
   const t = String(text || '').trim();
   const ab = {};
@@ -99,6 +105,28 @@ export function parseFulfilledAbility(text) {
   }
   const fr = t.match(/^Gain (\d+) additional Aquas? when fundraising/i);
   if (fr) ab.fundraiseAqua = Number(fr[1]);
+  if (icon) {
+    const tag = icon[1].toLowerCase(); const rest = icon[2];
+    // New Horizons: Crash hazards next to any industrialized Site, 1 per
+    // spacecraft per turn.
+    if (/skull/.test(tag) && /adjacent to industrialized sites/i.test(rest)) ab.skullNearFactory = 1;
+    // Inner Tour (the Earth-zone corridors into LEO) / HAVOC (a named zone).
+    if (/aerobrake/.test(tag)) {
+      if (/leading to LEO/i.test(rest)) ab.aerobrakeZones = ['Earth'];
+      const z = rest.match(/^(\w+) zone/i);
+      if (z) ab.aerobrakeZones = [z[1][0].toUpperCase() + z[1].slice(1).toLowerCase()];
+    }
+    // The push icon: the Powersat ability (Sun-fired Laser, "Negotiable").
+    if (/beam|play triangle|push/.test(tag) && !/air-eater/.test(tag)) ab.privilege = 'POWERSAT';
+  }
+  if (/^You may prospect Luna without permission/i.test(t)) ab.lunaFree = true;
+  const isru = t.match(/^-(\d+) ISRU when prospecting (\w+)/i);
+  if (isru) ab.isruBody = { body: isru[2], n: Number(isru[1]) };
+  const belt = t.match(/^\+1 flyby bonus from Radiation Belt \((once|twice)/i);
+  if (belt) ab.beltFlyby = belt[1].toLowerCase() === 'twice' ? 2 : 1;
+  if (/allowed Murder\/Suicide/i.test(t)) ab.murderSuicide = true;
+  if (/^Acetylene rocketplane liftoff is possible from all your Factories/i.test(t)) ab.acetyleneFactories = true;
+  if (/factory-assist landings\/liftoffs at Elevator Sites treat lander burns as normal Burn Spaces/i.test(t)) ab.elevatorLanderBurns = true;
   return ab;
 }
 // "When Fulfilling" effects (4B4f) the engine can enact, read off the text.
@@ -363,4 +391,16 @@ export function stepSatisfied(step, where, progress, ctx, prev = null) {
     default:
       return { ok: false, why: 'destination_not_yet_supported', detail: { step: step.why || step.raw } };
   }
+}
+
+// Acetylene Rocketplane Liftoff terms (H6c), with the M4 Equatorial Launch
+// Railway ability folded in: it is allowed from an atmospheric Site, or from
+// any of your own Factories with the ability; it costs 2 x wet mass in water
+// stored at the Site, halved (round up) on an atmospheric Site with the ability.
+// Shared by the engine and the client so the cost always agrees.
+export function acetyleneTerms({ atmospheric, ownFactory, railway, wetMass }) {
+  const full = Math.ceil(2 * (Number(wetMass) || 0));
+  const allowed = !!atmospheric || !!(railway && ownFactory);
+  const cost = (railway && atmospheric) ? Math.ceil(full / 2) : full;
+  return { allowed, cost };
 }

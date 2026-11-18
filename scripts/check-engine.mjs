@@ -11751,6 +11751,142 @@ check('Hazard Ignore passes the quoted hazards; the tophat enters one hazard fre
   return `${ring.face.name} passes "${NODE_LABELS[RING]}"; ${tophat.face.name} carries the ship through "${NODE_LABELS[PLAIN]}" free`;
 });
 
+check('the remaining blue Fulfilled Abilities (Inner Tour, New Horizons, Sun-fired Laser, Artemis, Closest Planet, Railway, Rescue Team, Tsiolkovsky)', () => {
+  const byName = (n) => conFace((f) => f.name === n);
+  const notes = [];
+  // Inner Tour: the Earth-zone aerobrakes into LEO are ignored.
+  const EARTH_AERO = 'lag-w6ybr';
+  assert(hazardKind(EARTH_AERO) === 'aero' && zoneOfSlug(EARTH_AERO) === 'Earth', 'test aerobrake');
+  const fly = (to, setup) => {
+    const st = startedGame({ seats: 2, m4: true });
+    const me = st.players[0];
+    st.activeIndex = 0; me.aqua = 20; me.rocket.siteId = null; me.rocket.tank = 12;
+    me.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }, ...supportsFor(thruster)];
+    me.rocket.activeThrusterId = thruster.id;
+    if (setup) setup(st, me);
+    return applyOperation(st, { kind: 'MOVE', hazardPay: true, segments: [{ from: null, to, burns: 0, turn: 1 }] }, { profileId: me.profileId });
+  };
+  const tour = byName('Inner Tour');
+  const ctl = fly(EARTH_AERO);
+  assert(ctl.ok && ctl.state.players[0].aqua < 20, `control paid no FINAO: ${ctl.error || ctl.log}`);
+  const it = fly(EARTH_AERO, (st, me) => fulfilledWith(me, tour));
+  assert(it.ok && it.state.players[0].aqua === 20, `Inner Tour did not pass the Earth aerobrake: ${it.error || it.log}`);
+  notes.push('Inner Tour');
+  // New Horizons: a skull next to an industrialized Site, once per spacecraft per turn.
+  const PLAIN = 'lag-olko7';
+  const nh = byName('New Horizons');
+  const nearFac = (st) => { st.factories[neighborSlugs(PLAIN)[0]] = { ownerId: 'someone', spectralType: 'C' }; };
+  const nhCtl = fly(PLAIN, (st, me) => fulfilledWith(me, nh));
+  assert(nhCtl.ok && nhCtl.state.players[0].aqua < 20, 'New Horizons passed a skull with no Factory beside it');
+  const nhOk = fly(PLAIN, (st, me) => { fulfilledWith(me, nh); nearFac(st); });
+  assert(nhOk.ok && nhOk.state.players[0].aqua === 20, `New Horizons: ${nhOk.error || nhOk.log}`);
+  assert(nhOk.state.players[0].newHorizonsUsed && nhOk.state.players[0].newHorizonsUsed.rocket === 1, 'New Horizons use not recorded');
+  const nhUsed = fly(PLAIN, (st, me) => { fulfilledWith(me, nh); nearFac(st); me.newHorizonsUsed = { rocket: 1 }; });
+  assert(nhUsed.ok && nhUsed.state.players[0].aqua < 20, 'New Horizons passed a second skull in one turn');
+  notes.push('New Horizons');
+  // Sun-fired Laser: the push icon is Powersat (negotiable through the beam).
+  {
+    const st = startedGame({ seats: 2, m4: true });
+    const [me, them] = st.players;
+    const beam = () => applyOperation(st, { kind: 'POWERSAT_BEAM', targetId: them.profileId, on: true }, { profileId: me.profileId });
+    const no = beam();
+    assert(!no.ok && no.error === 'no_powersat', `beam without Powersat: ${no.error || 'accepted'}`);
+    fulfilledWith(me, byName('Sun-fired Laser'));
+    const yes = beam();
+    assert(yes.ok, `Sun-fired Laser beam: ${yes.error}`);
+    notes.push('Sun-fired Laser (Powersat)');
+  }
+  // Prospects: Closest Planet (-1 ISRU on Mercury) and Artemis (Luna, no permission).
+  const prospect = (slug, robId, { second = false, con = null } = {}) => {
+    const st = startedGame({ seats: 2, m4: true });
+    st.firstPlayerIndex = 0;
+    st.activeIndex = second ? 1 : 0;
+    const me = st.players[st.activeIndex];
+    me.rocket.siteId = slug;
+    me.rocket.stack = [{ id: robId, kind: 'patent', face: 'primary' }];
+    me.rocket.activeProspectorId = robId;
+    st.turnActions = [];
+    if (con) fulfilledWith(me, con);
+    return applyOperation(st, { kind: 'PROSPECT', siteId: slug, turn: st.turn, round: st.round }, { profileId: me.profileId });
+  };
+  const cp = byName('Closest Planet');
+  const merc = prospect('mercury-north-pole', 'rob_rock_splitter');
+  assert(!merc.ok && merc.error === 'isru_too_high', `ISRU 4 at hydration 3 without the contract: ${merc.error || 'accepted'}`);
+  const merc2 = prospect('mercury-north-pole', 'rob_rock_splitter', { con: cp });
+  assert(merc2.ok, `Closest Planet: ${merc2.error}`);
+  notes.push('Closest Planet');
+  const LUNA = 'luna-shackleton-polar-rim';
+  const lt = prospect(LUNA, 'rob_free_electron_laser', { second: true });
+  assert(!lt.ok && lt.error === 'luna_treaty', `Luna by the second player: ${lt.error || 'accepted'}`);
+  const art = prospect(LUNA, 'rob_free_electron_laser', { second: true, con: byName('Artemis') });
+  assert(art.ok, `Artemis: ${art.error}`);
+  notes.push('Artemis');
+  // Equatorial Launch Railway: acetylene from any own Factory; half cost on atmosphere.
+  const rail = byName('Equatorial Launch Railway');
+  const acet = (site, route, con, water = 60) => {
+    const st = startedGame({ seats: 2, m0: true, m4: true });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    const thr = PATENTS.find((c) => c.type === 'thruster' && (c.faces?.primary?.thrust ?? 0) > 0);
+    me.rocket.siteId = site; me.rocket.tank = 0;
+    me.rocket.stack = [{ id: thr.id, kind: 'patent', face: 'primary' }, { id: 'rea_mini_mag_rf_paul_trap', kind: 'patent', face: 'primary' }];
+    me.rocket.activeThrusterId = thr.id; me.opsRemaining = 4;
+    st.factories = { [site]: { ownerId: me.profileId, spectralType: 'C' } };
+    me.outposts = { A: { letter: 'A', siteId: site, cards: [], tank: water } };
+    if (con) fulfilledWith(me, con);
+    return applyOperation(st, { kind: 'MOVE', acetyleneLiftoff: true, debug: true, segments: route }, { profileId: me.profileId });
+  };
+  const MRC = [{ from: 'mercury-north-pole', to: 'burn-p4xxi', burns: 1 }, { from: 'burn-p4xxi', to: 'lag-jkgud', burns: 0 }];
+  const noRail = acet('mercury-north-pole', MRC, null);
+  assert(!noRail.ok && noRail.error === 'not_atmospheric', `acetylene off airless Mercury without the Railway: ${noRail.error || 'accepted'}`);
+  const withRail = acet('mercury-north-pole', MRC, rail);
+  assert(withRail.ok, `Railway liftoff from an own Factory: ${withRail.error} ${JSON.stringify(withRail.detail || {})}`);
+  const TITAN = [{ from: 'titan-ontario-lacus', to: 'burn-8y72w', burns: 1 }, { from: 'burn-8y72w', to: 'lag-u3g7x', burns: 0 }];
+  const costOf = (r) => Number(((r.log || '').match(/(\d+) water burned from the site/) || [])[1]);
+  const full = costOf(acet('titan-ontario-lacus', TITAN, null));
+  const half = costOf(acet('titan-ontario-lacus', TITAN, rail));
+  assert(full > 0 && half === Math.ceil(full / 2), `atmospheric Railway cost ${half}, full ${full}`);
+  notes.push(`Railway (Titan ${full} -> ${half} water)`);
+  // Rescue Team: a Human may be let go (Murder/Suicide), as Collective Bargaining.
+  const human = Object.values(COLONISTS_BY_ID).find((c) => c && c.colonistKind === 'Human');
+  const scrap = (con) => {
+    const st = startedGame({ seats: 2, m4: true });
+    const me = st.players[0];
+    st.activeIndex = 0;
+    if (con) fulfilledWith(me, con);
+    me.rocket.siteId = null;
+    me.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }, { id: human.id, kind: 'colonist', face: 'primary' }];
+    me.opsRemaining = Math.max(1, me.opsRemaining | 0);
+    const r = applyOperation(st, { kind: 'DECOMMISSION', cardIds: [human.id], from: 'rocket' }, { profileId: me.profileId });
+    return r.ok && !(r.state.players[0].rocket.stack || []).some((x) => x.id === human.id);
+  };
+  assert(!scrap(null), 'a Human was let go with no Murder/Suicide allowance');
+  assert(scrap(byName('Rescue Team')), 'Rescue Team did not allow Murder/Suicide');
+  notes.push('Rescue Team');
+  // Tsiolkovsky Elevator Lab: factory-assist through lander burns at Elevator Sites only.
+  const tsio = byName('Tsiolkovsky Elevator Lab');
+  const lift = (site, to, con) => {
+    const st = startedGame({ seats: 2, m4: true });
+    st.activeIndex = 0;
+    const me = st.players[0];
+    me.rocket.siteId = site; me.rocket.tank = 12;
+    me.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }, ...supportsFor(thruster)];
+    me.rocket.activeThrusterId = thruster.id;
+    st.factories = { [site]: { ownerId: me.profileId, spectralType: 'C' } };
+    if (con) fulfilledWith(me, con);
+    return applyOperation(st, { kind: 'MOVE', hazardPay: true, debug: true, segments: [{ from: site, to: to[0], burns: 1, turn: 1 }, { from: to[0], to: to[1], burns: 0, turn: 1 }] }, { profileId: me.profileId });
+  };
+  const ARSIA = 'mars-arsia-mons-caves';
+  const tCtl = lift(ARSIA, ['burn-r1gov', 'lag-5bfh5'], null);
+  assert(!tCtl.ok && tCtl.error === 'cannot_liftoff', `liftoff past the lander burn with no Lab: ${tCtl.error || 'accepted'}`);
+  const tOk = lift(ARSIA, ['burn-r1gov', 'lag-5bfh5'], tsio);
+  assert(tOk.ok, `Tsiolkovsky at an Elevator Site: ${tOk.error} ${JSON.stringify(tOk.detail || {})}`);
+  const tElse = lift('mercury-north-pole', ['burn-p4xxi', 'lag-jkgud'], tsio);
+  assert(!tElse.ok && tElse.error === 'cannot_liftoff', `Tsiolkovsky away from an Elevator Site: ${tElse.error || 'accepted'}`);
+  notes.push('Tsiolkovsky');
+  return notes.join('; ');
+});
+
 // Alchemist Aviatrices ("During Factory Refuel, double the amount of isotope
 // fuel") must count wherever the Miner on the same card counts: aboard an
 // anchored Bernal Dirtside to the factory, or on the rocket at that Bernal's

@@ -87,6 +87,34 @@ check('no turn boundary lands inside a lander burn', () => {
   return `${checked} routes, none pausing partway down a landing`;
 });
 
+// M4 Plasma Intrusion Laboratory: "+1 flyby bonus from Radiation Belt
+// (once/Spacecraft/Turn)". The first belt entered each turn banks a free burn:
+// never worse than without it, sometimes better.
+check('Plasma Intrusion Lab banks one Radiation Belt flyby bonus per turn', () => {
+  const siteIds = (graph.sites || []).map((s) => s.id).filter((id) => pts[id]);
+  let seed = 4242;
+  const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  const burns = (r) => (r ? r.totalBurns : Infinity);
+  let checked = 0, better = 0;
+  for (let i = 0; i < 400; i += 1) {
+    const a = siteIds[Math.floor(rnd() * siteIds.length)];
+    const b = siteIds[Math.floor(rnd() * siteIds.length)];
+    if (a === b) continue;
+    let base, lab;
+    try {
+      base = planRoute(graph, a, b, { thrust: 3, gateSeason: false, metricPriority: ['burns', 'turns'] });
+      lab = planRoute(graph, a, b, { thrust: 3, gateSeason: false, metricPriority: ['burns', 'turns'], beltFlyby: 1 });
+    } catch { continue; }
+    if (!base || !lab) continue;
+    checked += 1;
+    assert(burns(lab) <= burns(base), `${a} -> ${b}: the Lab cost more burns (${burns(lab)} vs ${burns(base)})`);
+    if (burns(lab) < burns(base)) better += 1;
+  }
+  assert(checked > 100, `only ${checked} routes planned`);
+  assert(better > 0, 'the Lab never saved a burn');
+  return `${checked} routes, ${better} cheaper with the Lab`;
+});
+
 // A ROAD IS BUGGY ONLY - which is a BUGGY rule, not a rocket rule (user
 // 2026-08-31). The board's yellow dashed roads are drawn from the buggy-<body>
 // tags and are not in the movement graph at all: every road-tagged pair is
