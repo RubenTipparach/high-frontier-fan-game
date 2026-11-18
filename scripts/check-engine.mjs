@@ -16,6 +16,8 @@
 // Run locally: node scripts/check-engine.mjs
 
 import { createInitialState, seasonForSlot } from '../server/game/state.js';
+import { auctionWaitingOn } from '../server/game/engine.js';
+import { hotSeatWaitingOn, resolveHotSeatActor } from '../data/hot-seat.js';
 import { applyOperation, slotMass, autoFixGlitches, liveScoreboard, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, repairSpeciesDeckSplit, cycleMarketDecks, rocketSolarZone, activeNetThrust, outpostWater, buildFutureCtx, resolveSunspotEvent, computeFinalScores } from '../server/game/engine.js';
 import { BERNALS } from '../data/bernals.js';
 import { FUTURE_GOALS, SYNODIC_COMET_IDS, CENTAUR_SITE_IDS } from '../data/future-goals.js';
@@ -10954,6 +10956,32 @@ check('Equality in force: a research auction is refused, Research Grants takes t
   r = applyOperation(st, { kind: 'AUCTION_START', deckType: 'thruster' }, { profileId: me.profileId });
   assert(r.ok && r.state.auction, `an ordinary auction under another law: ${r.error}`);
   return 'Equality: auction refused, grants took the top card for 1 aqua; Freedom: auction opens';
+});
+
+check('Hot seat: an open auction hands the device to a seat that owes an answer, never a full-hand one', () => {
+  // Game 1070's hot-seat clone: the seat after the auctioneer had a full hand,
+  // so it never owes a bid, yet hot seat put it up with nothing to press while
+  // the auction waited on the next seat.
+  const st = startedGame({ seats: 3 });
+  const auc = st.players[st.activeIndex];
+  auc.opsRemaining = 1; auc.aqua = 10; auc.hand = [];
+  const seats = [1, 2].map((k) => st.players[(st.activeIndex + k) % 3]);
+  seats[0].hand = st.decks.reactor.slice(0, 4); seats[0].aqua = 10;   // full hand
+  seats[1].hand = []; seats[1].aqua = 10;
+  st.hotSeat = true; st.hotSeatOwnerId = auc.profileId;
+  const r = applyOperation(st, { kind: 'AUCTION_START', deckType: 'thruster' }, { profileId: auc.profileId });
+  assert(r.ok && r.state.auction, `auction did not open: ${r.error}`);
+  const ids = auctionWaitingOn(r.state).map((p) => p.profileId);
+  assert(ids.length === 1 && ids[0] === seats[1].profileId, `engine should wait only on the open seat: ${ids}`);
+  assert(hotSeatWaitingOn(r.state, ids) === seats[1].profileId, 'hot seat picked the wrong seat from the engine list');
+  const view = { ...r.state, auction: { ...r.state.auction, waitingOn: ids } };
+  assert(hotSeatWaitingOn(view) === seats[1].profileId, 'hot seat ignored the board view list');
+  assert(resolveHotSeatActor(r.state, auc.profileId, null, ids) === seats[1].profileId, 'an op with no seat named went to the wrong seat');
+  const pass = applyOperation(r.state, { kind: 'AUCTION_PASS' }, { profileId: seats[1].profileId });
+  assert(pass.ok, `the open seat could not pass: ${pass.error}`);
+  const next = auctionWaitingOn(pass.state).map((p) => p.profileId);
+  assert(hotSeatWaitingOn(pass.state, next) === auc.profileId, 'after the pass the device should go to the auctioneer to close');
+  return 'skips the full-hand seat, then hands over to the auctioneer to close';
 });
 
 // The smoke verdict above runs before the checks added below it; this one

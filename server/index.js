@@ -2019,6 +2019,12 @@ function gameView(gameId, viewerId = null) {
   // game state (a nudge mutates no board state); the client reads
   // state.reminders to show the "reminded Xh ago" timer + cooldown.
   if (viewState) viewState.reminders = gameReminders(gameId);
+  // Who the open auction is waiting on, by the engine's rules (a seat that
+  // cannot take the lot never owes an answer). Hot seat follows this list to
+  // know which seat to hand the device to.
+  if (viewState && viewState.auction && rawState) {
+    viewState.auction = { ...viewState.auction, waitingOn: auctionWaitingOn(rawState).map((p) => p.profileId) };
+  }
   // CEO Solitaire always runs the card Market (Research Auction / Free Market
   // need the shuffled decks). Force it in the view so the client's market-mode
   // pin flips to Card Market even for a game whose PERSISTED economy is a stale
@@ -3250,7 +3256,8 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
   // the owner of a hot-seat table is ever remapped - for every other caller,
   // and every normal game, this returns the caller unchanged, so the engine's
   // turn validation is exactly what it has always been.
-  const actorId = resolveHotSeatActor(prevState, req.profile.id, body.actAs);
+  const actorId = resolveHotSeatActor(prevState, req.profile.id, body.actAs,
+    prevState && prevState.auction ? auctionWaitingOn(prevState).map((p) => p.profileId) : null);
   const ctx = { profileId: actorId };
   // Admin-only promo crew testing (data/crew.js#PROMO_CREW): only checked for
   // PICK_CREW - profileIsAdmin does a DB lookup, so skip it on every other

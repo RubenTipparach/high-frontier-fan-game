@@ -66,7 +66,7 @@ export function isHotSeatOwner(state, profileId) {
 // a pending chooser (seniority disc / first-player handoff) freezes the table
 // for one specific seat, an open auction is waiting on its bidders, and
 // otherwise it is simply whoever's turn it is. Returns a profileId or null.
-export function hotSeatWaitingOn(state) {
+export function hotSeatWaitingOn(state, auctionWaitingIds = null) {
   if (!state || !Array.isArray(state.players)) return null;
   // The CREW DRAFT is simultaneous, not turn-based: every seat owes a faction
   // pick and activeIndex does not advance between them. So the seat to play is
@@ -90,6 +90,15 @@ export function hotSeatWaitingOn(state) {
   // than importing the engine into shared data.
   const a = state.auction;
   if (a) {
+    // The engine's own answer (auctionWaitingOn), when the caller has it: the
+    // board view sends it as `auction.waitingOn`, and the ops route passes it in.
+    // It skips a seat that cannot take the lot (full hand, ownership cap, no
+    // aqua), which the read below does not know about. Without it a full-hand
+    // seat that never needs to answer was picked, and the table sat on a seat
+    // with nothing to press while the auction waited on someone else.
+    const listed = Array.isArray(auctionWaitingIds) ? auctionWaitingIds
+      : (Array.isArray(a.waitingOn) ? a.waitingOn : null);
+    if (listed && listed.length) return listed[0];
     if (a.awaiting === 'auctioneer') return a.auctioneerId;
     const acted = a.acted || [];
     const auto = a.autoPassed || [];
@@ -114,7 +123,7 @@ export function hotSeatWaitingOn(state) {
 // own roster, so it can only ever select a seat that is already at this table.
 // With no `actAs` we fall back to the seat the table is waiting on, which keeps
 // an older client (and every non-auction op) working untouched.
-export function resolveHotSeatActor(state, callerId, actAs) {
+export function resolveHotSeatActor(state, callerId, actAs, auctionWaitingIds = null) {
   if (!isHotSeatOwner(state, callerId)) return callerId;
   if (actAs != null && actAs !== '') {
     const seat = (state.players || []).find((p) => sameId(p.profileId, actAs));
@@ -122,5 +131,5 @@ export function resolveHotSeatActor(state, callerId, actAs) {
     // waiting seat keeps a stale client from acting as a seat that has left.
     if (seat) return seat.profileId;
   }
-  return hotSeatWaitingOn(state) ?? callerId;
+  return hotSeatWaitingOn(state, auctionWaitingIds) ?? callerId;
 }
