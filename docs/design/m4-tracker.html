@@ -157,7 +157,7 @@ h2.block { font: 800 34px/1 var(--display); margin: 0; }
 
   <section class="topic" id="footage">
     <h2 class="block">Gameplay footage</h2>
-    <p class="lede">Recorded 2026-11-16 in a local two-seat M4 game, playing the real client against the real engine.</p>
+    <p class="lede">Recorded 2026-11-15 and 16 in a local two-seat M4 game, playing the real client against the real engine.</p>
     <div class="reels" id="reels"></div>
   </section>
 
@@ -244,15 +244,11 @@ const PROGRESS = [
 ];
 
 const REELS = [
-  { src: 'reels/m4-solo-spin.mp4', t: 'Spin Control (solo)', d: 'Into the rapid-spin hazard, pay, fulfil.' },
-  { src: 'reels/m4-solo-rescue.mp4', t: 'Rescue Team (solo)', d: 'Crew aboard at the size-11 Aerostat-Xity, fulfil.' },
-  { src: 'reels/m4-augmentation.mp4', t: 'Augmentation, no M2', d: 'Implant the triangle on the Ceres Colony.' },
-  { src: 'reels/m4-auction.mp4', t: 'Contract auction', d: 'Open at 10 years, a rival underbids at 4, the initiator closes it.' },
-  { src: 'reels/m4-insight.mp4', t: 'Insight', d: 'Send a reactor to the bottom, then auction the next one.' },
-  { src: 'reels/m4-connections.mp4', t: 'Connections', d: 'Honor / Unity opens through an Honor delegate.' },
-  { src: 'reels/m4-ignore.mp4', t: 'Hazard Ignore "ring"', d: 'Into a ring crossing with no checklist, roll or FINAO.' },
-  { src: 'reels/m4-tophat.mp4', t: 'Tophat', d: 'A tophat contract aboard enters a rubble-pile hazard free.' },
-  { src: 'reels/m4-control.mp4', t: 'Without the tophat', d: 'The same hop raises the checklist and costs 4 aqua FINAO.' },
+  { src: 'reels/m4-1-contract-auction.mp4', t: 'Contract auction', d: 'Bids in years; the lowest bid wins.' },
+  { src: 'reels/m4-2-boost-fly-fulfill.mp4', t: 'Boost, fly, fulfil', d: 'Boost the contract, fly the destination, fulfil.' },
+  { src: 'reels/m4-3-late-fee-and-default.mp4', t: 'Late fee and default', d: 'The timepiece runs out; pay the fee or default.' },
+  { src: 'reels/m4-4-augment-a-colonist.mp4', t: 'Augment a Colonist (M2)', d: 'Implant a chit on a Colonist at a Bernal.' },
+  { src: 'reels/m4-5-contract-hand-boost-loss-abandon.mp4', t: 'Contract in hand', d: 'Boost, lose the rocket, back to hand, abandon in Anarchy.' },
 ];
 
 // The questions. Answers live in the db collection `answers`, one document per question id.
