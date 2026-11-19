@@ -1542,7 +1542,7 @@ function countColonists(player) {
 // bottom of the queue; a Robot returns to its owner's HAND (a hand Robot is
 // patent-like - sellable, buildable, and no longer counted against the
 // colonist limit). Returns a short log phrase.
-function retireColonistId(state, player, cardId) {
+function retireColonistId(state, player, cardId, opts = {}) {
   const id = String(cardId);
   // M4 (4C4e): a Decommissioned Colonist's augmentation chits return to supply.
   if (state && state.m4 && player && player.augments) {
@@ -1560,6 +1560,13 @@ function retireColonistId(state, player, cardId) {
     // this is the SAME rule the emancipation sweep itself follows below.)
     if (state.robotsEmancipated) {
       return `${(card && card.name) || id} (emancipated Robot) is retired from the game`;
+    }
+    // A colonist discarded to make room (the colonist limit) goes back to
+    // the deck, a Robot included (user 2026-11-19).
+    if (opts.toQueue) {
+      const rq = (state && state.m4 && Array.isArray(state.spacebornQueue)) ? 'spaceborn' : null;
+      colonistQueueFor(state, player, rq).push(id);
+      return `${(card && card.name) || id} (Robot) returned to the ${rq ? 'spaceborn' : 'colonist'} queue`;
     }
     (player.hand = player.hand || []).push(id);
     return `${(card && card.name) || id} (Robot) returned to the hand`;
@@ -8891,6 +8898,7 @@ function exomigrateDraw(state, player, opts = {}) {
   // exomigration immediately draws again, until a colonist lands in space or
   // the queue runs dry.
   const robotsDrawn = [];
+  const robotIds = [];
   let cardId = null;
   let card = null;
   while (queue.length) {
@@ -8902,14 +8910,28 @@ function exomigrateDraw(state, player, opts = {}) {
     // like any Human - don't skim it to the hand.
     if (c.colonistKind === 'Robot' && !state.robotsEmancipated) {
       (player.hand = player.hand || []).push(String(id));
-      robotsDrawn.push(c.name || id);
+      robotsDrawn.push(c.name || id); robotIds.push(String(id));
       continue;
     }
     cardId = id; card = c;
     break;
   }
+  // M4 + M2 (4C2b): several Robots drawn in one spaceborn exomigration: keep
+  // one, the rest go back and the spaceborn queue is shuffled.
+  let robotsBack = [];
+  if (state.m4 && Array.isArray(state.spacebornQueue) && queue === state.spacebornQueue && robotsDrawn.length > 1) {
+    const kept = player.hand.splice(player.hand.length - robotIds.length, robotIds.length);
+    player.hand.push(kept[0]);
+    robotsBack = kept.slice(1);
+    queue.push(...robotsBack);
+    const gen = makeRng(state.seed, state.rng.cursor);
+    const mixed = shuffle(gen, queue.slice());
+    state.rng.cursor = gen.cursor;
+    queue.splice(0, queue.length, ...mixed);
+    robotsDrawn.splice(1);
+  }
   const robotNote = immigrantNote + (robotsDrawn.length
-    ? `${robotsDrawn.join(' and ')} (Robot${robotsDrawn.length === 1 ? '' : 's'}) joined the hand; `
+    ? `${robotsDrawn.join(' and ')} (Robot${robotsDrawn.length === 1 ? '' : 's'}) to the hand${robotsBack.length ? ` (${robotsBack.length} other Robot${robotsBack.length === 1 ? '' : 's'} back to the spaceborn queue)` : ''}; `
     : '');
   if (!cardId) {
     // The queue drained mid-draw (Handy skimmed the rest to hand). This is the
@@ -9067,7 +9089,7 @@ function dischargeExcessColonists(state, player, preferredIds) {
     const pick = all.find((e) => wanted.has(String(e.slot.id))) || all[all.length - 1];
     wanted.delete(String(pick.slot.id));
     removeColonistSlot(player, pick);
-    notes.push(retireColonistId(state, player, pick.slot.id));
+    notes.push(retireColonistId(state, player, pick.slot.id, { toQueue: true }));
   }
   return notes;
 }
@@ -11148,7 +11170,7 @@ function applyEtProduce(state, op, player) {
       }
       if (!loc) return fail('bad_downsize');
       removeColonistSlot(player, loc);
-      downNote = ` Downsized: ${retireColonistId(state, player, downId)}.`;
+      downNote = ` Downsized: ${retireColonistId(state, player, downId, { toQueue: true })}.`;
     }
     player.hand.splice(hIdx, 1);
     const cSlot = { id: cardId, kind: 'colonist', face: 'primary' };

@@ -6414,7 +6414,7 @@ function buildColonySection(me) {
     'Berths: 1 per anchored Bernal, 2 when the Bernal is promoted to a Lab. The Spacefaring Future adds one.'));
   if (inHand.length) {
     badges.appendChild(mkBadge(`🤖 ${inHand.length}`, 'robots in hand', '',
-      'Robot colonists in your hand never count toward the limit. Build one at a factory matching its spectral, sell it for 3 aqua, or discard it back to the queue.'));
+      'A Robot in hand is not in space, so it does not count yet. ET Produce it at a factory of its spectral type; over the limit, a colonist goes back to the queue.'));
   }
   badges.appendChild(mkBadge(`${queueN}`, 'in the queue', '',
     'Colonists waiting to exomigrate, face down - who arrives is revealed on landing.'));
@@ -6515,7 +6515,7 @@ function openExomigrateModal(me) {
   const note = document.createElement('p');
   note.className = 'muted';
   note.style.margin = '0 0 10px';
-  note.textContent = 'The topmost colonist leaves the queue and boards your station (free action). A Robot drawn on the way goes to your hand instead (build it later at a matching factory) and the draw continues.';
+  note.textContent = 'Free action. A Robot drawn goes to your hand; draw again.';
   modal.appendChild(note);
 
   // Destination is the player's CHOICE (user 2026-07-07): a colonist boards your
@@ -6682,7 +6682,7 @@ function showExomigrateGains(after, beforeHand, beforeHeld) {
     const note = document.createElement('p');
     note.className = 'muted';
     note.style.margin = '0 0 10px';
-    note.textContent = 'Robots drawn on the way went to your hand - they never count toward your colonist limit. Build one at a factory matching its spectral, sell it for 3 aqua, or discard it back to the queue.';
+    note.textContent = 'Robots go to your hand. They count against your colonist limit once ET Produced.';
     modal.appendChild(note);
   }
   modal.appendChild(cardPickGrid(gained.map((e) => ({
@@ -6719,8 +6719,8 @@ function openDownsizePicker(held, onPick) {
   note.className = 'mp-trade-colo no-colo';
   const emancipated = !!(_onlineSnapshot && _onlineSnapshot.robotsEmancipated);
   note.textContent = emancipated
-    ? 'Building this colonist puts you over your limit - retire one to make room. A Human returns to the colonist queue; an emancipated Robot is retired from the game for good.'
-    : 'Building this colonist puts you over your limit - retire one to make room. A Human returns to the colonist queue; a Robot returns to your hand.';
+    ? 'Over your colonist limit: return a colonist to the queue (an emancipated Robot leaves the game).'
+    : 'Over your colonist limit: return a colonist to the queue.';
   modal.appendChild(note);
   let picked = null;
   const commit = document.createElement('button');
@@ -12982,7 +12982,7 @@ function pickColonistsToDischarge(colonists, n, bernalName) {
     const head = document.createElement('h3');
     head.textContent = `⚓ Send ${n} colonist${n === 1 ? '' : 's'} home`;
     const blurb = document.createElement('p');
-    blurb.innerHTML = `Unanchoring ${esc(bernalName)} lowers your colonist limit. Choose <b>${n}</b> colonist${n === 1 ? '' : 's'} to return to the queue (a Human goes to the back of the queue; a Robot to your hand).`;
+    blurb.innerHTML = `Unanchoring ${esc(bernalName)} lowers your colonist limit. Choose <b>${n}</b> colonist${n === 1 ? '' : 's'} to return to the queue (they go back to the queue).`;
     const actions = document.createElement('div'); actions.className = 'turn-confirm-actions';
     ok.type = 'button'; ok.className = 'popup-btn primary';
     ok.addEventListener('click', () => { if (selected.size === n) close([...selected]); });

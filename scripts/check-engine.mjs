@@ -12259,6 +12259,24 @@ check('M4 + M2 Spacer Union (4C2): spaceborn needs a BEO Colony, joining discard
   return `refused without BEO; ${COLONISTS_BY_ID[human].name} joined, Biomechs discarded; earthborn refused to a member; M2 alone untouched`;
 });
 
+check('M4 + M2 Robots (4C2b): several Robots drawn in one spaceborn exomigration, keep one, the rest go back', () => {
+  const { st, P } = augGame({ colonists: [] });
+  const isRobot = (id) => (COLONISTS_BY_ID[id] || {}).colonistKind === 'Robot';
+  const robots = st.spacebornQueue.filter(isRobot).slice(0, 3);
+  const human = st.spacebornQueue.find((id) => !isRobot(id));
+  const rest = st.spacebornQueue.filter((id) => !robots.includes(id) && id !== human);
+  st.spacebornQueue.splice(0, st.spacebornQueue.length, ...robots, human, ...rest);
+  P.beoAtTurnStart = true; P.hand = [];
+  const r = op(st, 'EXOMIGRATE', P.profileId, { queue: 'spaceborn', placeDelegate: false });
+  assert(r.ok, `spaceborn draw: ${r.error}`);
+  const Q = pl(r.state, P.profileId);
+  const handRobots = Q.hand.filter(isRobot);
+  assert(handRobots.length === 1 && handRobots[0] === robots[0], `kept robots: ${handRobots}`);
+  assert(robots.slice(1).every((id) => r.state.spacebornQueue.includes(id)), 'the other Robots went back to the spaceborn queue');
+  assert(Q.bernals.some((bn) => (bn.stack || []).some((x) => x.id === human)), 'the Human boarded');
+  return r.log;
+});
+
 check('M4 + M2 Parenthood (4C5): heart side 1 on an earthborn, the child comes of age 9 years on and inherits', () => {
   // Heart is on M4N217F (blue). Biomechs is an earthborn Human.
   const { st, P } = augGame({ colonists: ['col_biomechs'], contracts: ['M4N217F', 'M4N222F'] });
