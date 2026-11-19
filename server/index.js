@@ -76,7 +76,7 @@ import {
   oauthIdentifyEnabled, buildIdentifyAuthorizeUrl, identifyOauth,
   botChannels, sendChannelMessage, isChannelId,
 } from './discord.js';
-import { ensureLeaderboardTables, recordGame, startBackfill, leaderboards, summaryMessages } from './leaderboard.js';
+import { ensureLeaderboardTables, recordGame, recordCancel, clearCancel, startBackfill, leaderboards, summaryMessages } from './leaderboard.js';
 
 // Leaderboards (server/leaderboard.js): one results row per real player per
 // finished game, read by GET /leaderboards and the Discord daily summary.
@@ -1548,6 +1548,21 @@ function joinLobby(lobbyId, profileId, { acceptedInvite }) {
   return { ok: true, alreadyMember: false };
 }
 
+// Cancelled solo attempts for the leaderboards (server/leaderboard.js): note a
+// lobby's cancelled game (one game, one board parse), or clear it on restore.
+function noteLobbyCancelled(lobbyId, at) {
+  try {
+    const g = db.prepare(`SELECT g.id, s.state FROM games g JOIN game_states s ON s.game_id = g.id
+       WHERE g.lobby_id = ? AND g.status = 'cancelled'`).get(lobbyId);
+    if (g) recordCancel(db, g.id, JSON.parse(g.state), at);
+  } catch (e) { console.warn('[leaderboard] cancel not recorded:', e.message); }
+}
+function noteLobbyRestored(lobbyId) {
+  try {
+    for (const g of db.prepare('SELECT id FROM games WHERE lobby_id = ?').all(lobbyId)) clearCancel(db, g.id);
+  } catch (e) { console.warn('[leaderboard] restore not recorded:', e.message); }
+}
+
 app.post('/lobbies/:id/leave', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
@@ -1595,6 +1610,7 @@ app.post('/lobbies/:id/close', requireProfile, (req, res) => {
     db.prepare("UPDATE lobbies SET status = 'cancelled', cancelled_at = ? WHERE id = ? AND status != 'cancelled'").run(now, id);
     db.prepare("UPDATE games SET status = 'cancelled', finished_at = COALESCE(finished_at, ?) WHERE lobby_id = ? AND status != 'cancelled'").run(now, id);
   })();
+  noteLobbyCancelled(id, now);
   broadcast(`lobby:${id}`, { type: 'lobby_disbanded', lobbyId: id });
   res.json({ ok: true });
 });
@@ -1621,6 +1637,7 @@ app.post('/lobbies/:id/restore', requireProfile, (req, res) => {
       db.prepare("UPDATE lobbies SET status = 'waiting', cancelled_at = NULL WHERE id = ?").run(id);
     }
   })();
+  noteLobbyRestored(id);
   res.json({ ok: true });
 });
 
@@ -7967,6 +7984,7 @@ app.post('/admin/lobbies/:id/delete', requireAdmin, (req, res) => {
       "UPDATE games SET status = 'cancelled', finished_at = COALESCE(finished_at, ?) WHERE lobby_id = ? AND status != 'cancelled'"
     ).run(now, id);
   })();
+  noteLobbyCancelled(id, now);
   broadcast(`lobby:${id}`, { type: 'lobby_disbanded', lobbyId: id });
   res.json({ ok: true });
 });
@@ -7998,6 +8016,7 @@ app.post('/admin/lobbies/:id/restore', requireAdmin, (req, res) => {
       db.prepare("UPDATE lobbies SET status = 'waiting', cancelled_at = NULL WHERE id = ?").run(id);
     }
   })();
+  noteLobbyRestored(id);
   res.json({ ok: true });
 });
 
