@@ -6588,6 +6588,24 @@ function openExomigrateModal(me) {
     modal.appendChild(delegateRow);
   }
 
+  // M4 + M2 (4C2): which queue to draw from.
+  let queueSel = null;
+  if (snap.m4 && snap.m2 && Array.isArray(snap.spacebornQueue)) {
+    const row = document.createElement('label');
+    row.style.cssText = 'display:flex;gap:6px;align-items:center;margin:0 0 10px';
+    row.appendChild(document.createTextNode('Queue '));
+    queueSel = document.createElement('select');
+    queueSel.className = 'exo-queue';
+    for (const [v, t] of [['earthborn', `Earthborn (${(snap.colonistQueue || []).length})`], ['spaceborn', `Spaceborn (${snap.spacebornQueue.length})`]]) {
+      const o = document.createElement('option');
+      o.value = v; o.textContent = t;
+      queueSel.appendChild(o);
+    }
+    if (me.spacerUnion) queueSel.value = 'spaceborn';
+    row.appendChild(queueSel);
+    modal.appendChild(row);
+  }
+
   // IMMIGRANT (New Pilgrims): optionally name a specialty first; the queue is
   // searched for the first Human with it (if any), then shuffled.
   let specialtySel = null;
@@ -6621,6 +6639,7 @@ function openExomigrateModal(me) {
     const op = { kind: 'EXOMIGRATE', to: chosenTo };
     if (delegateRow && !delegateRow._cb.checked) op.placeDelegate = false;
     if (specialtySel && specialtySel.value) op.specialty = specialtySel.value;
+    if (queueSel) op.queue = queueSel.value;
     const ok = await submitOnlineOp(op);
     if (ok) {
       const after = mySnapshotPlayer();
@@ -8842,6 +8861,14 @@ function renderMpPlayer(p, isMe, isActive) {
   // everywhere.
   stats.textContent = `${onlineSiteLabel(rkt.siteId)} · 💧${p.aqua || 0} · ${vp}vp`;
   head.append(dot, name);
+  // M4 + M2 (4C2): Spaceborn (Spacer Union) or Earthborn, beside the name.
+  if (_onlineSnapshot && _onlineSnapshot.m4 && _onlineSnapshot.m2 && Array.isArray(_onlineSnapshot.spacebornQueue)) {
+    const born = document.createElement('span');
+    born.className = `mp-born-tag ${p.spacerUnion ? 'spaceborn' : 'earthborn'}`;
+    born.textContent = p.spacerUnion ? 'Spaceborn' : 'Earthborn';
+    born.dataset.tip = p.spacerUnion ? 'Spacer Union' : 'Earthborn';
+    head.append(born);
+  }
   if (lockIcon) head.append(lockIcon);
   head.append(locPin, stats);
   // Per-player "All cards" overview button, headed by this player's name +
@@ -9955,6 +9982,8 @@ function humanizeOnlineOpError(code, detail) {
     abandon_at_leo_or_bernal: 'Bring the contract back to LEO or to an anchored Bernal to abandon it (or abandon it from your hand).',
     military_contract_cannot_abandon: 'A military contract can never be abandoned.',
     needs_beo_colony: 'Implanting needs a BEO Colony: one of your Bernals anchored Dirtside (not your Home Bernal).',
+    needs_beo_colony_since_turn_start: 'Spaceborn needs a BEO Colony held since the start of your turn.',
+    spacer_union: 'Spacer Union: no earthborn while you hold a spaceborn.',
     no_colonist_here: 'No Colonist is aboard that Bernal.',
     no_colony: 'Not your Colony.',
     enterprise_needs_peace: 'Not during War.',

@@ -28,7 +28,7 @@
 
 import { PATENTS_BY_ID as _PATENTS_BY_ID, radiatorRadHardness } from '../../data/patents.js';
 import { BERNALS_BY_ID, solarCellThrustBonus, bernalPrivilegeGrant } from '../../data/bernals.js';
-import { COLONISTS_BY_ID } from '../../data/colonists.js';
+import { COLONISTS_BY_ID, isSpacebornColonist } from '../../data/colonists.js';
 // One card-lookup table for the engine: patents PLUS the M2 Bernal + Colonist
 // cards (which live in data/bernals.js / data/colonists.js, not PATENTS,
 // because patents.js can't import them - circular). Both only ever ENTER play
@@ -1359,7 +1359,9 @@ function cardNameOf(id) {
 function decksFor(state, player) {
   return (state.sirenDecks && isSirenPlayer(state, player)) ? state.sirenDecks : state.decks;
 }
-function colonistQueueFor(state, player) {
+function colonistQueueFor(state, player, which = null) {
+  // M4 + M2 (4C2): the spaceborn queue, when asked for by name.
+  if (which === 'spaceborn' && Array.isArray(state.spacebornQueue)) return state.spacebornQueue;
   if (state.sirenColonistQueue && isSirenPlayer(state, player)) return state.sirenColonistQueue;
   return (state.colonistQueue = state.colonistQueue || []);
 }
@@ -1559,8 +1561,38 @@ function retireColonistId(state, player, cardId) {
     (player.hand = player.hand || []).push(id);
     return `${(card && card.name) || id} (Robot) returned to the hand`;
   }
-  colonistQueueFor(state, player).push(id);
-  return `${(card && card.name) || id} returned to the colonist queue`;
+  // M4 + M2: a spaceborn Human goes back under the spaceborn queue.
+  const which = (state && state.m4 && Array.isArray(state.spacebornQueue) && card && card.spaceborn) ? 'spaceborn' : null;
+  colonistQueueFor(state, player, which).push(id);
+  return `${(card && card.name) || id} returned to the ${which ? 'spaceborn' : 'colonist'} queue`;
+}
+// ---- M4 + M2: the Spacer Union (4C2) --------------------------------------------
+// Two queues: earthborn (M2 Humans) and spaceborn (M4 spaceborn colonists plus
+// every Robot). A player holding any spaceborn card (in play, or a Robot in
+// hand) is in the Spacer Union and may not draw earthborn, unless they hold no
+// Colonist at all. Rank & File (4C2e) dissolves the Union for good.
+function spacerUnionGame(state) {
+  return !!(state && state.m4 && state.m2 && Array.isArray(state.spacebornQueue));
+}
+export function inSpacerUnion(state, player) {
+  if (!spacerUnionGame(state) || state.spacerUnionDissolved || !player) return false;
+  for (const e of colonistLocations(player)) if (isSpacebornColonist(e.slot.id)) return true;
+  return (player.hand || []).some((id) => isSpacebornColonist(id) && (COLONISTS_BY_ID[id] || {}).colonistKind === 'Robot');
+}
+// Joining (4C2c): discard every earthborn Colonist the player has in play (not a
+// Felony). They go under the earthborn queue.
+function discardEarthborns(state, player) {
+  const gone = [];
+  for (const st of playerStacks(player)) {
+    for (let i = st.slots.length - 1; i >= 0; i--) {
+      const sl = st.slots[i];
+      if (!isColonistSlot(sl) || isSpacebornColonist(sl.id)) continue;
+      st.slots.splice(i, 1);
+      retireColonistId(state, player, sl.id);
+      gone.push((COLONISTS_BY_ID[sl.id] || {}).name || sl.id);
+    }
+  }
+  return gone;
 }
 // Where a card goes when a HAZARD / RAD / FLARE / GLITCH roll decommissions it
 // out of a stack. The caller has already pulled the slot; this only decides the
@@ -8724,9 +8756,37 @@ function applyDeployBernal(state, op, player) {
 // colonist's printed ideology (O2a), then a vote tally runs (auto when the
 // winner is unique; a tie leaves the star where it is).
 function exomigrateOne(state, player, opts = {}) {
+  // M4 + M2 (4C2): pick the queue. A Spacer Union member draws spaceborn by
+  // default (they may not draw earthborn); everyone else earthborn.
+  let which = null;
+  let joining = false;
+  if (spacerUnionGame(state)) {
+    const member = inSpacerUnion(state, player);
+    which = opts.queue === 'spaceborn' || opts.queue === 'earthborn' ? opts.queue : (member ? 'spaceborn' : 'earthborn');
+    const earthEmpty = !(state.colonistQueue || []).length;
+    const spaceEmpty = !(state.spacebornQueue || []).length;
+    // Rank & File (4C2e): after the Union dissolves, an empty queue sends
+    // everyone to the other one, BEO Colony or not.
+    if (state.spacerUnionDissolved && which === 'earthborn' && earthEmpty && !spaceEmpty) which = 'spaceborn';
+    if (state.spacerUnionDissolved && which === 'spaceborn' && spaceEmpty && !earthEmpty) which = 'earthborn';
+    const forced = state.spacerUnionDissolved && (earthEmpty || spaceEmpty);
+    if (which === 'earthborn' && member && countColonists(player) > 0) return { ok: false, error: 'spacer_union' };
+    // 4C2a: a BEO Colony owned since the beginning of the turn.
+    if (which === 'spaceborn' && !forced && !player.beoAtTurnStart) return { ok: false, error: 'needs_beo_colony_since_turn_start' };
+    joining = which === 'spaceborn' && !member && !state.spacerUnionDissolved;
+  }
+  const res = exomigrateDraw(state, player, { ...opts, which });
+  if (!res.ok || !joining) return res;
+  // Joining the Spacer Union (4C2c): only once a spaceborn is actually in play
+  // (a Robot to the hand alone also makes you a member, 4C2d).
+  if (!inSpacerUnion(state, player)) return res;
+  const gone = discardEarthborns(state, player);
+  return { ...res, log: `${res.log} Joined the Spacer Union${gone.length ? `: ${gone.join(', ')} discarded` : ''}.` };
+}
+function exomigrateDraw(state, player, opts = {}) {
   // Under a Sirens species split each species migrates from its OWN half of the
   // queue; one shared queue in every other game.
-  const queue = colonistQueueFor(state, player);
+  const queue = colonistQueueFor(state, player, opts.which);
   if (countColonists(player) >= colonistAllowance(player)) return { ok: false, error: 'no_colonist_slot' };
   // Destination (opts.to): 'leo', or 'bernal<i>' naming one of the player's
   // ANCHORED Bernals - the colonist boards the station directly (user decision
@@ -8939,6 +8999,8 @@ function emancipateRobots(state, dest) {
     p.hand = keep;
   }
   state.robotsEmancipated = true;
+  // 4C2e Rank & File: emancipation dissolves the Spacer Union for good.
+  if (spacerUnionGame(state)) state.spacerUnionDissolved = true;
   if (!robots.length) return null;
   if (!dest) return null;
   const gen = makeRng(state.seed, state.rng.cursor);
@@ -8958,6 +9020,7 @@ function applyExomigrate(state, op, player) {
     to: op.to,
     placeDelegate: op.placeDelegate !== false,
     specialty: op.specialty,
+    queue: op.queue,
     // Player-invoked exomigration CAN pause for a tie pick (unlike the automatic
     // mid-op exomigrations, which resolve ties quietly): a tied vote after the
     // arriving delegate seats leaves the active-law star for the player to set
@@ -13652,7 +13715,7 @@ function pickPayload(op) {
     case 'HOMESTEAD': return { siteId: op.siteId, productCardId: op.productCardId, colonistCardId: op.colonistCardId };
     case 'FREE_INSPIRATION': return {};
     case 'NANOFACTURE': return { cardId: op.cardId, cardIds: op.cardIds, ...(op.freeDelegate ? { freeDelegate: op.freeDelegate } : {}) };
-    case 'EXOMIGRATE': return { ...(op.to != null ? { to: op.to } : {}), ...(op.placeDelegate === false ? { placeDelegate: false } : {}), ...(op.specialty ? { specialty: op.specialty } : {}) };
+    case 'EXOMIGRATE': return { ...(op.to != null ? { to: op.to } : {}), ...(op.placeDelegate === false ? { placeDelegate: false } : {}), ...(op.specialty ? { specialty: op.specialty } : {}), ...(op.queue ? { queue: op.queue } : {}) };
     case 'SET_LAW_STAR': return { star: op.star };
     case 'SWAP_BIG_CUBE': return { factorySiteId: op.factorySiteId };
     case 'BUILD_ELEVATOR': return { pairKey: op.pairKey, hazardPay: !!op.hazardPay };
@@ -13844,6 +13907,8 @@ function openTurnFor(state, player) {
     player.contractAuctionDone = false;
     player.lateFeePaidThisTurn = 0;
     player.implantFreeUsed = false;
+    // 4C2a: whether a BEO Colony was owned since the start of this turn.
+    if (state.m2) player.beoAtTurnStart = hasBeoColony(state, player);
     if (player.transportUsed) delete player.transportUsed;
     player.turnStartedLate = !!(player.timepiece && player.timepiece.deadbeat);
     if (player.rocket) {

@@ -12235,6 +12235,30 @@ check('M4: the first gold bead refined monetizes isotope and flips the contract 
   return `monetized + decks flipped to gold (${Object.values(r.state.contractDecks).map((d) => d.length).join('/')} cards)${open.ok ? '; the next auction deals gold' : ''}; M1+M2 alone untouched`;
 });
 
+check('M4 + M2 Spacer Union (4C2): spaceborn needs a BEO Colony, joining discards earthborns, members cannot draw earthborn', () => {
+  const { st, P } = augGame({ colonists: ['col_biomechs'] });
+  assert(Array.isArray(st.spacebornQueue) && st.spacebornQueue.length && !st.colonistQueue.some((id) => (COLONISTS_BY_ID[id] || {}).colonistKind === 'Robot'),
+    'queues not split: robots belong in the spaceborn queue');
+  const human = st.spacebornQueue.find((id) => (COLONISTS_BY_ID[id] || {}).colonistKind === 'Human');
+  st.spacebornQueue.splice(st.spacebornQueue.indexOf(human), 1); st.spacebornQueue.unshift(human);
+  P.beoAtTurnStart = false;
+  let r = op(st, 'EXOMIGRATE', P.profileId, { queue: 'spaceborn', placeDelegate: false });
+  assert(!r.ok && r.error === 'needs_beo_colony_since_turn_start', `no BEO at turn start: ${r.error || 'accepted'}`);
+  P.beoAtTurnStart = true;
+  r = op(st, 'EXOMIGRATE', P.profileId, { queue: 'spaceborn', placeDelegate: false });
+  assert(r.ok, `spaceborn draw: ${r.error}`);
+  const Q = pl(r.state, P.profileId);
+  const ids = Q.bernals.flatMap((bn) => (bn.stack || []).map((x) => x.id));
+  assert(ids.includes(human) && !ids.includes('col_biomechs'), `spaceborn aboard, earthborn discarded: ${ids}`);
+  assert(/Spacer Union/.test(r.log) && r.state.colonistQueue.includes('col_biomechs'), `log / earthborn back in queue: ${r.log}`);
+  const e = op(r.state, 'EXOMIGRATE', P.profileId, { queue: 'earthborn', placeDelegate: false });
+  assert(!e.ok && e.error === 'spacer_union', `a member drew earthborn: ${e.error || 'accepted'}`);
+  // Zero bleed-through: an M2 game without M4 has one queue and no Union.
+  const m2 = startedGame({ m2: true });
+  assert(!m2.spacebornQueue && m2.colonistQueue.some((id) => (COLONISTS_BY_ID[id] || {}).colonistKind === 'Robot'), 'M2 alone changed its queue');
+  return `refused without BEO; ${COLONISTS_BY_ID[human].name} joined, Biomechs discarded; earthborn refused to a member; M2 alone untouched`;
+});
+
 // The smoke verdict above runs before the checks added below it; this one
 // covers every check in the file.
 if (failures) {
