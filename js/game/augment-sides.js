@@ -52,9 +52,9 @@ const PICT = {
     1: `<path d="M17 20 H33 L37 37 H13 Z" fill="#9ca3af" stroke="#0b1220" stroke-width="0.9" stroke-linejoin="round"/>
         <circle cx="25" cy="17" r="3.3" fill="none" stroke="#9ca3af" stroke-width="2.2"/>
         ${label(25, 34, '0', 13, '#fff', INK)}`,
-    // FTs may be spent for FINAO: a droplet over the hazard skull.
-    2: `${drop(21, 26, 1.25)}
-        <g transform="translate(33 31)"><circle r="7" fill="#dc2626" stroke="#0b1220" stroke-width="0.8"/>${label(0, 3.6, '☠', 10, '#fff', '#7f1d1d')}</g>`,
+    // FTs may be spent for FINAO: the blue FT oval over "pays FINAO", after the
+    // original chit (owner approved 2026-11-19).
+    2: `<ellipse cx="25" cy="17" rx="12.5" ry="6.4" fill="#0ea5e9"/><text x="25" y="21.2" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-weight="900" font-size="11.5" fill="#0b1220">FT</text><text x="25" y="32" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-weight="700" font-size="8.5" fill="#0b1220">pays</text><text x="25" y="42" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-weight="900" font-size="9.5" fill="#0b1220">FINAO</text>`,
   },
   hexagon: {
     // The robonaut card's read (owner approved 2026-11-19): the prospector coin
@@ -67,8 +67,9 @@ const PICT = {
     // (owner pick B, 2026-11-19).
     1: `<polygon points="43.40,28.45 37.40,38.84 25.40,38.84 19.40,28.45 25.40,18.06 37.40,18.06" fill="#0c0a16" stroke="#1f1b2e" stroke-width="0.8"/>
         <text x="31.4" y="33.49" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-weight="700" font-size="13.8" fill="#fff">C</text>`,
-    // +1 Hydration: a droplet, +1.
-    2: `${drop(31.4, 24, 1.8)}${inDrop(31.4, 33.5, '+1')}`,
+    // +1 Hydration: the black hexagon with +1 and a small drop (after the
+    // original chit; owner approved 2026-11-19).
+    2: `<polygon points="48.40,28.45 39.90,43.17 22.90,43.17 14.40,28.45 22.90,13.73 39.90,13.73" fill="#0c0a16"/><text x="27.4" y="33" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-weight="800" font-size="11.5" fill="#fff">+1</text><path transform="translate(39.4 30.2) scale(0.62)" d="M0 -9 C 4 -3, 6.5 0.5, 6.5 3.4 A 6.5 6.5 0 0 1 -6.5 3.4 C -6.5 0.5, -4 -3, 0 -9 Z" fill="#38bdf8"/>`,
   },
   battery: {
     // On-board pulse generator: the pulse generator coin (owner 2026-11-19).
