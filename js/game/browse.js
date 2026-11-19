@@ -9996,6 +9996,12 @@ function humanizeOnlineOpError(code, detail) {
     chit_in_use: 'You only have one chit of that shape, and it is implanted elsewhere: juggle it off a Colonist aboard first.',
     chit_not_colocated: 'That chit is on a Colonist who is not aboard this Bernal.',
     parenthood_not_yet: 'Parenthood needs M2: implant the heart\'s other side.',
+    parenthood_earthborn_only: 'Parenthood: an earthborn Human only.',
+    child_pending: 'You already have a child on the Sunspot Cycle.',
+    child_choice_due: 'Your child has come of age: choose who takes the parent\'s place.',
+    not_in_earthborn_queue: 'Pick an earthborn Human from the Colonist queue.',
+    parent_gone: 'The parent is no longer aboard.',
+    no_child_due: 'The child has not come of age yet.',
     needs_augmentation: 'This Colonist needs at least one augmentation to Promote.',
     nothing_to_implant: 'Choose an augmentation to implant.',
   };
@@ -35098,7 +35104,7 @@ const MP_LOG_ICONS = {
   // M4 contracts (4B): the auction is in years, the timepiece is a clock.
   AUCTION_CONTRACT_START: '📜', AUCTION_CONTRACT_BID: '⏳', AUCTION_CONTRACT_PASS: '🚫', AUCTION_CONTRACT_CLOSE: '⏱',
   // M4 isotope monetization (4D1d): gold beads at the Bank, sold / bought at Earth.
-  ISOTOPE_EXCHANGE: '🟡',
+  ISOTOPE_EXCHANGE: '🟡', CHILD_COMES_OF_AGE: '👶',
   FULFILL_CONTRACT: '🏁', PAY_LATE_FEE: '⏰', IMPLANT: '🦾', ABANDON_CONTRACT: '🗑', INSIGHT: '🔎',
   AUCTION_RESET: '↺', AUCTION_SELL: '✅',
   PICK_CREW: '🧑‍🚀', SET_SPECIES: '\u{1F9DC}', SET_FIRST_PLAYER: '🥇', FREE_CUBE: '🧊',

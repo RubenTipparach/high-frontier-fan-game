@@ -12259,6 +12259,33 @@ check('M4 + M2 Spacer Union (4C2): spaceborn needs a BEO Colony, joining discard
   return `refused without BEO; ${COLONISTS_BY_ID[human].name} joined, Biomechs discarded; earthborn refused to a member; M2 alone untouched`;
 });
 
+check('M4 + M2 Parenthood (4C5): heart side 1 on an earthborn, the child comes of age 9 years on and inherits', () => {
+  // Heart is on M4N217F (blue). Biomechs is an earthborn Human.
+  const { st, P } = augGame({ colonists: ['col_biomechs'], contracts: ['M4N217F', 'M4N222F'] });
+  assert((COLONISTS_BY_ID.col_biomechs || {}).colonistKind === 'Human', 'Biomechs should be Human');
+  let r = op(st, 'IMPLANT', P.profileId, { bernal: 0, implants: [{ colonistId: 'col_biomechs', shape: 'heart', side: 1 }, { colonistId: 'col_biomechs', shape: 'jar', side: 2 }] });
+  assert(r.ok, `implant parenthood: ${r.error}`);
+  let Q = pl(r.state, P.profileId);
+  assert(Q.childChit && Q.childChit.parentId === 'col_biomechs', `child chit: ${JSON.stringify(Q.childChit)}`);
+  // Nine years later (clock ticks past due): grown, and the turn cannot end until a child is chosen.
+  r.state.clockTicks = Q.childChit.due + 1; Q.childChit.grown = true;
+  const end = op(r.state, 'END_TURN', P.profileId);
+  assert(!end.ok && end.error === 'child_choice_due', `end turn with a grown child: ${end.error || 'accepted'}`);
+  const pick = r.state.colonistQueue.find((id) => (COLONISTS_BY_ID[id] || {}).colonistKind === 'Human');
+  const c = op(r.state, 'CHILD_COMES_OF_AGE', P.profileId, { colonistId: pick });
+  assert(c.ok, `coming of age: ${c.error}`);
+  Q = pl(c.state, P.profileId);
+  const ids = Q.bernals[0].stack.map((x) => x.id);
+  assert(ids.includes(pick) && !ids.includes('col_biomechs') && !Q.childChit, `child replaced parent: ${ids}`);
+  assert(Q.augments.heart.colonistId === pick && Q.augments.heart.side === 2 && Q.augments.jar.colonistId === pick, `inheritance: ${JSON.stringify(Q.augments)}`);
+  assert(!c.state.colonistQueue.includes(pick) && c.state.colonistQueue.includes('col_biomechs'), 'queue: child out, parent back');
+  // A spaceborn or a Robot cannot take Parenthood.
+  const sb = augGame({ colonists: ['col_lava_lamp_evangelists'], contracts: ['M4N217F'] });
+  const bad = op(sb.st, 'IMPLANT', sb.P.profileId, { bernal: 0, implants: [{ colonistId: 'col_lava_lamp_evangelists', shape: 'heart', side: 1 }] });
+  assert(!bad.ok && bad.error === 'parenthood_earthborn_only', `spaceborn parenthood: ${bad.error || 'accepted'}`);
+  return `child chit placed; END_TURN held; ${COLONISTS_BY_ID[pick].name} replaced Biomechs with heart (side 2) and jar; spaceborn refused`;
+});
+
 // The smoke verdict above runs before the checks added below it; this one
 // covers every check in the file.
 if (failures) {

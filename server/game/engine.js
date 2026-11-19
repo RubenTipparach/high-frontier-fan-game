@@ -1548,6 +1548,9 @@ function retireColonistId(state, player, cardId) {
   if (state && state.m4 && player && player.augments) {
     for (const k of Object.keys(player.augments)) if (player.augments[k] && player.augments[k].colonistId === id) delete player.augments[k];
   }
+  // Parenthood: a parent who leaves play before the child is ten takes the
+  // child chit with it.
+  if (state && state.m4 && player && player.childChit && player.childChit.parentId === id) delete player.childChit;
   const card = PATENTS_BY_ID[id];
   if (card && card.colonistKind === 'Robot') {
     // Post-Emancipation, a Robot counts as Human and "cannot enter a hand"
@@ -13658,6 +13661,7 @@ const FUNCTIONAL = {
   REFUEL: applyRefuel,
   CASH_WATER: applyCashWater,
   ISOTOPE_EXCHANGE: applyIsotopeExchange,
+  CHILD_COMES_OF_AGE: applyChildComesOfAge,
   DUMP: applyDump,
   CAN_FUEL: applyCanFuel,
   LOAD_FUEL: applyLoadFuel,
@@ -13746,6 +13750,7 @@ function pickPayload(op) {
     case 'CASH_WATER': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}),
       ...(op.cardId != null ? { cardId: op.cardId, holder: op.holder } : {}) };
     case 'DUMP': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
+    case 'CHILD_COMES_OF_AGE': return { colonistId: op.colonistId };
     case 'ISOTOPE_EXCHANGE': return { action: op.action, amount: op.amount, ...(op.cardId != null ? { cardId: op.cardId, holder: op.holder } : {}) };
     case 'CAN_FUEL': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
     // TRANSFER_FUEL_CARD and LOAD_FREIGHTER_WATER were MISSING here, so they
@@ -14298,6 +14303,8 @@ function noteSirenUranianLanding(state, player) {
 function applyEndTurn(state, _op, player) {
   // M4 Insight: the research auction it announced must be started this turn.
   if (player.insightPending) return fail('insight_auction_due');
+  // Parenthood: a grown child is chosen before the turn ends.
+  if (childChoiceDue(state, player)) return fail('child_choice_due');
   if (mustExomigrate(state, player)) return fail('must_exomigrate');
   // BLUE PLANET: settle the coming aerobrake hazard now, before the turn passes.
   let bluePlanetNote = '';
@@ -16665,6 +16672,7 @@ function applyAbandonContract(state, op, player) {
 function contractClockTick(state) {
   if (!state.m4) return;
   state.clockTicks = (state.clockTicks | 0) + 1;
+  childClockTick(state);
   const notes = [];
   for (const p of state.players) {
     const tp = p.timepiece;
@@ -16732,6 +16740,64 @@ function contractScoring(state) {
 // fulfilled contracts) and its partner enterprises (other players' fulfilled
 // contracts carrying its delegate), 4B8d.
 const AUG_SHAPES = ['heart', 'jar', 'hexagon', 'splat', 'battery', 'triangle'];
+// ---- Parenthood (4C5, M4 + M2) -------------------------------------------------
+// The heart's side 1 places the child chit 9 years ahead on the Sunspot Cycle.
+// When the Cube moves past it, at the start of the parent's next turn the child
+// is ten: the life-support Colonist is Decommissioned and replaced, in the same
+// place, by an earthborn Colonist of the player's choice from the whole
+// earthborn queue (then shuffled). Promoted parent: the child comes in Promoted
+// (Wunderkind, 4C5d). The child inherits the parent's augmentations, the heart
+// on its other side (4C5e). player.childChit = { parentId, due, slot, grown }.
+const CHILD_YEARS = 9;
+function childClockTick(state) {
+  if (!(state.m4 && state.m2)) return;
+  for (const p of state.players) {
+    const c = p.childChit;
+    if (c && !c.grown && (state.clockTicks | 0) > c.due) c.grown = true;
+  }
+}
+// A grown child holds End Turn only while the choice can be made: the parent is
+// still aboard and the queue holds an earthborn Human.
+function childChoiceDue(state, player) {
+  const c = state.m4 && state.m2 && player.childChit;
+  if (!c || !c.grown) return false;
+  if (!playerStacks(player).some((st) => st.slots.some((sl) => isColonistSlot(sl) && sl.id === c.parentId))) return false;
+  return (state.colonistQueue || []).some((id) => { const k = COLONISTS_BY_ID[id]; return k && k.colonistKind === 'Human' && !k.spaceborn; });
+}
+// CHILD_COMES_OF_AGE op = { colonistId }: the earthborn chosen as the child.
+function applyChildComesOfAge(state, op, player) {
+  if (!(state.m4 && state.m2)) return fail('not_m4');
+  const c = player.childChit;
+  if (!c || !c.grown) return fail('no_child_due');
+  const childId = String(op.colonistId || '');
+  const queue = state.colonistQueue || [];
+  const card = COLONISTS_BY_ID[childId];
+  if (!queue.includes(childId) || !card || card.colonistKind !== 'Human' || card.spaceborn) return fail('not_in_earthborn_queue');
+  let at = null;
+  for (const st of playerStacks(player)) {
+    const i = st.slots.findIndex((sl) => isColonistSlot(sl) && sl.id === c.parentId);
+    if (i >= 0) { at = { st, i }; break; }
+  }
+  if (!at) { delete player.childChit; return fail('parent_gone'); }
+  const parentSlot = at.st.slots[at.i];
+  const wunderkind = parentSlot.face === 'secondary';
+  queue.splice(queue.indexOf(childId), 1);
+  // Inheritance (4C5e): every chit on the parent moves to the child, the heart
+  // turned to its other side.
+  for (const [shape, a] of Object.entries(player.augments || {})) {
+    if (a && a.colonistId === c.parentId) player.augments[shape] = { colonistId: childId, side: shape === 'heart' ? 2 : a.side };
+  }
+  at.st.slots.splice(at.i, 1, { id: childId, kind: 'colonist', face: wunderkind ? 'secondary' : 'primary' });
+  const parentNote = retireColonistId(state, player, c.parentId);
+  const gen = makeRng(state.seed, state.rng.cursor);
+  const rest = shuffle(gen, queue.slice());
+  state.rng.cursor = gen.cursor;
+  queue.splice(0, queue.length, ...rest);
+  delete player.childChit;
+  syncCrewAugmentMarks(state);
+  return { ok: true, state, noUndo: true,
+    log: `${player.name}'s child comes of age: ${card.name} takes the parent's place${wunderkind ? ' Promoted (Wunderkind)' : ''} and inherits its augmentations; ${parentNote}.` };
+}
 function portfolioShapes(state, player) {
   const out = new Set();
   const add = (f) => { for (const s of ((contractFace(f.id, f.side) || {}).cybernetics || [])) out.add(s); };
@@ -16778,6 +16844,9 @@ function applyImplant(state, op, player) {
     const a = player.augments[shape];
     if (!a) return fail('no_such_chit', { shape });
     if (!ids.has(a.colonistId)) return fail('chit_not_colocated', { shape });
+    // While the child is a preteen it is part of the heart (4C5b): the heart
+    // stays where it is until the child comes of age.
+    if (shape === 'heart' && player.childChit) return fail('child_pending');
     delete player.augments[shape];
     parts.push(`took the ${shape} chit off ${cardNameOf(a.colonistId)}`);
   }
@@ -16790,11 +16859,19 @@ function applyImplant(state, op, player) {
     if (!portfolio.has(shape)) return fail('not_in_portfolio', { shape });
     if (!ids.has(colonistId)) return fail('colonist_not_here');
     if (player.augments[shape]) return fail('chit_in_use', { shape, on: player.augments[shape].colonistId });
-    // The heart's Parenthood side (4C5) needs M2 (owner 2026-11-18), and M4 does
-    // not run with M2 yet: implant side 2.
-    if (shape === 'heart' && side === 1) return fail('parenthood_not_yet');
+    // Parenthood (4C5, M2): the heart's side 1 goes only on an earthborn Human
+    // (4C4h), and places the child chit 9 years ahead on the Sunspot Cycle.
+    if (shape === 'heart' && side === 1) {
+      const pc = COLONISTS_BY_ID[colonistId] || {};
+      if (pc.spaceborn || pc.colonistKind !== 'Human') return fail('parenthood_earthborn_only');
+      if (player.childChit) return fail('child_pending');
+    }
     player.augments[shape] = { colonistId, side };
     parts.push(`implanted the ${shape} augmentation (side ${side}) in ${cardNameOf(colonistId)}`);
+    if (shape === 'heart' && side === 1) {
+      player.childChit = { parentId: colonistId, due: (state.clockTicks | 0) + CHILD_YEARS, slot: (state.turn + CHILD_YEARS) % SLOTS };
+      parts.push(`a child is on the way (${CHILD_YEARS} years)`);
+    }
   }
   if (free) player.implantFreeUsed = true;
   else player.opsRemaining -= 1;
