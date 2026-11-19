@@ -445,7 +445,7 @@ function syncCrewAugmentMarks(st) {
         if (hex) s.augProspector = hex.side === 1 ? { kind: 'raygun', isru: 1 } : { kind: 'buggy', isru: 2 };
         else delete s.augProspector;
         const bat = on('battery', 0, s) ? p.augments.battery : null;
-        if (bat && (bat.crewId || bat.colonistId)) s.augSupplies = bat.side === 1 ? ['gen-electric'] : ['reactor-antimatter'];
+        if (bat && (bat.crewId || bat.colonistId)) s.augSupplies = bat.side === 1 ? ['gen-electric'] : ['reactor-fission'];
         else delete s.augSupplies;
       }
     }
@@ -457,7 +457,7 @@ function batteryCrewKinds(player) {
   // A Battery on one Crew card supplies through that slot (slot.augSupplies);
   // only an older Colony chit powers every Crew.
   if (!a || a.crewId || a.colonistId) return [];
-  return a.side === 1 ? ['gen-electric'] : a.side === 2 ? ['reactor-antimatter'] : [];
+  return a.side === 1 ? ['gen-electric'] : a.side === 2 ? ['reactor-fission'] : [];
 }
 function hasAugmentSide(player, shape, side) {
   const a = player && player.augments && player.augments[shape];
@@ -3652,7 +3652,8 @@ function playerCrewReactorKinds(player, { pendingAnchorBn = null } = {}) {
   }
   // M4 Battery augmentation (4C3), counting for your Crew without M2 (owner
   // ruling 2026-11-17; tracker A3 recommended): side 1 "on-board pulse
-  // generator" supplies e electric, side 2 "on-board exotic reactor" antimatter.
+  // generator" supplies the e pulse generator, side 2 "on-board exotic reactor"
+  // the X exotic reactor (owner 2026-11-19: e = pulse, X = exotic).
   const bat = batteryCrewKinds(player);
   if (bat.length) kinds = Array.from(new Set([...(kinds || []), ...bat]));
   // A crew-granted reactor is a reactor: it meets an "Any Reactor" support too.

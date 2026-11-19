@@ -120,12 +120,12 @@ export const REQUIREMENT_VIS = {
   // spreadsheet's "Support Requirements" banner - operational
   // flags like Solar, Push, ISRU, Air Eater are card properties
   // (rendered separately as badges) rather than stack supports.
-  'reactor-fission':    { glyph: 'X',  label: 'Fission reactor'        },
-  'reactor-fusion':     { glyph: '∿',  label: 'Fusion reactor'         },
-  'reactor-antimatter': { glyph: '💣', label: 'Antimatter reactor'     },
+  'reactor-fission':    { glyph: 'X',  label: 'Exotic reactor'         },
+  'reactor-fusion':     { glyph: '∿',  label: 'Flux reactor'           },
+  'reactor-antimatter': { glyph: '💣', label: 'Bomb reactor'           },
   'reactor-any':        { glyph: '⚛', label: 'Any reactor'             },
   'gen-radioisotope':   { glyph: '⟛', label: 'Radioisotope generator' },
-  'gen-electric':       { glyph: 'e',  label: 'Electric generator'     },
+  'gen-electric':       { glyph: 'e',  label: 'Pulse generator'        },
   // Legacy / hand-written supports retained so older data still
   // loads cleanly.
   'pulse-generator':    { glyph: '⚡', label: 'Pulse generator'         },

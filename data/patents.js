@@ -29,11 +29,11 @@ import { CARD_DATA } from './card-data.js';
 export const REQUIREMENT_KINDS = [
   // power-source supports (matched against the reactor/generator
   // slotted in the stack):
-  'reactor-fission',        // X marker on the published cards
-  'reactor-fusion',         // ∿ wave
-  'reactor-antimatter',     // 💣 antimatter pulse
+  'reactor-fission',        // X exotic reactor (owner 2026-11-19; the id is historical)
+  'reactor-fusion',         // ∿ flux reactor
+  'reactor-antimatter',     // 💣 bomb reactor
   'gen-radioisotope',       // ⟛ RTG / radioisotope generator
-  'gen-electric',           // e electric / photovoltaic
+  'gen-electric',           // e pulse generator
   // operational supports:
   'beam-receiver',          // ☀ solar / beam-pushed
   'aerobrake-shroud',       // 🪂 atmospheric entry (Air Eater)

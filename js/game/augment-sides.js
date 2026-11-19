@@ -1,7 +1,7 @@
 // Module 4 augmentation chit SIDES (4C3). Each of the six chits is two-sided,
 // and each side carries its own picture: the chit's white shape in the corner
 // and the side's ability as a pictogram, drawn in the game's existing glyph
-// language (the support coins for raygun / buggy / e electric / antimatter, the
+// language (the support coins for raygun / buggy / e pulse / X exotic, the
 // water droplet, the hazard skull). Pure SVG strings, no DOM.
 import { supportIconSvg } from './support-icons.js';
 import { AUGMENTS } from './contract-glyphs.js';
@@ -19,7 +19,7 @@ const AQUA = '#38bdf8';
 const drop = (x, y, s, fill = AQUA) => `<path transform="translate(${x} ${y}) scale(${s})" d="M0 -9 C 4 -3, 6.5 0.5, 6.5 3.4 A 6.5 6.5 0 0 1 -6.5 3.4 C -6.5 0.5, -4 -3, 0 -9 Z" fill="${fill}" stroke="#0b1220" stroke-width="0.8"/>`;
 const INK = '#1f2937';
 const label = (x, y, t, size = 9, fill = INK, stroke = '#fff') => `<text x="${x}" y="${y}" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-weight="700" font-size="${size}" fill="${fill}" stroke="${stroke}" stroke-width="2.2" paint-order="stroke">${t}</text>`;
-// An embedded support coin (raygun, buggy, e electric, antimatter), placed at x,y.
+// An embedded support coin (raygun, buggy, e pulse, X exotic), placed at x,y.
 const coin = (kind, x, y, s) => {
   const svg = supportIconSvg(kind, { size: 32, cls: '' }) || '';
   const inner = svg.replace(/^<svg[^>]*>/, '').replace(/<\/svg>$/, '');
@@ -60,10 +60,10 @@ const PICT = {
     2: `${drop(23, 27, 1.35)}${label(35, 25, '+1', 10, '#0369a1')}`,
   },
   battery: {
-    // On-board pulse generator: the e electric generator coin.
+    // On-board pulse generator: the e pulse generator coin.
     1: coin('gen-electric', 11, 12, 0.9),
-    // On-board exotic reactor: the antimatter reactor coin.
-    2: coin('reactor-antimatter', 11, 12, 0.9),
+    // On-board exotic reactor: the X exotic reactor coin.
+    2: coin('reactor-fission', 11, 12, 0.9),
   },
   triangle: {
     // Site refuel yields +1 Isotope: an atom, +1.
