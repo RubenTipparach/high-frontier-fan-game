@@ -21,6 +21,15 @@ export function setContractProgressSource(progressOf, nameOf) {
   _nameOf = nameOf || ((slug) => slug);
 }
 
+// Which of the viewer's contracts can be fulfilled (or a step announced) where
+// they stand right now: set by contracts-ui.js. Returns null or { final }.
+let _readyOf = () => null;
+export function setContractReadySource(fn) { _readyOf = fn || (() => null); }
+// The Fulfill button drawn on a ready contract card.
+export function fulfillButtonHtml(cardId, ready) {
+  return `<button type="button" class="m4-fulfill-btn" data-fulfill="${String(cardId).replace(/"/g, '&quot;')}">🏁 ${ready && ready.final ? 'Fulfill' : 'Announce step'}</button>`;
+}
+
 const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
 
 // Inline [bracket] glyphs from the transcription -> readable tokens.
@@ -42,6 +51,32 @@ export function richText(s) {
         : `<span class="m4-inline-icon" data-tip="${esc(d)}">◉</span>`;
     })
     .replace(/Season (Red|Yellow|Blue)/g, (m, c) => `<span class="m4-season m4-season-${c.toLowerCase()}">${m}</span>`);
+}
+
+// The map places a destination names, as tokens for the map link: a listed
+// site or space (`at:` / `enter:`) by its slug, and a "<Body> Site" step as
+// `body:<Body>` (every site on that body). Steps with no named place (any
+// unexplored site, a flyby count) add nothing.
+export function destinationPlaces(steps) {
+  const out = [];
+  const add = (t) => { if (t && !out.includes(t)) out.push(t); };
+  for (const st of (steps || [])) {
+    if (st.verb === 'at') st.sites.forEach(add);
+    else if (st.verb === 'enter') add(st.node);
+    else if (st.verb === 'site' && st.filters && st.filters.body) add(`body:${st.filters.body}`);
+  }
+  return out;
+}
+// The destination text, as a map link when it names a place.
+function destHtml(face) {
+  const text = richText(face.Destination);
+  const places = Array.isArray(face.Places) ? face.Places : [];
+  // Filter destinations ("Unexplored Synodic Site") resolve to their matching
+  // sites in play, so any step that names a kind of place links too.
+  const kinds = (face.Steps || []).some((st) => ['site', 'space', 'flybys'].includes(st.verb));
+  if (!places.length && !(kinds && face.CardId)) return text;
+  const q = (v) => esc(v).replace(/"/g, '&quot;');
+  return `<span class="m4-dest-link" role="link" tabindex="0" data-places="${q(places.join('|'))}"${face.CardId ? ` data-card="${q(face.CardId)}" data-side="${q(face.Side)}"` : ''} data-contract="${q(face.Name)}" data-tip="Show on the map">${text}</span>`;
 }
 
 const SIDE_LABEL = { blue: 'Blue side', gold: 'Gold side', exodus: 'Project Exodus' };
@@ -98,7 +133,7 @@ export function renderContractFace(face) {
         ${vpBadge(face.VP)}
       </div>
       <div class="card-body m4-body has-craft" style='background-image:${art}'>
-        <div class="m4-box m4-dest"><b>Destination</b>${richText(face.Destination)}${stepsHtml(face)}</div>
+        <div class="m4-box m4-dest"><b>Destination</b>${destHtml(face)}${stepsHtml(face)}</div>
         ${face['Fulfilled Ability'] ? `<div class="m4-box m4-ability"><b>Fulfilled ability</b>${richText(face['Fulfilled Ability'])}</div>` : ''}
         ${face['When Fulfilling'] ? `<div class="m4-box m4-when"><b>When fulfilling</b>${richText(face['When Fulfilling'])}</div>` : ''}
       </div>
@@ -109,6 +144,10 @@ export function renderContractFace(face) {
       </div>
       <div class="card-footer m4-footer"><span>${SIDE_LABEL[side] || side}</span><code>${esc(face.Code)}</code></div>
     </div></div>`;
+  if (face.Ready && face.CardId) {
+    el.classList.add('m4-ready');
+    el.querySelector('.card-face').insertAdjacentHTML('beforeend', fulfillButtonHtml(face.CardId, face.Ready));
+  }
   return el;
 }
 
@@ -116,11 +155,14 @@ export function renderContractFace(face) {
 export function renderContractCard(cardId, side = 'blue') {
   const f = contractFace(cardId, side);
   if (!f) return null;
-  return renderContractFace({
+  const el = renderContractFace({
     Side: f.side, Code: f.code, Name: f.name, 'Contract Type': f.contractType, 'Ideology Pair': f.pair,
     Manned: f.manned, Mass: f.mass, 'Rad-Hard': f.radHardness, VP: f.vp, 'Late Fee': f.lateFee,
     Advance: f.advance, Cybernetics: f.cybernetics.join(', '), 'Title Icon': f.titleIcon,
     Destination: f.destination, 'Fulfilled Ability': f.fulfilledAbility, 'When Fulfilling': f.whenFulfilling,
-    Steps: f.steps, Progress: _progressOf(cardId),
+    Steps: f.steps, Progress: _progressOf(cardId), Places: destinationPlaces(f.steps),
+    CardId: cardId, Ready: _readyOf(cardId),
   });
+  if (el) el.dataset.contractId = cardId;
+  return el;
 }

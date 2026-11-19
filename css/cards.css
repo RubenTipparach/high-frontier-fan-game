@@ -1900,8 +1900,11 @@
 .m4c-ful-ok { justify-self: start; margin-top: 6px; padding: 8px 22px; border-radius: 8px; border: 1px solid #c98512;
   background: #c98512; color: #15161d; font-weight: 700; cursor: pointer; }
 @media (max-width: 560px) {
+  .m4c-fulfilled .m4c-modal { width: min(300px, 100%); }
   .m4c-ful-body { flex-direction: column; align-items: center; }
-  .m4c-ful-card { flex-basis: auto; width: 200px; }
+  .m4c-ful-card { flex-basis: auto; width: 220px; }
+  .m4c-ful-text { width: 220px; justify-items: center; text-align: center; }
+  .m4c-ful-ok { justify-self: stretch; }
 }
 .m4c-auction-body { justify-content: center; align-items: center; }
 .m4c-auction-play { display: flex; flex-direction: column; align-items: center; gap: 10px; }
@@ -2010,3 +2013,37 @@ button.m4c-aug:hover { border-color: #60a5fa; background: #232838; }
 .card-aug-chits svg { filter: drop-shadow(0 2px 3px rgba(0,0,0,.65)); }
 .m4c-aw-side { flex-direction: row; align-items: center; gap: 10px; }
 .m4c-aw-side > span { display: flex; flex-direction: column; gap: 2px; }
+
+/* M4 contract destination: a map link (tap to show the place). Inert while a
+   contract is being picked, where a tap on the card picks it. */
+.m4-dest-link { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+.m4-dest-link:hover, .m4-dest-link:focus-visible { color: #ffd166; outline: none; }
+.m4c-deck.closed .m4-dest-link { pointer-events: auto; }
+.m4c-fr-step .m4-dest-link, .m4c-fr-step .m4c-deck.closed .m4-dest-link, .enterprise-pick .m4-dest-link {
+  cursor: inherit; text-decoration: none; pointer-events: none; }
+.m4c-overlay.m4c-minimized { display: none; }
+.m4-loc-pins { position: fixed; top: calc(var(--vhpx, 1vh) * 14); left: 50%; /* placed under the map's top bar by browse.js */ transform: translateX(-50%); z-index: 95;
+  background: rgba(16, 18, 28, .94); color: #e8e8ee; border: 1px solid #3a3d4c; border-radius: 10px;
+  padding: 6px 8px; max-width: min(320px, calc(100% - 32px)); box-shadow: 0 6px 24px rgba(0, 0, 0, .5); }
+.m4-loc-pins-head { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.m4-loc-pins-head b { flex: 1; }
+.m4-loc-pins-x { background: none; border: 0; color: #aaa; font-size: 16px; cursor: pointer; }
+.m4-loc-pins-list { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; max-height: calc(var(--vhpx, 1vh) * 30); overflow-y: auto; }
+.m4-loc-pins-list button, .m4-loc-pins-back { background: #23263a; color: #e8e8ee; border: 1px solid #3f4460;
+  border-radius: 14px; padding: 3px 9px; font-size: 12px; cursor: pointer; }
+.m4-loc-pins-list button:hover { border-color: #ffd166; }
+.m4-loc-pins-back { margin-top: 8px; width: 100%; }
+
+/* A contract whose destination is met where it stands: the Fulfill button sits
+   on the card itself (owner 2026-11-18). */
+.card.m4-contract.m4-ready .card-inner { box-shadow: 0 0 0 2px #fbbf24, 0 0 14px rgba(251, 191, 36, .55); }
+.card.m4-contract .m4-fulfill-btn { position: absolute; left: 50%; bottom: 76px; transform: translateX(-50%); z-index: 3;
+  padding: 7px 16px; border-radius: 8px; border: 1px solid #c98512; background: #c98512; color: #15161d;
+  font-weight: 800; font-size: 14px; cursor: pointer; white-space: nowrap; box-shadow: 0 2px 10px rgba(0, 0, 0, .55); }
+.card.m4-contract .m4-fulfill-btn:hover { background: #fbbf24; }
+.card.m4-contract .m4-fulfill-btn:disabled { opacity: .6; cursor: wait; }
+.m4c-endturn-body { display: flex; flex-wrap: wrap; justify-content: center; gap: 16px; }
+.m4c-endturn-item { display: flex; flex-direction: column; align-items: center; gap: 10px; width: 220px; }
+.m4c-endturn-item .m4c-ful-ok { justify-self: auto; align-self: stretch; }
+.m4c-endturn-foot { display: flex; justify-content: center; padding: 0 14px 14px; }
+.m4c-endturn-skip { background: none; border: 1px solid #3f4460; color: #cfd6e6; border-radius: 8px; padding: 7px 16px; cursor: pointer; }

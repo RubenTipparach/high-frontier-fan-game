@@ -29,6 +29,11 @@ export function setM2(on) { _m2 = !!on; }
 let _m4 = false;
 export function isM4() { return _m4; }
 export function setM4(on) { _m4 = !!on; }
+// May this viewer play M4 at all (an admin or a playtester)? Lets the card
+// library show the contract catalog outside an M4 game, read-only.
+let _m4Preview = false;
+export function isM4Preview() { return _m4Preview; }
+export function setM4Preview(on) { _m4Preview = !!on; }
 
 // Shared flag: is SIRENS mode (V9) active in the current online game? Players
 // are Sirenian factions homed at Cordelia rather than LEO. Mirrors the server's

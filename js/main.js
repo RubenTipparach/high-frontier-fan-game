@@ -17,6 +17,7 @@ import {
 import {
   initInvites, refreshInvitesList, subscribeInvitesForProfile,
 } from './invites.js';
+import { setM4Preview } from './game/online-mode.js';
 import { mountBrowse, isBrowseOnline, refreshRoomOverlays, requestRocketFocus } from './game/browse.js';
 import { mountRatFrontier } from './game/rat-frontier/rat-view.js';
 import { currentSandboxId, activateSandboxGame } from './game/sandbox-games.js';
@@ -925,6 +926,7 @@ function syncAlphaBanner() {
 function syncM4Rows() {
   const allowed = _adminAllowedCache || _testerAllowedCache;
   setM4Allowed(allowed);
+  setM4Preview(allowed);
   for (const id of ['create-m4-row', 'solo-m4-row']) {
     const row = document.getElementById(id);
     if (!row) continue;

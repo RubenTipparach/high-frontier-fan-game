@@ -38,7 +38,7 @@ import { COLONISTS_BY_ID } from '../../data/colonists.js';
 // M4 contract cards ride the same lookup (a boosted contract is a stack slot
 // with a mass); they only ever enter play through m4-gated paths.
 import {
-  CONTRACTS_BY_ID, CONTRACT_PAIRS, CONTRACT_PAIR_NAMES, CONTRACT_BID_MAX, contractFace, sideFace, stepSatisfied,
+  CONTRACTS_BY_ID, CONTRACT_PAIRS, CONTRACT_PAIR_NAMES, CONTRACT_BID_MAX, contractFace, sideFace, stepSatisfied, siteMatches, FLYBY_NODES,
   acetyleneTerms,
 } from '../../data/contracts.js';
 const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...BERNALS_BY_ID, ...COLONISTS_BY_ID, ...CONTRACTS_BY_ID };
@@ -95,7 +95,7 @@ import {
   leoSlug, siteBySlug as siteById, hazardKind, nodeBySlug,
   nodeSizeNumber, lineOfSightSites, siteBodyOf, buggyRoamSites,
   isSiteNode, zoneOfSlug, isAerobrakeNode, isAerobrakeLandableSite,
-  neighborSlugs, siteHasLanderBurn, isLanderBurnNode, isHomeBernalSite,
+  neighborSlugs, siteHasLanderBurn, isLanderBurnNode, isHomeBernalSite, allSiteSlugs, allNodeSlugs,
 } from './planner-graph.js';
 import { siteHasHazardousLanderBurn, routeFlewAerobrake } from '../../data/lander-burn.js';
 import { SIGNPOSTED_SITES } from '../../data/signpost-routes.js';
@@ -12622,11 +12622,16 @@ function applyAirEaterRefuel(state, op, player) {
 // A site is a valid Promotion Site for a card needing colony `need`: it must
 // carry a colony dome matching the need. Needs are the 5 dome-icon classes
 // (2A3a): a spectral letter (the factory there must match), 'Submarine',
-// 'Astrobiology', 'Atmospheric' (the site's location class), or 'Push' /
-// unspecified (any colony).
+// 'Astrobiology', 'Atmospheric' (the site's location class), 'Push' (a colony
+// on a site with the push icon, 2A3a "Push Colony"), or unspecified (any colony).
+function sitePushIcon(siteId) {
+  const site = siteById(siteId);
+  return !!(site && site.push);
+}
 function colonyPromotes(state, siteId, need) {
   if (!siteId || !state.colonies[siteId]) return false;
-  if (!need || need === 'Push') return true;
+  if (!need) return true;
+  if (need === 'Push') return sitePushIcon(siteId);
   if (need === 'Submarine') {
     return state.colonies[siteId].type === 'submarine' || colonyClassOfSite(siteId) === 'submarine';
   }
@@ -12653,14 +12658,9 @@ function promotedBernalAt(state, siteId) {
 }
 // The full Promotion-Site test for a card standing at `siteId`.
 // V9 Sirens: "regardless of dome icon, Siren cards promote ONLY at push colonies
-// (2A3a) or promoted-and-anchored Bernals (2A3c)." The Push dome icon already
-// means "any colony will do" in this implementation (see colonyPromotes), so a
-// Siren's need is forced to 'Push' and the printed icon is ignored. The
-// promoted-Bernal clause is the one already below.
-//
-// Note this can only ever be NARROWER or equal for a Siren: forcing 'Push'
-// drops the spectral / Submarine / Astrobiology / Atmospheric requirements and
-// accepts any colony instead, which is what the rule says.
+// (2A3a) or promoted-and-anchored Bernals (2A3c)." So a Siren's need is forced
+// to 'Push' (a colony on a push-icon site, see colonyPromotes) and the printed
+// icon is ignored. The promoted-Bernal clause is the one already below.
 function promotionSiteAt(state, siteId, need, cardType, player) {
   const want = isSirenPlayer(state, player) ? 'Push' : need;
   if (colonyPromotes(state, siteId, want)) return true;
@@ -12673,11 +12673,12 @@ function promotionSiteAt(state, siteId, need, cardType, player) {
 // promote at an actual colony), a Bernal's dome names a LOCATION CLASS, so the
 // location-class domes (Submarine / Astrobiology / Atmospheric) match the SITE'S
 // own class with NO colony dome required (user 2026-07-04: "this site is
-// astrobiology"). A spectral dome matches a Factory of that spectral; Push /
-// unspecified takes any colony.
+// astrobiology"). A spectral dome matches a Factory of that spectral; Push
+// takes a colony on a push-icon site (2A3a); unspecified takes any colony.
 function bernalDomeMatchesSpace(state, siteId, need) {
   if (!siteId) return false;
-  if (!need || need === 'Push') return !!state.colonies[siteId];
+  if (!need) return !!state.colonies[siteId];
+  if (need === 'Push') return !!state.colonies[siteId] && sitePushIcon(siteId);
   if (need === 'Submarine')    return colonyClassOfSite(siteId) === 'submarine';
   if (need === 'Astrobiology') return colonyClassOfSite(siteId) === 'astrobiology';
   if (need === 'Atmospheric')  return isAtmosphericSite(siteId) || isAerostatSiteId(siteId);
@@ -16118,6 +16119,46 @@ function contractCtx(state, player = null, where = {}) {
     synodic: (id) => SYNODIC_SITE_IDS.includes(id),
     nodeZone: (n) => zoneOfSlug(n),
   };
+}
+// The map places a contract's destination names, for the "show on the map"
+// link: every place each step could be announced at right now, read with the
+// same rules fulfilment uses (contractCtx + siteMatches). Conditions on the
+// carrying stack (a Human aboard, a hazard rolled) are not about the place, so
+// they are left out. Read-only.
+const STACK_FILTERS = ['human', 'robonaut', 'refinery', 'rolled', 'sameturn'];
+export function contractStepPlaces(state, cardId, side, viewerId = null) {
+  const face = contractFace(cardId, side);
+  if (!face) return null;
+  const viewer = (state.players || []).find((p) => p.profileId === viewerId) || null;
+  const ctx = contractCtx(state, viewer, {});
+  const out = new Set();
+  const placeOnly = (f) => Object.fromEntries(Object.entries(f || {}).filter(([k]) => !STACK_FILTERS.includes(k)));
+  const ZI = (z) => ZONE_ORDER.indexOf(String(z || ''));
+  for (const step of face.steps || []) {
+    const f = placeOnly(step.filters);
+    if (step.verb === 'at') step.sites.forEach((x) => out.add(x));
+    else if (step.verb === 'enter') out.add(step.node);
+    else if (step.verb === 'site') {
+      for (const slug of allSiteSlugs()) {
+        if (siteMatches(siteById(slug), f, ctx, [], slug)) out.add(slug);
+      }
+    } else if (step.verb === 'space') {
+      for (const slug of allNodeSlugs()) {
+        const kind = hazardKind(slug);
+        if (f.aero && kind !== 'aero') continue;
+        if (f.hazard && kind !== 'skull') continue;
+        if (f.beyond && !(ZI(zoneOfSlug(slug)) > ZI(f.beyond))) continue;
+        if (!f.aero && !f.hazard && !f.beyond) continue;
+        out.add(slug);
+      }
+    } else if (step.verb === 'flybys') {
+      for (const slug of FLYBY_NODES) {
+        if (f.beyond && !(ZI(zoneOfSlug(slug)) > ZI(f.beyond))) continue;
+        out.add(slug);
+      }
+    }
+  }
+  return [...out];
 }
 // Claim the single default chit on the side of the contract that caused it.
 function claimDefaultChit(state, player, cardId) {

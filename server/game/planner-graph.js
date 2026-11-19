@@ -263,6 +263,9 @@ export function siteBodyOf(slug) {
   return s ? (s.body || s.name || null) : null;
 }
 
+// Every node slug (sites and waypoints alike).
+export function allNodeSlugs() { return [...NODES_BY_SLUG.keys()]; }
+
 // Every real-site slug (waypoints excluded). Feeds the buggy-roam reach scan.
 export function allSiteSlugs() {
   const out = [];
