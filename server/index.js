@@ -4984,12 +4984,38 @@ app.get('/admin', (req, res) => {
   const tpN = pageNum('tp'); // testers
   // Player sort: 'joined' (newest account first, default) or 'seen' (last seen).
   const ps = req.query.ps === 'seen' ? 'seen' : 'joined';
+  // Room filters (user 2026-11-19: "advanced filtering ... hermes, m1, m2,
+  // sirens etc"): each tag can be required (ft=m1,hermes) or excluded
+  // (fn=tutorial), and q matches the room name, code or host. Applied in SQL so
+  // the Multiplayer, Solo and Canceled / finished lists, their counts and their
+  // pages all agree. Tag columns come from this whitelist only.
+  const ROOM_TAGS = [
+    ['m0', 'l.m0', 'M0'], ['m1', 'l.m1', 'M1'], ['m2', 'l.m2', 'M2'], ['m4', 'l.m4', 'M4'],
+    ['ceo', 'l.ceo_solo', '👔 CEO'], ['altruism', 'l.altruism', '🤝 V4 Altruism'],
+    ['hermes', 'l.hermes', '☄️ V5 Hermes'], ['sirens', 'l.sirens', '\u{1F9DC} V9 Sirens'],
+    ['tutorial', 'l.tutorial', '📘 Tutorial'], ['quick', 'l.quick_start', '⚡ V1 Quick'],
+    ['draft', 'l.draft_start', '🃏 Draft'], ['random', 'l.random_draft', '🎲 Random'],
+    ['hotseat', 'l.hot_seat', '👥 Hot seat'],
+  ];
+  const ROOM_TAG_COL = Object.fromEntries(ROOM_TAGS.map(([k, c]) => [k, c]));
+  const tagList = (v) => String(v || '').split(',').map((x) => x.trim()).filter((x) => ROOM_TAG_COL[x]);
+  const fHas = tagList(req.query.ft);
+  const fNot = tagList(req.query.fn).filter((k) => !fHas.includes(k));
+  const fQ = String(req.query.q || '').trim().slice(0, 60);
+  const roomFilterSql = [
+    ...fHas.map((k) => `AND ${ROOM_TAG_COL[k]} = 1`),
+    ...fNot.map((k) => `AND ${ROOM_TAG_COL[k]} = 0`),
+    ...(fQ ? [`AND (LOWER(l.name) LIKE ? OR LOWER(l.code) LIKE ? OR LOWER((SELECT pq.name FROM profiles pq WHERE pq.id = l.host_id)) LIKE ?)`] : []),
+  ].join(' ');
+  const likeQ = `%${fQ.toLowerCase().replace(/[%_]/g, '')}%`;
+  const roomFilterArgs = fQ ? [likeQ, likeQ, likeQ] : [];
+  const roomFiltered = !!(fHas.length || fNot.length || fQ);
 
   // pageHref(param, n): rebuild the current query string, override one page
   // param (or ps), and append the tab hash so the link lands on the right tab.
   const pageHref = (param, n, tab) => {
     const params = new URLSearchParams();
-    ['pp', 'rp', 'cp', 'ip', 'lp', 'tp', 'ps'].forEach((k) => {
+    ['pp', 'rp', 'sp', 'ep', 'cp', 'ip', 'lp', 'tp', 'ps', 'ft', 'fn', 'q', 'rm'].forEach((k) => {
       if (req.query[k] != null && req.query[k] !== '') params.set(k, String(req.query[k]));
     });
     params.set(param, String(n));
@@ -5046,15 +5072,16 @@ app.get('/admin', (req, res) => {
        FROM lobbies l
        JOIN profiles p ON p.id = l.host_id
        WHERE l.status != 'cancelled'
-         AND NOT EXISTS (SELECT 1 FROM games g2 WHERE g2.lobby_id = l.id AND g2.status = 'finished')`;
+         AND NOT EXISTS (SELECT 1 FROM games g2 WHERE g2.lobby_id = l.id AND g2.status = 'finished')
+         ${roomFilterSql}`;
   const mpLobbiesRaw = db.prepare(
     `${ROOM_SELECT} AND l.max_players > 1 ORDER BY ${LAST_ACTIVE} DESC LIMIT ${PER + 1} OFFSET ${(rpN - 1) * PER}`
-  ).all();
+  ).all(...roomFilterArgs);
   const mpLobbiesHasNext = mpLobbiesRaw.length > PER;
   const mpLobbies = mpLobbiesRaw.slice(0, PER);
   const soloLobbiesRaw = db.prepare(
     `${ROOM_SELECT} AND l.max_players = 1 ORDER BY ${LAST_ACTIVE} DESC LIMIT ${PER + 1} OFFSET ${(spN - 1) * PER}`
-  ).all();
+  ).all(...roomFilterArgs);
   const soloLobbiesHasNext = soloLobbiesRaw.length > PER;
   const soloLobbies = soloLobbiesRaw.slice(0, PER);
   // Decorate each room that has a live game with its round + whose turn it is,
@@ -5077,11 +5104,11 @@ app.get('/admin', (req, res) => {
   mpLobbies.forEach(decorateRoom);
   soloLobbies.forEach(decorateRoom);
   const mpTotal = db.prepare(
-    `SELECT COUNT(*) c FROM lobbies l WHERE l.status!='cancelled' AND NOT EXISTS (SELECT 1 FROM games g2 WHERE g2.lobby_id=l.id AND g2.status='finished') AND l.max_players>1`
-  ).get().c;
+    `SELECT COUNT(*) c FROM lobbies l WHERE l.status!='cancelled' AND NOT EXISTS (SELECT 1 FROM games g2 WHERE g2.lobby_id=l.id AND g2.status='finished') AND l.max_players>1 ${roomFilterSql}`
+  ).get(...roomFilterArgs).c;
   const soloTotal = db.prepare(
-    `SELECT COUNT(*) c FROM lobbies l WHERE l.status!='cancelled' AND NOT EXISTS (SELECT 1 FROM games g2 WHERE g2.lobby_id=l.id AND g2.status='finished') AND l.max_players=1`
-  ).get().c;
+    `SELECT COUNT(*) c FROM lobbies l WHERE l.status!='cancelled' AND NOT EXISTS (SELECT 1 FROM games g2 WHERE g2.lobby_id=l.id AND g2.status='finished') AND l.max_players=1 ${roomFilterSql}`
+  ).get(...roomFilterArgs).c;
 
   // Ended games: cancelled rooms OR rooms whose game finished. Most-recently
   // ended first (cancelled -> cancelled_at; finished -> the game's finished_at;
@@ -5089,9 +5116,9 @@ app.get('/admin', (req, res) => {
   // list. PAGINATED like every other admin list (it used to hard-cap at the
   // last 10, hiding older ended games). A cancelled lobby's game is also
   // cancelled (never 'finished'), so the two cases don't overlap.
-  const endedWhere = `WHERE l.status = 'cancelled'
-          OR EXISTS (SELECT 1 FROM games g WHERE g.lobby_id = l.id AND g.status = 'finished')`;
-  const endedTotal = db.prepare(`SELECT COUNT(*) c FROM lobbies l ${endedWhere}`).get().c;
+  const endedWhere = `WHERE (l.status = 'cancelled'
+          OR EXISTS (SELECT 1 FROM games g WHERE g.lobby_id = l.id AND g.status = 'finished')) ${roomFilterSql}`;
+  const endedTotal = db.prepare(`SELECT COUNT(*) c FROM lobbies l ${endedWhere}`).get(...roomFilterArgs).c;
   const endedRaw = db
     .prepare(
       `SELECT l.id, l.code, l.name, l.max_players, p.name AS host_name,
@@ -5111,7 +5138,7 @@ app.get('/admin', (req, res) => {
          l.created_at) DESC
        LIMIT ${PER + 1} OFFSET ${(epN - 1) * PER}`
     )
-    .all();
+    .all(...roomFilterArgs);
   const endedHasNext = endedRaw.length > PER;
   const endedLobbies = endedRaw.slice(0, PER);
 
@@ -5242,6 +5269,7 @@ app.get('/admin', (req, res) => {
     if (r.tutorial) mods.push('<span class="mod-chip mod-tutorial">📘 Tutorial</span>');
     if (r.sirens) mods.push('<span class="mod-chip mod-sirens">\u{1F9DC} V9 Sirens</span>');
     if (r.hermes) mods.push('<span class="mod-chip mod-hermes">☄️ V5 Hermes</span>');
+    if (r.altruism) mods.push('<span class="mod-chip mod-open">🤝 V4 Altruism</span>');
     if (r.quick_start) mods.push('<span class="mod-chip mod-open">⚡ V1 Quick</span>');
     else if (r.draft_start) mods.push('<span class="mod-chip mod-open">🃏 Draft</span>');
     if (r.random_draft) mods.push('<span class="mod-chip mod-open">🎲 Random</span>');
@@ -5275,7 +5303,7 @@ app.get('/admin', (req, res) => {
       + `<code>${esc(c)}</code> <span class="room-open-icon" aria-hidden="true">&#x2197;</span></a>`;
   };
   const roomRowsHtml = (arr, emptyMsg) => arr.map((r) => `
-    <tr class="room-row" data-search="${esc((String(r.name || '') + ' ' + String(r.code || '')).toLowerCase())}">
+    <tr class="room-row" data-search="${esc((String(r.name || '') + ' ' + String(r.code || '') + ' ' + String(r.host_name || '')).toLowerCase())}">
       <td data-label="Code">${roomOpenLink(r.code)}</td>
       <td data-label="Name"><button class="btn-room linklike" data-lid="${r.id}" data-gid="${r.game_id || ''}" data-lname="${esc(r.name)}" data-lcode="${esc(r.code)}" data-status="active">${esc(r.name)}</button></td>
       <td data-label="Host">@${esc(r.host_name)}</td>
@@ -5414,6 +5442,11 @@ app.get('/admin', (req, res) => {
   .discord-link:hover{background:none;border:none;color:#a5e4ff}
   .reassign-picker select{background:#07060f;color:#e6e9ff;border:1px solid #2a2740;border-radius:4px;padding:3px 6px;font:inherit;font-size:12px}
   .rooms-toolbar{display:flex;align-items:center;gap:10px;margin:6px 0 10px;flex-wrap:wrap}
+  .room-filters{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}
+  .rf-chip,.rf-clear{background:#0d0b1a;color:#b8bdd8;border:1px solid #2a2740;border-radius:999px;padding:4px 10px;font:inherit;font-size:12px;cursor:pointer}
+  .rf-chip.rf-has{background:#123524;color:#86efac;border-color:#22c55e}
+  .rf-chip.rf-not{background:#3a1218;color:#fca5a5;border-color:#ef4444;text-decoration:line-through}
+  .rf-clear{border-style:dashed}
   #room-search{flex:1 1 240px;max-width:340px;background:#07060f;color:#e6e9ff;border:1px solid #2a2740;border-radius:6px;padding:6px 10px;font:inherit}
   #show-cancelled{background:#1a1430;color:#cdd7f0;border:1px solid #3a2740;border-radius:6px;padding:6px 12px;font:inherit;cursor:pointer}
   #show-cancelled:hover{background:#26193f}
@@ -6184,8 +6217,15 @@ app.get('/admin', (req, res) => {
   <section class="tab-panel" id="tab-rooms" hidden>
   <h2>Rooms</h2>
   <div class="rooms-toolbar">
-    <input id="room-search" type="search" placeholder="Search room name or code…" autocomplete="off" />
+    <input id="room-search" type="search" placeholder="Search room, code or host…" title="Enter searches every page" autocomplete="off" value="${esc(fQ)}" />
     <button id="show-cancelled" type="button">🗑 Canceled / finished games (${endedTotal})</button>
+  </div>
+  <div class="room-filters" id="room-filters" data-has="${esc(fHas.join(','))}" data-not="${esc(fNot.join(','))}">
+    ${ROOM_TAGS.map(([k, , label]) => {
+      const st = fHas.includes(k) ? 'has' : fNot.includes(k) ? 'not' : 'any';
+      return `<button type="button" class="rf-chip rf-${st}" data-tag="${k}" title="Tap: must have, again: must not have, again: any">${st === 'has' ? '✓ ' : st === 'not' ? '✕ ' : ''}${label}</button>`;
+    }).join('')}
+    ${roomFiltered ? '<button type="button" class="rf-clear" id="rf-clear">Clear filters</button>' : ''}
   </div>
   <div class="room-toggle"><button type="button" data-room-mode="mp" class="on">👥 Multiplayer (${mpTotal})</button><button type="button" data-room-mode="solo">🎲 Solo (${soloTotal})</button></div>
   <div id="rooms-mp">
@@ -6223,6 +6263,11 @@ app.get('/admin', (req, res) => {
         mp.hidden = mode !== 'mp';
         solo.hidden = mode !== 'solo';
       });
+    }
+    // A filter reload keeps the list you were on.
+    if (new URLSearchParams(location.search).get('rm') === 'solo') {
+      var sb = document.querySelector('[data-room-mode="solo"]');
+      if (sb) sb.click();
     }
   })();
   </script>
@@ -6918,6 +6963,46 @@ document.addEventListener('click', function (ev) {
       alert('Network error.');
     });
 });
+
+// Room filters: each tag chip cycles any -> must have -> must not have; the
+// page reloads with ft / fn (and q from the search box on Enter) so every list,
+// count and page follows the filter. Pages reset to 1 on a filter change.
+(function () {
+  var bar = document.getElementById('room-filters');
+  if (!bar) return;
+  var has = (bar.getAttribute('data-has') || '').split(',').filter(Boolean);
+  var not = (bar.getAttribute('data-not') || '').split(',').filter(Boolean);
+  function go() {
+    var p = new URLSearchParams(location.search);
+    ['rp', 'sp', 'ep'].forEach(function (k) { p.delete(k); });
+    if (has.length) p.set('ft', has.join(',')); else p.delete('ft');
+    if (not.length) p.set('fn', not.join(',')); else p.delete('fn');
+    var solo = document.querySelector('[data-room-mode="solo"].on');
+    if (solo) p.set('rm', 'solo'); else p.delete('rm');
+    var q = (document.getElementById('room-search') || {}).value || '';
+    if (q.trim()) p.set('q', q.trim()); else p.delete('q');
+    var qs = p.toString();
+    location.href = '/admin' + (qs ? '?' + qs : '') + '#rooms';
+  }
+  bar.addEventListener('click', function (ev) {
+    var b = ev.target.closest ? ev.target.closest('.rf-chip') : null;
+    if (b) {
+      var k = b.getAttribute('data-tag');
+      if (has.indexOf(k) !== -1) { has = has.filter(function (x) { return x !== k; }); not.push(k); }
+      else if (not.indexOf(k) !== -1) { not = not.filter(function (x) { return x !== k; }); }
+      else { has.push(k); }
+      go();
+      return;
+    }
+    if (ev.target.id === 'rf-clear') {
+      has = []; not = [];
+      var s = document.getElementById('room-search'); if (s) s.value = '';
+      go();
+    }
+  });
+  var search = document.getElementById('room-search');
+  if (search) search.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); go(); } });
+})();
 
 // Room search: filter the active-rooms table by the row's data-search
 // (lowercased name + code), so a code substring matches too.
