@@ -634,9 +634,25 @@ export async function abandonContract(id) {
 
 // ---- the auction overlay ----------------------------------------------------------
 let _yearsDraft = null;
+// Minimize, as every auction does: the overlay collapses to an Auction button
+// in the turn bar. A new lot always opens expanded.
+let _caMin = false;
+let _caKey = null;
+let _caLast = null;
+export function setContractAuctionMinimized(on) {
+  _caMin = !!on;
+  if (_caLast) renderContractAuction(_caLast);
+}
 export function renderContractAuction(a) {
   let el = document.getElementById('m4-contract-auction');
-  if (!a) { if (el) el.remove(); _yearsDraft = null; return; }
+  if (!a) {
+    if (el) el.remove();
+    _yearsDraft = null; _caMin = false; _caKey = null; _caLast = null;
+    if (D && D.setTurnAction) D.setTurnAction('contract-auction', null);
+    return;
+  }
+  _caLast = a;
+  if (_caKey !== a.cardId) { _caKey = a.cardId; _caMin = false; }
   const s = snap();
   const p = me();
   if (!el) {
@@ -688,10 +704,16 @@ export function renderContractAuction(a) {
   let controls = '';
   if (blocked) controls = `<p class="muted">${blocked}</p>`;
   else {
+    // What you have set now: your standing bid, and a greyed button while the
+    // picker still shows that same bid.
+    const isSet = myBid != null && myBid === _yearsDraft;
     controls = `<select id="m4c-years" aria-label="Your bid in years">${opts}</select>
-      <button type="button" data-act="bid">Submit ${_yearsDraft} yr</button>
+      <button type="button" data-act="bid" ${isSet ? 'disabled' : ''}>${isSet ? `✓ ${myBid} yr set` : `Submit ${_yearsDraft} yr`}</button>
       ${iAmAuctioneer ? '' : '<button type="button" data-act="pass">Pass</button>'}`;
   }
+  const mine = myBid != null
+    ? `<p class="m4c-mybid">Your bid: <b style="color:${esc((p && p.color) || '#e5e7eb')}">${myBid} yr</b>${myId === leaderId ? ' · winning' : ''}</p>`
+    : (p && (a.passed || []).includes(myId) ? '<p class="m4c-mybid">You passed</p>' : '');
   if (iAmAuctioneer) {
     // Ties (4B3g), as in a patent auction: the initiator wins a tie they are in;
     // otherwise they name the winner among the tied bidders.
@@ -702,14 +724,30 @@ export function renderContractAuction(a) {
       : `<div class="m4c-btns"><button type="button" data-act="close" ${settled ? '' : 'disabled'}>Close</button></div>`;
   }
   el.innerHTML = `<div class="m4c-modal" role="dialog" aria-label="Contract auction">
-    <div class="m4c-head"><h3>📜 Auction</h3><span class="muted">${CONTRACT_PAIR_NAMES[a.pair] || ''}</span></div>
+    <div class="m4c-head"><h3>📜 Auction</h3><span class="muted">${CONTRACT_PAIR_NAMES[a.pair] || ''}</span>
+      <button type="button" class="mp-mini-btn m4c-mini" title="Minimize" aria-label="Minimize">&minus;</button></div>
     <div class="m4c-auction-body">
       <div class="m4c-auction-card">${cardThumb(a.cardId, a.side || 'blue')}</div>
       <div class="m4c-auction-play">
         <div class="m4c-dial m4c-auction-dial">${dial}</div>
+        ${mine}
         <div class="m4c-controls">${controls}</div>
         <p class="m4c-wait">${settled ? `${esc(nameOf(a.auctioneerId))} to close` : `Waiting: ${waiting.map((q) => '@' + esc(q.name)).join(', ')}`}</p>
       </div></div></div>`;
+  // Docked: the overlay hides and the turn bar carries the Auction button.
+  const myMove = !blocked && myId !== a.auctioneerId && !(a.acted || []).includes(myId);
+  const myClose = iAmAuctioneer && settled;
+  el.classList.toggle('m4c-minimized', _caMin);
+  if (D && D.setTurnAction) {
+    D.setTurnAction('contract-auction', _caMin ? {
+      label: '📜 Auction',
+      meta: myBid != null ? `you ${myBid} yr` : `${a.low} yr`,
+      needsAction: myMove || myClose,
+      onClick: () => setContractAuctionMinimized(false),
+    } : null);
+  }
+  const mini = el.querySelector('.m4c-mini');
+  if (mini) mini.addEventListener('click', () => setContractAuctionMinimized(true));
   const sel = el.querySelector('#m4c-years');
   if (sel) sel.addEventListener('change', () => { _yearsDraft = Number(sel.value); renderContractAuction(a); });
   el.querySelectorAll('.dial-hit').forEach((h) => h.addEventListener('click', () => {

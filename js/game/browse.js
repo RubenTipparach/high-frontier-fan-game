@@ -121,7 +121,7 @@ import { futureGoalForCard, checkFutureGoal, CENTAUR_SITE_IDS, GREEK_CAMP_IDS, T
 // M2 Colonist powers (FINAO halved etc.) - the same flags the engine reads.
 import { colonistPower } from '../../data/colonist-abilities.js';
 import { openBernalStackModal, openBernalFuelTank } from './bernal-modal.js';
-import { initContractsUi, closeContractsPanel, contractSpaceName, contractsBeforeEndTurn, refreshContractsUi, abandonBlock, contractFeeDue, payContractFee, abandonContract, timepieceBadge, renderContractAuctionStep, openCompletedContracts } from './contracts-ui.js';
+import { initContractsUi, closeContractsPanel, contractSpaceName, contractsBeforeEndTurn, setContractAuctionMinimized, refreshContractsUi, abandonBlock, contractFeeDue, payContractFee, abandonContract, timepieceBadge, renderContractAuctionStep, openCompletedContracts } from './contracts-ui.js';
 import { getBernalSprite } from './bernal-sprite.js';
 import { fuelTankCylinderMarkup, fuelTransferSectionMarkup } from './fuel-tank-view.js';
 // One client card-lookup: patents PLUS the M2 Bernal cards (which live in
@@ -8287,7 +8287,7 @@ function showContractPins(title, nodes, auctionHidden) {
   x.type = 'button'; x.className = 'm4-loc-pins-x'; x.textContent = '✕'; x.setAttribute('aria-label', 'Close');
   x.addEventListener('click', () => {
     closeContractPins();
-    document.getElementById('m4-contract-auction')?.classList.remove('m4c-minimized');
+    setContractAuctionMinimized(false);
   });
   head.appendChild(x);
   box.appendChild(head);
@@ -8308,7 +8308,7 @@ function showContractPins(title, nodes, auctionHidden) {
     back.className = 'm4-loc-pins-back';
     back.textContent = '↩ Auction';
     back.addEventListener('click', () => {
-      document.getElementById('m4-contract-auction')?.classList.remove('m4c-minimized');
+      setContractAuctionMinimized(false);
       closeContractPins();
     });
     box.appendChild(back);
@@ -8358,8 +8358,9 @@ async function locateContractPlaces(link) {
   }
   closeContractsPanel();
   document.getElementById('m4-contract-where')?.remove();
+  // A live contract auction steps aside (minimized to the turn bar).
   const auction = document.getElementById('m4-contract-auction');
-  if (auction) auction.classList.add('m4c-minimized');
+  if (auction) setContractAuctionMinimized(true);
   let narrow = false;
   try { narrow = window.matchMedia('(max-width: 720px)').matches; } catch (e) { /* ignore */ }
   if (narrow) { try { showPane(null); } catch (e) { /* ignore */ } }
@@ -36011,6 +36012,7 @@ initContractsUi({
   },
   toast: (msg, level) => { if (_onlineToast) _onlineToast(msg, level); },
   confirm: (opts) => confirmModal(opts),
+  setTurnAction: (key, spec) => setMpTurnAction(key, spec),
   // The name a player reads for a map space (a site, a Lagrange point, a hazard).
   spaceName: (slug) => {
     const n = _activeData && _activeData.sites ? _activeData.sites.find((x) => x.id2 === slug) : null;
