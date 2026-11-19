@@ -4908,8 +4908,16 @@ function renderEventChooser(snapshot) {
   const confirm = document.createElement('button');
   confirm.type = 'button';
   confirm.className = 'modal-btn primary';
-  confirm.textContent = isCuts ? '\u2702\uFE0F Discard it' : '\u{1F9E8} Lose it';
-  confirm.disabled = !selected;
+  // The button names the card it acts on, so a pick scrolled out of sight on a
+  // phone is never a surprise.
+  const labelConfirm = () => {
+    const nm = selected ? ((lookup(selected) || {}).name || selected) : null;
+    confirm.textContent = isCuts
+      ? (nm ? `\u2702\uFE0F Discard ${nm}` : '\u2702\uFE0F Pick a card')
+      : (nm ? `\u{1F9E8} Lose ${nm}` : '\u{1F9E8} Pick a card');
+    confirm.disabled = !selected;
+  };
+  labelConfirm();
   confirm.addEventListener('click', () => {
     if (!selected) return;
     confirm.disabled = true;
@@ -4948,7 +4956,7 @@ function renderEventChooser(snapshot) {
       tick.className = 'et-pick-tick';
       tick.textContent = '\u2713';
       pick.appendChild(tick);
-      const choose = () => { selected = id; _eventPick = { key: `${kind}`, id }; confirm.disabled = false; repaint(); };
+      const choose = () => { selected = id; _eventPick = { key: `${kind}`, id }; labelConfirm(); repaint(); };
       pick.addEventListener('click', choose);
       pick.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); choose(); }
