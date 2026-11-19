@@ -280,7 +280,10 @@ function locationOf(p, id) {
 
 // The Completed contracts tab, opened from the Contracts chip in the stack row.
 export function openCompletedContracts() {
-  _tab = 'yours';
+  // Nothing completed or in play yet: the market is what there is to see.
+  const p = me();
+  const mine = p && ((p.fulfilledContracts || []).length || Object.keys(p.contractMeta || {}).length);
+  _tab = mine ? 'yours' : 'market';
   _panelOpen = true;
   renderPanel();
 }

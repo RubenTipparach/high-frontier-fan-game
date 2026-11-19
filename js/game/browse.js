@@ -11354,14 +11354,16 @@ function renderStackSwitcher() {
       siteAvailable: true,
       isEmpty: false,
     },
-    // M4: once you have completed contracts, a Contracts chip beside the LEO
-    // Stack opens them (owner 2026-11-18).
+    // M4: a Contracts chip beside the LEO Stack, always there in an M4 game
+    // (owner 2026-11-19: it is the way into the contracts panel). It counts
+    // your completed contracts and opens them; with none yet it opens the market.
     ...(() => {
-      const done = (isM4() && (mySnapshotPlayer() || {}).fulfilledContracts) || [];
-      return done.length ? [{
+      if (!isM4()) return [];
+      const done = (mySnapshotPlayer() || {}).fulfilledContracts || [];
+      return [{
         id: 'contracts', glyphHtml: '<span class="chip-emoji">📜</span>', sub: 'Contracts', cards: done.length,
         title: `Completed contracts - ${done.length}`, siteAvailable: false, isEmpty: false, noPin: true,
-      }] : [];
+      }];
     })(),
     {
       id: 'rocket', icon: 'rocket', sub: 'Rocket', cards: rocketStack.length,
