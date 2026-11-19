@@ -337,7 +337,7 @@ function decksHtml(s, p, auctionOpen) {
       <div class="m4c-deck-head"><b>${CONTRACT_PAIR_NAMES[pair]}</b>
         <span>${deck.length} left</span>
         <span class="m4c-law">${byLaw ? 'Active Law' : byConnections ? 'Connections' : ''}</span></div>
-      ${top ? cardThumb(top, 'blue') : '<div class="muted">empty</div>'}${btn}</div>`;
+      ${top ? cardThumb(top, s.contractSide === 'gold' ? 'gold' : 'blue') : '<div class="muted">empty</div>'}${btn}</div>`;
   }).join('')}</div>`;
 }
 // The contract auction step of a Fundraise (owner 2026-11-18: the auction is
@@ -386,6 +386,7 @@ function renderPanel() {
   const auctionOpen = false;   // the auction starts only in the Fundraise window
   if (s.defaultChit) market.push(`<p class="muted">🏷 Default chit: ${esc(nameOf(s.defaultChit.profileId))} (${s.defaultChit.side === 'gold' ? -6 : -3} VP)</p>`);
   market.push(decksHtml(s, p, auctionOpen));
+  market.push(isotopesHtml(s, p, myTurn));
 
   // Contracts in hand live in the Hand area (4B3h: a won contract is a Hand
   // Card), so the panel only points there; boosted and fulfilled ones are here.
@@ -435,6 +436,28 @@ function renderPanel() {
   el.querySelectorAll('button[data-act]').forEach((b) => b.addEventListener('click', () => onAct(b)));
 }
 
+// ---- isotope monetization (3B5, 4D1) ------------------------------------------------
+// Gold beads at your Bank are worth 10 aqua each. Blue/Gold Exchange: sell one to
+// the Earth market for 10 aqua, or buy one from it for 10 aqua (free actions).
+function isotopesHtml(s, p, myTurn) {
+  const bank = Math.max(0, p.isotopes | 0);
+  const market = Math.max(0, s.earthMarket | 0);
+  const r = p.rocket || {};
+  const tankIso = (r.tankGrade === 'isotope') ? Math.floor(Number(r.tank) || 0) : 0;
+  const status = s.isotopeMonetized
+    ? 'Isotope is monetized: FINAO costs are doubled.'
+    : 'Isotope is not monetized yet: the first gold bead refined monetizes it.';
+  const btn = (act, label, ok, tip) => `<button type="button" data-act="${act}"${ok ? '' : ' disabled'} data-tip="${esc(tip)}">${label}</button>`;
+  return `<h4>Isotopes</h4>
+    <p class="muted">${status}</p>
+    <p>🟡 At your Bank: <b>${bank}</b> (worth ${bank * 10} aqua) · Earth market: <b>${market}</b></p>
+    <div class="m4c-controls">
+      ${btn('iso-sell', 'Sell 1 for 10 aqua', myTurn && bank > 0, 'Sell a gold bead to the Earth market for 10 aqua. Free action.')}
+      ${btn('iso-buy', 'Buy 1 for 10 aqua', myTurn && market > 0 && (p.aqua | 0) >= 10, 'Buy a gold bead from the Earth market into your Bank. Free action.')}
+      ${tankIso > 0 ? btn('iso-tank', `Bring ${tankIso} from the tank to the Bank`, myTurn, 'Unload the whole isotope units in your rocket tank into your Bank. Your rocket must be at your Bank (LEO or your Home Bernal).') : ''}
+    </div>`;
+}
+
 // ---- augmentations (4C) ------------------------------------------------------------
 const SHAPES = ['heart', 'jar', 'hexagon', 'splat', 'battery', 'triangle'];
 function portfolioOf(p) {
@@ -462,7 +485,9 @@ function augmentationsHtml(s, p, myTurn) {
     // Without M2, any chit in your possession opens the Augment operation.
     const click = !s.m2 && myTurn && have;
     const glyph = a ? augmentSideSvg(sh, a.side, { size: 34 }) : augmentGlyph(sh, { size: 26 });
-    return `<${click ? 'button type="button" data-act="augment" data-shape="' + sh + '"' : 'div'} class="m4c-aug ${have ? 'have' : 'lack'}${a ? ' on' : ''}"${a ? ` data-tip="${esc(sideText(sh, a.side))}"` : ''}>${glyph}<span><b>${AUGMENTS[sh].name}</b> ${st}</span></${click ? 'button' : 'div'}>`;
+    // Every other chit, held or not, opens a look at its two sides.
+    const act = click ? 'augment' : 'chit-view';
+    return `<button type="button" data-act="${act}" data-shape="${sh}" class="m4c-aug ${have ? 'have' : 'lack'}${a ? ' on' : ''}"${a ? ` data-tip="${esc(sideText(sh, a.side))}"` : ''}>${glyph}<span><b>${AUGMENTS[sh].name}</b> ${st}</span></button>`;
   }).join('');
   const opts = [...portfolio].map((sh) => `<option value="${sh}">${AUGMENTS[sh].name}</option>`).join('');
   const controls = (key, attrs) => (myTurn && opts ? `<div class="m4c-controls"><select data-shape-for="${key}">${opts}</select>
@@ -513,6 +538,10 @@ async function onAct(b) {
     }
   }
   else if (act === 'augment') { openAugmentWizard(b.dataset.shape); return; }
+  else if (act === 'chit-view') { openChitSides(b.dataset.shape); return; }
+  else if (act === 'iso-sell') await D.submitTurnOp({ kind: 'ISOTOPE_EXCHANGE', action: 'sell', amount: 1 });
+  else if (act === 'iso-buy') await D.submitTurnOp({ kind: 'ISOTOPE_EXCHANGE', action: 'buy', amount: 1 });
+  else if (act === 'iso-tank') await D.submitTurnOp({ kind: 'ISOTOPE_EXCHANGE', action: 'deposit' });
   else if (act === 'pay') await payContractFee(id);
   else if (act === 'abandon') await abandonContract(id);
   if (act === 'auction') closePanel();
@@ -790,6 +819,23 @@ function renderAugmentWizard() {
     await D.submitTurnOp({ kind: 'IMPLANT', remove, implants });
     if (_panelOpen) renderPanel();
   });
+}
+// A look at a chit's two sides (any chit, held or not).
+function openChitSides(shape) {
+  if (!AUGMENTS[shape]) return;
+  document.getElementById('m4-chit-sides')?.remove();
+  const ov = document.createElement('div');
+  ov.id = 'm4-chit-sides';
+  ov.className = 'm4c-overlay';
+  const close = () => ov.remove();
+  ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+  const sides = [1, 2].map((n) => `<div class="m4c-aw-side m4c-cs-side">${augmentSideSvg(shape, n, { size: 96 })}
+      <span><b>Side ${n}</b><small>${esc(sideText(shape, n))}</small></span></div>`).join('');
+  ov.innerHTML = `<div class="m4c-modal m4c-aw" role="dialog" aria-label="${esc(AUGMENTS[shape].name)}">
+    <div class="m4c-head"><h3>${esc(AUGMENTS[shape].name)}</h3><button type="button" class="m4c-close" aria-label="Close">✕</button></div>
+    <div class="m4c-aw-sides">${sides}</div></div>`;
+  ov.querySelector('.m4c-close').addEventListener('click', close);
+  document.body.appendChild(ov);
 }
 function closeAugmentWizard() {
   _aug = null;

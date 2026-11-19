@@ -39,7 +39,7 @@ import { COLONISTS_BY_ID } from '../../data/colonists.js';
 // with a mass); they only ever enter play through m4-gated paths.
 import {
   CONTRACTS_BY_ID, CONTRACT_PAIRS, CONTRACT_PAIR_NAMES, CONTRACT_BID_MAX, contractFace, sideFace, stepSatisfied, siteMatches, FLYBY_NODES,
-  acetyleneTerms,
+  acetyleneTerms, faceUnplayable,
 } from '../../data/contracts.js';
 const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...BERNALS_BY_ID, ...COLONISTS_BY_ID, ...CONTRACTS_BY_ID };
 import { resolveSupportChain, unmetRequirements, openCycleChainCard } from '../../data/support-chain.js';
@@ -149,6 +149,9 @@ function slotMass(slot) {
   // A fuel cargo card weighs the fuel it holds (fuel has mass), so hauling it
   // costs burns like any cargo. Loading it into a tank is mass-neutral.
   if (slot.kind === 'fuel') return Math.max(0, Math.floor(Number(slot.amount) || 0));
+  // Jar augmentation, side 1 (M4): the Crew card or (with M2) Colonist it rides
+  // weighs nothing. The mark is only ever set on those two kinds of card.
+  if (slot.massless) return 0;
   const p = PATENTS_BY_ID[slot.id];
   if (p) {
     // A radiator's mass depends on the side it deployed on (light vs heavy),
@@ -368,16 +371,16 @@ function playerHasAtmoScoop(player, stack) {
   });
 }
 
-// M4 augmentation abilities (4C3). Without Module 2 a chit sits on one of your
-// Colonies (user ruling 2026-11-17), so a side that works "here" works at that
-// Colony's site. (With M2 the chit rides a Colonist; M4 does not combine with
-// M2 yet, so that placement is not read here.)
+// M4 augmentation abilities (4C3). Without Module 2 a chit sits on a Crew card
+// or one of your Colonies (user rulings 2026-11-17 / 18); with Module 2 it sits
+// on a Colonist (4C4). A side that works "here" works where its holder is.
 function augmentSideAt(player, shape, side, slug) {
   const a = player && player.augments && player.augments[shape];
   if (!(a && a.side === side && slug != null)) return false;
-  // A chit on a Crew card works wherever that Crew is (owner 2026-11-18); an
-  // older chit placed on a Colony works at that Colony.
-  if (a.crewId) return augHolderSite(player, a.crewId) === String(slug);
+  // A chit on a Crew card or a Colonist works wherever that card is (owner
+  // 2026-11-18); an older chit placed on a Colony works at that Colony.
+  const holder = a.crewId || a.colonistId;
+  if (holder) return augHolderSite(player, holder) === String(slug);
   return a.colonySite === String(slug);
 }
 // The map space a player's card sits in: its stack's site ('leo' at LEO), or
@@ -416,28 +419,33 @@ function playerSlotArrays(p) {
   return out;
 }
 function syncCrewAugmentMarks(st) {
-  if (!st || !st.m4 || st.m2) return;
+  if (!st || !st.m4) return;
   for (const p of st.players || []) {
-    // A chit whose Crew has left play comes back.
+    // A chit whose Crew has left play comes back. (A Colonist's chits come back
+    // when it is Decommissioned, which removes them itself: a Colonist can sit
+    // in a Colony, outside every stack, and keeps its chits there.)
     for (const [shape, a] of Object.entries(p.augments || {})) {
       if (a && a.crewId && augHolderSite(p, a.crewId) === undefined) delete p.augments[shape];
     }
     // Each mark applies to the Crew the chit is on (an older Colony chit, to
     // every Crew of the player).
+    // With Module 2 the chit rides a Colonist (4C4) and the marks go on that
+    // Colonist's slot instead.
     const on = (shape, side, s) => {
       const a = p.augments && p.augments[shape];
       if (!a || (side && a.side !== side)) return false;
-      return a.crewId ? String(a.crewId) === String(s.id) : true;
+      const holder = a.crewId || a.colonistId;
+      return holder ? String(holder) === String(s.id) : (!st.m2 && !!CREW_BY_ID[s.id]);
     };
     for (const arr of playerSlotArrays(p)) {
       for (const s of arr) {
-        if (!s || !CREW_BY_ID[s.id]) continue;
+        if (!s || !(CREW_BY_ID[s.id] || COLONISTS_BY_ID[s.id])) continue;
         if (on('jar', 1, s)) s.massless = true; else delete s.massless;
         const hex = on('hexagon', 0, s) ? p.augments.hexagon : null;
         if (hex) s.augProspector = hex.side === 1 ? { kind: 'raygun', isru: 1 } : { kind: 'buggy', isru: 2 };
         else delete s.augProspector;
         const bat = on('battery', 0, s) ? p.augments.battery : null;
-        if (bat && bat.crewId) s.augSupplies = bat.side === 1 ? ['gen-electric'] : ['reactor-antimatter'];
+        if (bat && (bat.crewId || bat.colonistId)) s.augSupplies = bat.side === 1 ? ['gen-radioisotope'] : ['reactor-fission'];
         else delete s.augSupplies;
       }
     }
@@ -448,8 +456,8 @@ function batteryCrewKinds(player) {
   const a = player && player.augments && player.augments.battery;
   // A Battery on one Crew card supplies through that slot (slot.augSupplies);
   // only an older Colony chit powers every Crew.
-  if (!a || a.crewId) return [];
-  return a.side === 1 ? ['gen-electric'] : a.side === 2 ? ['reactor-antimatter'] : [];
+  if (!a || a.crewId || a.colonistId) return [];
+  return a.side === 1 ? ['gen-radioisotope'] : a.side === 2 ? ['reactor-fission'] : [];
 }
 function hasAugmentSide(player, shape, side) {
   const a = player && player.augments && player.augments[shape];
@@ -740,6 +748,10 @@ function faceProps(slot) {
 // bug on crew_nasa_isro's ISRO Glavcosmonauts buggy face).
 function prospectorFace(slot) {
   if (!slot || !slot.id) return { properties: [], isru: 0 };
+  // Hexagon augmentation (M4) on a Colonist (with M2): the chit is its prospector.
+  if (slot.augProspector && !CREW_BY_ID[slot.id]) {
+    return { properties: [{ key: slot.augProspector.kind, value: true }], isru: slot.augProspector.isru | 0 };
+  }
   const crew = CREW_BY_ID[slot.id];
   if (crew) {
     const key = slot.face === 'secondary' ? 'secondary' : 'primary';
@@ -775,6 +787,7 @@ function prospectorIsru(slot) {
 // so this can't read prospectorIsru (0 also means "no rig" there).
 function slotHasIsruRig(slot) {
   if (!slot || !slot.id) return false;
+  if (slot.augProspector) return true;
   const crew = CREW_BY_ID[slot.id];
   if (crew) {
     const key = slot.face === 'secondary' ? 'secondary' : 'primary';
@@ -1751,8 +1764,12 @@ function colonistSizeRollModAt(state, player, siteId) {
 // season-blue event), halved again (fractions dropped) by a Frankenstein
 // Navigator / Josephson Implants colonist in play. Mirror the client's
 // finaoPer (browse.js) if the order ever changes.
-function finaoPerFor(state, player) {
+export function finaoPerFor(state, player) {
   let per = hasPrivilege(state, player, 'OPEN_SOURCE_FINAO') ? 3 : HAZARD_COST_PER;
+  // 3B5a / 4D1a: once isotope is monetized, FINAO costs are permanently doubled
+  // for everyone, Open Source included. Wired for M4 rooms only for now, so an
+  // M1 game already in flight does not double mid-game.
+  if (state.m4 && state.isotopeMonetized) per *= 2;
   if (state.internationalAssistance) per = Math.floor(per / 2);
   if (playerHasColonistPower(state, player, 'finaoHalved')) per = Math.floor(per / 2);
   return Math.max(1, per);
@@ -3571,7 +3588,7 @@ function chainCardsFromRocket(rocket, crewReactorKinds = null) {
     const pw = powerOfSlot(s);
     let supplies = (f && f.supplies) || (c && c.supplies) || [];
     if (isCrewSlot(s) && crewReactorKinds) supplies = [...supplies, ...crewReactorKinds];
-    if (isCrewSlot(s) && Array.isArray(s.augSupplies)) supplies = [...supplies, ...s.augSupplies];
+    if (Array.isArray(s.augSupplies)) supplies = [...supplies, ...s.augSupplies];
     return {
       id: s.id,
       type,
@@ -3635,7 +3652,9 @@ function playerCrewReactorKinds(player, { pendingAnchorBn = null } = {}) {
   }
   // M4 Battery augmentation (4C3), counting for your Crew without M2 (owner
   // ruling 2026-11-17; tracker A3 recommended): side 1 "on-board pulse
-  // generator" supplies e electric, side 2 "on-board exotic reactor" antimatter.
+  // generator" supplies the pulse generator support, side 2 "on-board exotic
+  // reactor" the X exotic reactor (owner 2026-11-19: the pulse generator is the
+  // orange bar-and-plates coin, our gen-radioisotope kind; X = exotic).
   const bat = batteryCrewKinds(player);
   if (bat.length) kinds = Array.from(new Set([...(kinds || []), ...bat]));
   // A crew-granted reactor is a reactor: it meets an "Any Reactor" support too.
@@ -3679,7 +3698,7 @@ function bernalChainCards(bn, crewReactorKinds = null) {
     const noBernalSupport = !!(pw && pw.safeAerobrakeNoBernalOrIndustrialize);
     let supplies = noBernalSupport ? [] : ((f && f.supplies) || (c && c.supplies) || []);
     if (isCrewSlot(s) && crewReactorKinds) supplies = [...supplies, ...crewReactorKinds];
-    if (isCrewSlot(s) && Array.isArray(s.augSupplies)) supplies = [...supplies, ...s.augSupplies];
+    if (Array.isArray(s.augSupplies)) supplies = [...supplies, ...s.augSupplies];
     cards.push({
       id: s.id,
       type,
@@ -3810,7 +3829,7 @@ function activeNetThrust(rocket, powersat = false, solarBonus = 0, powersatFutur
   if (!solarDriven) {
     // Mirror of rocket.js: solar-driven when any generator in the RESOLVED
     // modifier chain is a solar electric generator, INCLUDING a multi-hop chain
-    // (thruster -> radioisotope generator -> solar electric generator). The old
+    // (thruster -> pulse generator -> solar electric generator). The old
     // check only saw the thruster's DIRECT electric supplier, missing a solar
     // generator at depth 2. modifierChain already excludes idle + post-reactor
     // generators, so scanning it keeps the "idle solar generator" guard.
@@ -7410,6 +7429,99 @@ function applyCashWater(state, op, player) {
   // Cashing the rocket's last water from an empty stack decommissions it.
   recallIfEmpty(player);
   return { ok: true, state, log: `${player.name} cashed ${amt} water back to aqua (aqua ${player.aqua}).` };
+}
+
+// ===== M4 isotope monetization (3B5, 4D1) ======================================
+// The first gold bead refined for a GW/TW thruster monetizes isotope (3B5) and,
+// with Module 4, sets off the Isobank Contract Upheaval (4B1b): the three
+// non-Exodus contract decks flip so the bottom is on top, and from now on the
+// more ambitious gold side is dealt. A gold face this game cannot check yet is
+// dealt out, as blue ones are. Returns the note for the log line.
+function monetizeIsotope(state) {
+  if (state.isotopeMonetized) return '';
+  state.isotopeMonetized = true;
+  let note = ' Isotope is now monetized.';
+  if (state.m4) note += ' FINAO costs double.' + contractUpheaval(state);
+  return note;
+}
+function contractUpheaval(state) {
+  if (!state.m4 || state.contractSide === 'gold' || !state.contractDecks) return '';
+  state.contractSide = 'gold';
+  for (const pair of Object.keys(state.contractDecks)) {
+    state.contractDecks[pair] = state.contractDecks[pair].slice().reverse()
+      .filter((id) => !faceUnplayable(contractFace(id, 'gold')));
+  }
+  return ' Isobank Contract Upheaval: the contract decks flip to their gold sides.';
+}
+// Gold beads (Isotopes) stored at your Bank are currency worth 10 Aquas each
+// (3B5). 4D1d Blue/Gold Exchange: transport gold beads to your Bank; as a free
+// action sell 1 Isotope for 10 Aquas (it goes, unowned, to the Earth market), or
+// buy an unowned Isotope from the Earth market into your Bank for 10 Aquas.
+// A bead in the Bank has no spectral: it becomes your isostandard when it
+// leaves (4D1e). player.isotopes = beads at the Bank; state.earthMarket = the
+// unowned beads on Earth. Module 4 only.
+export const ISOTOPE_AQUA = 10;
+// op = { action: 'deposit', amount?, cardId?, holder? }  - whole isotope units
+//        from an isotope fuel can (cardId in holder, default the LEO Stack) or
+//        from the rocket's isotope tank, at your Bank (LEO / your Home Bernal).
+//      { action: 'sell', amount }  - Bank beads to the Earth market, +10 aqua each.
+//      { action: 'buy', amount }   - Earth market beads to your Bank, -10 aqua each.
+function applyIsotopeExchange(state, op, player) {
+  if (!state.m4) return fail('not_m4');
+  const action = String(op.action || '');
+  const want = op.amount == null ? null : Math.floor(Number(op.amount));
+  if (want != null && (!Number.isFinite(want) || want <= 0)) return fail('bad_amount');
+  player.isotopes = Math.max(0, player.isotopes | 0);
+  state.earthMarket = Math.max(0, state.earthMarket | 0);
+  if (action === 'deposit') {
+    if (op.cardId != null) {
+      const holderId = typeof op.holder === 'string' ? op.holder : 'leo';
+      const arr = stackArrayOf(player, holderId);
+      if (!arr) return fail('bad_holder');
+      const site = stackEndpointSite(player, holderId);
+      if (site === undefined) return fail('bad_holder');
+      if (!(site == null || siteIsRefuelDepot(player, site))) return fail('not_at_bank');
+      const idx = arr.findIndex((sl) => isFuelCardSlot(sl) && sl.id === String(op.cardId));
+      if (idx < 0) return fail('no_fuel_card');
+      const can = arr[idx];
+      if (can.grade !== 'isotope') return fail('not_isotope');
+      const have = Math.max(0, Math.floor(Number(can.amount) || 0));
+      const n = Math.min(want == null ? have : want, have);
+      if (n <= 0) return fail('no_isotope');
+      can.amount = have - n;
+      if (can.amount <= 0) arr.splice(idx, 1);
+      if (holderId === 'rocket') recallIfEmpty(player);
+      player.isotopes += n;
+      return { ok: true, state, log: `${player.name} brought ${n} isotope${n === 1 ? '' : 's'} from a can in ${stackLabel(holderId)} to their Bank (${player.isotopes} at the Bank, worth ${player.isotopes * ISOTOPE_AQUA} aqua).` };
+    }
+    if (!rocketAtRefuelDepot(state, player)) return fail('not_at_bank');
+    if (tankGradeOf(player.rocket) !== 'isotope') return fail('not_isotope');
+    // Whole units only; the sub-1 remainder stays in the tank.
+    const have = Math.floor(Number(player.rocket.tank) || 0);
+    const n = Math.min(want == null ? have : want, have);
+    if (n <= 0) return fail('no_isotope');
+    player.rocket.tank = round6((Number(player.rocket.tank) || 0) - n);
+    player.isotopes += n;
+    recallIfEmpty(player);
+    return { ok: true, state, log: `${player.name} brought ${n} isotope${n === 1 ? '' : 's'} from the rocket's tank to their Bank (${player.isotopes} at the Bank, worth ${player.isotopes * ISOTOPE_AQUA} aqua).` };
+  }
+  if (want == null) return fail('bad_amount');
+  if (action === 'sell') {
+    if (player.isotopes < want) return fail('no_isotope');
+    player.isotopes -= want;
+    state.earthMarket += want;
+    player.aqua = (player.aqua | 0) + want * ISOTOPE_AQUA;
+    return { ok: true, state, log: `${player.name} sold ${want} isotope${want === 1 ? '' : 's'} to the Earth market for ${want * ISOTOPE_AQUA} aqua (aqua ${player.aqua}; ${state.earthMarket} on the Earth market).` };
+  }
+  if (action === 'buy') {
+    if (state.earthMarket < want) return fail('earth_market_short');
+    if ((player.aqua | 0) < want * ISOTOPE_AQUA) return fail('insufficient_aqua');
+    state.earthMarket -= want;
+    player.aqua -= want * ISOTOPE_AQUA;
+    player.isotopes += want;
+    return { ok: true, state, log: `${player.name} bought ${want} isotope${want === 1 ? '' : 's'} from the Earth market for ${want * ISOTOPE_AQUA} aqua (${player.isotopes} at the Bank; aqua ${player.aqua}).` };
+  }
+  return fail('bad_action');
 }
 
 // Jettison fuel from the tank (Internal Tankage free action - destroyed for
@@ -11679,8 +11791,7 @@ function applySiteRefuel(state, op, player) {
     else outpost.cards.push({ id: nextFuelCardId(state), kind: 'fuel', grade: 'isotope', spectral: facSpectral, amount: iBase, face: 'primary' });
     player.refueledSites.push(siteId);
     if (!gate.freeRepeat) player.opsRemaining -= 1;
-    let monetizeNote = '';
-    if (!state.isotopeMonetized) { state.isotopeMonetized = true; monetizeNote = ' Isotope is now monetized.'; }
+    const monetizeNote = monetizeIsotope(state);
     const minerTail = gate.freeRepeat ? ' (Miner colonist: extra production)' : '';
     return {
       ok: true, state,
@@ -11799,11 +11910,7 @@ function applySiteRefuel(state, op, player) {
     if (!gateI.freeRepeat) player.opsRemaining -= 1;
     // First isotope ever refined monetizes the substance (M1 economy hook;
     // the price consequences land in a later slice).
-    let monetizeNote = '';
-    if (!state.isotopeMonetized) {
-      state.isotopeMonetized = true;
-      monetizeNote = ' Isotope is now monetized.';
-    }
+    const monetizeNote = monetizeIsotope(state);
     return {
       ok: true, state,
       log: `${player.name}: Isotope Refuel at ${site.name} (+${round6(igain)} isotope; tank ${round6(player.rocket.tank)}).${monetizeNote}`,
@@ -13487,6 +13594,7 @@ const FUNCTIONAL = {
   CONVERT_OUTPOST: applyConvertOutpost,
   REFUEL: applyRefuel,
   CASH_WATER: applyCashWater,
+  ISOTOPE_EXCHANGE: applyIsotopeExchange,
   DUMP: applyDump,
   CAN_FUEL: applyCanFuel,
   LOAD_FUEL: applyLoadFuel,
@@ -13575,6 +13683,7 @@ function pickPayload(op) {
     case 'CASH_WATER': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}),
       ...(op.cardId != null ? { cardId: op.cardId, holder: op.holder } : {}) };
     case 'DUMP': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
+    case 'ISOTOPE_EXCHANGE': return { action: op.action, amount: op.amount, ...(op.cardId != null ? { cardId: op.cardId, holder: op.holder } : {}) };
     case 'CAN_FUEL': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
     // TRANSFER_FUEL_CARD and LOAD_FREIGHTER_WATER were MISSING here, so they
     // recorded an empty payload and an UNDO later in the same turn replayed them
@@ -16045,7 +16154,8 @@ function contractPairsOpenTo(state, player) {
 // default chit bars manned contracts (4B2d / 4B6c).
 function contractBidBlock(state, player, cardId) {
   if (player.timepiece) return 'timepiece_in_use';
-  const face = contractFace(cardId, 'blue');
+  const a = state.auction;
+  const face = contractFace(cardId, (a && a.kind === 'contract' && a.cardId === cardId && a.side) || state.contractSide || 'blue');
   if (face && face.manned && state.defaultChit && state.defaultChit.profileId === player.profileId) return 'default_stigma';
   return null;
 }
@@ -16220,9 +16330,11 @@ function applyContractAuctionStart(state, op, ctx) {
   }
   if (op.abandon) return { ok: true, state, log: `${log}${player.name} looked over the ${CONTRACT_PAIR_NAMES[pair]} contracts and walked away.` };
   const cardId = deck.shift();
-  const face = contractFace(cardId, 'blue');
+  // Gold side once the Isobank Contract Upheaval has happened (4B1b).
+  const side = state.contractSide === 'gold' ? 'gold' : 'blue';
+  const face = contractFace(cardId, side);
   state.auction = {
-    kind: 'contract', pair, cardId, side: 'blue',
+    kind: 'contract', pair, cardId, side,
     auctioneerId: player.profileId,
     // The initiator must open at 10 years (4B3f); lower is better for nobody but
     // the winner, so the lowest bid wins.
@@ -16257,7 +16369,7 @@ function applyContractAuctionBid(state, op, ctx) {
   a.passed = a.passed.filter((id) => id !== bidder.profileId);
   // A strictly lower bid puts everyone else back on the clock.
   a.acted = lower ? [bidder.profileId] : [...new Set([...a.acted, bidder.profileId])];
-  return { ok: true, state, log: `${bidder.name} ${lower ? 'bid' : 'matched'} ${years} year${years === 1 ? '' : 's'} on ${contractFace(a.cardId, 'blue').name}.` };
+  return { ok: true, state, log: `${bidder.name} ${lower ? 'bid' : 'matched'} ${years} year${years === 1 ? '' : 's'} on ${contractFace(a.cardId, a.side || 'blue').name}.` };
 }
 function applyContractAuctionPass(state, op, ctx) {
   const a = state.auction;
@@ -16267,7 +16379,7 @@ function applyContractAuctionPass(state, op, ctx) {
   if (!p) return fail('not_a_player');
   if (!a.passed.includes(p.profileId)) a.passed.push(p.profileId);
   if (!a.acted.includes(p.profileId)) a.acted.push(p.profileId);
-  return { ok: true, state, log: `${p.name} passed on ${contractFace(a.cardId, 'blue').name}.` };
+  return { ok: true, state, log: `${p.name} passed on ${contractFace(a.cardId, a.side || 'blue').name}.` };
 }
 // Everyone who CAN bid has bid or passed at the current low.
 function contractAuctionSettled(state) {
@@ -16621,6 +16733,7 @@ function applyImplant(state, op, player) {
   }
   if (free) player.implantFreeUsed = true;
   else player.opsRemaining -= 1;
+  syncCrewAugmentMarks(state);
   const where = (siteById(bn.siteId) || {}).name || 'the Bernal';
   return { ok: true, state, log: `${player.name} ${parts.join(' and ')} at ${where}${free ? ' (Industrialist: free)' : ''}.` };
 }

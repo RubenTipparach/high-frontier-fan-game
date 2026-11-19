@@ -9918,6 +9918,10 @@ function lunaFirstPlayerId() {
 function humanizeOnlineOpError(code, detail) {
   // M4 contracts (4B): every refusal the contract ops can return, in table terms.
   const M4_ERRORS = {
+    not_at_bank: 'Isotope reaches your Bank only at LEO or your Home Bernal. Haul it there first.',
+    not_isotope: 'That holds no isotope.',
+    no_isotope: 'Not enough whole isotope units there.',
+    earth_market_short: 'The Earth market does not hold that many isotopes.',
     fundraise_first: 'A contract auction is the last step of a Fundraise: fundraise first.',
     contract_auction_done: 'You already held this turn\'s contract auction.',
     timepiece_in_use: 'Your timepiece is already on the Sunspot Cycle: fulfill or repay that contract first.',
@@ -12458,6 +12462,31 @@ function buildWaterCashButton(slot, stackId, after) {
   return b;
 }
 
+// M4 (4D1d): an isotope can at your Bank unloads into the Bank as gold beads,
+// worth 10 aqua each there. Free action.
+function buildIsotopeBankButton(slot, stackId, after) {
+  if (!(_onlineSnapshot && _onlineSnapshot.m4)) return null;
+  if (!bankReachableStack(stackId)) return null;
+  if (!slot || slot.kind !== 'fuel' || slot.grade !== 'isotope') return null;
+  const units = Math.max(0, Math.floor(Number(slot.amount) || 0));
+  if (units <= 0) return null;
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'rocket-select leo-water-cash';
+  b.textContent = `🟡 To the Bank (+${units})`;
+  const locked = !isOnlineMyTurn();
+  b.disabled = locked;
+  b.title = locked ? 'Wait for your turn.'
+    : `Unload this can's ${units} isotope into your Bank as gold beads, worth 10 aqua each there. Free.`;
+  b.addEventListener('click', async () => {
+    if (b.disabled) return;
+    b.disabled = true;
+    const sent = await submitOnlineOp({ kind: 'ISOTOPE_EXCHANGE', action: 'deposit', cardId: slot.id, holder: stackId });
+    if (sent && typeof after === 'function') after();
+  });
+  return b;
+}
+
 // My M1 Freighter unit from the live snapshot, or null. Online + M1 only (the
 // server only ever sets player.freighter in an M1 game).
 function getMyFreighter() {
@@ -12669,13 +12698,13 @@ function myCrewReactorKinds() {
     if (pw.crewOnBoardReactorHome && !isHomeBernalUnit(bn)) continue;
     kinds = kinds ? Array.from(new Set([...kinds, ...pw.crewOnBoardReactor])) : [...pw.crewOnBoardReactor];
   }
-  // M4 Battery on your Crew (engine batteryCrewKinds): side 1 e electric,
-  // side 2 antimatter. Augments exist only in M4, which never runs with M2.
+  // M4 Battery on your Crew (engine batteryCrewKinds): side 1 the pulse
+  // generator, side 2 the X exotic reactor. Augments exist only in M4, which never runs with M2.
   const bat = (mySnapshotPlayer() || {}).augments;
   const b = bat && bat.battery;
   // A Battery on one Crew card supplies through that slot (slot.augSupplies);
   // only an older Colony chit powers every Crew.
-  const bk = (b && !b.crewId) ? (b.side === 1 ? ['gen-electric'] : b.side === 2 ? ['reactor-antimatter'] : []) : [];
+  const bk = (b && !b.crewId) ? (b.side === 1 ? ['gen-radioisotope'] : b.side === 2 ? ['reactor-fission'] : []) : [];
   if (bk.length) kinds = Array.from(new Set([...(kinds || []), ...bk]));
   return kinds;
 }
@@ -13694,6 +13723,8 @@ function mountStackTransfer(cardsHost, footerHost, stackId, opts = {}) {
         if (card.grade === 'isotope') {
           const sellIso = buildIsotopeSellButton(slot, stackId, opts.onAfterAction || opts.onAfter);
           if (sellIso) actions.appendChild(sellIso);
+          const bankIso = buildIsotopeBankButton(slot, stackId, opts.onAfterAction || opts.onAfter);
+          if (bankIso) actions.appendChild(bankIso);
         } else {
           // Water goes straight back to the bank at 1:1 wherever the bank reaches.
           const cash = buildWaterCashButton(slot, stackId, opts.onAfterAction || opts.onAfter);
@@ -14139,6 +14170,8 @@ function openUnifiedStackInspector(stackId) {
         if (_online && isFuel && card.grade === 'isotope') {
           const sellIso = buildIsotopeSellButton(slot, stackId, () => render());
           if (sellIso) actions.appendChild(sellIso);
+          const bankIso = buildIsotopeBankButton(slot, stackId, () => render());
+          if (bankIso) actions.appendChild(bankIso);
         } else if (_online && isFuel) {
           // ...and a WATER can cashes straight back to the bank at 1:1, free.
           // Same two stations, same reason this control belongs in the inspector
@@ -19764,6 +19797,8 @@ const HAZARD_COST_PER = 4;
 function finaoPer() {
   const me = mySnapshotPlayer();
   let per = (me && playerHasPrivilege(me, 'OPEN_SOURCE_FINAO')) ? 3 : HAZARD_COST_PER;
+  // Isotope monetization doubles FINAO for everyone (3B5a; M4 rooms).
+  if (_onlineSnapshot && _onlineSnapshot.m4 && _onlineSnapshot.isotopeMonetized) per *= 2;
   if (_onlineSnapshot && _onlineSnapshot.internationalAssistance) per = Math.floor(per / 2);
   if (me && snapshotColonistSlots(me).some((e) => {
     const c = e.card;
@@ -29005,6 +29040,7 @@ function describeTurnAction(a) {
     CONVERT_OUTPOST: 'outpost conversion',
     REFUEL: 'refuel',
     CASH_WATER: 'water cash-out',
+    ISOTOPE_EXCHANGE: 'isotope exchange',
     FREE_MARKET: 'sale',
     DISCARD: 'discard',
     LOAD_GLORY: 'glory load',
@@ -35032,6 +35068,8 @@ const MP_LOG_ICONS = {
   AUCTION_START: '🎯', AUCTION_BID: '💰', AUCTION_PASS: '🚫',
   // M4 contracts (4B): the auction is in years, the timepiece is a clock.
   AUCTION_CONTRACT_START: '📜', AUCTION_CONTRACT_BID: '⏳', AUCTION_CONTRACT_PASS: '🚫', AUCTION_CONTRACT_CLOSE: '⏱',
+  // M4 isotope monetization (4D1d): gold beads at the Bank, sold / bought at Earth.
+  ISOTOPE_EXCHANGE: '🟡',
   FULFILL_CONTRACT: '🏁', PAY_LATE_FEE: '⏰', IMPLANT: '🦾', ABANDON_CONTRACT: '🗑', INSIGHT: '🔎',
   AUCTION_RESET: '↺', AUCTION_SELL: '✅',
   PICK_CREW: '🧑‍🚀', SET_SPECIES: '\u{1F9DC}', SET_FIRST_PLAYER: '🥇', FREE_CUBE: '🧊',

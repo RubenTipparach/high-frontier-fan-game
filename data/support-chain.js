@@ -57,7 +57,7 @@ export function resolveSupportChain({ cards = [], activeId = null, wiring = {} }
   // gen-* kinds) form ONE OR-group: the consumer needs ANY ONE supplier of
   // those kinds, not all of them. This matches the activation gate
   // (isRocketActive), which has always grouped by prefix; the chain walk now
-  // agrees. A generator that accepts "fusion OR antimatter" therefore pulls in
+  // agrees. A generator that accepts "flux OR bomb" therefore pulls in
   // exactly ONE reactor (the player's wired pick, else the first match) and the
   // other reactor is a spare, not a second forced chain member. The group is
   // keyed by its FIRST kind (a real kind), so edges / wiring / display use a
@@ -71,7 +71,7 @@ export function resolveSupportChain({ cards = [], activeId = null, wiring = {} }
     }
     return groups;
   };
-  // "reactor-any" is met by ANY reactor kind (fission / fusion / antimatter),
+  // "reactor-any" is met by ANY reactor kind (exotic / flux / bomb),
   // including a reactor a crew grants that never carried the tag.
   const suppliesAny = (c, kinds) => Array.isArray(c.supplies)
     && kinds.some((k) => c.supplies.includes(k)

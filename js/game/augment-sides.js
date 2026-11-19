@@ -1,7 +1,7 @@
 // Module 4 augmentation chit SIDES (4C3). Each of the six chits is two-sided,
 // and each side carries its own picture: the chit's white shape in the corner
 // and the side's ability as a pictogram, drawn in the game's existing glyph
-// language (the support coins for raygun / buggy / e electric / antimatter, the
+// language (the support coins for raygun / buggy / pulse / X exotic, the
 // water droplet, the hazard skull). Pure SVG strings, no DOM.
 import { supportIconSvg } from './support-icons.js';
 import { AUGMENTS } from './contract-glyphs.js';
@@ -16,15 +16,23 @@ const SHAPE_PATH = {
 };
 
 const AQUA = '#38bdf8';
-const drop = (x, y, s, fill = AQUA) => `<path transform="translate(${x} ${y}) scale(${s})" d="M0 -9 C 4 -3, 6.5 0.5, 6.5 3.4 A 6.5 6.5 0 0 1 -6.5 3.4 C -6.5 0.5, -4 -3, 0 -9 Z" fill="${fill}" stroke="#0b1220" stroke-width="0.8"/>`;
+const ISO_GOLD = '#e0aa2c';
+const drop = (x, y, s, fill = AQUA, stroke = '#0b1220') => `<path transform="translate(${x} ${y}) scale(${s})" d="M0 -9 C 4 -3, 6.5 0.5, 6.5 3.4 A 6.5 6.5 0 0 1 -6.5 3.4 C -6.5 0.5, -4 -3, 0 -9 Z" fill="${fill}" stroke="${stroke}" stroke-width="0.8"/>`;
+// A number written inside a drop.
+const inDrop = (x, y, t) => `<text x="${x}" y="${y}" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-weight="800" font-size="9.5" fill="#fff" stroke="#0b1220" stroke-width="1.5" paint-order="stroke">${t}</text>`;
 const INK = '#1f2937';
 const label = (x, y, t, size = 9, fill = INK, stroke = '#fff') => `<text x="${x}" y="${y}" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-weight="700" font-size="${size}" fill="${fill}" stroke="${stroke}" stroke-width="2.2" paint-order="stroke">${t}</text>`;
-// An embedded support coin (raygun, buggy, e electric, antimatter), placed at x,y.
+// An embedded support coin (raygun, buggy, pulse, X exotic), placed at x,y.
 const coin = (kind, x, y, s) => {
   const svg = supportIconSvg(kind, { size: 32, cls: '' }) || '';
   const inner = svg.replace(/^<svg[^>]*>/, '').replace(/<\/svg>$/, '');
   return `<g transform="translate(${x} ${y}) scale(${s})">${inner}</g>`;
 };
+
+// The grey "ISRU: N" chip a robonaut card shows beside its prospector coin.
+const isruChip = (x, y, n) => `<g transform="translate(${x} ${y})"><rect x="0" y="-8" width="19" height="16" rx="1.6" fill="#6b6f78" stroke="#4b5563" stroke-width="0.6"/>
+  <text x="2" y="-1" font-family="DejaVu Sans, Arial, sans-serif" font-weight="700" font-size="5.2" fill="#f1f5f9">ISRU:</text>
+  <text x="9.5" y="6.4" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-weight="800" font-size="8.5" fill="#f1f5f9">${n}</text></g>`;
 
 // The pictogram for each side, drawn in a 48 x 48 box (centre ~ 26,28).
 const PICT = {
@@ -44,34 +52,37 @@ const PICT = {
     1: `<path d="M17 20 H33 L37 37 H13 Z" fill="#9ca3af" stroke="#0b1220" stroke-width="0.9" stroke-linejoin="round"/>
         <circle cx="25" cy="17" r="3.3" fill="none" stroke="#9ca3af" stroke-width="2.2"/>
         ${label(25, 34, '0', 13, '#fff', INK)}`,
-    // FTs may be spent for FINAO: a droplet over the hazard skull.
-    2: `${drop(21, 26, 1.25)}
-        <g transform="translate(33 31)"><circle r="7" fill="#dc2626" stroke="#0b1220" stroke-width="0.8"/>${label(0, 3.6, '☠', 10, '#fff', '#7f1d1d')}</g>`,
+    // FTs may be spent for FINAO: the blue FT oval over "pays FINAO", after the
+    // original chit (owner approved 2026-11-19).
+    2: `<ellipse cx="25" cy="17" rx="12.5" ry="6.4" fill="#0ea5e9"/><text x="25" y="21.2" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-weight="900" font-size="11.5" fill="#0b1220">FT</text><text x="25" y="32" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-weight="700" font-size="8.5" fill="#0b1220">pays</text><text x="25" y="42" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-weight="900" font-size="9.5" fill="#0b1220">FINAO</text>`,
   },
   hexagon: {
-    1: `${coin('raygun', 11, 13, 0.85)}${label(38, 41, '1', 10, '#be185d')}`,
-    2: `${coin('buggy', 11, 13, 0.85)}${label(38, 41, '2', 10, '#be185d')}`,
+    // The robonaut card's read (owner approved 2026-11-19): the prospector coin
+    // and a grey "ISRU: N" chip beside it.
+    1: `${coin('raygun', 6, 19, 0.56)}${isruChip(25, 28, 1)}`,
+    2: `${coin('buggy', 6, 19, 0.56)}${isruChip(25, 28, 2)}`,
   },
   splat: {
-    // Factory is also Carbon: a factory and the C spectral hex.
-    1: `<path d="M10 37 V24 L16 28 V24 L22 28 V20 H27 V37 Z" fill="#64748b" stroke="#0b1220" stroke-width="0.9" stroke-linejoin="round"/>
-        <g transform="translate(34 27)"><path d="M-6 0 L-3 -5.2 H3 L6 0 L3 5.2 H-3 Z" fill="#111827" stroke="#e5e7eb" stroke-width="1.1"/>${label(0, 3.4, 'C', 8.5, '#fff', '#111827')}</g>`,
-    // +1 Hydration: a droplet, +1.
-    2: `${drop(23, 27, 1.35)}${label(35, 25, '+1', 10, '#0369a1')}`,
+    // Factory is also Carbon: the card's black spectral hexagon with a white C
+    // (owner pick B, 2026-11-19).
+    1: `<polygon points="43.40,28.45 37.40,38.84 25.40,38.84 19.40,28.45 25.40,18.06 37.40,18.06" fill="#0c0a16" stroke="#1f1b2e" stroke-width="0.8"/>
+        <text x="31.4" y="33.49" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-weight="700" font-size="13.8" fill="#fff">C</text>`,
+    // +1 Hydration: the black hexagon with +1 and a small drop (after the
+    // original chit; owner approved 2026-11-19).
+    2: `<polygon points="48.40,28.45 39.90,43.17 22.90,43.17 14.40,28.45 22.90,13.73 39.90,13.73" fill="#0c0a16"/><text x="24" y="31.9" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-weight="800" font-size="10.5" fill="#fff">+1</text><path transform="translate(38.6 28.4) scale(0.76)" d="M0 -9 C 4 -3, 6.5 0.5, 6.5 3.4 A 6.5 6.5 0 0 1 -6.5 3.4 C -6.5 0.5, -4 -3, 0 -9 Z" fill="#38bdf8"/>`,
   },
   battery: {
-    // On-board pulse generator: the e electric generator coin.
-    1: coin('gen-electric', 11, 12, 0.9),
-    // On-board exotic reactor: the antimatter reactor coin.
-    2: coin('reactor-antimatter', 11, 12, 0.9),
+    // On-board pulse generator: the pulse generator coin (owner 2026-11-19).
+    1: coin('gen-radioisotope', 11, 12, 0.9),
+    // On-board exotic reactor: the X exotic reactor coin.
+    2: coin('reactor-fission', 11, 12, 0.9),
   },
   triangle: {
-    // Site refuel yields +1 Isotope: an atom, +1.
-    1: `<g fill="none" stroke="#059669" stroke-width="1.9">
-          <ellipse cx="23" cy="28" rx="10" ry="4"/><ellipse cx="23" cy="28" rx="10" ry="4" transform="rotate(60 23 28)"/><ellipse cx="23" cy="28" rx="10" ry="4" transform="rotate(-60 23 28)"/></g>
-        <circle cx="23" cy="28" r="2.4" fill="#34d399"/>${label(38, 43, '+1', 10, '#059669')}`,
-    // Site refuel yields +2 Aqua: a droplet, +2.
-    2: `${drop(23, 27, 1.35)}${label(35, 25, '+2', 10, '#0369a1')}`,
+    // Site refuel yields +1 Isotope: the gold isotope drop (as on a GW thruster),
+    // +1 inside it (owner 2026-11-19).
+    1: `${drop(24, 24.5, 1.8, ISO_GOLD, '#a8761a')}${inDrop(24, 34, '+1')}`,
+    // Site refuel yields +2 Aqua: the water drop, +2 inside it.
+    2: `${drop(24, 24.5, 1.8)}${inDrop(24, 34, '+2')}`,
   },
 };
 

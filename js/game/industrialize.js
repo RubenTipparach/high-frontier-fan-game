@@ -129,7 +129,7 @@ function isNoIndustrialize(slot) {
 
 // Group a requires array by supplier prefix (reactor-* / gen-* /
 // etc.) so same-supplier kinds read as OR-alternatives. A card
-// that requires X-pulse OR X-fusion is satisfied when any single
+// that requires one reactor OR another (e.g. flux OR bomb) is satisfied when any single
 // supplier provides any of those kinds. Mirrors the OR rule used
 // by rocket.js isRocketActive() so the engine behaves
 // consistently.

@@ -16,7 +16,7 @@
 // Run locally: node scripts/check-engine.mjs
 
 import { createInitialState, seasonForSlot } from '../server/game/state.js';
-import { auctionWaitingOn } from '../server/game/engine.js';
+import { auctionWaitingOn, finaoPerFor } from '../server/game/engine.js';
 import { hotSeatWaitingOn, resolveHotSeatActor } from '../data/hot-seat.js';
 import { applyOperation, slotMass, autoFixGlitches, liveScoreboard, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, repairSpeciesDeckSplit, cycleMarketDecks, rocketSolarZone, activeNetThrust, outpostWater, buildFutureCtx, resolveSunspotEvent, computeFinalScores } from '../server/game/engine.js';
 import { BERNALS } from '../data/bernals.js';
@@ -11149,7 +11149,7 @@ check('Without M2, Jar 1 and Hexagon count for your Crew (0 Mass; Raygun ISRU 1)
   return `crew at ${site}: refused at ISRU 4, prospects with Hexagon 1; Jar 1 marks it 0 Mass and the mark lifts`;
 });
 
-check('Without M2, Battery on your Crew supplies e electric (side 1) or antimatter (side 2)', () => {
+check('Without M2, Battery on your Crew supplies the pulse generator (side 1) or the X exotic reactor (side 2)', () => {
   const to = neighborSlugs(leoSlug())[0];
   const fly = (thrId, augs) => {
     const st = startedGame({ m4: true });
@@ -11162,14 +11162,18 @@ check('Without M2, Battery on your Crew supplies e electric (side 1) or antimatt
     me.augments = augs;
     return applyOperation(st, { kind: 'MOVE', segments: [{ from: null, to, burns: 1, turn: 1 }] }, { profileId: me.profileId });
   };
-  const hall = 'thr_hall_effect';
-  const bare = fly(hall, {});
-  assert(!bare.ok && bare.error === 'thruster_unsupported', `a Hall Effect flew with no e electric supply: ${bare.error || 'accepted'}`);
-  const b1 = fly(hall, { battery: { colonySite: 'ceres', side: 1 } });
-  assert(b1.ok, `Battery 1 did not power the Hall Effect: ${b1.error} ${JSON.stringify(b1.detail || {})}`);
-  const b2 = fly(hall, { battery: { colonySite: 'ceres', side: 2 } });
-  assert(!b2.ok && b2.error === 'thruster_unsupported', `Battery 2 (antimatter) powered an electric thruster: ${b2.error || 'accepted'}`);
-  return `Hall Effect: refused bare (${bare.error}), flies with Battery 1, refused with Battery 2`;
+  // Owner 2026-11-19 (A3): "on-board pulse generator" is the pulse generator
+  // support (the orange bar-and-plates coin), "exotic reactor" the X reactor.
+  const md = 'thr_mass_driver';     // needs the pulse generator only
+  const bare = fly(md, {});
+  assert(!bare.ok && bare.error === 'thruster_unsupported', `a Mass Driver flew with no pulse generator: ${bare.error || 'accepted'}`);
+  const b1 = fly(md, { battery: { colonySite: 'ceres', side: 1 } });
+  assert(b1.ok, `Battery 1 did not power the Mass Driver: ${b1.error} ${JSON.stringify(b1.detail || {})}`);
+  const b2 = fly(md, { battery: { colonySite: 'ceres', side: 2 } });
+  assert(!b2.ok && b2.error === 'thruster_unsupported', `Battery 2 (X exotic) powered a pulse thruster: ${b2.error || 'accepted'}`);
+  const hall = fly('thr_hall_effect', { battery: { colonySite: 'ceres', side: 1 } });
+  assert(!hall.ok && hall.error === 'thruster_unsupported', `Battery 1 powered an e electric thruster: ${hall.error || 'accepted'}`);
+  return `Mass Driver: refused bare, flies with Battery 1, refused with Battery 2; Hall Effect (e) refused with Battery 1`;
 });
 
 check('Augment Heart side 2: a second delegate move in a Fundraise', () => {
@@ -11571,6 +11575,21 @@ check('IMPLANT puts a portfolio augmentation on a Colonist at your anchored Bern
   r = op(augGame().st, 'IMPLANT', P.profileId, { bernal: 0, implants: [{ colonistId: 'col_biomechs', shape: other, side: 2 }] });
   assert(!r.ok && r.error === 'not_in_portfolio', `outside the portfolio: ${r.error}`);
   return r.ok ? '' : `${shape} implanted for the operation; ${other} refused (not in the portfolio)`;
+});
+
+check('M4 + M2: Jar 1 and Hexagon on a Colonist work on that Colonist (0 Mass, prospector)', () => {
+  // Owner 2026-11-18: M4 now runs with M2, where a chit rides a Colonist (4C4).
+  const { st, P } = augGame({ contracts: ['M4N222F', 'M4N237F'] });
+  const r = op(st, 'IMPLANT', P.profileId, { bernal: 0, implants: [
+    { colonistId: 'col_biomechs', shape: 'jar', side: 1 },
+    { colonistId: 'col_biomechs', shape: 'hexagon', side: 1 }] });
+  assert(r.ok, `implant: ${r.error}`);
+  const slot = pl(r.state, P.profileId).bernals[0].stack.find((s) => s.id === 'col_biomechs');
+  const bare = pl(r.state, P.profileId).bernals[0].stack.find((s) => s.id === 'col_botany_bay_convicts');
+  assert(slot.massless && slot.augProspector && slot.augProspector.kind === 'raygun', `marks on the Colonist: ${JSON.stringify(slot)}`);
+  assert(slotMass(slot) === 0, `Jar 1 Colonist mass ${slotMass(slot)}`);
+  assert(!bare.massless && !bare.augProspector, 'the other Colonist got marks too');
+  return 'the augmented Colonist weighs 0 and prospects as a Raygun; its neighbour is untouched';
 });
 
 check('IMPLANT needs a Dirtside-anchored Bernal (the BEO Colony) and the Colonist aboard an anchored Bernal', () => {
@@ -12143,6 +12162,77 @@ check('Hot seat: an open auction hands the device to a seat that owes an answer,
   const next = auctionWaitingOn(pass.state).map((p) => p.profileId);
   assert(hotSeatWaitingOn(pass.state, next) === auc.profileId, 'after the pass the device should go to the auctioneer to close');
   return 'skips the full-hand seat, then hands over to the auctioneer to close';
+});
+
+check('M4 isotope monetization: a can at LEO banks as gold beads, sells and buys at 10 aqua, FINAO doubles (4D1)', () => {
+  const st = startedGame({ m4: true, m1: true, m2: true });
+  const P = currentPlayerOf(st);
+  P.aqua = 5;
+  P.leo = [...(P.leo || []), { id: 'fuel-iso-1', kind: 'fuel', grade: 'isotope', spectral: 'S', amount: 3, face: 'primary' }];
+  let r = op(st, 'ISOTOPE_EXCHANGE', P.profileId, { action: 'deposit', cardId: 'fuel-iso-1', holder: 'leo' });
+  assert(r.ok, `deposit: ${r.error}`);
+  let Q = pl(r.state, P.profileId);
+  assert(Q.isotopes === 3 && !(Q.leo || []).some((x) => x.id === 'fuel-iso-1'), `bank ${Q.isotopes}, can gone`);
+  r = op(r.state, 'ISOTOPE_EXCHANGE', P.profileId, { action: 'sell', amount: 2 });
+  Q = pl(r.state, P.profileId);
+  assert(r.ok && Q.isotopes === 1 && Q.aqua === 25 && r.state.earthMarket === 2, `sell: ${r.error} bank ${Q.isotopes} aqua ${Q.aqua} market ${r.state.earthMarket}`);
+  r = op(r.state, 'ISOTOPE_EXCHANGE', P.profileId, { action: 'buy', amount: 1 });
+  Q = pl(r.state, P.profileId);
+  assert(r.ok && Q.isotopes === 2 && Q.aqua === 15 && r.state.earthMarket === 1, `buy: ${r.error}`);
+  const short = op(r.state, 'ISOTOPE_EXCHANGE', P.profileId, { action: 'buy', amount: 2 });
+  assert(!short.ok && short.error === 'earth_market_short', `buying past the market: ${short.error}`);
+  const before = finaoPerFor(r.state, Q);
+  r.state.isotopeMonetized = true;
+  assert(finaoPerFor(r.state, Q) === before * 2, `FINAO ${before} -> ${finaoPerFor(r.state, Q)}`);
+  // Zero bleed-through: no exchange, no doubling, outside M4.
+  const m1 = startedGame({ m1: true });
+  const M = currentPlayerOf(m1);
+  const no = op(m1, 'ISOTOPE_EXCHANGE', M.profileId, { action: 'buy', amount: 1 });
+  const m1Before = finaoPerFor(m1, M);
+  m1.isotopeMonetized = true;
+  assert(!no.ok && finaoPerFor(m1, M) === m1Before, `outside M4: ${no.error}, FINAO ${m1Before} -> ${finaoPerFor(m1, M)}`);
+  return `3 beads banked, sold 2 for 20, bought 1 back; FINAO ${before} -> ${before * 2}; M1 alone untouched`;
+});
+
+check('M4: the first gold bead refined monetizes isotope and flips the contract decks to gold (4B1b)', () => {
+  const SITE = 'luna-shackleton-polar-rim', SPACE = 'lag-qofv5';
+  const setup = (m4) => {
+    const st = startedGame({ m0: true, m1: true, m2: true, m4, seats: 2, maxRounds: 7 });
+    const me = st.players[st.activeIndex];
+    st.factories = { [SITE]: { ownerId: me.profileId, spectralType: 'S' } };
+    me.bernals = [{ cardId: 'ber_l4_antimatter_factory', figure: 'stanford', face: 'secondary', promoted: true,
+      siteId: SPACE, anchored: true, tank: 0, wiring: {}, route: [], stack: [] }];
+    me.rocket.siteId = SPACE; me.rocket.turnStartSiteId = SPACE;
+    me.rocket.stack = [{ id: 'gw-_amat_catalyzed_fission_fusion', kind: 'patent', face: 'secondary' }];
+    me.rocket.activeThrusterId = 'gw-_amat_catalyzed_fission_fusion';
+    me.rocket.tank = 0; me.rocket.tankGrade = 'isotope'; me.rocket.tankSpectral = 'S';
+    me.isostandards = ['S']; me.opsRemaining = 1; me.refueledSites = []; st.turnActions = [];
+    return { st, me };
+  };
+  const { st, me } = setup(true);
+  const before = Object.fromEntries(Object.entries(st.contractDecks).map(([k, d]) => [k, d.slice()]));
+  assert(st.contractSide !== 'gold' && !st.isotopeMonetized, 'gold or monetized before any isotope');
+  const r = applyOperation(st, { kind: 'SITE_REFUEL', siteId: SITE, mode: 'isotope' }, { profileId: me.profileId });
+  assert(r.ok, `isotope refuel: ${r.error}`);
+  assert(r.state.isotopeMonetized && r.state.contractSide === 'gold', 'not monetized / not gold');
+  assert(/Upheaval/.test(r.log), `log: ${r.log}`);
+  for (const [pair, d] of Object.entries(r.state.contractDecks)) {
+    const want = before[pair].slice().reverse();
+    assert(d.length && d.every((id, i) => want.indexOf(id) >= 0) && want.indexOf(d[0]) <= want.indexOf(d[d.length - 1]), `${pair} not flipped`);
+    assert(d[0] === want.find((id) => d.includes(id)), `${pair}: the old bottom card is not on top`);
+  }
+  // The next contract auction deals the gold side.
+  const P = pl(r.state, me.profileId);
+  const pair = Object.keys(r.state.contractDecks)[0];
+  P.fundraisedThisTurn = true; P.contractAuctionDone = false; P.timepiece = null;
+  r.state.activeLawStar = r.state.activeLawStar || 'freedom';
+  const open = applyOperation(r.state, { kind: 'AUCTION_CONTRACT_START', pair }, { profileId: me.profileId });
+  if (open.ok) assert(open.state.auction ? open.state.auction.side === 'gold' : true, 'auction dealt the blue side');
+  // Zero bleed-through: the same refinery run without M4 monetizes but leaves no contract decks to flip.
+  const plain = setup(false);
+  const r2 = applyOperation(plain.st, { kind: 'SITE_REFUEL', siteId: SITE, mode: 'isotope' }, { profileId: plain.me.profileId });
+  assert(r2.ok && r2.state.isotopeMonetized && !r2.state.contractSide && !/Upheaval|FINAO/.test(r2.log), `without M4: ${r2.error} ${r2.log}`);
+  return `monetized + decks flipped to gold (${Object.values(r.state.contractDecks).map((d) => d.length).join('/')} cards)${open.ok ? '; the next auction deals gold' : ''}; M1+M2 alone untouched`;
 });
 
 // The smoke verdict above runs before the checks added below it; this one
