@@ -11149,7 +11149,7 @@ check('Without M2, Jar 1 and Hexagon count for your Crew (0 Mass; Raygun ISRU 1)
   return `crew at ${site}: refused at ISRU 4, prospects with Hexagon 1; Jar 1 marks it 0 Mass and the mark lifts`;
 });
 
-check('Without M2, Battery on your Crew supplies e electric (side 1) or antimatter (side 2)', () => {
+check('Without M2, Battery on your Crew supplies the pulse generator (side 1) or the X exotic reactor (side 2)', () => {
   const to = neighborSlugs(leoSlug())[0];
   const fly = (thrId, augs) => {
     const st = startedGame({ m4: true });
@@ -11162,14 +11162,18 @@ check('Without M2, Battery on your Crew supplies e electric (side 1) or antimatt
     me.augments = augs;
     return applyOperation(st, { kind: 'MOVE', segments: [{ from: null, to, burns: 1, turn: 1 }] }, { profileId: me.profileId });
   };
-  const hall = 'thr_hall_effect';
-  const bare = fly(hall, {});
-  assert(!bare.ok && bare.error === 'thruster_unsupported', `a Hall Effect flew with no e electric supply: ${bare.error || 'accepted'}`);
-  const b1 = fly(hall, { battery: { colonySite: 'ceres', side: 1 } });
-  assert(b1.ok, `Battery 1 did not power the Hall Effect: ${b1.error} ${JSON.stringify(b1.detail || {})}`);
-  const b2 = fly(hall, { battery: { colonySite: 'ceres', side: 2 } });
-  assert(!b2.ok && b2.error === 'thruster_unsupported', `Battery 2 (antimatter) powered an electric thruster: ${b2.error || 'accepted'}`);
-  return `Hall Effect: refused bare (${bare.error}), flies with Battery 1, refused with Battery 2`;
+  // Owner 2026-11-19 (A3): "on-board pulse generator" is the pulse generator
+  // support (the orange bar-and-plates coin), "exotic reactor" the X reactor.
+  const md = 'thr_mass_driver';     // needs the pulse generator only
+  const bare = fly(md, {});
+  assert(!bare.ok && bare.error === 'thruster_unsupported', `a Mass Driver flew with no pulse generator: ${bare.error || 'accepted'}`);
+  const b1 = fly(md, { battery: { colonySite: 'ceres', side: 1 } });
+  assert(b1.ok, `Battery 1 did not power the Mass Driver: ${b1.error} ${JSON.stringify(b1.detail || {})}`);
+  const b2 = fly(md, { battery: { colonySite: 'ceres', side: 2 } });
+  assert(!b2.ok && b2.error === 'thruster_unsupported', `Battery 2 (X exotic) powered a pulse thruster: ${b2.error || 'accepted'}`);
+  const hall = fly('thr_hall_effect', { battery: { colonySite: 'ceres', side: 1 } });
+  assert(!hall.ok && hall.error === 'thruster_unsupported', `Battery 1 powered an e electric thruster: ${hall.error || 'accepted'}`);
+  return `Mass Driver: refused bare, flies with Battery 1, refused with Battery 2; Hall Effect (e) refused with Battery 1`;
 });
 
 check('Augment Heart side 2: a second delegate move in a Fundraise', () => {

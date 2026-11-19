@@ -1,7 +1,7 @@
 // Module 4 augmentation chit SIDES (4C3). Each of the six chits is two-sided,
 // and each side carries its own picture: the chit's white shape in the corner
 // and the side's ability as a pictogram, drawn in the game's existing glyph
-// language (the support coins for raygun / buggy / e pulse / X exotic, the
+// language (the support coins for raygun / buggy / e electric / 💣 bomb, the
 // water droplet, the hazard skull). Pure SVG strings, no DOM.
 import { supportIconSvg } from './support-icons.js';
 import { AUGMENTS } from './contract-glyphs.js';
@@ -19,7 +19,7 @@ const AQUA = '#38bdf8';
 const drop = (x, y, s, fill = AQUA) => `<path transform="translate(${x} ${y}) scale(${s})" d="M0 -9 C 4 -3, 6.5 0.5, 6.5 3.4 A 6.5 6.5 0 0 1 -6.5 3.4 C -6.5 0.5, -4 -3, 0 -9 Z" fill="${fill}" stroke="#0b1220" stroke-width="0.8"/>`;
 const INK = '#1f2937';
 const label = (x, y, t, size = 9, fill = INK, stroke = '#fff') => `<text x="${x}" y="${y}" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-weight="700" font-size="${size}" fill="${fill}" stroke="${stroke}" stroke-width="2.2" paint-order="stroke">${t}</text>`;
-// An embedded support coin (raygun, buggy, e pulse, X exotic), placed at x,y.
+// An embedded support coin (raygun, buggy, e electric, 💣 bomb), placed at x,y.
 const coin = (kind, x, y, s) => {
   const svg = supportIconSvg(kind, { size: 32, cls: '' }) || '';
   const inner = svg.replace(/^<svg[^>]*>/, '').replace(/<\/svg>$/, '');
@@ -53,17 +53,20 @@ const PICT = {
     2: `${coin('buggy', 11, 13, 0.85)}${label(38, 41, '2', 10, '#be185d')}`,
   },
   splat: {
-    // Factory is also Carbon: a factory and the C spectral hex.
-    1: `<path d="M10 37 V24 L16 28 V24 L22 28 V20 H27 V37 Z" fill="#64748b" stroke="#0b1220" stroke-width="0.9" stroke-linejoin="round"/>
-        <g transform="translate(34 27)"><path d="M-6 0 L-3 -5.2 H3 L6 0 L3 5.2 H-3 Z" fill="#111827" stroke="#e5e7eb" stroke-width="1.1"/>${label(0, 3.4, 'C', 8.5, '#fff', '#111827')}</g>`,
+    // Factory is also Carbon: the card's black spectral hexagon with a white C
+    // (owner pick B, 2026-11-19).
+    1: `<polygon points="37.00,28.00 31.00,38.39 19.00,38.39 13.00,28.00 19.00,17.61 31.00,17.61" fill="#0c0a16" stroke="#1f1b2e" stroke-width="0.8"/>
+        <text x="25" y="33.04" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-weight="700" font-size="13.8" fill="#fff">C</text>`,
     // +1 Hydration: a droplet, +1.
     2: `${drop(23, 27, 1.35)}${label(35, 25, '+1', 10, '#0369a1')}`,
   },
   battery: {
-    // On-board pulse generator: the e pulse generator coin.
+    // On-board pulse generator: drawn with the e electric coin (the art is the owner's
+    // call; the rules supply the pulse generator, see engine batteryCrewKinds).
     1: coin('gen-electric', 11, 12, 0.9),
-    // On-board exotic reactor: the X exotic reactor coin.
-    2: coin('reactor-fission', 11, 12, 0.9),
+    // On-board exotic reactor: drawn with the 💣 bomb coin (the art is the owner's call;
+    // the rules supply the X exotic reactor, see engine batteryCrewKinds).
+    2: coin('reactor-antimatter', 11, 12, 0.9),
   },
   triangle: {
     // Site refuel yields +1 Isotope: an atom, +1.

@@ -418,7 +418,9 @@ function augmentationsHtml(s, p, myTurn) {
     // Without M2, any chit in your possession opens the Augment operation.
     const click = !s.m2 && myTurn && have;
     const glyph = a ? augmentSideSvg(sh, a.side, { size: 34 }) : augmentGlyph(sh, { size: 26 });
-    return `<${click ? 'button type="button" data-act="augment" data-shape="' + sh + '"' : 'div'} class="m4c-aug ${have ? 'have' : 'lack'}${a ? ' on' : ''}"${a ? ` data-tip="${esc(sideText(sh, a.side))}"` : ''}>${glyph}<span><b>${AUGMENTS[sh].name}</b> ${st}</span></${click ? 'button' : 'div'}>`;
+    // Every other chit, held or not, opens a look at its two sides.
+    const act = click ? 'augment' : 'chit-view';
+    return `<button type="button" data-act="${act}" data-shape="${sh}" class="m4c-aug ${have ? 'have' : 'lack'}${a ? ' on' : ''}"${a ? ` data-tip="${esc(sideText(sh, a.side))}"` : ''}>${glyph}<span><b>${AUGMENTS[sh].name}</b> ${st}</span></button>`;
   }).join('');
   const opts = [...portfolio].map((sh) => `<option value="${sh}">${AUGMENTS[sh].name}</option>`).join('');
   const controls = (key, attrs) => (myTurn && opts ? `<div class="m4c-controls"><select data-shape-for="${key}">${opts}</select>
@@ -469,6 +471,7 @@ async function onAct(b) {
     }
   }
   else if (act === 'augment') { openAugmentWizard(b.dataset.shape); return; }
+  else if (act === 'chit-view') { openChitSides(b.dataset.shape); return; }
   else if (act === 'iso-sell') await D.submitTurnOp({ kind: 'ISOTOPE_EXCHANGE', action: 'sell', amount: 1 });
   else if (act === 'iso-buy') await D.submitTurnOp({ kind: 'ISOTOPE_EXCHANGE', action: 'buy', amount: 1 });
   else if (act === 'iso-tank') await D.submitTurnOp({ kind: 'ISOTOPE_EXCHANGE', action: 'deposit' });
@@ -749,6 +752,23 @@ function renderAugmentWizard() {
     await D.submitTurnOp({ kind: 'IMPLANT', remove, implants });
     if (_panelOpen) renderPanel();
   });
+}
+// A look at a chit's two sides (any chit, held or not).
+function openChitSides(shape) {
+  if (!AUGMENTS[shape]) return;
+  document.getElementById('m4-chit-sides')?.remove();
+  const ov = document.createElement('div');
+  ov.id = 'm4-chit-sides';
+  ov.className = 'm4c-overlay';
+  const close = () => ov.remove();
+  ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
+  const sides = [1, 2].map((n) => `<div class="m4c-aw-side m4c-cs-side">${augmentSideSvg(shape, n, { size: 96 })}
+      <span><b>Side ${n}</b><small>${esc(sideText(shape, n))}</small></span></div>`).join('');
+  ov.innerHTML = `<div class="m4c-modal m4c-aw" role="dialog" aria-label="${esc(AUGMENTS[shape].name)}">
+    <div class="m4c-head"><h3>${esc(AUGMENTS[shape].name)}</h3><button type="button" class="m4c-close" aria-label="Close">✕</button></div>
+    <div class="m4c-aw-sides">${sides}</div></div>`;
+  ov.querySelector('.m4c-close').addEventListener('click', close);
+  document.body.appendChild(ov);
 }
 function closeAugmentWizard() {
   _aug = null;

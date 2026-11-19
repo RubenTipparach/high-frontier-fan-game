@@ -124,8 +124,8 @@ export const REQUIREMENT_VIS = {
   'reactor-fusion':     { glyph: '∿',  label: 'Flux reactor'           },
   'reactor-antimatter': { glyph: '💣', label: 'Bomb reactor'           },
   'reactor-any':        { glyph: '⚛', label: 'Any reactor'             },
-  'gen-radioisotope':   { glyph: '⟛', label: 'Radioisotope generator' },
-  'gen-electric':       { glyph: 'e',  label: 'Pulse generator'        },
+  'gen-radioisotope':   { glyph: '⟛', label: 'Pulse generator'        },
+  'gen-electric':       { glyph: 'e',  label: 'Electric generator'     },
   // Legacy / hand-written supports retained so older data still
   // loads cleanly.
   'pulse-generator':    { glyph: '⚡', label: 'Pulse generator'         },

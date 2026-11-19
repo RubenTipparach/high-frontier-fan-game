@@ -22,7 +22,7 @@ import { CARD_DATA } from './card-data.js';
 
 // Requirement-kind catalogue. Each kind is a single capability
 // the engine tracks across the cards in your stack. Other cards
-// "supply" a kind (e.g. a fission Reactor supplies 1
+// "supply" a kind (e.g. an X exotic Reactor supplies 1
 // reactor-fission); a thruster or robonaut carries a `requires`
 // row that the stack must collectively satisfy. Card-ui maps
 // each kind to a glyph + label.
@@ -32,8 +32,8 @@ export const REQUIREMENT_KINDS = [
   'reactor-fission',        // X exotic reactor (owner 2026-11-19; the id is historical)
   'reactor-fusion',         // ∿ flux reactor
   'reactor-antimatter',     // 💣 bomb reactor
-  'gen-radioisotope',       // ⟛ RTG / radioisotope generator
-  'gen-electric',           // e pulse generator
+  'gen-radioisotope',       // ⟛ pulse generator (owner 2026-11-19; the id is historical)
+  'gen-electric',           // e electric generator
   // operational supports:
   'beam-receiver',          // ☀ solar / beam-pushed
   'aerobrake-shroud',       // 🪂 atmospheric entry (Air Eater)
@@ -157,7 +157,7 @@ function requiresFromFace(face, type) {
 
 // Columns under the "Type" banner of Reactor / Generator sheets
 // that say what THIS card supplies to the stack. A generator
-// with ⟛=true supplies a radioisotope-generator chip, a fission
+// with ⟛=true supplies a pulse-generator chip, an X exotic
 // reactor (X=true) supplies the reactor-fission chip, etc.
 // Used to drive the per-card glyphs shown on the typebar.
 const REACTOR_TYPE_COLS = {
@@ -178,7 +178,7 @@ const GENERATOR_TYPE_COLS = {
 // types supply nothing (they don't show up as chips on other
 // cards' supports rows).
 // "Any Reactor" (the GW sheet's column) means ANY reactor: a card that supplies
-// a fission, fusion or antimatter reactor also satisfies it. Tagged on the
+// an exotic, flux or bomb reactor also satisfies it. Tagged on the
 // supply list so every check that asks "does the stack supply this kind?"
 // answers it the same way. Display code skips the tag (it is not a chip of its
 // own).

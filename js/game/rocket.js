@@ -1482,7 +1482,7 @@ export function getSupportChainView({
 
   // Every OTHER card that supplies ANY kind in an OR-group (the resolver's
   // candidate set): the choices a player can wire a consumer's support to. A
-  // reactor OR-group (fusion / antimatter) lists every reactor that satisfies
+  // reactor OR-group (flux / bomb) lists every reactor that satisfies
   // it, so the picker can offer all of them.
   const candidatesFor = (consumerId, kinds) => cards
     .filter((c) => c.id !== consumerId && Array.isArray(c.supplies)
@@ -1539,7 +1539,7 @@ export function getSupportChainView({
       // One entry PER OR-GROUP (same supplier-prefix), keyed by the group's
       // first kind to match the resolver's edge + wiring key. The candidate
       // list is the UNION across the group's kinds, so a reactor group offers
-      // every reactor that satisfies it (fusion OR antimatter) - which is what
+      // every reactor that satisfies it (flux OR bomb) - which is what
       // lets the player pick the better reactor as the first/modifier reactor.
       const groups = new Map();
       for (const k of reqKindsOf(c)) {
@@ -1710,7 +1710,7 @@ export function getActiveThrusterStats(overrideId) {
     // The thruster runs on solar when its electric power ultimately comes from a
     // solar generator anywhere in the RESOLVED modifier chain, NOT only when the
     // thruster's DIRECT electric supplier is solar. A multi-hop chain (thruster
-    // -> radioisotope generator -> solar electric generator) is still solar
+    // -> pulse generator -> solar electric generator) is still solar
     // driven; the solar generator at depth 2 was previously missed, so the zone
     // shift never applied. modifierChain is the set of cards that actually power
     // + modify this thruster (rules 1+2), so it already excludes idle generators

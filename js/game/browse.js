@@ -12512,13 +12512,13 @@ function myCrewReactorKinds() {
     if (pw.crewOnBoardReactorHome && !isHomeBernalUnit(bn)) continue;
     kinds = kinds ? Array.from(new Set([...kinds, ...pw.crewOnBoardReactor])) : [...pw.crewOnBoardReactor];
   }
-  // M4 Battery on your Crew (engine batteryCrewKinds): side 1 the e pulse
+  // M4 Battery on your Crew (engine batteryCrewKinds): side 1 the pulse
   // generator, side 2 the X exotic reactor. Augments exist only in M4, which never runs with M2.
   const bat = (mySnapshotPlayer() || {}).augments;
   const b = bat && bat.battery;
   // A Battery on one Crew card supplies through that slot (slot.augSupplies);
   // only an older Colony chit powers every Crew.
-  const bk = (b && !b.crewId) ? (b.side === 1 ? ['gen-electric'] : b.side === 2 ? ['reactor-fission'] : []) : [];
+  const bk = (b && !b.crewId) ? (b.side === 1 ? ['gen-radioisotope'] : b.side === 2 ? ['reactor-fission'] : []) : [];
   if (bk.length) kinds = Array.from(new Set([...(kinds || []), ...bk]));
   return kinds;
 }
