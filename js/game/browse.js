@@ -8524,16 +8524,12 @@ function actorsNeededClient(snapshot) {
   return active ? [active.profileId] : [];
 }
 
-// Who I can manually nudge - mirrors the server's nudgeTargets. Same as
-// actorsNeededClient normally, but during an auction EVERY other player
-// is nudgable (user: "all players are nudgable during auctions"), since
-// the on-the-clock set churns as bids land and you may want to ping the
-// auctioneer or an already-acted bidder to keep things moving.
+// Who I can manually nudge - mirrors the server's nudgeTargets: every player.
 function nudgeTargetsClient(snapshot) {
-  if (snapshot && snapshot.auction && Array.isArray(snapshot.players)) {
-    return snapshot.players.map((p) => p.profileId);
-  }
-  return actorsNeededClient(snapshot);
+  // Every player at the table (user 2026-11-19), the ones on the clock first.
+  const onClock = actorsNeededClient(snapshot);
+  const rest = ((snapshot && snapshot.players) || []).map((p) => p.profileId).filter((pid) => !onClock.includes(pid));
+  return [...onClock, ...rest];
 }
 
 // Effective last-nudge timestamp for a target: the later of the
@@ -8555,8 +8551,10 @@ async function doNudge(opts, btn) {
   if (btn) btn.disabled = true;
   const r = await remindTurn(_onlineGameId, _onlineMe.token, opts);
   if (r && r.ok) {
-    const nudged = r.nudged || [];
-    const skipped = r.skipped || [];
+    // The reply body rides in r.data (api.js#call).
+    const body = r.data || r;
+    const nudged = body.nudged || [];
+    const skipped = body.skipped || [];
     for (const n of [...nudged, ...skipped]) recordLocalNudge(n.targetId, n.sentAt);
     if (nudged.length) {
       _onlineToast(`👋 Nudged ${nudged.map((n) => '@' + (n.targetName || '?')).join(', ')}.`);
@@ -8760,11 +8758,8 @@ function renderMpPanel(snapshot) {
   // module tags so a returning player can see at a glance what's enabled.
   tableEl.appendChild(buildMpConfigBlock(snapshot));
 
-  // Footer: turn nudge(s). Ping whoever can be nudged with a turn DM.
-  // Normally that's whoever the table is waiting on; during an auction
-  // it's every other player (user: "all players are nudgable during
-  // auctions"), so each gets a button plus a "Nudge all". Otherwise it's
-  // the single active player / chooser. Always shows WHO is being nudged
+  // Footer: nudges. Every other player gets a button (the ones on the clock
+  // first), plus a "Nudge all". Always shows WHO is being nudged
   // (user: "show who you're nudging in case we need to fix it") and the
   // per-target cooldown timer. I am never a nudge target.
   const needed = nudgeTargetsClient(snapshot).filter((pid) => pid !== myId);

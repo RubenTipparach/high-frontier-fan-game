@@ -2559,9 +2559,13 @@ function whoNeedsToAct(state) {
 // bids fly in any order and the on-the-clock set churns as people act,
 // so let anyone ping anyone - the auctioneer and already-acted bidders
 // included - to keep the lot moving.
+// Who may be nudged: every player at the table (user 2026-11-19: "add nudge to
+// all players"), the ones the table is waiting on first so a bare nudge still
+// pings the player on the clock.
 function nudgeTargets(state) {
-  if (state && state.auction) return (state.players || []).map((p) => p.profileId);
-  return actorsNeeded(state);
+  const onClock = actorsNeeded(state);
+  const rest = ((state && state.players) || []).map((p) => p.profileId).filter((pid) => !onClock.includes(pid));
+  return [...onClock, ...rest];
 }
 
 // Most-recent nudge per target for a game, so the client can render the
@@ -3554,9 +3558,10 @@ app.post('/games/:id/remind', requireProfile, (req, res) => {
   // Nor does a hot-seat table: every seat belongs to the one person already
   // sitting at the browser, so there is nobody to nudge but themselves.
   if (state && state.hotSeat) return res.status(409).json({ error: 'nobody_to_nudge' });
-  // Who the sender may nudge (never themselves). Normally whoever is on
-  // the clock; during an auction it's every other player.
+  // Who the sender may nudge (never themselves): every other player, the ones
+  // on the clock first.
   const needed = nudgeTargets(state).filter((pid) => pid !== req.profile.id);
+  const onClock = new Set(actorsNeeded(state));
   if (!needed.length) return res.status(409).json({ error: 'nobody_to_nudge' });
   const inAuction = !!(state && state.auction);
   const cd = REMIND_COOLDOWN_MS;
@@ -3613,8 +3618,10 @@ app.post('/games/:id/remind', requireProfile, (req, res) => {
       continue;
     }
     ins.run(id, tid, req.profile.id, now);
-    const why = inAuction ? `the auction is waiting on you in **${nm}**` : `it's your turn in **${nm}**`;
-    notifyProfile(tid, 'turn', `👋 ${req.profile.name} nudged you - ${why}.${jump}`);
+    // Only a player the table is actually waiting on hears "it's your turn".
+    const msg = !onClock.has(tid) ? `👋 ${req.profile.name} nudged you in **${nm}**.${jump}`
+      : `👋 ${req.profile.name} nudged you - ${inAuction ? `the auction is waiting on you in **${nm}**` : `it's your turn in **${nm}**`}.${jump}`;
+    notifyProfile(tid, 'turn', msg);
     nudged.push({ targetId: tid, targetName: tname, sentAt: now });
   }
   if (nudged.length) {
