@@ -321,7 +321,7 @@ let _tab = null;        // 'market' | 'yours'
 // May the viewer start a contract auction now (the end of their Fundraise)?
 function canAuctionNow(s, p, myTurn) {
   return !!(s && p && myTurn && p.fundraisedThisTurn && !p.contractAuctionDone && !p.timepiece && !s.auction
-    && !s.anarchy && !s.war);
+    && !s.anarchy && !s.war && !(D.handFull && D.handFull(p)));
 }
 // The three pair decks, top card up. A deck you may auction carries one
 // Auction button; one you may not is greyed out with none (owner 2026-11-18).
@@ -664,10 +664,17 @@ export function renderContractAuction(a) {
   const face = contractFace(a.cardId, a.side || 'blue');
   const myId = p && p.profileId;
   const iAmAuctioneer = myId === a.auctioneerId;
-  const blocked = p && (p.timepiece ? 'Timepiece out.'
-    : (face.manned && s.defaultChit && s.defaultChit.profileId === myId ? 'Default chit: no manned bids.' : null));
-  const waiting = (s.players || []).filter((q) => q.profileId !== a.auctioneerId && !(a.acted || []).includes(q.profileId)
-    && !q.timepiece && !(face.manned && s.defaultChit && s.defaultChit.profileId === q.profileId));
+  // Who may not bid (4B3): a timepiece already out (a contract on the clock),
+  // the default chit on a manned contract, or the academia hand limit.
+  const barOf = (q) => (!q ? null : q.timepiece ? 'Timepiece out.'
+    : (face.manned && s.defaultChit && s.defaultChit.profileId === q.profileId) ? 'Default chit: no manned bids.'
+      : (D.handFull && D.handFull(q)) ? 'Hand full: 4 cards.' : null);
+  const blocked = iAmAuctioneer ? null : barOf(p);
+  // The bidders still owed an answer: the engine's own list when it is there.
+  const waitIds = Array.isArray(a.waitingOn) ? a.waitingOn.filter((id) => id !== a.auctioneerId) : null;
+  const waiting = (s.players || []).filter((q) => q.profileId !== a.auctioneerId && (waitIds
+    ? waitIds.includes(q.profileId)
+    : (!(a.acted || []).includes(q.profileId) && !barOf(q))));
   const settled = !waiting.length;
   if (_yearsDraft == null || _yearsDraft > a.low) _yearsDraft = Math.max(0, a.low - (iAmAuctioneer ? 0 : 1));
   // The dial: each bid is its bidder's timepiece on the slot that many years
@@ -723,6 +730,11 @@ export function renderContractAuction(a) {
       ? `<div class="m4c-btns">${tied.map((id) => `<button type="button" data-act="close" data-winner="${id}" ${settled ? '' : 'disabled'}>Award to @${esc(nameOf(id))} (${a.low} yr)</button>`).join('')}</div>`
       : `<div class="m4c-btns"><button type="button" data-act="close" ${settled ? '' : 'disabled'}>Close</button></div>`;
   }
+  // Who sits this lot out, and why.
+  const out = (s.players || []).filter((q) => q.profileId !== a.auctioneerId && barOf(q));
+  const outLine = out.length
+    ? `<p class="m4c-wait">Out: ${out.map((q) => `<span class="player-name" style="--player-color:${esc(q.color || 'currentColor')}">@${esc(q.name)}</span> (${esc(barOf(q).replace(/\.$/, '').replace(/:.*/, '').toLowerCase())})`).join(', ')}</p>`
+    : '';
   el.innerHTML = `<div class="m4c-modal" role="dialog" aria-label="Contract auction">
     <div class="m4c-head"><h3>📜 Auction</h3><span class="muted">${CONTRACT_PAIR_NAMES[a.pair] || ''}</span>
       <button type="button" class="mp-mini-btn m4c-mini" title="Minimize" aria-label="Minimize">&minus;</button></div>
@@ -733,6 +745,7 @@ export function renderContractAuction(a) {
         ${mine}
         <div class="m4c-controls">${controls}</div>
         <p class="m4c-wait">${settled ? `${esc(nameOf(a.auctioneerId))} to close` : `Waiting: ${waiting.map((q) => '@' + esc(q.name)).join(', ')}`}</p>
+        ${outLine}
       </div></div></div>`;
   // Docked: the overlay hides and the turn bar carries the Auction button.
   const myMove = !blocked && myId !== a.auctioneerId && !(a.acted || []).includes(myId);
@@ -745,6 +758,21 @@ export function renderContractAuction(a) {
       needsAction: myMove || myClose,
       onClick: () => setContractAuctionMinimized(false),
     } : null);
+  }
+  // Nudges, as in a patent auction: the auctioneer can ping the bidders still
+  // owed an answer, or everyone else at the table.
+  if (iAmAuctioneer && D.nudgeButton) {
+    const others = (s.players || []).map((q) => q.profileId).filter((id) => id !== myId);
+    if (others.length) {
+      const wrap = document.createElement('div');
+      wrap.className = 'm4c-btns m4c-nudges';
+      wrap.append(
+        D.nudgeButton('👋 Nudge waiting', { waiting: true }, waiting.map((q) => q.profileId), 'Remind the bidders who have not bid or passed yet.'),
+        D.nudgeButton('👋 Nudge all', { all: true }, others, 'Remind every other player at the table.'),
+      );
+      const play = el.querySelector('.m4c-auction-play');
+      if (play) play.appendChild(wrap);
+    }
   }
   const mini = el.querySelector('.m4c-mini');
   if (mini) mini.addEventListener('click', () => setContractAuctionMinimized(true));

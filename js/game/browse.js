@@ -8512,6 +8512,7 @@ function actorsNeededClient(snapshot) {
     return snapshot.pendingFirstPlayer.chooserId != null ? [snapshot.pendingFirstPlayer.chooserId] : [];
   }
   const a = snapshot.auction;
+  if (a && a.kind === 'contract' && Array.isArray(a.waitingOn)) return a.waitingOn.slice();
   if (a) {
     if (auctionAllBiddersActed(a, snapshot.players)) return [a.auctioneerId];
     const acted = a.acted || [];
@@ -36013,6 +36014,9 @@ initContractsUi({
   toast: (msg, level) => { if (_onlineToast) _onlineToast(msg, level); },
   confirm: (opts) => confirmModal(opts),
   setTurnAction: (key, spec) => setMpTurnAction(key, spec),
+  // The academia hand limit, Skunkworks aside (same check as a patent auction).
+  handFull: (p) => auctionHandFull(p),
+  nudgeButton: (label, opts, ids, title) => makeAuctionNudgeButton(_onlineSnapshot, label, opts, ids, title),
   // The name a player reads for a map space (a site, a Lagrange point, a hazard).
   spaceName: (slug) => {
     const n = _activeData && _activeData.sites ? _activeData.sites.find((x) => x.id2 === slug) : null;

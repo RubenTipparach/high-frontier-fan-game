@@ -2554,6 +2554,9 @@ function actorsNeeded(state) {
     return state.pendingFirstPlayer.chooserId != null ? [state.pendingFirstPlayer.chooserId] : [];
   }
   const a = state.auction;
+  // A contract lot: the engine's own list (bidders who may still bid, then the
+  // initiator to close), so a barred player is never waited on or nudged.
+  if (a && a.kind === 'contract') return auctionWaitingOn(state).map((p) => p.profileId);
   if (a) {
     if (a.awaiting === 'auctioneer') return [a.auctioneerId];
     const acted = a.acted || [];
@@ -3597,7 +3600,10 @@ app.post('/games/:id/remind', requireProfile, (req, res) => {
     // survives a floor reopen). Off-auction it's just the active seat.
     // Always a subset of `needed`.
     const a = state.auction;
-    if (a) {
+    if (a && a.kind === 'contract') {
+      const w = auctionWaitingOn(state).map((p) => p.profileId);
+      targets = needed.filter((pid) => pid !== a.auctioneerId && w.includes(pid));
+    } else if (a) {
       const acted = a.acted || [];
       const auto = a.autoPassed || [];
       targets = needed.filter((pid) =>
