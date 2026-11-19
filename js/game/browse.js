@@ -13410,7 +13410,13 @@ function openBernalUnitModal(index) {
 // colonyPromotes. 'Push' / unspecified accepts any colony.
 function colonyPromotesAt(siteId, need) {
   if (!siteId || !getColony(siteId)) return false;
-  if (!need || need === 'Push') return true;
+  if (!need) return true;
+  // A Push dome (2A3a) wants a colony on a site with the push icon.
+  if (need === 'Push') {
+    const node = _activeData && _activeData.byId ? _activeData.byId[siteId] : null;
+    const rec = node && node.serverId ? SITES_BY_ID[node.serverId] : (SITES_BY_ID[siteId] || null);
+    return !!(rec && rec.push);
+  }
   const f = getFactory(siteId);
   return !!(f && (f.spectralType || 'C') === need);
 }
@@ -14211,8 +14217,8 @@ function openUnifiedStackInspector(stackId) {
           const siteId = getStackSiteId(stackId);
           const atSite = !!siteId && siteId !== getLeoSiteId();
           const likelyOk = promotionSiteAt(siteId, card.promotionColony);
-          const need = (card.promotionColony && card.promotionColony !== 'Push')
-            ? `${card.promotionColony}-colony` : 'a colony';
+          const need = (card.promotionColony === 'Push') ? 'a push colony'
+            : card.promotionColony ? `${card.promotionColony}-colony` : 'a colony';
           const lockedPromo = !isOnlineMyTurn();
           const promoBtn = document.createElement('button');
           promoBtn.type = 'button';
@@ -14386,8 +14392,8 @@ function openUnifiedStackInspector(stackId) {
           const frSite = getStackSiteId('freighter');
           const atSite = !!frSite && frSite !== getLeoSiteId();
           const likelyOk = promotionSiteAt(frSite, ucard.promotionColony);
-          const need = (ucard.promotionColony && ucard.promotionColony !== 'Push')
-            ? `${ucard.promotionColony}-colony` : 'a colony';
+          const need = (ucard.promotionColony === 'Push') ? 'a push colony'
+            : ucard.promotionColony ? `${ucard.promotionColony}-colony` : 'a colony';
           const promoBtn = document.createElement('button');
           promoBtn.type = 'button';
           promoBtn.className = 'rocket-select gw-promote';
@@ -19306,8 +19312,8 @@ function openRocketStackModal() {
         const siteId = getStackSiteId('rocket');
         const atSite = !!siteId && siteId !== getLeoSiteId();
         const likelyOk = promotionSiteAt(siteId, card.promotionColony);
-        const need = (card.promotionColony && card.promotionColony !== 'Push')
-          ? `${card.promotionColony}-colony` : 'a colony';
+        const need = (card.promotionColony === 'Push') ? 'a push colony'
+          : card.promotionColony ? `${card.promotionColony}-colony` : 'a colony';
         const lockedPromo = !isOnlineMyTurn();
         const kindWord = isColonistCard ? 'Colonist' : 'TW thruster';
         const promoBtn = document.createElement('button');
@@ -19376,8 +19382,8 @@ function openRocketStackModal() {
       if (_online && canConvBn && slot.face !== 'secondary') {
         const siteId = getStackSiteId('rocket');
         const atSite = !!siteId && siteId !== getLeoSiteId();
-        const need = (card.promotionColony && card.promotionColony !== 'Push')
-          ? `${card.promotionColony}` : 'a matching colony';
+        const need = (card.promotionColony === 'Push') ? 'a push colony'
+          : card.promotionColony ? `${card.promotionColony}` : 'a matching colony';
         const lockedPromo = !isOnlineMyTurn();
         const promoBtn = document.createElement('button');
         promoBtn.type = 'button';
@@ -19410,8 +19416,8 @@ function openRocketStackModal() {
         const siteId = getStackSiteId('rocket');
         const atSite = !!siteId && siteId !== getLeoSiteId();
         const likelyOk = promotionSiteAt(siteId, card.promotionColony);
-        const need = (card.promotionColony && card.promotionColony !== 'Push')
-          ? `${card.promotionColony}-colony` : 'a colony';
+        const need = (card.promotionColony === 'Push') ? 'a push colony'
+          : card.promotionColony ? `${card.promotionColony}-colony` : 'a colony';
         const lockedPromo = !isOnlineMyTurn();
         const promoBtn = document.createElement('button');
         promoBtn.type = 'button';
@@ -31132,8 +31138,8 @@ function showSitePopupFor(site) {
       }
     }
     for (const cand of promoCands) {
-      const need = (cand.card.promotionColony && cand.card.promotionColony !== 'Push')
-        ? `${cand.card.promotionColony}-colony` : 'a colony';
+      const need = (cand.card.promotionColony === 'Push') ? 'a push colony'
+        : cand.card.promotionColony ? `${cand.card.promotionColony}-colony` : 'a colony';
       const likelyOk = promotionSiteAt(site.id, cand.card.promotionColony);
       const kindWord = cand.unit === 'bernal' ? 'Lab'
         : cand.unit === 'freighter' ? 'Freighter'

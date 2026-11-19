@@ -12622,11 +12622,16 @@ function applyAirEaterRefuel(state, op, player) {
 // A site is a valid Promotion Site for a card needing colony `need`: it must
 // carry a colony dome matching the need. Needs are the 5 dome-icon classes
 // (2A3a): a spectral letter (the factory there must match), 'Submarine',
-// 'Astrobiology', 'Atmospheric' (the site's location class), or 'Push' /
-// unspecified (any colony).
+// 'Astrobiology', 'Atmospheric' (the site's location class), 'Push' (a colony
+// on a site with the push icon, 2A3a "Push Colony"), or unspecified (any colony).
+function sitePushIcon(siteId) {
+  const site = siteById(siteId);
+  return !!(site && site.push);
+}
 function colonyPromotes(state, siteId, need) {
   if (!siteId || !state.colonies[siteId]) return false;
-  if (!need || need === 'Push') return true;
+  if (!need) return true;
+  if (need === 'Push') return sitePushIcon(siteId);
   if (need === 'Submarine') {
     return state.colonies[siteId].type === 'submarine' || colonyClassOfSite(siteId) === 'submarine';
   }
@@ -12653,14 +12658,9 @@ function promotedBernalAt(state, siteId) {
 }
 // The full Promotion-Site test for a card standing at `siteId`.
 // V9 Sirens: "regardless of dome icon, Siren cards promote ONLY at push colonies
-// (2A3a) or promoted-and-anchored Bernals (2A3c)." The Push dome icon already
-// means "any colony will do" in this implementation (see colonyPromotes), so a
-// Siren's need is forced to 'Push' and the printed icon is ignored. The
-// promoted-Bernal clause is the one already below.
-//
-// Note this can only ever be NARROWER or equal for a Siren: forcing 'Push'
-// drops the spectral / Submarine / Astrobiology / Atmospheric requirements and
-// accepts any colony instead, which is what the rule says.
+// (2A3a) or promoted-and-anchored Bernals (2A3c)." So a Siren's need is forced
+// to 'Push' (a colony on a push-icon site, see colonyPromotes) and the printed
+// icon is ignored. The promoted-Bernal clause is the one already below.
 function promotionSiteAt(state, siteId, need, cardType, player) {
   const want = isSirenPlayer(state, player) ? 'Push' : need;
   if (colonyPromotes(state, siteId, want)) return true;
@@ -12673,11 +12673,12 @@ function promotionSiteAt(state, siteId, need, cardType, player) {
 // promote at an actual colony), a Bernal's dome names a LOCATION CLASS, so the
 // location-class domes (Submarine / Astrobiology / Atmospheric) match the SITE'S
 // own class with NO colony dome required (user 2026-07-04: "this site is
-// astrobiology"). A spectral dome matches a Factory of that spectral; Push /
-// unspecified takes any colony.
+// astrobiology"). A spectral dome matches a Factory of that spectral; Push
+// takes a colony on a push-icon site (2A3a); unspecified takes any colony.
 function bernalDomeMatchesSpace(state, siteId, need) {
   if (!siteId) return false;
-  if (!need || need === 'Push') return !!state.colonies[siteId];
+  if (!need) return !!state.colonies[siteId];
+  if (need === 'Push') return !!state.colonies[siteId] && sitePushIcon(siteId);
   if (need === 'Submarine')    return colonyClassOfSite(siteId) === 'submarine';
   if (need === 'Astrobiology') return colonyClassOfSite(siteId) === 'astrobiology';
   if (need === 'Atmospheric')  return isAtmosphericSite(siteId) || isAerostatSiteId(siteId);
