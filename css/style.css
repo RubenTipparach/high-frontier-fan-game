@@ -1453,12 +1453,14 @@ body.in-lobby .main-menu-fab { display: none; }
 .lb-record { white-space: nowrap; text-align: right; font-size: 12.5px; }
 .lb-wins { color: var(--good); font-weight: 600; }
 .lb-dim { color: var(--ink-mute); font-weight: 400; font-size: 12.5px; }
+.lb-cancelled { color: var(--ink-mute); font-weight: 400; font-size: 12.5px; }
 .lb-podium .lb-name { color: #fde68a; }
 .lb-me td { background: rgba(125, 211, 252, 0.08); }
 .lb-me .lb-name::after { content: ' (you)'; color: var(--accent); font-weight: 400; font-size: 12px; }
 .lb-empty { color: var(--ink-dim); text-align: center; padding: 18px 0; }
 @media (max-width: 520px) {
   .lb-record .lb-dim { display: none; }
+  .lb-record .lb-sep { display: none; }
   .lb-group { min-width: 100%; }
 }
 

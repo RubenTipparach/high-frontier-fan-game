@@ -82,9 +82,11 @@ export async function openLeaderboards() {
 function renderBoard(b, me) {
   const rows = b.entries.map((e) => {
     const place = MEDALS[e.rank - 1] || `<span class="lb-num">${e.rank}</span>`;
-    const record = b.showsWins
+    const record = (b.showsWins
       ? `<span class="lb-wins">${plural(e.wins, 'win')}</span> <span class="lb-dim">in ${plural(e.games, 'game')}</span>`
-      : `<span class="lb-dim">${plural(e.games, 'game')}</span>`;
+      : `<span class="lb-dim">${plural(e.games, 'game')}</span>`)
+      // Solo boards also count the games a player cancelled before the end.
+      + (b.showsCancelled ? ` <span class="lb-cancelled"><span class="lb-sep">· </span>${e.cancelled | 0} cancelled</span>` : '');
     return `<tr class="${e.rank <= 3 ? 'lb-podium' : ''}${String(e.profileId) === String(me) ? ' lb-me' : ''}">
       <td class="lb-place">${place}</td>
       <td class="lb-name">@${esc(e.name)}</td>
