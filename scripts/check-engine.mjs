@@ -12286,6 +12286,48 @@ check('M4 + M2 Parenthood (4C5): heart side 1 on an earthborn, the child comes o
   return `child chit placed; END_TURN held; ${COLONISTS_BY_ID[pick].name} replaced Biomechs with heart (side 2) and jar; spaceborn refused`;
 });
 
+check('M4 + M2 promotion counts (4C7e): a Bernal needs 3 different augmentations aboard and a Dirtside anchor', () => {
+  // Find a Bernal + Space where an M2-only promotion succeeds, then require the
+  // M4 counts on the same board.
+  const sites = allSiteSlugs();
+  const base = augGame({ colonists: [], dirtside: false }).st;
+  let found = null;
+  for (const bern of BERNALS.filter((c) => c.promotionColony)) {
+    for (const siteId of sites) {
+      const st = structuredClone(base); const P = currentPlayerOf(st);
+      st.m4 = false;
+      P.bernals = [{ cardId: bern.id, figure: 'kalpana', face: 'primary', siteId, anchored: true, home: false,
+        stack: [{ id: 'col_biomechs', kind: 'colonist', face: 'primary' }, { id: 'col_botany_bay_convicts', kind: 'colonist', face: 'primary' }],
+        tank: 0, wiring: {}, route: [] }];
+      P.opsRemaining = 4;
+      if (op(st, 'PROMOTE', P.profileId, { unit: 'bernal', cardId: bern.id }).ok) { found = { bern, siteId }; break; }
+    }
+    if (found) break;
+  }
+  assert(found, 'no Bernal promotes anywhere in an M2 game');
+  const mk = (augs) => {
+    const st = structuredClone(base); const P = currentPlayerOf(st);
+    P.bernals = [{ cardId: found.bern.id, figure: 'kalpana', face: 'primary', siteId: found.siteId, anchored: true, home: false,
+      stack: [{ id: 'col_biomechs', kind: 'colonist', face: 'primary' }, { id: 'col_botany_bay_convicts', kind: 'colonist', face: 'primary' }],
+      tank: 0, wiring: {}, route: [] }];
+    P.opsRemaining = 4;
+    P.augments = Object.fromEntries(augs.map(([shape, colonistId]) => [shape, { colonistId, side: 2 }]));
+    return { st, P };
+  };
+  let g = mk([['jar', 'col_biomechs'], ['splat', 'col_botany_bay_convicts']]);
+  let r = op(g.st, 'PROMOTE', g.P.profileId, { unit: 'bernal', cardId: found.bern.id });
+  assert(!r.ok && r.error === 'needs_augmentation', `2 augmentations promoted a Bernal: ${r.error || 'accepted'}`);
+  g = mk([['jar', 'col_biomechs'], ['splat', 'col_botany_bay_convicts'], ['triangle', 'col_biomechs']]);
+  r = op(g.st, 'PROMOTE', g.P.profileId, { unit: 'bernal', cardId: found.bern.id });
+  assert(r.ok, `3 different augmentations should promote: ${r.error}`);
+  // The Home Bernal is not Dirtside.
+  g = mk([['jar', 'col_biomechs'], ['splat', 'col_botany_bay_convicts'], ['triangle', 'col_biomechs']]);
+  g.P.bernals[0].home = true;
+  r = op(g.st, 'PROMOTE', g.P.profileId, { unit: 'bernal', cardId: found.bern.id });
+  assert(!r.ok, 'a Home Bernal promoted under M4 + M2');
+  return `${found.bern.name} at ${found.siteId}: 2 refused, 3 promoted, Home refused (${r.error})`;
+});
+
 // The smoke verdict above runs before the checks added below it; this one
 // covers every check in the file.
 if (failures) {

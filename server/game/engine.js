@@ -12907,6 +12907,8 @@ function applyPromote(state, op, player) {
     if (fr.promoted || fr.face === 'secondary') return fail('already_promoted');
     const card = PATENTS_BY_ID[fr.cardId];
     if (!promotionSiteAt(state, fr.siteId, card && card.promotionColony, 'freighter', player)) return fail('no_promotion_colony');
+    // M4 + M2 (4C7e): Colonists there with 2 different augmentations.
+    if (state.m4 && state.m2 && augShapesAt(player, fr.siteId) < 2) return fail('needs_augmentation', { need: 2, have: augShapesAt(player, fr.siteId) });
     const spentFr = takePromotionOp(state, player, fr.siteId);
     if (!spentFr) return fail('no_ops_left');
     fr.face = 'secondary'; fr.promoted = true;
@@ -12942,6 +12944,12 @@ function applyPromote(state, op, player) {
     const card = PATENTS_BY_ID[cardId];
     const need = card && card.promotionColony;
     if (!bernalPromotionColocated(state, bn, need)) return fail('no_promotion_colony');
+    // M4 + M2 (4C7e): Colonists aboard with 3 different augmentations, and the
+    // Promotion Colony must be a Dirtside (the Bernal anchored Dirtside).
+    if (state.m4 && state.m2) {
+      if (isHomeBernal(bn)) return fail('promote_needs_dirtside');
+      if (augShapesAt(player, bn.siteId) < 3) return fail('needs_augmentation', { need: 3, have: augShapesAt(player, bn.siteId) });
+    }
     const spentBn = takePromotionOp(state, player, bn.siteId);
     if (!spentBn) return fail('no_ops_left');
     bn.face = 'secondary'; bn.promoted = true;
@@ -12989,6 +12997,12 @@ function applyPromote(state, op, player) {
   if (card.type !== 'gw-thruster') return fail('not_promotable');
   if (slot.face === 'secondary') return fail('already_promoted');
   if (!promotionSiteAt(state, siteId, card.promotionColony, 'gw-thruster', player)) return fail('no_promotion_colony');
+  // M4 + M2 (4C7e): Colonists there with 4 different augmentations, and a
+  // completed gold-side or Exodus contract.
+  if (state.m4 && state.m2) {
+    if (augShapesAt(player, siteId) < 4) return fail('needs_augmentation', { need: 4, have: augShapesAt(player, siteId) });
+    if (!hasGoldOrExodusContract(player)) return fail('promote_needs_gold_contract');
+  }
   const spentGw = takePromotionOp(state, player, siteId);
   if (!spentGw) return fail('no_ops_left');
   slot.face = 'secondary';
@@ -16814,6 +16828,17 @@ function portfolioShapes(state, player) {
 // side anchored bernal").
 function hasBeoColony(state, player) {
   return (player.bernals || []).some((bn) => bn && bn.anchored && !isHomeBernal(bn));
+}
+// M4 + M2 (4C7e): the different augmentation chits on your Colonists at a site,
+// the ones "doing the Promotion" of a unit there.
+function augShapesAt(player, siteId) {
+  const here = new Set();
+  for (const e of colonistLocations(player)) if (e.siteId === siteId) here.add(e.slot.id);
+  return Object.values(player.augments || {}).filter((a) => a && here.has(a.colonistId)).length;
+}
+// Completed a gold-side (4B1b) or Exodus (4B1c) contract.
+function hasGoldOrExodusContract(player) {
+  return (player.fulfilledContracts || []).some((f) => f && (f.side === 'gold' || f.side === 'exodus' || (CONTRACTS_BY_ID[f.id] || {}).exodus));
 }
 function colonistAugCount(player, colonistId) {
   return Object.values(player.augments || {}).filter((a) => a && a.colonistId === colonistId).length;

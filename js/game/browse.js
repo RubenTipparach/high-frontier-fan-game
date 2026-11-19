@@ -10002,7 +10002,11 @@ function humanizeOnlineOpError(code, detail) {
     not_in_earthborn_queue: 'Pick an earthborn Human from the Colonist queue.',
     parent_gone: 'The parent is no longer aboard.',
     no_child_due: 'The child has not come of age yet.',
-    needs_augmentation: 'This Colonist needs at least one augmentation to Promote.',
+    needs_augmentation: (detail && detail.need > 1)
+      ? `Promoting this needs your Colonists here with ${detail.need} different augmentations${detail.have != null ? ` (you have ${detail.have})` : ''}.`
+      : 'This Colonist needs at least one augmentation to Promote.',
+    promote_needs_dirtside: 'A Bernal promotes only at a Dirtside Colony.',
+    promote_needs_gold_contract: 'Promoting to a TW thruster needs a completed gold-side or Exodus contract.',
     nothing_to_implant: 'Choose an augmentation to implant.',
   };
   if (M4_ERRORS[code]) return M4_ERRORS[code];
