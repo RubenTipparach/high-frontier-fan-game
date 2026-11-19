@@ -221,8 +221,11 @@ const PROGRESS = [
   ] },
   { name: 'M4 + M2', items: [
     { s: 'done', t: 'M4 with M2 in one room', d: 'Allowed since 2026-11-18. With M2 a chit rides a Colonist, and its abilities work where that Colonist is.' },
-    { s: 'm2', t: 'Parenthood on the heart chit (4C5)', d: 'Not available without M2 (2026-11-18). Until then the heart implants side 2 only.' },
-    { s: 'm2', t: 'Promotion counts for Freighter, Bernal, GW thruster', d: 'Promotion does not work without M2 (2026-11-18).' },
+    { s: 'done', t: 'Spaceborn queue and the Spacer Union (4C2)', d: 'Two queues; spaceborn needs a BEO Colony since turn start; joining discards earthborns; Spaceborn / Earthborn tag by each name in the multiplayer tab. Robot Emancipation dissolves the Union.' },
+    { s: 'done', t: 'Parenthood on the heart chit (4C5)', d: 'Heart side 1 on an earthborn Human puts a child chit 9 years out. On coming of age pick an earthborn from the queue; it replaces the parent, inherits the chits (heart to side 2), Wunderkind if the parent was Promoted. End Turn waits on the pick.' },
+    { s: 'done', t: 'Promotion counts (4C7e)', d: 'Freighter 2 different augmentations; Bernal 3 and anchored Dirtside; GW thruster 4 plus a completed gold-side or Exodus contract.' },
+    { s: 'done', t: 'Robots (2026-11-19)', d: 'A Robot in hand does not count; ET Producing one over the limit sends a colonist back to the queue (a Robot too). Several Robots in one spaceborn draw: keep one, the rest shuffle back (4C2b).' },
+    { s: 'partial', t: 'Choosing which Robot to keep', d: 'The first one drawn is kept for now; a picker is next.' },
     { s: 'm2', t: 'Chit and Spaceborn glyphs on colonist cards', d: 'Needs a rendered preview and your sign-off first.' },
     { s: 'm2', t: 'Contracts that need Bernals, Colonies or Colonists', d: 'Junket, Fugitive, Drug Smuggling, Life Support Reconfig Team and their gold sides: dealt out of M0+M4 games.' },
   ] },
@@ -283,6 +286,8 @@ const SECTIONS = [
 
 const DECIDED = [
   // Newest first: { text: 'What was decided, with the owner\'s words', where: 'Where it landed' },
+  { text: 'Robots count against your colonist limit once ET Produced, not in hand; producing one over the limit returns a colonist on the board to the deck (2026-11-19).', where: 'ET_PRODUCE, Colonists tab' },
+  { text: 'M4 + M2 is the focus: Parenthood, spaceborn vs earthborn with a tag by the name in the multiplayer tab, colonist deck restrictions, Bernal rules (2026-11-19).', where: 'PR #124' },
   { text: 'Support names: the orange bar-and-plates coin is the pulse generator, e electric, X exotic, 💣 bomb, ∿ flux. Battery side 1 supplies the pulse generator, side 2 X (A3, 2026-11-19).', where: 'card-ui.js labels, Battery augmentation' },
   { text: 'The Augment operation counts any Colony as the BEO Colony (A4, 2026-11-18).', where: 'IMPLANT' },
   { text: 'Jar side 2 pays FINAO from any of your water: rocket and Freighter tanks, Outpost cans (A1).', where: 'finaoWaterTaps' },
