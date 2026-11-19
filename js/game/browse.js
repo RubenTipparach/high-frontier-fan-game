@@ -15995,7 +15995,8 @@ function enterManualMoveMode(opts = {}) {
     _manualOriginId = unit === 'factory' ? (opts.originPlannerId || null) : getStackSiteId('freighter');
   } else {
     const thrStats = getActiveThrusterStats();
-    const thrust = thrStats && Number.isFinite(thrStats.thrust) ? thrStats.thrust : 4;
+    // Gun Club arcjet: one more burn on this (the first) turn of the move.
+    const thrust = (thrStats && Number.isFinite(thrStats.thrust) ? thrStats.thrust : 4) + rocketArcjetBonus();
     _manualBudget = thrust;
     _manualBudgetMax = thrust;
     _manualPirouettes = activeThrusterBonusPivots();
@@ -25670,6 +25671,25 @@ function getRocketSite() {
     (x) => x.type === 'lagrange' && x.name === 'LEO'
   ) || null;
 }
+// WATER / HYDROGEN ARCJET (Baltimore Gun Club): "Colocated thruster gets a
+// bonus burn if it starts its move at LEO" (white face), "... LEO, your
+// Anchored Bernal, or your Factory" (black face). The crew must ride the
+// rocket, and Anarchy suspends it. The same test as the engine's arcjetCredit,
+// so the planner offers the burn the move will grant: 1, or 0.
+function rocketArcjetBonus() {
+  if (!_online || !_onlineSnapshot || _onlineSnapshot.anarchy) return 0;
+  const me = mySnapshotPlayer();
+  const r = me && me.rocket;
+  if (!r) return 0;
+  const slot = (r.stack || []).find((s) => s && s.id === 'crew_baltimore_gun_club');
+  if (!slot) return 0;
+  const here = r.siteId == null ? null : r.siteId;
+  if (here == null) return 1;
+  if (slot.face !== 'secondary') return 0;
+  if ((me.bernals || []).some((bn) => bn && bn.anchored && bn.siteId === here)) return 1;
+  const f = (_onlineSnapshot.factories || {})[here];
+  return f && f.ownerId === me.profileId ? 1 : 0;
+}
 function persistRocketSite() {
   if (isOnline()) return; // online state is server-owned; don't touch the solo save
   try {
@@ -28286,7 +28306,9 @@ async function moveRocket() {
   const _totals = getStackTotals();
   const _dryM = (_thrFuel && Number.isFinite(_thrFuel.dryMass)) ? _thrFuel.dryMass : _totals.dryMass;
   const _wetM = (_thrFuel && Number.isFinite(_thrFuel.wetMass)) ? _thrFuel.wetMass : _totals.wetMass;
-  const _stepsNeeded = _fuelOn ? Math.ceil(_perBurn * turn1Burns) : 0;
+  // The Gun Club arcjet's bonus burn is free, as the move charges it.
+  const _paidBurns = Math.max(0, turn1Burns - rocketArcjetBonus());
+  const _stepsNeeded = _fuelOn ? Math.ceil(_perBurn * _paidBurns) : 0;
   const _stepsAvail = blackStepsBetween(_dryM, _wetM);
   const _newWet = _stepsNeeded > 0 ? walkBlackDown(_wetM, _stepsNeeded) : _wetM;
   const fuelCost = _stepsNeeded > 0 ? Math.round((_wetM - _newWet) * 1e6) / 1e6 : 0;  // water spent
@@ -32036,6 +32058,9 @@ function planRocketRouteTo(destSite) {
     // Synodic Comet in any season, so the search stops treating those comets as
     // off the board. Every other seasonal space still gates normally.
     twThruster: !!(thrStats && thrStats.isTw),
+    // Baltimore Gun Club aboard, leaving a qualifying departure: +1 burn on the
+    // first turn of the move.
+    firstTurnBonus: rocketArcjetBonus(),
   });
   if (!result || !result.segments.length) {
     // Every map location is reachable from LEO (the route graph has no

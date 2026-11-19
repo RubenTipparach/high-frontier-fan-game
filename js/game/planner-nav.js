@@ -183,6 +183,11 @@ export function buildPlanner(graph, {
   // the rocket's own route paths set this; a Freighter / Bernal / mobile
   // Factory never does. Off makes the search byte-identical to before.
   twThruster = false,
+  // Water / Hydrogen Arcjet (Baltimore Gun Club aboard): a bonus burn on the
+  // FIRST turn of a move from a qualifying departure. Added to turn 1's burn
+  // budget only (a wait refills to plain thrust). 0 keeps the search
+  // byte-identical to before.
+  firstTurnBonus = 0,
 } = {}) {
   // A lander-burn node (a burn node carrying a `landing` cost, drawn 🚀). The
   // acetylene pass waives the budget for the FIRST of these entered.
@@ -398,13 +403,13 @@ export function buildPlanner(graph, {
   }
 
   function findPath(fromId) {
-    const source = { node: fromId, dir: null, bonus: 0, burnsRemaining: thrust, pivots: freePivots, acet: acetylene ? 1 : 0, belt: beltFlyby };
+    const source = { node: fromId, dir: null, bonus: 0, burnsRemaining: thrust + (firstTurnBonus | 0), pivots: freePivots, acet: acetylene ? 1 : 0, belt: beltFlyby };
     return dijkstra(getNeighbors, nodeWeight, tupleNs, pathId, source, allowed, makeDominancePrune());
   }
 
   function drawPath(pathData, fromId, toId) {
     const { distance, previous } = pathData;
-    const source = { node: fromId, dir: null, bonus: 0, burnsRemaining: thrust, pivots: freePivots, acet: acetylene ? 1 : 0, belt: beltFlyby };
+    const source = { node: fromId, dir: null, bonus: 0, burnsRemaining: thrust + (firstTurnBonus | 0), pivots: freePivots, acet: acetylene ? 1 : 0, belt: beltFlyby };
     const target = { node: toId, dir: null, bonus: 0, done: true };
     const targetId = pathId(target);
     if (!(targetId in distance)) return null;
