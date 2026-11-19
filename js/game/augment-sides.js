@@ -69,7 +69,7 @@ const PICT = {
         <text x="31.4" y="33.49" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-weight="700" font-size="13.8" fill="#fff">C</text>`,
     // +1 Hydration: the black hexagon with +1 and a small drop (after the
     // original chit; owner approved 2026-11-19).
-    2: `<polygon points="48.40,28.45 39.90,43.17 22.90,43.17 14.40,28.45 22.90,13.73 39.90,13.73" fill="#0c0a16"/><text x="27.4" y="33" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-weight="800" font-size="11.5" fill="#fff">+1</text><path transform="translate(39.4 30.2) scale(0.62)" d="M0 -9 C 4 -3, 6.5 0.5, 6.5 3.4 A 6.5 6.5 0 0 1 -6.5 3.4 C -6.5 0.5, -4 -3, 0 -9 Z" fill="#38bdf8"/>`,
+    2: `<polygon points="48.40,28.45 39.90,43.17 22.90,43.17 14.40,28.45 22.90,13.73 39.90,13.73" fill="#0c0a16"/><text x="24" y="31.9" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-weight="800" font-size="10.5" fill="#fff">+1</text><path transform="translate(38.6 28.4) scale(0.76)" d="M0 -9 C 4 -3, 6.5 0.5, 6.5 3.4 A 6.5 6.5 0 0 1 -6.5 3.4 C -6.5 0.5, -4 -3, 0 -9 Z" fill="#38bdf8"/>`,
   },
   battery: {
     // On-board pulse generator: the pulse generator coin (owner 2026-11-19).
