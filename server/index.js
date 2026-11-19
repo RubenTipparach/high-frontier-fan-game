@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
-import { applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, liveScoreboard, rocketSolarZone, auctionWaitingOn, driveTutorialBots, migrateGloryCrewBindings, elevatorConnectedFactorySet, pinnedFactorySlugs, playerHasColonistPower, playerCrewReactorKinds, decksFor, repairSpeciesDeckSplit, repairSirensAssembly, autoFixGlitches, canLooseOutpostWater, outpostWater } from './game/engine.js';
+import { contractStepPlaces, applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, liveScoreboard, rocketSolarZone, auctionWaitingOn, driveTutorialBots, migrateGloryCrewBindings, elevatorConnectedFactorySet, pinnedFactorySlugs, playerHasColonistPower, playerCrewReactorKinds, decksFor, repairSpeciesDeckSplit, repairSirensAssembly, autoFixGlitches, canLooseOutpostWater, outpostWater } from './game/engine.js';
 import { randomSeed, makeRng, shuffle } from './game/rng.js';
 import { COLONISTS } from '../data/colonists.js';
 import { siteBySlug, nodeBySlug, resolveNodeRef, leoSlug } from './game/planner-graph.js';
@@ -3644,6 +3644,22 @@ function annotateTurns(gameId, rowsAsc) {
 
 // Operation log, optionally only the ops after a given seq (catch-up
 // for a reconnecting client that missed broadcasts).
+// M4: the map places a contract's destination names (every site a step could
+// be announced at right now), for the card's "show on the map" link. Read-only,
+// open to anyone who may view the game (HF4 is open information).
+app.get('/games/:id/contract-places', requireProfile, (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
+  if (!canViewGame(id, req.profile.id, req)) return res.status(403).json({ error: 'not_a_player' });
+  const row = db.prepare('SELECT state FROM game_states WHERE game_id = ?').get(id);
+  if (!row) return res.status(404).json({ error: 'not_found' });
+  const state = JSON.parse(row.state);
+  const side = ['blue', 'gold', 'exodus'].includes(String(req.query.side)) ? String(req.query.side) : 'blue';
+  const places = contractStepPlaces(state, String(req.query.cardId || ''), side, req.profile.id);
+  if (!places) return res.status(404).json({ error: 'unknown_contract' });
+  res.json({ places });
+});
+
 app.get('/games/:id/ops', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });

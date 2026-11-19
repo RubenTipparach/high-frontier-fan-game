@@ -121,7 +121,7 @@ import { futureGoalForCard, checkFutureGoal, CENTAUR_SITE_IDS, GREEK_CAMP_IDS, T
 // M2 Colonist powers (FINAO halved etc.) - the same flags the engine reads.
 import { colonistPower } from '../../data/colonist-abilities.js';
 import { openBernalStackModal, openBernalFuelTank } from './bernal-modal.js';
-import { initContractsUi, refreshContractsUi, abandonBlock, contractFeeDue, payContractFee, abandonContract, timepieceBadge, renderContractAuctionStep, openCompletedContracts } from './contracts-ui.js';
+import { initContractsUi, closeContractsPanel, contractSpaceName, contractsBeforeEndTurn, refreshContractsUi, abandonBlock, contractFeeDue, payContractFee, abandonContract, timepieceBadge, renderContractAuctionStep, openCompletedContracts } from './contracts-ui.js';
 import { getBernalSprite } from './bernal-sprite.js';
 import { fuelTankCylinderMarkup, fuelTransferSectionMarkup } from './fuel-tank-view.js';
 // One client card-lookup: patents PLUS the M2 Bernal cards (which live in
@@ -252,13 +252,13 @@ import {
 // are inert until mountBrowse({ online:true }) flips _online on; the
 // solo path never touches them.
 import { setOnline, isOnline, setM1, isM1, setM2, isM2, setM4, isM4, setSirens, isSirens, setFutures, isFutures,
-  setHermes, isHermes, setAltruism, setMySpecies, mySpecies, homeLabel, homeSiteId, isMySiren } from './online-mode.js';
+  setHermes, isHermes, setAltruism, setMySpecies, mySpecies, homeLabel, homeSiteId, isMySiren, isM4Preview } from './online-mode.js';
 import {
   buildIdMaps, hydrateFromSnapshot, toServerId, toPlannerId,
 } from './net-bridge.js';
 import { abandonSandboxGame, currentSandboxId } from './sandbox-games.js';
 import { isHotSeatOwner, hotSeatWaitingOn, isHotSeatId } from '../../data/hot-seat.js';
-import { getGame, getGameOps, submitGameOp, fetchChat, sendChat, remindTurn, listMyGames, getGameDeck, cloneGameToHotSeat } from '../api.js';
+import { getGame, getGameOps, getContractPlaces, submitGameOp, fetchChat, sendChat, remindTurn, listMyGames, getGameDeck, cloneGameToHotSeat } from '../api.js';
 import { ws } from '../ws.js';
 import { runHazardStepper as runHazardStepperCore } from './hazard-stepper.js';
 
@@ -2920,7 +2920,8 @@ function openCardPreview(id) {
     const el = renderContractCard(id, side);
     if (el) box.appendChild(el);
     back.appendChild(box);
-    back.addEventListener('click', () => back.remove());
+    // Only a tap outside the card closes it, so its tips can be read.
+    back.addEventListener('click', (e) => { if (e.target === back) back.remove(); });
     document.body.appendChild(back);
     return;
   }
@@ -8206,6 +8207,191 @@ function navigateToChatLocation(siteId) {
   if (narrow) { try { showPane(null); } catch (e) { /* ignore */ } }
   _renderer.flyTo(site, locateZoom(4));
 }
+// Where an M4 contract is in the game, for the card library: whose it is and
+// what stage it is at (in a deck, up for auction, in hand, boosted at LEO, in
+// transit with its destination steps, fulfilled). Null outside an M4 game or
+// for a card not in play.
+function contractWhereabouts(id) {
+  const s = _onlineSnapshot;
+  if (!s || !s.m4) return null;
+  for (const p of (s.players || [])) {
+    const ful = (p.fulfilledContracts || []).find((f) => f.id === id);
+    if (ful) {
+      const n = (ful.partners || []).length;
+      return { player: p, side: ful.side, stage: `Fulfilled${n ? ` · ${n} partner${n === 1 ? '' : 's'}` : ''}` };
+    }
+    const meta = (p.contractMeta || {})[id];
+    if (!meta) continue;
+    const side = meta.side || 'blue';
+    if ((p.contractHand || []).includes(id)) return { player: p, side, stage: meta.default ? 'In default' : 'Hand' };
+    if ((p.leo || []).some((sl) => sl && sl.id === id)) return { player: p, side, stage: 'Boosted · LEO' };
+    const steps = ((contractFace(id, side) || {}).steps || []).length;
+    const done = (meta.progress && meta.progress.done) | 0;
+    const prog = steps > 1 ? ` · step ${done}/${steps}` : '';
+    const units = [['Rocket', p.rocket && p.rocket.stack, p.rocket && p.rocket.siteId]];
+    for (const o of Object.values(p.outposts || {})) if (o) units.push([`Outpost ${o.letter}`, o.cards, o.siteId]);
+    if (p.freighter) units.push(['Freighter', p.freighter.stack, p.freighter.siteId]);
+    for (const bn of (p.bernals || [])) if (bn) units.push(['Bernal', bn.stack, bn.siteId]);
+    for (const [label, arr, siteId] of units) {
+      if (!(arr || []).some((sl) => sl && sl.id === id)) continue;
+      return siteId
+        ? { player: p, side, siteId, stage: `In transit · ${label}${prog}` }
+        : { player: p, side, stage: `Boosted · ${label} at LEO${prog}` };
+    }
+    return { player: p, side, stage: 'Boosted' };
+  }
+  if (s.auction && s.auction.kind === 'contract' && s.auction.cardId === id) return { stage: 'Up for auction', side: s.auction.side };
+  for (const deck of Object.values(s.contractDecks || {})) {
+    const i = (deck || []).indexOf(id);
+    if (i === 0) return { stage: 'Top of deck', side: 'blue' };
+    if (i > 0) return { stage: 'In deck', side: 'blue' };
+  }
+  return null;
+}
+
+// M4 contract destination links (contract-card.js#destHtml): one place closes
+// whatever covers the map and flies there; several pin a list of them on the map.
+// Inert while a contract is being picked (the Fundraise deck step, the Enterprise
+// picker): there a tap on the card picks it.
+function contractPlaceNodes(tokens) {
+  if (!_activeData || !_activeData.sites) return [];
+  const out = [];
+  const add = (n) => { if (n && Number.isFinite(n.x) && Number.isFinite(n.y) && !out.includes(n)) out.push(n); };
+  for (const t of tokens) {
+    if (t.startsWith('body:')) {
+      const body = t.slice(5);
+      _activeData.sites.filter((n) => !n.isWaypoint && n.serverId && SITES_BY_ID[n.serverId]
+        && SITES_BY_ID[n.serverId].body === body).forEach(add);
+    } else {
+      add(_activeData.sites.find((n) => n.id2 === t) || (_activeData.byId && _activeData.byId[t]));
+    }
+  }
+  return out;
+}
+function ringContractPlaces(nodes) {
+  if (_renderer && typeof _renderer.setGroupHighlight === 'function') _renderer.setGroupHighlight(nodes && nodes.length ? nodes.map((n) => n.id) : null);
+}
+function closeContractPins() {
+  if (document.getElementById('m4-loc-pins')) ringContractPlaces(null);
+  document.getElementById('m4-loc-pins')?.remove();
+}
+function showContractPins(title, nodes, auctionHidden) {
+  closeContractPins();
+  const box = document.createElement('div');
+  box.id = 'm4-loc-pins';
+  box.className = 'm4-loc-pins';
+  const head = document.createElement('div');
+  head.className = 'm4-loc-pins-head';
+  head.innerHTML = `<b>📍 ${esc(title || 'Destination')}</b>`;
+  const x = document.createElement('button');
+  x.type = 'button'; x.className = 'm4-loc-pins-x'; x.textContent = '✕'; x.setAttribute('aria-label', 'Close');
+  x.addEventListener('click', () => {
+    closeContractPins();
+    document.getElementById('m4-contract-auction')?.classList.remove('m4c-minimized');
+  });
+  head.appendChild(x);
+  box.appendChild(head);
+  const list = document.createElement('div');
+  list.className = 'm4-loc-pins-list';
+  const label = (n) => contractSpaceName(n.id2 || n.id) || n.name || n.id2;
+  for (const n of [...nodes].sort((a, b) => String(label(a)).localeCompare(String(label(b))))) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = label(n);
+    b.addEventListener('click', () => { if (_renderer) _renderer.flyTo(n, locateZoom(4)); });
+    list.appendChild(b);
+  }
+  if (nodes.length > 1) box.appendChild(list);
+  if (auctionHidden) {
+    const back = document.createElement('button');
+    back.type = 'button';
+    back.className = 'm4-loc-pins-back';
+    back.textContent = '↩ Auction';
+    back.addEventListener('click', () => {
+      document.getElementById('m4-contract-auction')?.classList.remove('m4c-minimized');
+      closeContractPins();
+    });
+    box.appendChild(back);
+  }
+  document.body.appendChild(box);
+  placeContractPins();
+}
+// Sit the pin list on the map, just under whatever floats along the map's top
+// edge (the toolbar, the collapsed panel pill on a phone), centred over the map.
+function placeContractPins() {
+  const box = document.getElementById('m4-loc-pins');
+  if (!box) return;
+  const map = document.getElementById('browse-map-canvas');
+  const mr = map ? map.getBoundingClientRect() : { left: 0, right: window.innerWidth, top: 0 };
+  let top = mr.top;
+  let right = mr.right;
+  for (const el of document.querySelectorAll('.map-toolbar, #browse-sidepanel')) {
+    const r = el.getBoundingClientRect();
+    // A full-height side panel covers the map's right side: centre left of it.
+    if (r.width && r.height > 160 && r.left > mr.left + 100 && r.left < right) right = r.left;
+    // Only a bar floating over the top of the map (not a full-height sidebar).
+    if (!r.width || !r.height || r.height > 160 || r.right <= mr.left || r.left >= mr.right) continue;
+    if (r.top <= mr.top + 160) top = Math.max(top, r.bottom);
+  }
+  box.style.top = `${toLayoutPx(top + 8)}px`;
+  box.style.left = `${toLayoutPx((mr.left + right) / 2)}px`;
+}
+window.addEventListener('resize', placeContractPins);
+async function locateContractPlaces(link) {
+  let tokens = String(link.dataset.places || '').split('|').filter(Boolean);
+  // In a game, ask for every place the destination could be announced at now
+  // (filter steps like "Unexplored Synodic Site" included).
+  if (_online && _onlineGameId && _onlineMe && link.dataset.card) {
+    try {
+      const r = await getContractPlaces(_onlineGameId, link.dataset.card, link.dataset.side || 'blue', _onlineMe.token);
+      const live = r && r.ok && r.data && Array.isArray(r.data.places) ? r.data.places : null;
+      if (live && live.length) tokens = live;
+    } catch { /* keep the printed places */ }
+  }
+  const nodes = contractPlaceNodes(tokens);
+  if (!nodes.length || !_renderer) return;
+  // Uncover the map: card previews / zooms and the contract panels close; a live
+  // contract auction only steps aside (the pin list brings it back).
+  document.querySelectorAll('.mp-modal-back').forEach((el) => el.remove());
+  for (const x of document.querySelectorAll('.card-modal-overlay .modal-x')) {
+    try { x.click(); } catch (e) { /* ignore */ }
+  }
+  closeContractsPanel();
+  document.getElementById('m4-contract-where')?.remove();
+  const auction = document.getElementById('m4-contract-auction');
+  if (auction) auction.classList.add('m4c-minimized');
+  let narrow = false;
+  try { narrow = window.matchMedia('(max-width: 720px)').matches; } catch (e) { /* ignore */ }
+  if (narrow) { try { showPane(null); } catch (e) { /* ignore */ } }
+  if (nodes.length === 1) {
+    if (auction) showContractPins(link.dataset.contract, nodes, true); else closeContractPins();
+    _renderer.flyTo(nodes[0], locateZoom(4));
+  } else {
+    showContractPins(link.dataset.contract, nodes, !!auction);
+    _renderer.flyToFit(nodes, { maxZoom: locateZoom(4) });
+  }
+  ringContractPlaces(nodes);
+  // A lone place's ring fades on its own; a pinned list keeps them lit.
+  if (!document.getElementById('m4-loc-pins')) {
+    setTimeout(() => { if (!document.getElementById('m4-loc-pins')) ringContractPlaces(null); }, 30000);
+  }
+}
+const CONTRACT_PICKING = '.m4c-fr-step, .enterprise-pick';
+document.addEventListener('click', (e) => {
+  const a = e.target.closest && e.target.closest('.m4-dest-link');
+  if (!a || a.closest(CONTRACT_PICKING)) return;
+  // Capture phase: the card under the link (a hand tile that zooms, a preview
+  // that closes on any click) never sees this tap.
+  e.preventDefault();
+  e.stopPropagation();
+  locateContractPlaces(a);
+}, true);
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  const a = e.target.closest && e.target.closest('.m4-dest-link');
+  if (a && !a.closest(CONTRACT_PICKING)) { e.preventDefault(); locateContractPlaces(a); }
+}, true);
+
 let _chatLocWired = false;
 function wireChatLocLinks() {
   if (_chatLocWired) return;
@@ -13253,7 +13439,13 @@ function openBernalUnitModal(index) {
 // colonyPromotes. 'Push' / unspecified accepts any colony.
 function colonyPromotesAt(siteId, need) {
   if (!siteId || !getColony(siteId)) return false;
-  if (!need || need === 'Push') return true;
+  if (!need) return true;
+  // A Push dome (2A3a) wants a colony on a site with the push icon.
+  if (need === 'Push') {
+    const node = _activeData && _activeData.byId ? _activeData.byId[siteId] : null;
+    const rec = node && node.serverId ? SITES_BY_ID[node.serverId] : (SITES_BY_ID[siteId] || null);
+    return !!(rec && rec.push);
+  }
   const f = getFactory(siteId);
   return !!(f && (f.spectralType || 'C') === need);
 }
@@ -14058,8 +14250,8 @@ function openUnifiedStackInspector(stackId) {
           const siteId = getStackSiteId(stackId);
           const atSite = !!siteId && siteId !== getLeoSiteId();
           const likelyOk = promotionSiteAt(siteId, card.promotionColony);
-          const need = (card.promotionColony && card.promotionColony !== 'Push')
-            ? `${card.promotionColony}-colony` : 'a colony';
+          const need = (card.promotionColony === 'Push') ? 'a push colony'
+            : card.promotionColony ? `${card.promotionColony}-colony` : 'a colony';
           const lockedPromo = !isOnlineMyTurn();
           const promoBtn = document.createElement('button');
           promoBtn.type = 'button';
@@ -14233,8 +14425,8 @@ function openUnifiedStackInspector(stackId) {
           const frSite = getStackSiteId('freighter');
           const atSite = !!frSite && frSite !== getLeoSiteId();
           const likelyOk = promotionSiteAt(frSite, ucard.promotionColony);
-          const need = (ucard.promotionColony && ucard.promotionColony !== 'Push')
-            ? `${ucard.promotionColony}-colony` : 'a colony';
+          const need = (ucard.promotionColony === 'Push') ? 'a push colony'
+            : ucard.promotionColony ? `${ucard.promotionColony}-colony` : 'a colony';
           const promoBtn = document.createElement('button');
           promoBtn.type = 'button';
           promoBtn.className = 'rocket-select gw-promote';
@@ -16521,6 +16713,7 @@ function ensureMapShell(host) {
       }
       if (hasRocket && (getMovesRemaining() > 0 || getOpsRemaining() > 0)
         && !(await confirmEndTurn())) return;
+      if (isM4() && !(await contractsBeforeEndTurn())) return;
       await submitOnlineOp({ kind: 'END_TURN', ...(bluePlanet ? { bluePlanet: true } : {}) });
       // Turn just passed - refresh the "Next table" list now so the button can
       // offer a jump to another game that needs me without waiting for a poll.
@@ -17697,7 +17890,21 @@ function wireMapInsets(renderer) {
     // gBCR is visual (zoomed) px; the renderer's screen space is layout px.
     const handH    = hand    ? toLayoutPx(hand.getBoundingClientRect().height)   : 0;
     const sideW    = sidebar ? toLayoutPx(sidebar.getBoundingClientRect().width) : 0;
+    // A bar floating over the map's top edge (the collapsed panel pill on a
+    // phone) hides what's under it, so the view centres below it.
+    let topH = 0;
+    const mapEl = document.getElementById('browse-map-canvas');
+    if (mapEl) {
+      const mr = mapEl.getBoundingClientRect();
+      for (const bar of document.querySelectorAll('.map-toolbar, #browse-sidepanel')) {
+        const b = bar.getBoundingClientRect();
+        if (!b.width || !b.height || b.height > 160 || b.top > mr.top + 160) continue;
+        if (b.right <= mr.left || b.left >= mr.right) continue;
+        topH = Math.max(topH, toLayoutPx(b.bottom - mr.top));
+      }
+    }
     r.setInsets({
+      top: topH,
       bottom: handH,
       right:  isMobile ? 0 : sideW,
     });
@@ -19138,8 +19345,8 @@ function openRocketStackModal() {
         const siteId = getStackSiteId('rocket');
         const atSite = !!siteId && siteId !== getLeoSiteId();
         const likelyOk = promotionSiteAt(siteId, card.promotionColony);
-        const need = (card.promotionColony && card.promotionColony !== 'Push')
-          ? `${card.promotionColony}-colony` : 'a colony';
+        const need = (card.promotionColony === 'Push') ? 'a push colony'
+          : card.promotionColony ? `${card.promotionColony}-colony` : 'a colony';
         const lockedPromo = !isOnlineMyTurn();
         const kindWord = isColonistCard ? 'Colonist' : 'TW thruster';
         const promoBtn = document.createElement('button');
@@ -19208,8 +19415,8 @@ function openRocketStackModal() {
       if (_online && canConvBn && slot.face !== 'secondary') {
         const siteId = getStackSiteId('rocket');
         const atSite = !!siteId && siteId !== getLeoSiteId();
-        const need = (card.promotionColony && card.promotionColony !== 'Push')
-          ? `${card.promotionColony}` : 'a matching colony';
+        const need = (card.promotionColony === 'Push') ? 'a push colony'
+          : card.promotionColony ? `${card.promotionColony}` : 'a matching colony';
         const lockedPromo = !isOnlineMyTurn();
         const promoBtn = document.createElement('button');
         promoBtn.type = 'button';
@@ -19242,8 +19449,8 @@ function openRocketStackModal() {
         const siteId = getStackSiteId('rocket');
         const atSite = !!siteId && siteId !== getLeoSiteId();
         const likelyOk = promotionSiteAt(siteId, card.promotionColony);
-        const need = (card.promotionColony && card.promotionColony !== 'Push')
-          ? `${card.promotionColony}-colony` : 'a colony';
+        const need = (card.promotionColony === 'Push') ? 'a push colony'
+          : card.promotionColony ? `${card.promotionColony}-colony` : 'a colony';
         const lockedPromo = !isOnlineMyTurn();
         const promoBtn = document.createElement('button');
         promoBtn.type = 'button';
@@ -21940,6 +22147,7 @@ async function passTurn() {
       if (me) openExomigrateModal(me);
       return;
     }
+    if (isM4() && !(await contractsBeforeEndTurn())) return;
     let bluePlanet = false;
     try { bluePlanet = await bluePlanetChoice(); } catch { bluePlanet = false; }
     await submitOnlineOp({ kind: 'END_TURN', ...(bluePlanet ? { bluePlanet: true } : {}) });
@@ -30966,8 +31174,8 @@ function showSitePopupFor(site) {
       }
     }
     for (const cand of promoCands) {
-      const need = (cand.card.promotionColony && cand.card.promotionColony !== 'Push')
-        ? `${cand.card.promotionColony}-colony` : 'a colony';
+      const need = (cand.card.promotionColony === 'Push') ? 'a push colony'
+        : cand.card.promotionColony ? `${cand.card.promotionColony}-colony` : 'a colony';
       const likelyOk = promotionSiteAt(site.id, cand.card.promotionColony);
       const kindWord = cand.unit === 'bernal' ? 'Lab'
         : cand.unit === 'freighter' ? 'Freighter'
@@ -32641,8 +32849,9 @@ function renderPatents() {
   // a non-M2 game never sees the categories. Both are a white-front /
   // purple-promoted class loaded from data/colonists.js + data/bernals.js.
   const m2Types = isM2() ? ['colonist', 'bernal'] : [];
-  // M4 contracts: their own tab, only in an M4 game.
-  const m4Types = isM4() ? ['contract'] : [];
+  // M4 contracts: their own tab in an M4 game, and as a read-only catalog for
+  // anyone who may play M4 (admins, playtesters) in any other game.
+  const m4Types = (isM4() || isM4Preview()) ? ['contract'] : [];
   const types = [...PATENT_TYPES, 'supports', 'crew', ...expansionTypes, ...m2Types, ...m4Types];
   const counts = Object.fromEntries(PATENT_TYPES.map((t) => [t, patentsByType(t).length]));
   for (const t of expansionTypes) counts[t] = patentsByType(t).length;
@@ -32782,10 +32991,35 @@ function renderPatents() {
   // Exodus contracts have one side). Inspect-only, tap for the full card.
   const contractSideOf = (c) => (c.exodus ? 'exodus' : (librarySide === 'secondary' ? 'gold' : 'blue'));
   const contractLibraryTile = (c) => {
-    const side = contractSideOf(c);
+    const st = _online ? contractWhereabouts(c.id) : null;
+    const side = (st && st.side) || contractSideOf(c);
     const el = renderContractCard(c.id, side) || document.createElement('div');
     el.dataset.cardId = c.id;
     el.classList.add('is-inspectable');
+    if (st) {
+      if (st.player) el.classList.add('is-held');
+      if (st.player && st.player.profileId === (mySnapshotPlayer() || {}).profileId) el.classList.add('is-held-mine');
+      const tag = document.createElement('div');
+      tag.className = 'card-held-tag';
+      tag.innerHTML = (st.player
+        ? `<span class="card-held-who player-name"${st.player.color ? ` style="--player-color:${esc(st.player.color)}"` : ''}>@${esc(st.player.name)}</span>`
+        : '') + `<span class="card-held-where">${esc(st.stage)}</span>`;
+      if (st.siteId) {
+        const locName = onlineSiteLabel(st.siteId);
+        const pin = document.createElement('button');
+        pin.type = 'button';
+        pin.className = 'card-held-pin';
+        pin.textContent = `📍 ${locName}`;
+        pin.title = `Fly the map to ${locName}`;
+        pin.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          const pos = mpRocketCoords(st.siteId);
+          if (pos && _renderer) _renderer.flyTo(pos, locateZoom(4));
+        });
+        tag.appendChild(pin);
+      }
+      el.appendChild(tag);
+    }
     el.addEventListener('click', () => {
       const back = document.createElement('div');
       back.className = 'mp-modal-back mp-card-preview-back';
@@ -32794,7 +33028,8 @@ function renderPatents() {
       const big = renderContractCard(c.id, side);
       if (big) box.appendChild(big);
       back.appendChild(box);
-      back.addEventListener('click', () => back.remove());
+      // Only a tap outside the card closes it, so its tips can be read.
+      back.addEventListener('click', (e) => { if (e.target === back) back.remove(); });
       document.body.appendChild(back);
     });
     return el;
@@ -32981,7 +33216,7 @@ function renderPatents() {
       for (const c of CREW_FACES) if (cardMatchesQuery(c, q)) { grid.appendChild(decorateForHand(c, 'crew')); hits++; }
       if (isM2()) for (const c of COLONISTS) if (cardMatchesQuery(c, q)) { grid.appendChild(decorateForHand(c, 'colonist')); hits++; }
       if (isM2()) for (const c of BERNALS) if (cardMatchesQuery(c, q)) { grid.appendChild(decorateForHand(c, 'bernal')); hits++; }
-      if (isM4()) for (const c of CONTRACTS) if (contractTileMatches(c, q)) { grid.appendChild(contractLibraryTile(c)); hits++; }
+      if (isM4() || isM4Preview()) for (const c of CONTRACTS) if (contractTileMatches(c, q)) { grid.appendChild(contractLibraryTile(c)); hits++; }
       if (!hits) {
         const empty = document.createElement('p');
         empty.className = 'muted patent-search-empty';
@@ -35771,6 +36006,12 @@ initContractsUi({
   myTurn: () => isOnlineMyTurn(),
   submitTurnOp: (op) => submitOnlineOp(op),
   submitAuctionOp: (op) => submitMpAuctionOp(op),
+  // A rules dry run of an op (nothing changes): { ok, log } or { ok:false, error }.
+  dryRun: async (op) => {
+    if (!_online || !_onlineGameId || !_onlineMe) return null;
+    const r = await submitSeatOp(_onlineGameId, { ...op, debug: true }, _onlineMe.token);
+    return r && r.ok ? r.data : null;
+  },
   toast: (msg, level) => { if (_onlineToast) _onlineToast(msg, level); },
   confirm: (opts) => confirmModal(opts),
   // The name a player reads for a map space (a site, a Lagrange point, a hazard).

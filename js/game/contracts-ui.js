@@ -13,7 +13,7 @@
 import {
   CONTRACTS_BY_ID, CONTRACT_PAIRS, CONTRACT_PAIR_NAMES, CONTRACT_BID_MAX, contractFace,
 } from '../../data/contracts.js';
-import { renderContractCard, richText, setContractProgressSource } from './contract-card.js';
+import { renderContractCard, richText, setContractProgressSource, setContractReadySource, fulfillButtonHtml } from './contract-card.js';
 import { SITES_BY_ID } from '../../data/sites.js';
 import { lagrangeLabel } from '../../data/lagrange-labels.js';
 import { nodeLabelOf } from '../../data/map-labels.js';
@@ -42,6 +42,7 @@ export function initContractsUi(deps) {
 }
 // The name a player reads for a map space: the site, the Lagrange point
 // (numbered as on the board), the hazard by its board caption.
+export function contractSpaceName(slug) { return spaceName(slug); }
 function spaceName(slug) {
   const site = SITES_BY_ID[String(slug).replace(/-/g, '_')] || SITES_BY_ID[slug];
   if (site) return site.name;
@@ -83,41 +84,106 @@ const hasContractAbility = (p, key) => (p && p.fulfilledContracts || [])
 // of its ideologies.
 const delegateIn = (s, k, pid) => (((s && s.assembly && s.assembly.delegates) || {})[k] || {})[pid] > 0;
 
-// ---- toolbar tag ----------------------------------------------------------------
-function ensureTag() {
-  const host = document.getElementById('turn-budget');
-  if (!host) return null;
-  let tag = document.getElementById('turn-tag-contracts');
-  if (!tag) {
-    tag = document.createElement('button');
-    tag.type = 'button';
-    tag.id = 'turn-tag-contracts';
-    tag.className = 'turn-tag';
-    tag.title = 'Your contracts: timepiece, auction, boost, fulfill, late fees';
-    tag.addEventListener('click', () => { _panelOpen = true; renderPanel(); });
-    host.appendChild(tag);
+// ---- fulfill readiness ----------------------------------------------------------
+// Which boosted contracts of mine would announce a step (or be fulfilled) where
+// they stand now: asked of the rules engine as a dry run, once per board change
+// on my turn, so the card can carry a Fulfill button and End turn can remind me.
+let _ready = new Map();   // cardId -> { final }
+let _readyKey = null;
+setContractReadySource((id) => _ready.get(id) || null);
+function boostedContractIds(p) {
+  if (!p) return [];
+  return Object.keys(p.contractMeta || {}).filter((id) => !(p.contractHand || []).includes(id)
+    && !(p.contractMeta[id] || {}).default);
+}
+async function checkReady(ids) {
+  const out = new Map();
+  for (const id of ids) {
+    let r = null;
+    try { r = await D.dryRun({ kind: 'FULFILL_CONTRACT', cardId: id }); } catch { r = null; }
+    if (r && r.ok) out.set(id, { final: / fulfilled /.test(String(r.log || '')) });
   }
-  return tag;
+  return out;
+}
+async function refreshReady(s) {
+  const p = me();
+  const ids = (s && p && D.myTurn() && D.dryRun) ? boostedContractIds(p) : [];
+  const key = ids.length ? `${s.round}:${s.turn}:${JSON.stringify(ids.map((id) => [id, (p.contractMeta[id].progress || {}).done | 0]))}:${JSON.stringify([p.rocket, p.outposts, p.freighter, p.bernals, p.leo].map((x) => x && JSON.stringify(x).length))}` : '';
+  if (key === _readyKey) return;
+  _readyKey = key;
+  const next = ids.length ? await checkReady(ids) : new Map();
+  if (key !== _readyKey) return;   // a newer board already took over
+  const same = next.size === _ready.size && [...next].every(([k, v]) => _ready.get(k) && _ready.get(k).final === v.final);
+  _ready = next;
+  if (!same) { decorateReadyCards(); if (_panelOpen) renderPanel(); }
+}
+// Put (or take) the Fulfill button on every contract card already on screen.
+function decorateReadyCards() {
+  for (const el of document.querySelectorAll('.card.m4-contract[data-contract-id]')) {
+    if (el.closest('.m4c-fulfilled')) continue;
+    const ready = _ready.get(el.dataset.contractId);
+    const btn = el.querySelector('.m4-fulfill-btn');
+    el.classList.toggle('m4-ready', !!ready);
+    if (!ready) { if (btn) btn.remove(); continue; }
+    if (btn) btn.remove();
+    const face = el.querySelector('.card-face');
+    if (face) face.insertAdjacentHTML('beforeend', fulfillButtonHtml(el.dataset.contractId, ready));
+  }
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest && e.target.closest('.m4-fulfill-btn');
+  if (!b) return;
+  // Capture phase: the card under the button (a hand tile, a stack card that
+  // opens its zoom) never sees this tap.
+  e.preventDefault();
+  e.stopPropagation();
+  if (b.closest('.m4c-fulfilled')) return;
+  b.disabled = true;
+  document.querySelectorAll('.card-modal-overlay .modal-x').forEach((x) => { try { x.click(); } catch { /* ignore */ } });
+  fulfillContract(b.dataset.fulfill).finally(() => { b.disabled = false; });
+}, true);
+
+// Before the turn ends: a contract that could be fulfilled right here pops up
+// with its Fulfill button. Resolves true to go on ending the turn.
+export async function contractsBeforeEndTurn() {
+  const s = snap(); const p = me();
+  if (!s || !s.m4 || !p || !D || !D.dryRun) return true;
+  const ids = boostedContractIds(p);
+  if (!ids.length) return true;
+  const ready = await checkReady(ids);
+  if (!ready.size) return true;
+  return new Promise((resolve) => {
+    document.getElementById('m4-contract-endturn')?.remove();
+    const ov = document.createElement('div');
+    ov.id = 'm4-contract-endturn';
+    ov.className = 'm4c-overlay m4c-fulfilled m4c-endturn';
+    ov.innerHTML = `<div class="m4c-modal" role="dialog" aria-modal="true" aria-label="Contract ready">
+      <div class="m4c-head"><h3>🏁 Contract ready</h3><button type="button" class="m4c-close" aria-label="Close">✕</button></div>
+      <div class="m4c-body m4c-endturn-body">${[...ready].map(([id, r]) => `<div class="m4c-endturn-item">${cardThumb(id, (p.contractMeta[id] || {}).side || 'blue')}
+        <button type="button" class="m4c-ful-ok" data-go="${esc(id)}">🏁 ${r.final ? 'Fulfill' : 'Announce step'}</button></div>`).join('')}</div>
+      <div class="m4c-endturn-foot"><button type="button" class="m4c-endturn-skip">End turn anyway</button></div></div>`;
+    const done = (v) => { ov.remove(); resolve(v); };
+    ov.addEventListener('click', async (e) => {
+      if (e.target === ov || e.target.closest('.m4c-close')) { done(false); return; }
+      if (e.target.closest('.m4c-endturn-skip')) { done(true); return; }
+      const go = e.target.closest('[data-go]');
+      if (go) { done(false); await fulfillContract(go.dataset.go); }
+    });
+    // The ready card's own Fulfill button is not needed twice here.
+    ov.querySelectorAll('.m4-fulfill-btn').forEach((b) => b.remove());
+    document.body.appendChild(ov);
+  });
 }
 
 // Called on every snapshot apply (browse.js#applySnapshot).
 export function refreshContractsUi() {
   const s = snap();
   const on = !!(s && isM4() && s.m4);
-  const tag = ensureTag();
-  if (tag) {
-    tag.hidden = !on;
-    if (on) {
-      const p = me();
-      const tp = p && p.timepiece;
-      const late = tp && tp.deadbeat;
-      // The contract auction lives only in the Fundraise window (owner
-      // 2026-11-18), so the tag never advertises it.
-      tag.textContent = late ? '⏰ contract LATE' : '📜 contracts';
-      tag.classList.toggle('turn-tag-alert', !!late);
-    }
-  }
-  if (!on) { closePanel(); renderContractAuction(null); _seenFulfilled = null; return; }
+  // No toolbar tag (owner 2026-11-18): the Contracts chip by the stacks and the
+  // timepiece badge are the ways in.
+  document.getElementById('turn-tag-contracts')?.remove();
+  if (!on) { closePanel(); renderContractAuction(null); _seenFulfilled = null; _ready = new Map(); _readyKey = null; return; }
+  refreshReady(s);
   announceFulfilled(s);
   renderContractAuction(s.auction && s.auction.kind === 'contract' ? s.auction : null);
   if (_panelOpen) renderPanel();
@@ -184,6 +250,7 @@ const turnLine = (s) => `Turn ${(s.turn | 0) + 1}`;
 
 
 // ---- the panel --------------------------------------------------------------------
+export function closeContractsPanel() { closePanel(); }
 function closePanel() {
   _panelOpen = false;
   const el = document.getElementById('m4-contracts-panel');

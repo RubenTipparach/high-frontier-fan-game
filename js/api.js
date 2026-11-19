@@ -268,6 +268,11 @@ export async function getGameOps(id, { after, before } = {}, token) {
   return call('GET', `/games/${id}/ops${qs}`, { token });
 }
 
+// M4: every map place a contract's destination could be announced at now.
+export async function getContractPlaces(id, cardId, side, token) {
+  return call('GET', `/games/${id}/contract-places?cardId=${encodeURIComponent(cardId)}&side=${encodeURIComponent(side)}`, { token });
+}
+
 // Manual turn nudge. opts: { targetId } to nudge one player on the
 // clock, { all: true } to nudge everyone on the clock (auction rounds),
 // { waiting: true } to nudge only the players still owing a response
