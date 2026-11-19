@@ -38,7 +38,7 @@ import { COLONISTS_BY_ID } from '../../data/colonists.js';
 // M4 contract cards ride the same lookup (a boosted contract is a stack slot
 // with a mass); they only ever enter play through m4-gated paths.
 import {
-  CONTRACTS_BY_ID, CONTRACT_PAIRS, CONTRACT_PAIR_NAMES, CONTRACT_BID_MAX, contractFace, sideFace, stepSatisfied,
+  CONTRACTS_BY_ID, CONTRACT_PAIRS, CONTRACT_PAIR_NAMES, CONTRACT_BID_MAX, contractFace, sideFace, stepSatisfied, siteMatches, FLYBY_NODES,
   acetyleneTerms,
 } from '../../data/contracts.js';
 const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...BERNALS_BY_ID, ...COLONISTS_BY_ID, ...CONTRACTS_BY_ID };
@@ -95,7 +95,7 @@ import {
   leoSlug, siteBySlug as siteById, hazardKind, nodeBySlug,
   nodeSizeNumber, lineOfSightSites, siteBodyOf, buggyRoamSites,
   isSiteNode, zoneOfSlug, isAerobrakeNode, isAerobrakeLandableSite,
-  neighborSlugs, siteHasLanderBurn, isLanderBurnNode, isHomeBernalSite,
+  neighborSlugs, siteHasLanderBurn, isLanderBurnNode, isHomeBernalSite, allSiteSlugs, allNodeSlugs,
 } from './planner-graph.js';
 import { siteHasHazardousLanderBurn, routeFlewAerobrake } from '../../data/lander-burn.js';
 import { SIGNPOSTED_SITES } from '../../data/signpost-routes.js';
@@ -16118,6 +16118,46 @@ function contractCtx(state, player = null, where = {}) {
     synodic: (id) => SYNODIC_SITE_IDS.includes(id),
     nodeZone: (n) => zoneOfSlug(n),
   };
+}
+// The map places a contract's destination names, for the "show on the map"
+// link: every place each step could be announced at right now, read with the
+// same rules fulfilment uses (contractCtx + siteMatches). Conditions on the
+// carrying stack (a Human aboard, a hazard rolled) are not about the place, so
+// they are left out. Read-only.
+const STACK_FILTERS = ['human', 'robonaut', 'refinery', 'rolled', 'sameturn'];
+export function contractStepPlaces(state, cardId, side, viewerId = null) {
+  const face = contractFace(cardId, side);
+  if (!face) return null;
+  const viewer = (state.players || []).find((p) => p.profileId === viewerId) || null;
+  const ctx = contractCtx(state, viewer, {});
+  const out = new Set();
+  const placeOnly = (f) => Object.fromEntries(Object.entries(f || {}).filter(([k]) => !STACK_FILTERS.includes(k)));
+  const ZI = (z) => ZONE_ORDER.indexOf(String(z || ''));
+  for (const step of face.steps || []) {
+    const f = placeOnly(step.filters);
+    if (step.verb === 'at') step.sites.forEach((x) => out.add(x));
+    else if (step.verb === 'enter') out.add(step.node);
+    else if (step.verb === 'site') {
+      for (const slug of allSiteSlugs()) {
+        if (siteMatches(siteById(slug), f, ctx, [], slug)) out.add(slug);
+      }
+    } else if (step.verb === 'space') {
+      for (const slug of allNodeSlugs()) {
+        const kind = hazardKind(slug);
+        if (f.aero && kind !== 'aero') continue;
+        if (f.hazard && kind !== 'skull') continue;
+        if (f.beyond && !(ZI(zoneOfSlug(slug)) > ZI(f.beyond))) continue;
+        if (!f.aero && !f.hazard && !f.beyond) continue;
+        out.add(slug);
+      }
+    } else if (step.verb === 'flybys') {
+      for (const slug of FLYBY_NODES) {
+        if (f.beyond && !(ZI(zoneOfSlug(slug)) > ZI(f.beyond))) continue;
+        out.add(slug);
+      }
+    }
+  }
+  return [...out];
 }
 // Claim the single default chit on the side of the contract that caused it.
 function claimDefaultChit(state, player, cardId) {

@@ -71,8 +71,12 @@ export function destinationPlaces(steps) {
 function destHtml(face) {
   const text = richText(face.Destination);
   const places = Array.isArray(face.Places) ? face.Places : [];
-  if (!places.length) return text;
-  return `<span class="m4-dest-link" role="link" tabindex="0" data-places="${esc(places.join('|')).replace(/"/g, '&quot;')}" data-contract="${esc(face.Name).replace(/"/g, '&quot;')}" data-tip="Show on the map">${text}</span>`;
+  // Filter destinations ("Unexplored Synodic Site") resolve to their matching
+  // sites in play, so any step that names a kind of place links too.
+  const kinds = (face.Steps || []).some((st) => ['site', 'space', 'flybys'].includes(st.verb));
+  if (!places.length && !(kinds && face.CardId)) return text;
+  const q = (v) => esc(v).replace(/"/g, '&quot;');
+  return `<span class="m4-dest-link" role="link" tabindex="0" data-places="${q(places.join('|'))}"${face.CardId ? ` data-card="${q(face.CardId)}" data-side="${q(face.Side)}"` : ''} data-contract="${q(face.Name)}" data-tip="Show on the map">${text}</span>`;
 }
 
 const SIDE_LABEL = { blue: 'Blue side', gold: 'Gold side', exodus: 'Project Exodus' };
