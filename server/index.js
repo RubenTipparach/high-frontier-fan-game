@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
+import { CONTRACTS_BY_ID } from '../data/contracts.js';
 import { contractStepPlaces, applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, liveScoreboard, rocketSolarZone, auctionWaitingOn, driveTutorialBots, migrateGloryCrewBindings, elevatorConnectedFactorySet, pinnedFactorySlugs, playerHasColonistPower, playerCrewReactorKinds, decksFor, repairSpeciesDeckSplit, repairSirensAssembly, autoFixGlitches, canLooseOutpostWater, outpostWater } from './game/engine.js';
 import { randomSeed, makeRng, shuffle } from './game/rng.js';
 import { COLONISTS } from '../data/colonists.js';
@@ -2681,6 +2682,29 @@ function dispatchTurnNotifications(gameId, kind, state) {
         if (awaiting) {
           notifyProfile(awaiting.profileId, 'turn', `🤝 ${from ? from.name : 'A player'} ${verb} in **${name}**.${jump}`);
           notifyWebhook(`🤝 ${from ? from.name : 'A player'} ${cverb} to ${awaiting.name || 'a player'} in **${name}**.${jump}`);
+        }
+      }
+    } else if (kind === 'AUCTION_CONTRACT_START' || kind === 'AUCTION_CONTRACT_BID' || kind === 'AUCTION_CONTRACT_PASS') {
+      // M4 contract auction: the same pings a patent auction sends. Only the
+      // players the lot is waiting on hear about it (auctionWaitingOn already
+      // drops anyone barred: timepiece out, default chit, hand limit).
+      const a = state.auction;
+      if (a && a.kind === 'contract') {
+        const cname = (CONTRACTS_BY_ID[a.cardId] || {}).name || 'a contract';
+        const waiting = auctionWaitingOn(state);
+        const toClose = waiting.length === 1 && waiting[0].profileId === a.auctioneerId;
+        if (toClose && kind !== 'AUCTION_CONTRACT_START') {
+          notifyProfile(a.auctioneerId, 'auction', `📜 Every bidder has answered on **${cname}** in **${name}** - close the contract auction.${jump}`);
+        } else if (!toClose && kind === 'AUCTION_CONTRACT_START') {
+          for (const p of waiting) {
+            notifyProfile(p.profileId, 'auction', `📜 A contract auction opened in **${name}**: **${cname}** at ${a.low} years - bid fewer years or pass.${jump}`);
+          }
+          notifyWebhook(`📜 A contract auction opened in **${name}**: **${cname}** - bidding is live.${jump}`);
+        } else if (!toClose && kind === 'AUCTION_CONTRACT_BID') {
+          // A lower bid puts the others back on the clock.
+          for (const p of waiting) {
+            notifyProfile(p.profileId, 'auction', `📜 The bid on **${cname}** in **${name}** is down to ${a.low} years - bid again or pass.${jump}`);
+          }
         }
       }
     } else if (kind === 'AUCTION_START') {
