@@ -247,8 +247,8 @@ per room and carried into the game state as a boolean (`state.m0`,
   variant (`m4_no_variants`, on create AND room settings); V9 Sirens in
   particular is not compatible with M4 (owner 2026-11-18). The 4G solitaire rules are DONE: CEO
   Solitaire (V6) implements them, including the 4G3 Solitaire Assembly (owner
-  2026-11-17); only the gate refusing M4 in a CEO Solitaire room remains. M4 is not played with M2 for now (`m4_no_m2` on create AND settings),
-  and contracts whose destination needs a piece the game lacks (Bernals,
+  2026-11-17); only the gate refusing M4 in a CEO Solitaire room remains. M4 combines with M2 (owner 2026-11-18; `m4_no_m2` is gone): with M2 a chit
+  rides a Colonist and its marks go on that Colonist's slot. Contracts whose destination needs a piece the game lacks (Bernals,
   colonists, freighters, the isobank) are dealt out of the decks
   (`data/contracts.js#faceUnplayable`; owner 2026-11-17). Lagrange ring
   numbers (L1-L5) read off the board live in `data/lagrange-labels.js`.

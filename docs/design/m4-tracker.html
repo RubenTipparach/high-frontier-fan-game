@@ -143,7 +143,7 @@ h2.block { font: 800 34px/1 var(--display); margin: 0; }
 
 <div class="wrap">
   <header class="top">
-    <div class="eyebrow">High Frontier 4 - Module 4 - updated 2026-11-16</div>
+    <div class="eyebrow">High Frontier 4 - Module 4 - updated 2026-11-19</div>
     <h1>M4 Exodus Tracker</h1>
     <div class="suits" aria-hidden="true"><span style="background:var(--sun)"></span><span style="background:var(--crescent)"></span><span style="background:var(--star)"></span><span style="background:var(--eagle)"></span></div>
     <p class="lede">Where Module 4 (Exodus) stands: what is built, footage of it running, and the open questions. Each question already has an option built in. Pick an option, add a note, or leave it blank.</p>
@@ -190,7 +190,7 @@ const ART_IMG = '';
 // Progress, newest status first within each stage. s: done | partial | design | todo | m2.
 const PROGRESS = [
   { name: 'Stage 1: Contracts', items: [
-    { s: 'done', t: 'M4 rooms for admins and playtesters', d: 'Opened to the tester list 2026-11-18 (alpha banner names it). M4 forces M0 on; no variants, no M2.' },
+    { s: 'done', t: 'M4 rooms for admins and playtesters', d: 'Opened to the tester list 2026-11-18 (alpha banner names it). M4 forces M0 on; no variants. M2 allowed since 2026-11-18.' },
     { s: 'done', t: 'Contract decks from the card sheet', d: 'Three ideology-pair decks. Contracts needing absent pieces are dealt out.' },
     { s: 'done', t: 'Contract auction', d: 'Fundraise ends with it. Bids in years, lowest wins, finder\'s fee 1 aqua.' },
     { s: 'done', t: 'Ties: the patent auction close', d: 'The initiator awards a tie they are not in.' },
@@ -228,6 +228,9 @@ const PROGRESS = [
   ] },
   { name: 'Stage 3: Isotopes and the starship (M4 + M1)', items: [
     { s: 'done', t: 'Isotope monetization', d: 'The first gold bead doubles FINAO; gold beads at your Bank are worth 10 aqua; sell to / buy from the Earth market (4D1d).' },
+    { s: 'todo', t: 'Paying with gold beads', d: 'Bids and FINAO straight from the Bank; for now a bead is sold first.' },
+    { s: 'todo', t: 'A bead leaving the Bank as your isostandard (4D1e), debasement (4D1b)' },
+    { s: 'todo', t: 'The other monetization triggers (4D1a)', d: 'Lofstrom Loop / GEO Elevator Home Bernal, ET Home Bernal.' },
     { s: 'todo', t: 'The isobank and the isobanker' },
     { s: 'done', t: 'Gold-side contract upheaval (4B1b)', d: 'The first gold bead flips the three decks; gold sides are dealt from then on.' },
     { s: 'todo', t: 'Exodus contracts and the starship launch' },
@@ -278,6 +281,9 @@ const SECTIONS = [
       { id: 'R6', q: 'Shielded takes 2 off Belt and CME rolls (4B2f). A Mobile Factory crossing a belt glitches on a flat roll of 1. Should Shielded protect that roll too?',
         options: ['No: that is a glitch roll, not a Belt Roll', 'Yes'], rec: 0,
         why: 'Its result does not depend on the roll total, so a -2 has nothing to act on.' },
+      { id: 'R8', q: 'Isotope monetization doubles FINAO for everyone (3B5a, an M1 rule). Today it applies in M4 rooms only. Should M1 games without M4 double too?',
+        options: ['M4 rooms only', 'Every game with M1 (only new rooms)', 'Every game with M1, games in flight included'], rec: 0,
+        why: 'An M1 game already monetized would suddenly pay double FINAO mid-game.' },
     ] },
   { tag: 'A', name: 'Augmentations',
     lead: 'Without M2 the chit sits on a Colony; Jar 1, Hexagon and Battery count for your Crew.',
