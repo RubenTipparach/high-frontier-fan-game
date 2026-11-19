@@ -491,6 +491,12 @@ let _firstPlayerMin = false;
 let _freeCubeMin = false;
 let _auctionMin = false;
 let _eventMin = false;
+// The card picked in the Sunspot event chooser (Budget Cuts discard, Pad
+// Explosion tie). The chooser is redrawn on every board update, so the pick
+// lives here, keyed by the event, and survives a redraw (it used to fall back
+// to the first card, so a pick made just before another player acted was
+// silently swapped for the first card in hand).
+let _eventPick = { key: null, id: null };
 // Rising-edge tracker for auction turn notifications: remembers, per lot,
 // whether it was already "my turn" (bid/pass) or "my close" so a re-render
 // only toasts when the turn newly lands on me - e.g. the auctioneer raises
@@ -4679,6 +4685,7 @@ function renderEventChooser(snapshot) {
   if (!pending || !_online || !gameViewVisible()) {
     if (existing) existing.remove();
     setMpTurnAction('event', null);
+    _eventPick = { key: null, id: null };
     return;
   }
   const players = (snapshot.players || []);
@@ -4891,7 +4898,12 @@ function renderEventChooser(snapshot) {
   // A tied card's deployed radiator side, when the blast reported one.
   const padSides = (isPad && pending.optionSides && pending.optionSides[myId]) || null;
   const padSideOf = (id) => (padSides && padSides[id]) || null;
-  let selected = optionIds[0] || null;
+  // No card is preselected: Discard waits for the player's own pick.
+  if (_eventPick.key !== `${kind}` || !optionIds.includes(_eventPick.id)) {
+    if (_eventPick.key !== `${kind}`) _eventPick = { key: `${kind}`, id: null };
+    else _eventPick.id = null;
+  }
+  let selected = _eventPick.id;
 
   const confirm = document.createElement('button');
   confirm.type = 'button';
@@ -4901,7 +4913,9 @@ function renderEventChooser(snapshot) {
   confirm.addEventListener('click', () => {
     if (!selected) return;
     confirm.disabled = true;
-    submitEventChoice(selected, padLobby);
+    const id = selected;
+    _eventPick = { key: null, id: null };
+    submitEventChoice(id, padLobby);
   });
   actions.appendChild(confirm);
 
@@ -4934,7 +4948,7 @@ function renderEventChooser(snapshot) {
       tick.className = 'et-pick-tick';
       tick.textContent = '\u2713';
       pick.appendChild(tick);
-      const choose = () => { selected = id; confirm.disabled = false; repaint(); };
+      const choose = () => { selected = id; _eventPick = { key: `${kind}`, id }; confirm.disabled = false; repaint(); };
       pick.addEventListener('click', choose);
       pick.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); choose(); }
