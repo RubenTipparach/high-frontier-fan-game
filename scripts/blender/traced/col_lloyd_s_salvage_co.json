@@ -1,0 +1,226 @@
+{
+"trader.head": [
+85.9,
+87.6
+],
+"trader.head_tip": [
+85.3,
+34.4
+],
+"trader.neck_01": [
+76.7,
+115.7
+],
+"trader.neck_01_tip": [
+85.9,
+87.6
+],
+"trader.hand_l": [
+266.3,
+127.1
+],
+"trader.hand_l_tip": [
+275.3,
+117.8
+],
+"trader.hand_r": [
+38.5,
+341.7
+],
+"trader.hand_r_tip": [
+42.4,
+355.8
+],
+"trader.lowerarm_l": [
+197.0,
+171.7
+],
+"trader.lowerarm_l_tip": [
+266.3,
+127.1
+],
+"trader.lowerarm_r": [
+11.0,
+249.8
+],
+"trader.lowerarm_r_tip": [
+38.5,
+341.7
+],
+"trader.upperarm_l": [
+124.5,
+153.8
+],
+"trader.upperarm_l_tip": [
+197.0,
+171.7
+],
+"trader.upperarm_r": [
+21.2,
+159.0
+],
+"trader.upperarm_r_tip": [
+11.0,
+249.8
+],
+"trader.foot_l": [
+121.6,
+513.7
+],
+"trader.foot_l_tip": [
+147.4,
+550.2
+],
+"trader.foot_r": [
+38.3,
+580.8
+],
+"trader.foot_r_tip": [
+60.9,
+631.0
+],
+"trader.calf_l": [
+114.8,
+394.4
+],
+"trader.calf_l_tip": [
+121.6,
+513.7
+],
+"trader.calf_r": [
+44.4,
+432.9
+],
+"trader.calf_r_tip": [
+38.3,
+580.8
+],
+"trader.spine_03": [
+63.6,
+223.8
+],
+"trader.spine_03_tip": [
+60.8,
+187.1
+],
+"trader.pelvis": [
+75.6,
+291.6
+],
+"trader.pelvis_tip": [
+68.6,
+256.1
+],
+"partner.head": [
+251.6,
+103.6
+],
+"partner.head_tip": [
+252.2,
+66.7
+],
+"partner.neck_01": [
+252.0,
+124.2
+],
+"partner.neck_01_tip": [
+251.6,
+103.6
+],
+"partner.hand_l": [
+315.8,
+263.5
+],
+"partner.hand_l_tip": [
+317.5,
+270.9
+],
+"partner.hand_r": [
+181.4,
+252.6
+],
+"partner.hand_r_tip": [
+178.5,
+259.0
+],
+"partner.lowerarm_l": [
+305.1,
+208.5
+],
+"partner.lowerarm_l_tip": [
+315.8,
+263.5
+],
+"partner.lowerarm_r": [
+199.6,
+203.4
+],
+"partner.lowerarm_r_tip": [
+181.4,
+252.6
+],
+"partner.upperarm_l": [
+297.5,
+150.9
+],
+"partner.upperarm_l_tip": [
+305.1,
+208.5
+],
+"partner.upperarm_r": [
+208.1,
+149.8
+],
+"partner.upperarm_r_tip": [
+199.6,
+203.4
+],
+"partner.foot_l": [
+287.9,
+439.1
+],
+"partner.foot_l_tip": [
+288.5,
+471.8
+],
+"partner.foot_r": [
+207.8,
+423.8
+],
+"partner.foot_r_tip": [
+201.6,
+453.5
+],
+"partner.calf_l": [
+281.8,
+340.5
+],
+"partner.calf_l_tip": [
+287.9,
+439.1
+],
+"partner.calf_r": [
+216.0,
+331.9
+],
+"partner.calf_r_tip": [
+207.8,
+423.8
+],
+"partner.spine_03": [
+251.9,
+199.9
+],
+"partner.spine_03_tip": [
+252.7,
+172.0
+],
+"partner.pelvis": [
+250.2,
+248.0
+],
+"partner.pelvis_tip": [
+251.2,
+225.1
+]
+}

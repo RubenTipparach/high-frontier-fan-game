@@ -1,0 +1,114 @@
+{
+"hiker.head": [
+129.5,
+61.0
+],
+"hiker.head_tip": [
+128.5,
+35.2
+],
+"hiker.neck_01": [
+138.9,
+73.1
+],
+"hiker.neck_01_tip": [
+129.5,
+61.0
+],
+"hiker.hand_l": [
+155.1,
+177.9
+],
+"hiker.hand_l_tip": [
+154.3,
+185.0
+],
+"hiker.hand_r": [
+104.9,
+162.8
+],
+"hiker.hand_r_tip": [
+100.0,
+166.0
+],
+"hiker.lowerarm_l": [
+150.6,
+129.7
+],
+"hiker.lowerarm_l_tip": [
+155.1,
+177.9
+],
+"hiker.lowerarm_r": [
+133.2,
+133.9
+],
+"hiker.lowerarm_r_tip": [
+104.9,
+162.8
+],
+"hiker.upperarm_l": [
+136.0,
+88.9
+],
+"hiker.upperarm_l_tip": [
+150.6,
+129.7
+],
+"hiker.upperarm_r": [
+145.7,
+97.5
+],
+"hiker.upperarm_r_tip": [
+133.2,
+133.9
+],
+"hiker.foot_l": [
+129.2,
+297.0
+],
+"hiker.foot_l_tip": [
+110.5,
+308.6
+],
+"hiker.foot_r": [
+224.4,
+281.8
+],
+"hiker.foot_r_tip": [
+213.8,
+300.9
+],
+"hiker.calf_l": [
+117.9,
+220.6
+],
+"hiker.calf_l_tip": [
+129.2,
+297.0
+],
+"hiker.calf_r": [
+179.7,
+221.3
+],
+"hiker.calf_r_tip": [
+224.4,
+281.8
+],
+"hiker.spine_03": [
+159.5,
+127.9
+],
+"hiker.spine_03_tip": [
+158.8,
+108.2
+],
+"hiker.pelvis": [
+150.3,
+163.3
+],
+"hiker.pelvis_tip": [
+156.1,
+145.3
+]
+}

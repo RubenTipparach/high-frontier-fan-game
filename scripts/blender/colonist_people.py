@@ -99,25 +99,24 @@ def build_figure(f):
         HumanService.deserialize_from_dict(info, settings)
     objs = list(set(bpy.data.objects) - before)
     rig = next(o for o in objs if o.type == "ARMATURE")
-    meshes = [o for o in objs if o.type == "MESH"]
-    body = max(meshes, key=lambda o: len(o.data.vertices) if o.name == f["id"] or "human" in o.name.lower() else 0)
-    # flat materials
+    # MPFB names the parts "<id>.body", "<id>.<asset>"; match on the asset name.
     skin = flat(f["id"] + "_skin", hexrgb(f.get("skin", "#c99a7a")), 0.5, 0.15)
     hair = flat(f["id"] + "_hair", hexrgb(f.get("hair_color", "#2a1a10")), 0.55)
+    eye = flat(f["id"] + "_eye", [235, 232, 228], 0.25)
     cols = f.get("cloth_colors", {})
     for o in objs:
         if o.type != "MESH":
             continue
-        n = o.name.lower()
-        if o is body:
+        part = o.name.split(".", 1)[1].lower() if "." in o.name else o.name.lower()
+        if part.startswith("body"):
             set_mat(o, skin)
-        elif "eyebrow" in n or "eyelash" in n or (f.get("hair") and f["hair"] in n):
+        elif part.startswith(("eyebrow", "eyelash")) or (f.get("hair") and part.startswith(f["hair"])):
             set_mat(o, hair)
-        elif "low-poly" in n or "eye" in n:
-            set_mat(o, flat(f["id"] + "_eye", [240, 240, 240], 0.2))
+        elif part.startswith(("low-poly", "high-poly", "teeth", "tongue")):
+            pass          # keep MPFB's own eye texture: a flat colour blanks the irises
         else:
-            key = next((k for k in cols if k in n), None)
-            set_mat(o, flat(f["id"] + "_" + n, hexrgb(cols[key] if key else f.get("cloth", "#8a8a8a")), 0.75))
+            key = next((k for k in cols if k in part), None)
+            set_mat(o, flat(f["id"] + "_" + part, hexrgb(cols[key] if key else f.get("cloth", "#8a8a8a")), 0.75))
     return rig, objs
 
 
@@ -179,7 +178,7 @@ def render_scene(sc):
     s = bpy.context.scene
     s.render.engine = "CYCLES"
     s.cycles.device = "CPU"
-    s.cycles.samples = 24 if LO else 96
+    s.cycles.samples = 24 if LO else 48
     s.cycles.use_denoising = True
     s.render.film_transparent = True
     s.render.resolution_x, s.render.resolution_y = (300, 330) if LO else (600, 660)
@@ -234,7 +233,7 @@ def render_scene(sc):
                 v = world_to_camera_view(s, cam, rig.matrix_world @ co)
                 marks[f"{fid}.{bn}{end}"] = [round(v.x * 300, 1), round((1 - v.y) * 330, 1)]
     json.dump(marks, open(os.path.join(OUT, sc["id"] + ".json"), "w"), indent=0)
-    print("RENDERED", s.render.filepath, [(o.name, o.data.materials[0].name if o.type == "MESH" and o.data.materials else "") for o in bpy.data.objects if o.type == "MESH"])
+    print("RENDERED", s.render.filepath)
 
 
 os.makedirs(OUT, exist_ok=True)

@@ -175,16 +175,16 @@
   {
    "id": "col_botany_bay_convicts",
    "camera": [
-    0.12,
-    -1.25,
-    1.5
+    0.15,
+    -1.35,
+    1.45
    ],
    "look": [
     0,
-    -0.45,
-    1.38
+    -0.3,
+    1.3
    ],
-   "lens": 34,
+   "lens": 38,
    "figures": [
     {
      "id": "bb",
@@ -205,31 +205,31 @@
      "pose": {
       "upperarm_r": {
        "aim": [
-        -0.35,
-        -0.85,
-        0.1
+        -0.3,
+        -0.72,
+        -0.62
        ]
       },
       "lowerarm_r": {
        "aim": [
-        -0.55,
-        -0.75,
-        0.3
+        -0.45,
+        -0.8,
+        0.4
        ]
       },
       "hand_r_shape": "fist",
       "upperarm_l": {
        "aim": [
-        0.35,
-        -0.85,
-        0.1
+        0.3,
+        -0.72,
+        -0.62
        ]
       },
       "lowerarm_l": {
        "aim": [
-        0.55,
-        -0.75,
-        0.3
+        0.45,
+        -0.8,
+        0.4
        ]
       },
       "hand_l_shape": "fist",
@@ -628,7 +628,7 @@
     1.42
    ],
    "look": [
-    -0.22,
+    0.28,
     0,
     1.32
    ],
@@ -647,7 +647,7 @@
      "hair": "short01",
      "hair_color": "#120a06",
      "clothes": [
-      "female_sportsuit01"
+      "female_casualsuit01"
      ],
      "cloth": "#f2f2f4",
      "pose": {
@@ -726,7 +726,7 @@
      "hair": "afro01",
      "hair_color": "#140a06",
      "clothes": [
-      "female_sportsuit01"
+      "female_casualsuit01"
      ],
      "cloth": "#f4f6f8",
      "pose": {

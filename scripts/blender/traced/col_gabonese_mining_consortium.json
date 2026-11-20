@@ -1,0 +1,114 @@
+{
+"boy.head": [
+147.7,
+240.2
+],
+"boy.head_tip": [
+145.0,
+194.1
+],
+"boy.neck_01": [
+130.0,
+259.7
+],
+"boy.neck_01_tip": [
+147.7,
+240.2
+],
+"boy.hand_l": [
+214.6,
+229.8
+],
+"boy.hand_l_tip": [
+211.7,
+220.0
+],
+"boy.hand_r": [
+180.3,
+241.1
+],
+"boy.hand_r_tip": [
+181.1,
+228.6
+],
+"boy.lowerarm_l": [
+208.8,
+275.7
+],
+"boy.lowerarm_l_tip": [
+214.6,
+229.8
+],
+"boy.lowerarm_r": [
+140.4,
+311.7
+],
+"boy.lowerarm_r_tip": [
+180.3,
+241.1
+],
+"boy.upperarm_l": [
+153.5,
+287.0
+],
+"boy.upperarm_l_tip": [
+208.8,
+275.7
+],
+"boy.upperarm_r": [
+102.1,
+310.7
+],
+"boy.upperarm_r_tip": [
+140.4,
+311.7
+],
+"boy.foot_l": [
+153.5,
+576.7
+],
+"boy.foot_l_tip": [
+179.0,
+600.2
+],
+"boy.foot_r": [
+106.9,
+646.7
+],
+"boy.foot_r_tip": [
+132.9,
+680.8
+],
+"boy.calf_l": [
+156.6,
+474.5
+],
+"boy.calf_l_tip": [
+153.5,
+576.7
+],
+"boy.calf_r": [
+123.7,
+512.2
+],
+"boy.calf_r_tip": [
+106.9,
+646.7
+],
+"boy.spine_03": [
+113.5,
+345.1
+],
+"boy.spine_03_tip": [
+103.6,
+307.4
+],
+"boy.pelvis": [
+126.1,
+405.3
+],
+"boy.pelvis_tip": [
+118.1,
+370.9
+]
+}

@@ -1,0 +1,226 @@
+{
+"jesuit.head": [
+166.9,
+87.3
+],
+"jesuit.head_tip": [
+168.0,
+57.9
+],
+"jesuit.neck_01": [
+164.0,
+101.1
+],
+"jesuit.neck_01_tip": [
+166.9,
+87.3
+],
+"jesuit.hand_l": [
+240.4,
+74.8
+],
+"jesuit.hand_l_tip": [
+241.0,
+68.5
+],
+"jesuit.hand_r": [
+145.8,
+194.6
+],
+"jesuit.hand_r_tip": [
+148.3,
+198.2
+],
+"jesuit.lowerarm_l": [
+232.9,
+116.4
+],
+"jesuit.lowerarm_l_tip": [
+240.4,
+74.8
+],
+"jesuit.lowerarm_r": [
+127.2,
+165.0
+],
+"jesuit.lowerarm_r_tip": [
+145.8,
+194.6
+],
+"jesuit.upperarm_l": [
+193.3,
+123.3
+],
+"jesuit.upperarm_l_tip": [
+232.9,
+116.4
+],
+"jesuit.upperarm_r": [
+132.6,
+122.5
+],
+"jesuit.upperarm_r_tip": [
+127.2,
+165.0
+],
+"jesuit.foot_l": [
+186.1,
+333.3
+],
+"jesuit.foot_l_tip": [
+196.0,
+352.5
+],
+"jesuit.foot_r": [
+139.1,
+342.4
+],
+"jesuit.foot_r_tip": [
+145.6,
+363.3
+],
+"jesuit.calf_l": [
+186.3,
+257.8
+],
+"jesuit.calf_l_tip": [
+186.1,
+333.3
+],
+"jesuit.calf_r": [
+141.4,
+263.1
+],
+"jesuit.calf_r_tip": [
+139.1,
+342.4
+],
+"jesuit.spine_03": [
+158.1,
+159.8
+],
+"jesuit.spine_03_tip": [
+157.7,
+140.5
+],
+"jesuit.pelvis": [
+163.0,
+195.5
+],
+"jesuit.pelvis_tip": [
+160.7,
+176.3
+],
+"colleague.head": [
+-1.0,
+121.4
+],
+"colleague.head_tip": [
+-0.5,
+97.7
+],
+"colleague.neck_01": [
+8.0,
+137.8
+],
+"colleague.neck_01_tip": [
+-1.0,
+121.4
+],
+"colleague.hand_l": [
+-12.6,
+227.2
+],
+"colleague.hand_l_tip": [
+-16.0,
+231.6
+],
+"colleague.hand_r": [
+-11.4,
+210.6
+],
+"colleague.hand_r_tip": [
+-14.9,
+213.5
+],
+"colleague.lowerarm_l": [
+2.6,
+193.1
+],
+"colleague.lowerarm_l_tip": [
+-12.6,
+227.2
+],
+"colleague.lowerarm_r": [
+7.4,
+185.3
+],
+"colleague.lowerarm_r_tip": [
+-11.4,
+210.6
+],
+"colleague.upperarm_l": [
+2.0,
+153.4
+],
+"colleague.upperarm_l_tip": [
+2.6,
+193.1
+],
+"colleague.upperarm_r": [
+6.1,
+151.5
+],
+"colleague.upperarm_r_tip": [
+7.4,
+185.3
+],
+"colleague.foot_l": [
+7.0,
+346.5
+],
+"colleague.foot_l_tip": [
+-11.0,
+358.7
+],
+"colleague.foot_r": [
+10.5,
+323.0
+],
+"colleague.foot_r_tip": [
+-5.4,
+333.0
+],
+"colleague.calf_l": [
+2.9,
+282.9
+],
+"colleague.calf_l_tip": [
+7.0,
+346.5
+],
+"colleague.calf_r": [
+6.1,
+269.3
+],
+"colleague.calf_r_tip": [
+10.5,
+323.0
+],
+"colleague.spine_03": [
+9.7,
+183.3
+],
+"colleague.spine_03_tip": [
+6.4,
+160.3
+],
+"colleague.pelvis": [
+7.2,
+219.6
+],
+"colleague.pelvis_tip": [
+15.7,
+206.6
+]
+}

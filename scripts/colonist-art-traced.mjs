@@ -58,7 +58,7 @@ export function drawTracedFronts({ W, H, panel, emit }) {
     const g = rng(71);
     const link = (x, y, ang) => `<g transform="translate(${f1(x)},${f1(y)}) rotate(${f1(ang)})"><rect x="-8" y="-4.5" width="16" height="9" rx="4.5" fill="none" stroke="#3a3a40" stroke-width="3"/></g>`;
     let chain = '';
-    for (let i = 0; i <= 10; i++) { if (i === 5) continue; const p = mid(a, b, i / 10); chain += link(p[0], p[1] + Math.sin(i / 10 * Math.PI) * 10, i % 2 ? 90 : 0); }
+    for (let i = 0; i <= 10; i++) { if (i === 5) continue; const p = mid(a, b, i / 10); chain += link(p[0], p[1] + Math.sin(i / 10 * Math.PI) * 4, i % 2 ? 90 : 0); }
     let fly = ''; const c = mid(a, b);
     for (let i = 0; i < 7; i++) fly += link(c[0] + (g() - 0.5) * 70, c[1] - 20 - g() * 60, g() * 180);
     out('col_botany_bay_convicts', `${radial('bb-bg', [['0%', '#fff4e0'], ['55%', '#f0c890'], ['100%', '#a86a3a']], '50%', '40%')}${soft('bb-v')}`,
