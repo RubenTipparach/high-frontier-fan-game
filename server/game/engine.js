@@ -11564,6 +11564,27 @@ function mayRabbleRouse(state, player) {
   if (!state.anarchy || factionPrivilegesLocked(state, player)) return false;
   return playerOwnsAbility(player, 'RABBLE-ROUSER');
 }
+// Lobby Mishap Insurance (4B5a): pay 1 aqua and discard a Centrist delegate on
+// the first turn a contract is late; the Pool pays that turn's late fee.
+function lobbyMishapInsurance(state, player, asm, laws, solo) {
+  if (!state.m4) return fail('bad_ideology');
+  const tp = player.timepiece;
+  const meta = tp && contractMetaOf(player, tp.contractId);
+  const face = tp && contractFaceOf(player, tp.contractId);
+  if (!tp || !tp.deadbeat || !meta || !face || meta.default) return fail('no_late_contract');
+  if (!meta.firstLate || !player.turnStartedLate) return fail('not_first_late_turn');
+  if (meta.insuredTurn) return fail('already_insured');
+  if (laws.active.has('centrist')) return fail('law_already_active');
+  if (placeCount(asm, 'centrist', player.profileId) <= 0) return fail('no_delegate_there');
+  const freeLobby = solo && laws.active.has('unity');
+  if (!freeLobby && (player.aqua | 0) < 1) return fail('insufficient_aqua');
+  if (!freeLobby) player.aqua -= 1;
+  setPlaceCount(asm, 'centrist', player.profileId, placeCount(asm, 'centrist', player.profileId) - 1);
+  meta.paid += face.lateFee;
+  meta.insuredTurn = true;
+  player.lobbiedThisTurn = true;
+  return { ok: true, state, log: `${player.name} lobbied Mishap Insurance (${freeLobby ? 'no aqua' : '1 aqua'} and a Centrist delegate): the Pool pays the ${face.lateFee}-aqua late fee on ${face.name} this turn.` };
+}
 function applyLobby(state, op, player) {
   if (!state.m0) return fail('not_m0');
   const asm = assemblyOf(state);
@@ -11572,6 +11593,10 @@ function applyLobby(state, op, player) {
   if (laws.lobbyingDisabled) return fail('lobbying_disabled');
   if (player.lobbiedThisTurn) return fail('already_lobbied');
   const key = String(op.ideology || '');
+  // Mishap Insurance (4B5a): "You may lobby this Law." On the first turn a
+  // contract is late, a Centrist delegate (plus the usual aqua) has the Pool
+  // pay that turn's late fee, as if the law were in force when it flipped.
+  if (key === 'centrist') return lobbyMishapInsurance(state, player, asm, laws, solo);
   if (!IDEOLOGY_ORDER.includes(key)) return fail('bad_ideology');
   if (laws.active.has(key)) return fail('law_already_active');
   if (placeCount(asm, key, player.profileId) <= 0) return fail('no_delegate_there');
@@ -16631,6 +16656,9 @@ function contractClockTick(state) {
     tp.deadbeat = true;
     const face = contractFaceOf(p, tp.contractId);
     const meta = contractMetaOf(p, tp.contractId);
+    // The first late turn is the one Mishap Insurance covers, and the one in
+    // which it may be lobbied (4B5a). Cleared at the end of that turn.
+    if (meta) meta.firstLate = true;
     notes.push(`${p.name}'s ${face ? face.name : 'contract'} is LATE: pay the ${face ? face.lateFee : 0}-aqua late fee each turn or default.`);
     if (meta && lawInForce(state, 'centrist')) {
       meta.paid += face.lateFee;
@@ -16648,6 +16676,7 @@ function contractEndTurnCheck(state, player) {
   const meta = contractMetaOf(player, tp.contractId);
   const face = contractFaceOf(player, tp.contractId);
   if (!meta || !face || meta.default) return '';
+  meta.firstLate = false;
   if (meta.insuredTurn) { meta.insuredTurn = false; return ''; }
   if ((player.lateFeePaidThisTurn | 0) >= face.lateFee) return '';
   meta.default = true;

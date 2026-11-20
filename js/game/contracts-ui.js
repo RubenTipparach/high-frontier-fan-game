@@ -83,6 +83,20 @@ const hasContractAbility = (p, key) => (p && p.fulfilledContracts || [])
 // Connections (4B2f): a deck is also open when you have a delegate in either
 // of its ideologies.
 const delegateIn = (s, k, pid) => (((s && s.assembly && s.assembly.delegates) || {})[k] || {})[pid] > 0;
+// Mishap Insurance may be lobbied (4B5a) on the first turn a contract is late,
+// with a Centrist delegate, while the law is not already in force.
+function mishapLobbyable(id) {
+  const s = snap(); const p = me();
+  if (!s || !p || !D || !D.myTurn() || !s.m0) return false;
+  const tp = p.timepiece;
+  const meta = (p.contractMeta || {})[id] || {};
+  if (!tp || tp.contractId !== id || !tp.deadbeat || meta.default || !meta.firstLate || meta.insuredTurn) return false;
+  if (!p.turnStartedLate || p.lobbiedThisTurn) return false;
+  if (lawKeys(s, null).has('centrist')) return false;
+  if (!delegateIn(s, 'centrist', p.profileId)) return false;
+  return (p.aqua | 0) >= 1 || (usesSoloAssembly(s) && lawKeys(s, null).has('unity'));
+}
+const mishapBtn = (id) => `<button type="button" data-act="mishap" data-id="${id}" title="Pay 1 aqua and discard a Centrist delegate: the Pool pays this turn's late fee.">🛡 Lobby Mishap Insurance</button>`;
 
 // ---- fulfill readiness ----------------------------------------------------------
 // Which boosted contracts of mine would announce a step (or be fulfilled) where
@@ -310,8 +324,13 @@ export function showContractWhere(id) {
   ov.className = 'm4c-overlay';
   ov.innerHTML = `<div class="m4c-modal m4c-where" role="dialog" aria-label="Contract">
     <div class="m4c-head"><h3>⏱ ${esc((faceOf(p, id) || {}).name || '')}</h3><button type="button" class="m4c-close" aria-label="Close">✕</button></div>
-    <div class="m4c-where-body">${cardThumb(id, meta.side)}<div class="m4c-where-loc">📍 ${esc(locationOf(p, id) || 'In a stack')}</div></div></div>`;
+    <div class="m4c-where-body">${cardThumb(id, meta.side)}<div class="m4c-where-loc">📍 ${esc(locationOf(p, id) || 'In a stack')}</div>
+      ${mishapLobbyable(id) ? `<div class="m4c-btns">${mishapBtn(id)}</div>` : ''}</div></div>`;
   const close = () => ov.remove();
+  ov.querySelector('[data-act="mishap"]')?.addEventListener('click', async () => {
+    close();
+    await D.submitTurnOp({ kind: 'LOBBY', ideology: 'centrist' });
+  });
   ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
   ov.querySelector('.m4c-close').addEventListener('click', close);
   document.body.appendChild(ov);
@@ -402,6 +421,7 @@ function renderPanel() {
       <div class="m4c-note">${esc(where)}</div>
       <div class="m4c-btns">${myTurn ? `<button type="button" data-act="fulfill" data-id="${id}">Fulfill here</button>` : ''}
       ${myTurn && late ? `<button type="button" data-act="pay" data-id="${id}" data-max="${f.lateFee}">Pay late fee (${f.lateFee})</button>` : ''}
+      ${mishapLobbyable(id) ? mishapBtn(id) : ''}
       ${myTurn && abandonBlock(s, p, id) === null ? `<button type="button" data-act="abandon" data-id="${id}">Abandon (Anarchy)</button>` : ''}</div></div>`;
   }).join('');
   const partnerLine = (x) => ((x.partners || []).length
@@ -546,6 +566,7 @@ async function onAct(b) {
   else if (act === 'iso-buy') await D.submitTurnOp({ kind: 'ISOTOPE_EXCHANGE', action: 'buy', amount: 1 });
   else if (act === 'iso-tank') await D.submitTurnOp({ kind: 'ISOTOPE_EXCHANGE', action: 'deposit' });
   else if (act === 'pay') await payContractFee(id);
+  else if (act === 'mishap') await D.submitTurnOp({ kind: 'LOBBY', ideology: 'centrist' });
   else if (act === 'abandon') await abandonContract(id);
   if (act === 'auction') closePanel();
   else if (_panelOpen) renderPanel();
