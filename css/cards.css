@@ -2047,3 +2047,9 @@ button.m4c-aug:hover { border-color: #60a5fa; background: #232838; }
 .m4c-endturn-item .m4c-ful-ok { justify-self: auto; align-self: stretch; }
 .m4c-endturn-foot { display: flex; justify-content: center; padding: 0 14px 14px; }
 .m4c-endturn-skip { background: none; border: 1px solid #3f4460; color: #cfd6e6; border-radius: 8px; padding: 7px 16px; cursor: pointer; }
+
+/* M4 colonist marks: bottom of the art, right of the thrust triangle (Humans)
+   or near the spectral hex (Robots), as printed on the Spaceborn deck. */
+.colonist-marks { position: absolute; bottom: 6px; left: 46%; z-index: 3; display: flex; gap: 3px; align-items: flex-end; pointer-events: auto; filter: drop-shadow(0 1px 2px rgba(0,0,0,.55)); }
+.colonist-marks.robot { left: 34%; }
+.colonist-marks.beside-thrust { left: 58%; }

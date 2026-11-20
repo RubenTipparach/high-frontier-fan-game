@@ -19,6 +19,23 @@ export const M4_COLONIST_IDS = [
   'col_clone_entrepreneurs',
 ];
 
+// The glowing figure in laurels printed on Lava Lamp Evangelists' shirt (owner
+// sign-off 2026-11-20): a raised-arms figure inside a laurel wreath, centred at
+// (x, y). Drawn into the art so the thrust triangle sits in front of it.
+function shirtLaurel(x, y, k) {
+  const leaves = (side) => Array.from({ length: 7 }, (_, i) => {
+    const deg = 125 + i * 19, t = deg * Math.PI / 180;
+    let lx = 40 + Math.cos(t) * 27, ly = 44 + Math.sin(t) * 27, rot = deg + 115;
+    if (side < 0) { lx = 80 - lx; rot = -rot; }
+    return `<ellipse cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" rx="3" ry="6.5" transform="rotate(${rot.toFixed(0)} ${lx.toFixed(1)} ${ly.toFixed(1)})" fill="#ff8a2a" stroke="#ffd08a" stroke-width="0.8"/>`;
+  }).join('');
+  return `<g transform="translate(${(x - 40 * k).toFixed(1)},${(y - 40 * k).toFixed(1)}) scale(${k})">
+    <defs><radialGradient id="ll-glow"><stop offset="0" stop-color="#ffb347" stop-opacity=".9"/><stop offset="1" stop-color="#ff6a00" stop-opacity="0"/></radialGradient></defs>
+    <circle cx="40" cy="40" r="34" fill="url(#ll-glow)"/>${leaves(1)}${leaves(-1)}
+    <g fill="#fff3d6" stroke="#ff8a2a" stroke-width="1.2"><circle cx="40" cy="22" r="5.5"/>
+    <path d="M40 29 L28 18 L25.5 20.5 L36 32 L36 50 L31 62 L34.5 63.5 L40 52 L45.5 63.5 L49 62 L44 50 L44 32 L54.5 20.5 L52 18 Z"/></g></g>`;
+}
+
 export function drawM4(h) {
   const { W, H, panel, starsField, purpleBackDefs, emit, beardedManFace, biomechArm, profileHeadChip, sailScene } = h;
   const CX = W * 0.5, CY = H * 0.46;
@@ -143,8 +160,7 @@ export function drawM4(h) {
   // laurel emblem; back, the nanite "goo" glowing in an arm.
   emit('col_lava_lamp_evangelists', 'front', panel({ defs: `${bg('ll-bg', '#5a3a1e', '#140a04')}<linearGradient id="ll-skin" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#d8a07a"/><stop offset="100%" stop-color="#8a5a3c"/></linearGradient>`,
     inner: `${rect('url(#ll-bg)')}${beardedManFace({ hcx: CX, hcy: CY - 20, r: 44, skin: 'url(#ll-skin)', hair: '#3a2414', body: '#2a2a32', beard: 'goatee' })}
-      <g transform="translate(${CX},${CY + 104})" fill="none" stroke="#ff9a3a" stroke-width="4" stroke-linecap="round">${[-1, 1].map((d) => `<path d="M${d * 8},18 Q${d * 46},0 ${d * 30},-40"/>`).join('')}</g>
-      <circle cx="${CX}" cy="${CY + 78}" r="8" fill="#ffb35a"/><path d="M${CX},${CY + 86} v26 M${CX - 12},${CY + 96} h24" stroke="#ffb35a" stroke-width="5" stroke-linecap="round"/>` }));
+      ${shirtLaurel(CX, CY + 100, 1.1)}` }));
   emit('col_lava_lamp_evangelists', 'back', panel({ defs: purpleBackDefs('ll2-bg'),
     inner: `${rect('url(#ll2-bg)')}${starsField(8, 114)}${biomechArm({ cx: CX, cy: CY, skinColor: '#d8a07a', skinColor2: '#8a5a3c', chipColor: '#ff9a5a', traceColor: '#ffd08a' })}` }));
   // 8. Gabonese Mining Consortium / Bubbleopolis: a young prospector with

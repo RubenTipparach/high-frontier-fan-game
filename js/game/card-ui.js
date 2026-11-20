@@ -37,6 +37,7 @@ export function setAugChitHook(hook) { _augChitHook = hook || null; }
 // the art. Only the 18 shipped colonists have art, so a card with no asset
 // simply keeps its plain body (the guard below reads a manifest set).
 import { COLONIST_ART_IDS } from '../../data/colonist-art.js';
+import { colonistMarksHtml } from './colonist-marks.js';
 // Patent card art (thrusters first; scripts/fetch-card-art.py -> assets/cards/).
 // A plain background picture behind the card body, nothing else: the card
 // layout is untouched (unlike the colonist .has-art recipe, which docks the
@@ -589,6 +590,18 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
       const artSide = sideName === 'secondary' ? 'back' : 'front';
       body.style.backgroundImage = `url("${assetUrl(`assets/colonists/${card.id}-${artSide}.svg`)}")`;
       face.classList.add('has-art');
+    }
+  }
+  // M4 colonist marks (humans aboard + Spaceborn, or the Robot gear), both faces.
+  const marks = colonistMarksHtml(card);
+  if (marks) {
+    const body = face.querySelector('.card-body');
+    if (body) {
+      const m = document.createElement('div');
+      m.className = 'colonist-marks' + (card.colonistKind === 'Robot' ? ' robot' : '')
+        + (face.querySelector('.card-thrust') ? ' beside-thrust' : '');
+      m.innerHTML = marks;
+      body.appendChild(m);
     }
   }
   const patentArt = CARD_ART[card.id] && CARD_ART[card.id][sideName];
