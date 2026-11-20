@@ -90,9 +90,11 @@ backwards). `HAND_POSES` are settings of the rig (relaxed, open, wave, fist,
 point, peace, thumb, ok, hold, pinch, flat). Pose new hands in
 `tools/rig2d/hand.html` (drag joints, fold sliders, copy the JSON). Hands are
 FLAT: one colour, no shade crescent, no crease lines (the owner asked whether
-hands need shading at all; the kits' hands have none). A thumbs-up is the fist
-seen from the thumb side (`view: 'fistside'`): fingers stacked as bars, thumb
-straight up, forearm from the side, as in the owner's photo. A look's
+hands need shading at all; the kits' hands have none). A thumbs-up is POSED
+from the rig, never drawn as a special shape (the owner: "that's violating every
+rule"): the hand turned on its side (palm -90), palm to the viewer, each
+finger's first bone folded toward the viewer (short), its middle bone turned
+back across the palm (the stacked bars, finely outlined), thumb straight up. A look's
 `hands.L` / `hands.R` take a pose name or a pose object. Never draw hands as
 loose generated finger sticks; that was rejected twice.
 
