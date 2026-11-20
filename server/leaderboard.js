@@ -110,6 +110,18 @@ export function ensureLeaderboardTables(db) {
     CREATE TABLE IF NOT EXISTS game_results_scanned (
       game_id INTEGER PRIMARY KEY
     );
+    -- Cancelled solo games (user 2026-11-19: "show how many canceled attempts
+    -- ... most solo players don't finish a game they're losing"). One row per
+    -- cancelled game, written when it is cancelled and removed on restore. A
+    -- NULL board marks a game looked at but not counted (a table, a tutorial,
+    -- a game that had already finished), so the backfill never reads it twice.
+    CREATE TABLE IF NOT EXISTS game_cancels (
+      game_id      INTEGER PRIMARY KEY,
+      profile_id   INTEGER,
+      board        TEXT,
+      cancelled_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_game_cancels_board ON game_cancels(board, profile_id);
   `);
   // The board a game sits on is decided when it is recorded, so a change to
   // how boards are split re-reads every finished game: clear the results and
@@ -151,6 +163,26 @@ export function recordGame(db, gameId, state, finishedAt) {
   return rows.length;
 }
 
+// Record one cancelled game. Only a one-seat game that had not finished counts
+// (a solo attempt abandoned part way); anything else is stored with no board.
+// Safe to call twice.
+export function recordCancel(db, gameId, state, cancelledAt) {
+  const board = boardFor(state);
+  const seats = (state && state.players) || [];
+  const pid = seats.length === 1 ? seats[0].profileId : null;
+  const counts = !!(board && pid != null && isRealProfile(pid) && state.status !== 'finished');
+  db.prepare(
+    `INSERT INTO game_cancels (game_id, profile_id, board, cancelled_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT(game_id) DO UPDATE SET profile_id = excluded.profile_id, board = excluded.board,
+       cancelled_at = excluded.cancelled_at`
+  ).run(gameId, counts ? pid : null, counts ? board : null, Number(cancelledAt) || Date.now());
+  return counts;
+}
+// A restored game is no longer a cancelled attempt.
+export function clearCancel(db, gameId) {
+  db.prepare('DELETE FROM game_cancels WHERE game_id = ?').run(gameId);
+}
+
 // Fill in games that finished before game_results existed. One game per step,
 // a rest between, logged as it goes; stops by itself when none are left.
 export function startBackfill(db, { restMs = 250, log = console.log } = {}) {
@@ -160,10 +192,31 @@ export function startBackfill(db, { restMs = 250, log = console.log } = {}) {
      WHERE g.status = 'finished' AND g.id NOT IN (SELECT game_id FROM game_results_scanned)
      ORDER BY g.id LIMIT 1`
   );
+  // Then the cancelled games from before game_cancels existed, the same way.
+  const nextCancel = db.prepare(
+    `SELECT g.id, g.finished_at, s.state FROM games g JOIN game_states s ON s.game_id = g.id
+     WHERE g.status = 'cancelled' AND g.id NOT IN (SELECT game_id FROM game_cancels)
+     ORDER BY g.id LIMIT 1`
+  );
+  let cancels = 0;
+  const stepCancel = () => {
+    let row = null;
+    try { row = nextCancel.get(); } catch (e) { log(`[leaderboard] cancel backfill stopped: ${e.message}`); return; }
+    if (!row) { if (cancels) log(`[leaderboard] cancel backfill finished: ${cancels} game(s) looked at`); return; }
+    try {
+      const counted = recordCancel(db, row.id, JSON.parse(row.state), row.finished_at);
+      cancels++;
+      if (counted) log(`[leaderboard] backfilled cancelled solo game ${row.id}`);
+    } catch (e) {
+      db.prepare('INSERT OR IGNORE INTO game_cancels (game_id, cancelled_at) VALUES (?, ?)').run(row.id, Date.now());
+      log(`[leaderboard] skipped cancelled game ${row.id}: ${e.message}`);
+    }
+    setTimeout(() => setImmediate(stepCancel), restMs).unref?.();
+  };
   const step = () => {
     let row = null;
     try { row = next.get(); } catch (e) { log(`[leaderboard] backfill stopped: ${e.message}`); return; }
-    if (!row) { if (done) log(`[leaderboard] backfill finished: ${done} game(s) recorded`); return; }
+    if (!row) { if (done) log(`[leaderboard] backfill finished: ${done} game(s) recorded`); stepCancel(); return; }
     try {
       const st = JSON.parse(row.state);
       const n = recordGame(db, row.id, st, row.finished_at);
@@ -190,6 +243,12 @@ export function leaderboards(db, { limit = 10 } = {}) {
        FROM game_results r LEFT JOIN profiles p ON p.id = r.profile_id
       GROUP BY r.board, r.profile_id`
   ).all();
+  // Cancelled solo attempts per board and player.
+  const cancelled = new Map();
+  for (const c of db.prepare(
+    `SELECT board, profile_id AS profileId, COUNT(*) AS n FROM game_cancels
+      WHERE board IS NOT NULL GROUP BY board, profile_id`
+  ).all()) cancelled.set(`${c.board}:${c.profileId}`, c.n);
   const by = new Map();
   for (const r of rows) {
     if (!by.has(r.board)) by.set(r.board, []);
@@ -207,7 +266,9 @@ export function leaderboards(db, { limit = 10 } = {}) {
       showsWins: b.group === 'Multiplayer' || b.variant,
       entries: list.slice(0, limit).map((r, i) => ({
         rank: i + 1, profileId: r.profileId, name: r.name, best: r.best, games: r.games, wins: r.wins | 0,
+        cancelled: cancelled.get(`${b.key}:${r.profileId}`) | 0,
       })),
+      showsCancelled: b.group === 'Solo',
     });
   }
   return out;
@@ -253,7 +314,8 @@ export function summaryMessages(boards, { date = new Date(), gameUrl } = {}) {
       title: `${b.emoji} ${b.name}`,
       description: b.entries.slice(0, 5).map((e, i) => {
         const place = MEDALS[i] || `\`${i + 1}.\``;
-        const tail = b.showsWins ? ` · ${plural(e.wins, 'win')} in ${plural(e.games, 'game')}` : ` · ${plural(e.games, 'game')}`;
+        const tail = (b.showsWins ? ` · ${plural(e.wins, 'win')} in ${plural(e.games, 'game')}` : ` · ${plural(e.games, 'game')}`)
+          + (b.showsCancelled && e.cancelled ? ` · ${e.cancelled} cancelled` : '');
         return `${place} **${clean(e.name, 40)}** · ${e.best} VP${tail}`;
       }).join('\n').slice(0, 4000),
       footer: { text: `${group} · ${plural(b.players, 'player')} ranked` },
