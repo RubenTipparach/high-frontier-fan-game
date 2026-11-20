@@ -59,6 +59,25 @@ pipelines in Adobe Character Animator, Duik and Godot's cutout tutorial):
     set of parts on its own rest skeleton (the kits draw a turnaround), not a
     rotation of the front parts.
 
+## Builds and styles
+
+- **Styles** (`look.style`, `STYLES` in cutout.mjs): `slim` (the first kit, too
+  thin for the owner), `classic` (the default: thicker limbs, broader body, head
+  1.12x, like the stock constructor kits), `chunky` (rounder, head 1.3x). Always
+  get the skeleton with `skeletonFor(look)` so props land on the same joints the
+  figure is drawn with.
+- **Robot** (`body: 'robot'`, `ROBOT_LOOK`): the same skeleton in plates, with
+  visible round joints, a visor and eye lights. Armour suits use it too.
+- **Beard** (`look.beard`: short / full): a ring from the sideburns round the
+  jaw, the mouth left open on top. Check beards on a big render; they go wrong
+  easily.
+- **Foreshortening** (`pose.len: { bone: factor }`): a limb pointing at the
+  viewer is shortened along its bone (binoculars, a handshake toward the
+  camera). A front view cannot bring hands to the face without it.
+- **Reach** (`reach(sk, pose, side, [x, y], { limb, bend })`): two-bone IK for
+  a hand or foot on a target. Try both `bend` signs and look: one usually
+  crosses the body or folds the elbow backwards.
+
 ## The code
 
 | File | What it is |

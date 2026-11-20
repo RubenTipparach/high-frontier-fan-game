@@ -19,7 +19,8 @@
 //     transformed), never a recolour of the same shapes.
 import { drawM2Fronts, REDONE_M2_FRONTS } from './colonist-art-m2-fronts.mjs';
 import { drawPeopleFronts, PEOPLE_FRONTS } from './colonist-art-people.mjs';
-import { drawTracedFronts, TRACED_FRONTS } from './colonist-art-traced.mjs';
+import { drawTracedFronts, drawKitBacks, TRACED_FRONTS, KIT_BACKS } from './colonist-art-traced.mjs';
+import { drawUpgradedBacks, UPGRADED_BACKS } from './colonist-art-backs.mjs';
 import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { drawM4 } from './colonist-art-m4.mjs';
 import { dirname, join } from 'node:path';
@@ -71,6 +72,7 @@ function writeArt(id, side, svg) {
 // The second-pass M2 fronts (colonist-art-m2-fronts.mjs) replace the ones below.
 function emit(id, side, svg) {
   if (side === 'front' && (REDONE_M2_FRONTS.has(id) || PEOPLE_FRONTS.has(id) || TRACED_FRONTS.has(id))) return;
+  if (side === 'back' && (KIT_BACKS.has(id) || UPGRADED_BACKS.has(id))) return;   // redrawn in the second pass
   writeArt(id, side, svg);
 }
 // The second-pass M2 fronts, minus the cards with people (drawn by colonist-art-people.mjs).
@@ -968,6 +970,8 @@ drawM4({ W, H, panel, starsField, purpleBackDefs, emit, beardedManFace, biomechA
 drawM2Fronts({ W, H, panel, emit: writeM2 });
 drawPeopleFronts({ W, H, panel, emit: writePeople });
 drawTracedFronts({ W, H, panel, emit: writeArt });
+drawKitBacks({ W, H, panel, emit: writeArt });
+drawUpgradedBacks({ W, H, panel, emit: writeArt });
 
 console.log(`wrote ${manifest.length} SVGs to assets/colonists/`);
 

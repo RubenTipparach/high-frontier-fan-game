@@ -1,5 +1,5 @@
 import { artKit } from './colonist-art-m4-fronts.mjs';
-import { drawCutout, skeleton, restPose, fk, reach, POSES } from './rig2d/cutout.mjs';
+import { drawCutout, skeleton, skeletonFor, restPose, fk, reach, POSES, ROBOT_LOOK } from './rig2d/cutout.mjs';
 
 // Colonist fronts with people from the cut-out character kit (owner 2026-11-20:
 // a 2D rig drawn once at rest and posed by rotating bones; see the
@@ -32,13 +32,16 @@ const FIGS = {
       pose: () => at(92, 326, 46, { upperL: -100, foreL: -10 }) }],
   col_house_of_saud: [{ fid: 'prince', look: { body: 'male', skin: '#c89468', hair: '#1a1410', hairStyle: 'buzz', face: 'sleepy', top: 'longsleeve', topColor: '#f6f4ee', bottomColor: '#ecebe4', shoes: '#c8b890', hands: { L: 'open', R: 'open' } },
     pose: (sk) => { let p = at(150, 300, 46, { thighL: -78, shinL: 150, thighR: 78, shinR: -150 }); const J = fk(sk, p).joints; p = reach(sk, p, 'L', [J.knL[0] - 6, J.knL[1] - 8], { bend: -1 }); return reach(sk, p, 'R', [J.knR[0] + 6, J.knR[1] - 8], { bend: 1 }); } }],
-  col_rock_rats_miners_union: [{ fid: 'miner', look: { body: 'female', skin: '#d8a07a', hair: '#8a3a1a', hairStyle: 'ponytail', face: 'smirk', top: 'jumpsuit', topColor: '#c8862a', hands: { L: 'fist', R: 'relaxed' } },
+  col_rock_rats_miners_union: [{ fid: 'bot', look: { ...ROBOT_LOOK, topColor: '#f0c060', hands: { L: 'relaxed', R: 'open' } }, pose: () => at(236, 326, 44, { upperR: 130, foreR: 20 }) },
+    { fid: 'miner', look: { body: 'female', skin: '#d8a07a', hair: '#8a3a1a', hairStyle: 'ponytail', face: 'smirk', top: 'jumpsuit', topColor: '#c8862a', hands: { L: 'fist', R: 'relaxed' } },
     pose: () => at(96, 326, 46, { upperL: -38, foreL: 78, handL: 20, upperR: 6 }) }],
-  col_cobots: [{ fid: 'cobw', look: { body: 'female', skin: '#7a4a2e', hair: '#1a1210', hairStyle: 'curly', face: 'smile', top: 'tee', topColor: '#4a7ab0', bottomColor: '#2a2e3a', hands: { L: 'open', R: 'relaxed' } },
-    pose: (sk) => reach(sk, at(92, 326, 46, { head: -6 }), 'L', [176, 150], { bend: 1 }) }],
+  col_cobots: [{ fid: 'bot', look: { ...ROBOT_LOOK, hands: { L: 'relaxed', R: 'open' } }, pose: (sk) => reach(sk, at(232, 326, 48), 'R', [178, 196], { bend: 1 }) },
+    { fid: 'cobw', look: { body: 'female', skin: '#7a4a2e', hair: '#1a1210', hairStyle: 'curly', face: 'smile', top: 'tee', topColor: '#4a7ab0', bottomColor: '#2a2e3a', hands: { L: 'open', R: 'relaxed' } },
+    pose: (sk) => reach(sk, at(92, 326, 46, { head: -6 }), 'L', [168, 198], { bend: -1 }) }],
   col_gabonese_mining_consortium: [{ fid: 'boy', look: { body: 'male', skin: '#4a2e1e', hair: '#141010', hairStyle: 'buzz', face: 'smile', top: 'polo', topColor: '#2a8a5a', bottomColor: '#b8a070', hands: { L: 'fist', R: 'fist' } },
-    pose: (sk) => { let p = at(120, 326, 46); const J = fk(sk, p).joints, cy = J.headBase[1] - 0.45 * 46; p = reach(sk, p, 'L', [J.headBase[0] + 12, cy + 10], { bend: 1 }); return reach(sk, p, 'R', [J.headBase[0] - 12, cy + 10], { bend: -1 }); } }],
-  col_teleoperators: [{ fid: 'op', look: { body: 'female', skin: '#f0d0b0', hair: '#1e1a1a', hairStyle: 'bob', face: 'smile', top: 'jumpsuit', topColor: '#dfe2e8', hands: { L: 'open', R: 'relaxed' } },
+    pose: (sk) => { let p = { ...at(120, 326, 46), len: { upperL: 0.5, upperR: 0.5, foreL: 0.85, foreR: 0.85 } }; const J = fk(sk, p).joints, cy = J.headBase[1] - 0.45 * 46; p = reach(sk, p, 'L', [J.headBase[0] + 12, cy + 12], { bend: -1 }); return reach(sk, p, 'R', [J.headBase[0] - 12, cy + 12], { bend: 1 }); } }],
+  col_teleoperators: [{ fid: 'bot', look: { ...ROBOT_LOOK, topColor: '#dfe6ee', collar: '#ff6a7a', hands: { L: 'relaxed', R: 'hold' } }, pose: (sk) => reach(sk, at(236, 326, 46), 'R', [208, 168], { bend: -1 }) },
+    { fid: 'op', look: { body: 'female', skin: '#f0d0b0', hair: '#1e1a1a', hairStyle: 'bob', face: 'smile', top: 'jumpsuit', topColor: '#dfe2e8', hands: { L: 'open', R: 'relaxed' } },
     pose: (sk) => reach(sk, at(88, 326, 46), 'L', [184, 168], { bend: 1 }) }],
   col_boston_hexapods: [{ fid: 'eng', look: { body: 'female', skin: '#e8b890', hair: '#6a3a1e', hairStyle: 'bun', face: 'smile', top: 'longsleeve', topColor: '#d86a3a', bottomColor: '#2a3a5a', hands: { L: 'relaxed', R: 'point' } },
     pose: (sk) => reach(sk, at(222, 326, 46), 'R', [150, 150], { bend: -1 }) }],
@@ -56,7 +59,7 @@ for (const [m, s] of [['l', 'L'], ['r', 'R']]) Object.assign(MAP, { [`upperarm_$
 function figure(id) {
   let g = ''; const J = {};
   for (const f of FIGS[id]) {
-    const sk = skeleton(f.look.body), pose = f.pose(sk);
+    const sk = skeletonFor(f.look), pose = f.pose(sk);
     g += drawCutout({ id: `${id}-${f.fid}`, look: f.look, pose });
     const { joints } = fk(sk, pose);
     for (const [k, v] of Object.entries(MAP)) J[`${f.fid}.${k}`] = joints[v];
@@ -137,7 +140,7 @@ export function drawTracedFronts({ W, H, panel, emit }) {
   // Rock Rats Miners' Union: hand on hip, her cobot beside her.
   if (has('col_rock_rats_miners_union')) {
     const F = figure('col_rock_rats_miners_union');
-    const r = robotBust({ id: 'rr3', cx: 232, cy: 112, s: 0.82 });
+    const r = { defs: '', svg: '' };
     const c = F.m('miner.spine_03');
     out('col_rock_rats_miners_union', `${linear('rr-bg', [['0%', '#e4e8ec'], ['100%', '#9aa2ac']], 1, 1)}${r.defs}${soft('rr-v')}`,
       `${rect('url(#rr-bg)')}<rect x="200" width="100" height="${H}" fill="#fff" opacity="0.35"/>${r.svg}${F.g}
@@ -146,7 +149,7 @@ export function drawTracedFronts({ W, H, panel, emit }) {
   // Cobots: she glances down; her service robot shoulder to shoulder.
   if (has('col_cobots')) {
     const F = figure('col_cobots');
-    const r = robotBust({ id: 'cb3', cx: 218, cy: 106, s: 1.0 });
+    const r = { defs: '', svg: '' };
     out('col_cobots', `${linear('cb-bg', [['0%', '#e2e6ea'], ['100%', '#7a8490']], 1, 1)}${r.defs}${soft('cb-v')}`,
       `${rect('url(#cb-bg)')}<rect y="220" width="${W}" height="110" fill="#5a6470" opacity="0.35"/>${r.svg}${F.g}${rect('url(#cb-v)')}`);
   }
@@ -165,10 +168,10 @@ export function drawTracedFronts({ W, H, panel, emit }) {
     const F = figure('col_teleoperators');
     const e = eyes(F, 'op'), hh = F.m('op.head'), ht = F.m('op.head_tip');
     const s = Math.hypot(ht[0] - hh[0], ht[1] - hh[1]);
-    const r = robotBust({ id: 'to3', cx: 236, cy: 112, s: 0.9 });
+    const r = { defs: '', svg: '' };
     out('col_teleoperators', `${linear('to-bg', [['0%', '#d8dde2'], ['100%', '#6a7480']], 1, 1)}${linear('to-vz', [['0%', '#f2f8ff'], ['100%', '#8ab0d0']], 1, 0)}${r.defs}${soft('to-v')}`,
       `${rect('url(#to-bg)')}<rect width="${W}" height="80" fill="#fff" opacity="0.35"/>${r.svg}
-       <g transform="translate(204,150)"><path d="M0,0 L-6,30" stroke="#3a7a3a" stroke-width="3"/><path d="M-3,14 q-12,-4 -14,6 q10,2 14,-6" fill="#4a9a4a"/><circle cx="0" cy="-6" r="11" fill="#c8202e"/><path d="M-9,-8 Q0,-19 9,-8 Q4,0 0,-4 Q-4,0 -9,-8 Z" fill="#e8404a"/></g>
+       <g transform="translate(${f1(F.m('bot.hand_r')[0])},${f1(F.m('bot.hand_r')[1] - 4)})"><path d="M0,0 L-6,30" stroke="#3a7a3a" stroke-width="3"/><path d="M-3,14 q-12,-4 -14,6 q10,2 14,-6" fill="#4a9a4a"/><circle cx="0" cy="-6" r="11" fill="#c8202e"/><path d="M-9,-8 Q0,-19 9,-8 Q4,0 0,-4 Q-4,0 -9,-8 Z" fill="#e8404a"/></g>
        ${F.g}<rect x="${f1(e[0] - s * 0.62)}" y="${f1(e[1] - s * 0.16)}" width="${f1(s * 1.24)}" height="${f1(s * 0.32)}" rx="${f1(s * 0.15)}" fill="url(#to-vz)"/>${rect('url(#to-v)')}`);
   }
   // Boston Hexapods: in profile, pointing into the holo screen of her walker.
@@ -203,4 +206,65 @@ export function drawTracedFronts({ W, H, panel, emit }) {
        <path d="M0,300 L120,286 L300,262 L300,${H} L0,${H} Z" fill="url(#ex-near)"/>
        <rect x="${f1(sp[0] + 4)}" y="${f1(sp[1] - 12)}" width="26" height="46" rx="6" fill="#3a4a5e"/>${F.g}${strut('l')}${strut('r')}${rect('url(#ex-v)')}`);
   }
+}
+
+// ---- promoted (purple) sides with people, drawn with the same kit ------------------
+export const KIT_BACKS = new Set(['col_malcolm', 'col_botany_bay_convicts', 'col_lloyd_s_salvage_co', 'col_rock_rats_miners_union',
+  'col_cobots', 'col_boston_hexapods', 'col_vr_simulcasters']);
+const BACKS = {
+  // Renaissance Man: a bearded polymath at his glowing blueprints.
+  col_malcolm: [{ fid: 'rm', look: { body: 'male', skin: '#e2b48e', hair: '#4a2c18', hairStyle: 'tuft', beard: 'full', face: 'smile', top: 'jacket', topColor: '#4a3a6a', collar: '#e8e0f0', bottomColor: '#2a2236', hands: { L: 'point', R: 'relaxed' }, blush: false },
+    pose: () => at(150, 326, 46, { upperL: -95, foreL: -30 }) }],
+  // Soldier Caste: an armoured trooper, blade across the chest.
+  col_botany_bay_convicts: [{ fid: 'sol', look: { ...ROBOT_LOOK, topColor: '#c9ced8', bottomColor: '#4a4e5a', collar: '#ff4a6a', hands: { L: 'fist', R: 'fist' } },
+    pose: () => at(150, 326, 48, { upperL: -20, foreL: 120, upperR: 14, foreR: -60 }) }],
+  // Svalbard Caretakers: asleep upright in a glowing pod.
+  col_lloyd_s_salvage_co: [{ fid: 'pod', look: { body: 'female', skin: '#f0d6c4', hair: '#e8e0d0', hairStyle: 'long', face: 'sleepy', top: 'jumpsuit', topColor: '#f4f0fa', collar: '#c8b8e8', hands: { L: 'relaxed', R: 'relaxed' } },
+    pose: () => at(150, 306, 40, { upperL: -6, upperR: 6 }) }],
+  // Alchemist Aviatrices: a pilot in her flight suit, goggles up.
+  col_rock_rats_miners_union: [{ fid: 'av', look: { body: 'female', skin: '#d8a07a', hair: '#8a3a1a', hairStyle: 'ponytail', face: 'grin', top: 'jacket', topColor: '#7a4a2a', collar: '#f0e0c8', bottomColor: '#3a2a20', shoes: '#2a1a12', hands: { L: 'fist', R: 'thumb' } },
+    pose: () => at(150, 326, 46, { upperL: -38, foreL: 78, handL: 20, upperR: 30, foreR: 120 }) }],
+  // Singularity: a family against a dawn of their own making.
+  col_cobots: [
+    { fid: 'a', look: { body: 'male', hairStyle: 'tuft' }, pose: () => at(70, 330, 44, { upperL: -10 }) },
+    { fid: 'b', look: { body: 'female', hairStyle: 'bob' }, pose: () => at(130, 330, 42, { upperR: 10 }) },
+    { fid: 'c', look: { body: 'male', hairStyle: 'curly' }, pose: () => at(190, 330, 30, { upperL: -120, foreL: -10 }) },
+    { fid: 'd', look: { body: 'female', hairStyle: 'ponytail' }, pose: () => at(240, 330, 26, { upperR: 40 }) }],
+  // Zombie Wanderers: shuffling on, arms out, by the dead screens.
+  col_boston_hexapods: [{ fid: 'zw', look: { body: 'male', skin: '#b8c8a8', hair: '#4a4a3a', hairStyle: 'buzz', face: 'sleepy', top: 'longsleeve', topColor: '#ece8f0', bottomColor: '#c8c4d0', shoes: '#5a5660', hands: { L: 'relaxed', R: 'relaxed' }, blush: false },
+    pose: () => at(196, 326, 46, { upperL: -62, foreL: -6, handL: 30, upperR: 58, foreR: 4, handR: -30, head: 10, root: 3 }) }],
+  // The Presence: two people meeting through a point of light.
+  col_vr_simulcasters: [
+    { fid: 'l', look: { body: 'female', skin: '#d8b090', hair: '#3a2418', hairStyle: 'long', face: 'smile', top: 'longsleeve', topColor: '#2a1c44', bottomColor: '#1e1430', hands: { L: 'open', R: 'relaxed' } }, pose: (sk) => reach(sk, at(82, 326, 44), 'L', [138, 190], { bend: 1 }) },
+    { fid: 'r', look: { body: 'male', skin: '#5a3a26', hair: '#141010', hairStyle: 'buzz', face: 'smile', top: 'longsleeve', topColor: '#2a1c44', bottomColor: '#1e1430', hands: { L: 'relaxed', R: 'open' } }, pose: (sk) => reach(sk, at(218, 326, 46), 'R', [162, 190], { bend: -1 }) }],
+};
+
+export function drawKitBacks({ W, H, panel, emit }) {
+  const { f1, rect, radial, linear, stars } = artKit({ W, H });
+  const bg = (id) => radial(id, [['0%', '#655ca8'], ['100%', '#652d91']], '50%', '44%', '80%');
+  const people = (id) => { const save = FIGS[id]; FIGS[id] = BACKS[id]; const F = figure(id); FIGS[id] = save; return F; };
+  const out = (id, defs, inner) => emit(id, 'back', panel({ defs, inner }));
+
+  { const F = people('col_malcolm');
+    out('col_malcolm', bg('rm-bg'), `${rect('url(#rm-bg)')}${stars(10, 41)}
+      <g fill="none" stroke="#bfe6ff" stroke-width="1.6" opacity="0.8"><circle cx="232" cy="70" r="26"/><path d="M206,70 H258 M232,44 V96"/><rect x="34" y="52" width="58" height="44"/><path d="M34,74 H92 M63,52 V96"/><path d="M200,140 l26,-14 l26,14 l-26,14 z"/></g>${F.g}`); }
+  { const F = people('col_botany_bay_convicts'), h = F.m('sol.hand_r'), g = F.m('sol.hand_l');
+    out('col_botany_bay_convicts', bg('sc-bg'), `${rect('url(#sc-bg)')}${stars(10, 42)}${F.g}
+      <path d="M${f1(h[0])},${f1(h[1])} L${f1(g[0] + 30)},${f1(g[1] - 70)}" stroke="#e8ecf2" stroke-width="6" stroke-linecap="round"/><path d="M${f1(h[0] - 8)},${f1(h[1] + 6)} L${f1(h[0] + 8)},${f1(h[1] - 6)}" stroke="#3a3e48" stroke-width="5"/>`); }
+  { const F = people('col_lloyd_s_salvage_co');
+    out('col_lloyd_s_salvage_co', `${bg('sv-bg')}${radial('sv-pod', [['0%', '#ffffff', 0.55], ['100%', '#c8b8f0', 0.15]])}${radial('sv-glow', [['0%', '#e8d8ff', 0.6], ['100%', '#e8d8ff', 0]])}`,
+      `${rect('url(#sv-bg)')}${stars(10, 43)}<ellipse cx="150" cy="170" rx="120" ry="160" fill="url(#sv-glow)"/>${F.g}
+      <rect x="92" y="22" width="116" height="296" rx="58" fill="url(#sv-pod)" stroke="#f4eeff" stroke-width="3"/>${[60, 120, 200, 260].map((y, i) => `<circle cx="${i % 2 ? 214 : 86}" cy="${y}" r="5" fill="#f0e6ff"/>`).join('')}`); }
+  { const F = people('col_rock_rats_miners_union'), e = F.m('av.head'), t = F.m('av.head_tip');
+    const s = Math.hypot(t[0] - e[0], t[1] - e[1]), gy = e[1] + (t[1] - e[1]) * 0.78;
+    out('col_rock_rats_miners_union', bg('aa-bg'), `${rect('url(#aa-bg)')}${stars(12, 44)}<path d="M20,300 Q150,250 290,120" stroke="#ffd08a" stroke-width="2" fill="none" stroke-dasharray="6 6" opacity="0.7"/>${F.g}
+      <g transform="translate(${f1(e[0])},${f1(gy)})"><rect x="${f1(-s * 0.46)}" y="${f1(-s * 0.06)}" width="${f1(s * 0.92)}" height="${f1(s * 0.08)}" fill="#3a2a20"/><circle cx="${f1(-s * 0.16)}" cy="0" r="${f1(s * 0.13)}" fill="#7ad0e8" stroke="#c8a060" stroke-width="2"/><circle cx="${f1(s * 0.16)}" cy="0" r="${f1(s * 0.13)}" fill="#7ad0e8" stroke="#c8a060" stroke-width="2"/></g>`); }
+  { const F = people('col_cobots');
+    out('col_cobots', `${bg('sg-bg')}${linear('sg-dawn', [['0%', '#ffd59a', 0], ['100%', '#ffd59a', 0.75]])}<filter id="sg-sil" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="0 0 0 0 0.16  0 0 0 0 0.11  0 0 0 0 0.27  0 0 0 1 0"/></filter>`,
+      `${rect('url(#sg-bg)')}${stars(12, 45)}<rect y="${H * 0.5}" width="${W}" height="${H * 0.5}" fill="url(#sg-dawn)"/><g filter="url(#sg-sil)">${F.g}</g>`); }
+  { const F = people('col_boston_hexapods');
+    out('col_boston_hexapods', bg('zw-bg'), `${rect('url(#zw-bg)')}${stars(8, 46)}${Array.from({ length: 6 }, (_, i) => `<rect x="24" y="${70 + i * 22}" width="${70 - (i % 3) * 14}" height="8" rx="3" fill="#9af0ff" opacity="0.5"/>`).join('')}${F.g}`); }
+  { const F = people('col_vr_simulcasters');
+    out('col_vr_simulcasters', `${bg('pr-bg')}${radial('pr-orb', [['0%', '#ffffff'], ['100%', '#9af0ff', 0]])}`,
+      `${rect('url(#pr-bg)')}${stars(8, 47)}${F.g}<circle cx="150" cy="186" r="46" fill="url(#pr-orb)"/>`); }
 }

@@ -52,9 +52,18 @@ const ORDER = Object.keys(PARENT);
 
 // Body build -> rest joints + limb radii. female / male differ in shoulders,
 // waist and hips; everything else is shared so heads and hands fit both.
-export function skeleton(body = 'female') {
-  const m = body === 'male';
-  const sh = m ? 0.6 : 0.52, hip = m ? 0.22 : 0.25;
+// Body styles (owner 2026-11-20: "humans are a bit too skinny, try different art
+// styles"): slim = the first kit; classic = the stock constructor kits (thicker
+// limbs, broader body, bigger head); chunky = the rounder, big-headed kits.
+export const STYLES = {
+  slim: { limb: 1, shoulder: 0, hip: 0, torso: 1, head: 1, hand: 1, foot: 1 },
+  classic: { limb: 1.38, shoulder: 0.07, hip: 0.04, torso: 1.16, head: 1.12, hand: 1.15, foot: 1.15 },
+  chunky: { limb: 1.7, shoulder: 0.12, hip: 0.07, torso: 1.3, head: 1.3, hand: 1.3, foot: 1.3 },
+};
+export function skeleton(body = 'female', style = 'slim') {
+  const m = body === 'male' || body === 'robot';
+  const ST = body === 'robot' ? STYLES.slim : (STYLES[style] || STYLES.slim);
+  const sh = (m ? 0.6 : 0.52) + ST.shoulder, hip = (m ? 0.22 : 0.25) + ST.hip;
   const J = {
     pelvis: [0, 0], chest: [0, -1.2], neck: [0, -1.74], headBase: [0, -1.92], headTop: [0, -2.92],
   };
@@ -65,7 +74,8 @@ export function skeleton(body = 'female') {
   const R = m
     ? { sh: 0.155, el: 0.12, wr: 0.095, hip: 0.22, kn: 0.165, an: 0.11 }
     : { sh: 0.14, el: 0.11, wr: 0.085, hip: 0.22, kn: 0.155, an: 0.1 };
-  return { body: m ? 'male' : 'female', J, R };
+  for (const k of Object.keys(R)) R[k] *= ST.limb;
+  return { body: body === 'robot' ? 'robot' : m ? 'male' : 'female', J, R, ST };
 }
 
 // Forward kinematics. pose = { root:[x,y] px, scale px/head, rot:{ bone: local deg, root: deg } }
@@ -76,7 +86,8 @@ export function fk(sk, pose) {
     const [a, c] = BONES[b];
     const ang = (PARENT[b] ? world[PARENT[b]] : r0) + ((pose.rot && pose.rot[b]) || 0);
     world[b] = ang;
-    J[c] = add(J[a], mul(rot(sub(sk.J[c], sk.J[a]), ang), pose.scale));
+    const k = (pose.len && pose.len[b]) || 1;
+    J[c] = add(J[a], mul(rot(sub(sk.J[c], sk.J[a]), ang), pose.scale * k));
   }
   world.root = r0;
   return { joints: J, world };
@@ -130,14 +141,16 @@ const ell = (cx, cy, rx, ry) => `M${f2(cx - rx)},${f2(cy)}a${f2(rx)},${f2(ry)} 0
 
 // ---- looks -------------------------------------------------------------------------
 export const DEFAULT_LOOK = {
-  body: 'female', skin: '#f2c4a0', hair: '#2b2222', hairStyle: 'bob', face: 'smile',
+  style: 'classic', body: 'female', skin: '#f2c4a0', hair: '#2b2222', hairStyle: 'bob', face: 'smile',
   top: 'tee', topColor: '#efe4d3', collar: '#ffffff', bottom: 'trousers', bottomColor: '#5b2f2b', shoes: '#26262b',
   hands: { L: 'relaxed', R: 'relaxed' }, blush: true,
 };
 export const OPTIONS = {
-  body: ['female', 'male'],
+  body: ['female', 'male', 'robot'],
+  style: ['slim', 'classic', 'chunky'],
   hairStyle: ['tuft', 'bob', 'long', 'bun', 'ponytail', 'buzz', 'curly', 'bald'],
   face: ['smile', 'grin', 'neutral', 'wink', 'frown', 'surprised', 'shout', 'smirk', 'sleepy'],
+  beard: ['', 'short', 'full'],
   top: ['tee', 'polo', 'longsleeve', 'jacket', 'jumpsuit'],
   bottom: ['trousers', 'shorts', 'skirt'],
   hand: ['relaxed', 'fist', 'open', 'point', 'peace', 'thumb', 'hold'],
@@ -155,6 +168,17 @@ function headParts(sk, look) {
   const H = hairShapes(look.hairStyle, cy, look.body);
   if (H.back) back.push({ d: H.back, fill: hair, shade: true });
   const out = [{ d: ears, fill: skin }, { d: ell(0.4, cy + 0.03, 0.03, 0.05) + ell(-0.4, cy + 0.03, 0.03, 0.05), fill: shade(skin, 0.86) }, { d: face, fill: skin, shade: true }];
+  if (look.beard) {
+    // a full beard: from the sideburns round the jaw, the mustache over the lip,
+    // the mouth left open (drawn on top)
+    const Y = (v) => cy + v;
+    const outer = [[0.4, Y(-0.12)], [0.39, Y(0.14)], [0.32, Y(0.38)], [0.16, Y(0.54)], [0, Y(0.58)], [-0.16, Y(0.54)], [-0.32, Y(0.38)], [-0.39, Y(0.14)], [-0.4, Y(-0.12)]];
+    const inner = look.beard === 'short'
+      ? [[-0.34, Y(-0.1)], [-0.3, Y(0.14)], [-0.16, Y(0.2)], [0, Y(0.18)], [0.16, Y(0.2)], [0.3, Y(0.14)], [0.34, Y(-0.1)]]
+      : [[-0.33, Y(-0.1)], [-0.27, Y(0.12)], [-0.14, Y(0.17)], [0, Y(0.15)], [0.14, Y(0.17)], [0.27, Y(0.12)], [0.33, Y(-0.1)]];
+    out.push({ d: blob([...outer, ...inner]), fill: hair, shade: true });
+    out.push({ d: ell(0, cy + 0.26, 0.1, 0.05), fill: shade(skin, 0.8) });
+  }
   out.push(...faceShapes(look.face, cy, skin, look.blush));
   if (H.front) out.push({ d: H.front, fill: hair, shade: true });
   if (H.extra) out.push(...H.extra.map((d) => ({ d, fill: shade(hair, 0.82) })));
@@ -247,16 +271,18 @@ function clothes(look) {
 // Every part of the figure, keyed by name, in rest coordinates.
 export function buildParts(look) {
   const L = { ...DEFAULT_LOOK, ...look, hands: { ...DEFAULT_LOOK.hands, ...(look && look.hands) } };
-  const sk = skeleton(L.body), J = sk.J, R = sk.R, fem = sk.body === 'female';
+  const sk = skeletonFor(L), J = sk.J, R = sk.R, fem = sk.body === 'female', ST = sk.ST;
+  if (sk.body === 'robot') return { sk, parts: robotParts(sk, L), look: L };
   const skin = L.skin, cloth = L.topColor, C = clothes(L);
   const parts = {};
   const H = headParts(sk, L);
-  parts.hairBack = { bone: 'head', layer: 0, shapes: H.back };
-  parts.head = { bone: 'head', layer: 60, shapes: H.front };
+  const hs = ST.head !== 1 ? [J.headBase, ST.head] : null;
+  parts.hairBack = { bone: 'head', layer: 0, shapes: H.back, scaleAbout: hs };
+  parts.head = { bone: 'head', layer: 60, shapes: H.front, scaleAbout: hs };
   parts.neck = { bone: 'neckB', layer: 40, shapes: [{ d: capsule([0, -1.55], J.headBase, 0.09, 0.09), fill: skin }, { d: `M-0.09,-1.92Q0,-1.84 0.09,-1.92L0.09,-1.8Q0,-1.74 -0.09,-1.8Z`, fill: shade(skin, 0.86) }] };
 
   // torso (shirt): shoulders round into the sleeve caps; hem tucks under the pelvis
-  const sw = Math.abs(J.shL[0]), w = fem ? 0.34 : 0.4, hw = fem ? 0.4 : 0.38;
+  const sw = Math.abs(J.shL[0]), w = (fem ? 0.34 : 0.4) * ST.torso, hw = (fem ? 0.4 : 0.38) * ST.torso;
   const torso = blob(sym([[0.1, -1.76], [sw - 0.1, -1.73], [sw + 0.02, -1.6], [sw - 0.02, -1.38], [fem ? sw - 0.08 : sw - 0.06, -1.05], [w, -0.55], [hw, -0.12], [0.2, -0.06]]));
   const ts = [{ d: torso, fill: cloth, shade: true }];
   if (fem) ts.push({ d: `M-0.3,-1.06Q-0.17,-0.98 -0.06,-1.07M0.06,-1.07Q0.17,-0.98 0.3,-1.06`, stroke: shade(cloth, 0.86), width: 0.03 });
@@ -268,7 +294,7 @@ export function buildParts(look) {
   parts.torso = { bone: 'spine', layer: 30, shapes: ts };
 
   // pelvis (trouser top / skirt): one piece over the thigh tops
-  const pw = fem ? 0.44 : 0.4;
+  const pw = (fem ? 0.44 : 0.4) * ST.torso;
   const pelvisD = C.skirt
     ? blob(sym([[0.2, -0.12], [pw - 0.02, -0.08], [pw + 0.1, 0.5], [pw + 0.14, 0.95], [0.2, 0.98]]))
     : blob(sym([[0.2, -0.12], [pw - 0.03, -0.1], [pw, 0.15], [pw - 0.02, 0.4], [0.06, 0.42], [0.0, 0.3]]));
@@ -282,8 +308,8 @@ export function buildParts(look) {
     const fore = [{ d: capsule(J['el' + s], J['wr' + s], R.el, R.wr), fill: C.long ? cloth : skin, shade: true }];
     if (C.long) fore.push({ d: `M${P(add(J['wr' + s], [-R.wr * 1.15, -0.08]))}L${P(add(J['wr' + s], [R.wr * 1.15, -0.08]))}`, stroke: shade(cloth, 0.78), width: 0.03 });
     parts['fore' + s] = { bone: 'fore' + s, layer: 51, side: s, shapes: fore };
-    const hs = handShape(L.hands[s]).map((d) => ({ d, fill: skin, shade: true, so: 0.028 }));
-    parts['hand' + s] = { bone: 'hand' + s, layer: 52, side: s, mirror: k, origin: J['wr' + s], shapes: hs };
+    const hands = handShape(L.hands[s]).map((d) => ({ d, fill: skin, shade: true, so: 0.028 }));
+    parts['hand' + s] = { bone: 'hand' + s, layer: 52, side: s, mirror: k, origin: J['wr' + s], handScale: ST.hand, shapes: hands };
     // legs
     const thighFill = C.short || C.skirt ? skin : C.pants;
     const th = [{ d: capsule(J['hip' + s], J['kn' + s], R.hip, R.kn), fill: thighFill, shade: true }];
@@ -291,7 +317,7 @@ export function buildParts(look) {
     parts['thigh' + s] = { bone: 'thigh' + s, layer: 10, side: s, shapes: th };
     parts['shin' + s] = { bone: 'shin' + s, layer: 11, side: s, shapes: [{ d: capsule(J['kn' + s], J['an' + s], R.kn, R.an), fill: C.short || C.skirt ? skin : C.pants, shade: true }] };
     const a = J['an' + s];
-    parts['foot' + s] = { bone: 'foot' + s, layer: 12, side: s, shapes: [{ d: blob(mirror([[-0.12, -0.06], [0.1, -0.07], [0.25, 0.05], [0.27, 0.17], [0.02, 0.19], [-0.15, 0.17], [-0.16, 0.04]], k).map((p) => add(p, a))), fill: L.shoes, shade: true },
+    parts['foot' + s] = { bone: 'foot' + s, layer: 12, side: s, scaleAbout: ST.foot !== 1 ? [a, ST.foot] : null, shapes: [{ d: blob(mirror([[-0.12, -0.06], [0.1, -0.07], [0.25, 0.05], [0.27, 0.17], [0.02, 0.19], [-0.15, 0.17], [-0.16, 0.04]], k).map((p) => add(p, a))), fill: L.shoes, shade: true },
       { d: `M${P(add(a, [k * -0.15, 0.15]))}L${P(add(a, [k * 0.25, 0.165]))}`, stroke: '#f2f2f2', width: 0.035 }] };
   }
   return { sk, parts, look: L };
@@ -312,7 +338,12 @@ function partSvg(part, name, uid, xf) {
   if (part.mirror) {
     // hand shapes are local to the wrist; mirror for the left hand
     const o = part.origin;
-    body = `<g transform="translate(${f2(o[0])},${f2(o[1])}) scale(${f2((part.mirror === 1 ? -1 : 1) * HAND_SCALE)},${HAND_SCALE})">${body}</g>`;
+    const hsc = HAND_SCALE * (part.handScale || 1);
+    body = `<g transform="translate(${f2(o[0])},${f2(o[1])}) scale(${f2((part.mirror === 1 ? -1 : 1) * hsc)},${f2(hsc)})">${body}</g>`;
+  }
+  if (part.scaleAbout) {
+    const [o, k] = part.scaleAbout;
+    body = `<g transform="translate(${f2(o[0])},${f2(o[1])}) scale(${f2(k)}) translate(${f2(-o[0])},${f2(-o[1])})">${body}</g>`;
   }
   return `<g data-part="${name}" transform="${xf}">${body}</g>`;
 }
@@ -335,7 +366,13 @@ export function drawCutout({ id = 'cut', look = {}, pose, explode = 0 }) {
       const mid = part.side ? mul(add(rs, c), 0.5) : (name === 'head' || name === 'hairBack' ? [0, -2.4] : name === 'neck' ? [0, -1.8] : name === 'torso' ? [0, -1.0] : [0, 0.1]);
       off = mul([mid[0] * 0.9, mid[1] * 0.42], explode * pose.scale);
     }
-    const xf = `translate(${f2(ps[0] + off[0])},${f2(ps[1] + off[1])}) rotate(${f2(ang)}) scale(${f2(pose.scale)}) translate(${f2(-rs[0])},${f2(-rs[1])})`;
+    const k = bone !== 'root' && pose.len && pose.len[bone];
+    let squash = '';
+    if (k && k !== 1) {
+      const [a, c] = BONES[bone], d = sub(sk.J[c], sk.J[a]), deg = (Math.atan2(d[1], d[0]) * 180) / Math.PI;
+      squash = ` rotate(${f2(deg)}) scale(${f2(k)},1) rotate(${f2(-deg)})`;
+    }
+    const xf = `translate(${f2(ps[0] + off[0])},${f2(ps[1] + off[1])}) rotate(${f2(ang)}) scale(${f2(pose.scale)})${squash} translate(${f2(-rs[0])},${f2(-rs[1])})`;
     let layer = part.layer;
     if (part.side && /^(upper|fore|hand)/.test(name) && behind.has(part.side)) layer -= 48;   // behind the legs / torso
     items.push([layer, partSvg(part, name, `${id}-`, xf)]);
@@ -377,7 +414,8 @@ export const POSES = {
 export function reach(sk, pose, s, target, { limb = 'arm', bend = 1 } = {}) {
   const [b1, b2, j0, j1, j2] = limb === 'arm' ? ['upper' + s, 'fore' + s, 'sh' + s, 'el' + s, 'wr' + s] : ['thigh' + s, 'shin' + s, 'hip' + s, 'kn' + s, 'an' + s];
   const { joints, world } = fk(sk, pose);
-  const S = joints[j0], l1 = len(sub(sk.J[j1], sk.J[j0])) * pose.scale, l2 = len(sub(sk.J[j2], sk.J[j1])) * pose.scale;
+  const kl = (b) => (pose.len && pose.len[b]) || 1;
+  const S = joints[j0], l1 = len(sub(sk.J[j1], sk.J[j0])) * pose.scale * kl(b1), l2 = len(sub(sk.J[j2], sk.J[j1])) * pose.scale * kl(b2);
   const d0 = sub(target, S), d = Math.max(Math.abs(l1 - l2) + 1e-3, Math.min(l1 + l2 - 1e-3, len(d0)));
   const base = Math.atan2(d0[1], d0[0]);
   const a = Math.acos((l1 * l1 + d * d - l2 * l2) / (2 * l1 * d));
@@ -391,3 +429,46 @@ export function reach(sk, pose, s, target, { limb = 'arm', bend = 1 } = {}) {
   const norm = (x) => ((x + 540) % 360) - 180;
   return { ...pose, rot: { ...pose.rot, [b1]: norm(w1 - world[PARENT[b1]]), [b2]: norm(w2 - w1) } };
 }
+
+// ---- robot build ---------------------------------------------------------------------
+// Same skeleton and joints as the people, so every pose and the app carry over.
+// Plates in the top colour, joints and hands in the bottom colour, the visor
+// dark with eye lights in the collar colour. Robots SHOW their round joints.
+export const ROBOT_LOOK = { body: 'robot', topColor: '#e9edf2', bottomColor: '#3a4250', collar: '#6fe3ff', shoes: '#3a4250', hands: { L: 'relaxed', R: 'relaxed' } };
+function robotParts(sk, L) {
+  const J = sk.J, R = sk.R, plate = L.topColor, joint = L.bottomColor, glow = L.collar, visor = '#141821';
+  const cy = J.headBase[1] - 0.47, parts = {};
+  parts.hairBack = { bone: 'head', layer: 0, shapes: [] };
+  parts.head = { bone: 'head', layer: 60, shapes: [
+    { d: ell(0.42, cy + 0.02, 0.08, 0.12) + ell(-0.42, cy + 0.02, 0.08, 0.12), fill: joint },
+    { d: blob([[0, cy - 0.5], [0.32, cy - 0.44], [0.43, cy - 0.12], [0.4, cy + 0.24], [0.26, cy + 0.42], [0, cy + 0.46], [-0.26, cy + 0.42], [-0.4, cy + 0.24], [-0.43, cy - 0.12], [-0.32, cy - 0.44]]), fill: plate, shade: true },
+    { d: blob([[0, cy - 0.2], [0.3, cy - 0.16], [0.34, cy + 0.06], [0.26, cy + 0.26], [0, cy + 0.3], [-0.26, cy + 0.26], [-0.34, cy + 0.06], [-0.3, cy - 0.16]]), fill: visor },
+    { d: ell(-0.13, cy + 0.04, 0.06, 0.07) + ell(0.13, cy + 0.04, 0.06, 0.07), fill: glow },
+    { d: `M-0.2,${f2(cy - 0.33)}Q0,${f2(cy - 0.4)} 0.2,${f2(cy - 0.33)}`, stroke: shade(plate, 0.8), width: 0.03 },
+  ] };
+  parts.neck = { bone: 'neckB', layer: 40, shapes: [{ d: capsule([0, -1.55], J.headBase, 0.08, 0.08), fill: joint }] };
+  const sw = Math.abs(J.shL[0]);
+  parts.torso = { bone: 'spine', layer: 30, shapes: [
+    { d: blob(sym([[0.1, -1.76], [sw - 0.12, -1.74], [sw - 0.02, -1.58], [sw - 0.06, -1.1], [0.36, -0.55], [0.3, -0.12], [0.15, -0.08]])), fill: plate, shade: true },
+    { d: blob(sym([[0.0, -1.5], [0.22, -1.46], [0.24, -1.1], [0.0, -1.0]])), fill: shade(plate, 0.9) },
+    { d: ell(0, -1.24, 0.07, 0.07), fill: glow },
+    { d: `M-0.22,-0.75L0.22,-0.75M-0.2,-0.55L0.2,-0.55`, stroke: shade(plate, 0.75), width: 0.03 },
+  ] };
+  parts.pelvis = { bone: 'root', layer: 25, shapes: [{ d: blob(sym([[0.18, -0.14], [0.34, -0.1], [0.36, 0.14], [0.26, 0.32], [0.0, 0.3]])), fill: plate, shade: true },
+    { d: ell(0.22, 0.14, 0.13, 0.13) + ell(-0.22, 0.14, 0.13, 0.13), fill: joint }] };
+  const limb = (a, b, ra, rb) => [{ d: ell(a[0], a[1], ra * 1.05, ra * 1.05), fill: joint }, { d: capsule(a, b, ra * 0.86, rb * 0.86), fill: plate, shade: true }];
+  for (const [s, k] of [['L', 1], ['R', -1]]) {
+    parts['upper' + s] = { bone: 'upper' + s, layer: 50, side: s, shapes: [{ d: ell(J['sh' + s][0], J['sh' + s][1], R.sh * 1.25, R.sh * 1.25), fill: plate, shade: true }, ...limb(J['sh' + s], J['el' + s], R.sh, R.el).slice(1)] };
+    parts['fore' + s] = { bone: 'fore' + s, layer: 51, side: s, shapes: limb(J['el' + s], J['wr' + s], R.el, R.wr) };
+    parts['hand' + s] = { bone: 'hand' + s, layer: 52, side: s, mirror: k, origin: J['wr' + s], shapes: handShape(L.hands[s]).map((d) => ({ d, fill: joint, shade: true, so: 0.028 })) };
+    parts['thigh' + s] = { bone: 'thigh' + s, layer: 10, side: s, shapes: limb(J['hip' + s], J['kn' + s], R.hip * 0.85, R.kn) };
+    parts['shin' + s] = { bone: 'shin' + s, layer: 11, side: s, shapes: limb(J['kn' + s], J['an' + s], R.kn, R.an * 1.1) };
+    const a = J['an' + s];
+    parts['foot' + s] = { bone: 'foot' + s, layer: 12, side: s, shapes: [{ d: blob(mirror([[-0.12, -0.04], [0.12, -0.05], [0.24, 0.06], [0.24, 0.17], [-0.14, 0.17], [-0.15, 0.05]], k).map((p) => add(p, a))), fill: plate, shade: true },
+      { d: `M${P(add(a, [k * -0.14, 0.17]))}L${P(add(a, [k * 0.24, 0.17]))}`, stroke: joint, width: 0.05 }] };
+  }
+  return parts;
+}
+
+// The skeleton a look is drawn on (body + style, with the kit defaults).
+export const skeletonFor = (look = {}) => skeleton(look.body || DEFAULT_LOOK.body, look.style || DEFAULT_LOOK.style);

@@ -2,7 +2,7 @@
 // facing you; drag a joint to rotate the bone that ends there (drag the pelvis to
 // move it), swap heads, hair, hands and clothes, and export SVG or figure JSON.
 // Serve the repository root (python3 -m http.server) and open /tools/rig2d/.
-import { drawCutout, restPose, skeleton, fk, aim, BONES, OPTIONS, DEFAULT_LOOK, POSES } from '../../scripts/rig2d/cutout.mjs';
+import { drawCutout, restPose, skeleton, skeletonFor, fk, aim, BONES, OPTIONS, DEFAULT_LOOK, POSES } from '../../scripts/rig2d/cutout.mjs';
 
 const W = 300, H = 330;
 const $ = (s) => document.querySelector(s);
@@ -16,7 +16,7 @@ for (const [b, [, c]] of Object.entries(BONES)) BONE_TO[c] = b;
 const lookBox = $('#look');
 const sel = (key, opts) => `<label>${key} <select data-look="${key}">${opts.map((o) => `<option>${o}</option>`).join('')}</select></label>`;
 const col = (key) => `<label>${key} <input type="color" data-look="${key}"></label>`;
-lookBox.innerHTML = '<legend>Look</legend>' + sel('body', OPTIONS.body) + sel('face', OPTIONS.face) + sel('hairStyle', OPTIONS.hairStyle)
+lookBox.innerHTML = '<legend>Look</legend>' + sel('style', OPTIONS.style) + sel('body', OPTIONS.body) + sel('beard', OPTIONS.beard) + sel('face', OPTIONS.face) + sel('hairStyle', OPTIONS.hairStyle)
   + sel('top', OPTIONS.top) + sel('bottom', OPTIONS.bottom)
   + `<label>left hand <select data-hand="L">${OPTIONS.hand.map((o) => `<option>${o}</option>`).join('')}</select></label>`
   + `<label>right hand <select data-hand="R">${OPTIONS.hand.map((o) => `<option>${o}</option>`).join('')}</select></label>`
@@ -25,7 +25,7 @@ lookBox.innerHTML = '<legend>Look</legend>' + sel('body', OPTIONS.body) + sel('f
 $('#preset').innerHTML = Object.keys(POSES).map((p) => `<option>${p}</option>`).join('');
 
 function render() {
-  const sk = skeleton(state.look.body);
+  const sk = skeletonFor(state.look);
   const fig = drawCutout({ id: 'fig', look: state.look, pose: state.pose });
   let joints = '';
   if ($('#showJoints').checked) {
@@ -44,7 +44,7 @@ card.addEventListener('pointermove', (e) => {
   if (!drag) return;
   const p = toCard(e);
   if (drag.j === 'pelvis') state.pose.root = p;
-  else { const b = BONE_TO[drag.j]; state.pose.rot = { ...state.pose.rot, [b]: Math.round(aim(skeleton(state.look.body), state.pose, b, p)) }; }
+  else { const b = BONE_TO[drag.j]; state.pose.rot = { ...state.pose.rot, [b]: Math.round(aim(skeletonFor(state.look), state.pose, b, p)) }; }
   render();
 });
 card.addEventListener('pointerup', () => { drag = null; });
