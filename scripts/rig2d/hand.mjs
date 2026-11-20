@@ -167,8 +167,10 @@ export const HAND_POSES = {
   peace: { rot: { ...THUMB_IN, i1: -9, m1: 6 }, len: { ...FIST_LEN, i1: 1, i2: 1, i3: 1, m1: 1, m2: 1, m3: 1 }, thumbFront: true },
   // thumbs up: the fist turns on its side (palm 90), the thumb stands straight up
   thumb: { rot: { palm: 90, t1: 118, t2: 0, t3: 0 }, len: { ...FIST_LEN, t1: 0.9 } },
-  ok: { rot: { i1: -30, i2: -62, i3: -58, m1: 0, r1: 6, p1: 14, t1: -22, t2: 40, t3: 34 }, len: { i1: 0.85 } },
-  hold: { view: 'side', rot: { i1: -50, i2: -70, i3: -50, m1: -50, m2: -70, m3: -50, t1: 40, t2: 30 } },
+  // OK: index and thumb tips meet in a ring (thumb angles solved for contact)
+  ok: { rot: { i1: -25, i2: -70, i3: -60, m1: 0, r1: 6, p1: 14, t1: -18, t2: 15, t3: 10 } },
+  // hold: a C grip seen side-on, the thumb opposite the curled fingers with a gap for the object
+  hold: { view: 'side', rot: { i1: -30, i2: -50, i3: -45, m1: -30, m2: -50, m3: -45, t1: -28, t2: 21, t3: 10 } },
   pinch: { view: 'side', rot: { i1: -28, i2: -35, i3: -20, m1: -70, m2: -80, m3: -60, t1: -6, t2: -8 } },
   flat: { view: 'side', rot: { t1: 10 } },
 };
