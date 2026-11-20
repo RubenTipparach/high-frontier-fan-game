@@ -10,7 +10,7 @@ function laurel(side) {
   }
   return s;
 }
-export const SPACEBORN_EMBLEM = `<svg width="80" height="80" viewBox="0 0 80 80">
+export const SHIRT_LAUREL = `<svg width="80" height="80" viewBox="0 0 80 80">
   <defs><radialGradient id="sbg"><stop offset="0" stop-color="#ffb347" stop-opacity=".9"/><stop offset="1" stop-color="#ff6a00" stop-opacity="0"/></radialGradient></defs>
   <circle cx="40" cy="40" r="34" fill="url(#sbg)"/>
   ${laurel(1)}${laurel(-1)}
@@ -31,4 +31,13 @@ function gear(cx, cy, r, teeth) {
 export const ROBOT_GEAR = `<svg width="48" height="48" viewBox="0 0 48 48">
   <path d="${gear(24, 24, 16, 10)}" fill="#7d6a9e" stroke="#4b3d66" stroke-width="1.2"/>
   <circle cx="24" cy="24" r="7" fill="#2b2238" stroke="#4b3d66" stroke-width="1.2"/>
+</svg>`;
+
+// Spaceborn emblem: a baby curled in a ball (white disc, black figure), as printed.
+export const SPACEBORN_EMBLEM = `<svg width="31" height="31" viewBox="0 0 26 26">
+  <circle cx="12" cy="14" r="10.5" fill="#fff" stroke="#111" stroke-width="1.6"/>
+  <circle cx="20.5" cy="5" r="3.2" fill="#fff" stroke="#111" stroke-width="1.4"/>
+  <circle cx="14.6" cy="9.4" r="2.9" fill="#111"/>
+  <path d="M12.6 12.2c-3.2.2-5.6 2.4-5.6 5.2 0 2.3 1.9 3.6 4.4 3.6h4.8c1.3 0 1.9-1.3 1.1-2.2l-1.9-1.8 1.6-.6c1-.4 1.1-1.6.2-2.1l-2.4-1.5z" fill="#111"/>
+  <path d="M8.6 19.6l-2.4 1.6M15.6 15.2l3 .6" stroke="#111" stroke-width="1.6" stroke-linecap="round"/>
 </svg>`;
