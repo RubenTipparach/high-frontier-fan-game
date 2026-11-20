@@ -165,7 +165,8 @@ export const HAND_POSES = {
   fist: { rot: { ...THUMB_IN }, len: FIST_LEN, thumbFront: true },
   point: { rot: { ...THUMB_IN }, len: { ...FIST_LEN, i1: 1, i2: 1, i3: 1 }, thumbFront: true },
   peace: { rot: { ...THUMB_IN, i1: -9, m1: 6 }, len: { ...FIST_LEN, i1: 1, i2: 1, i3: 1, m1: 1, m2: 1, m3: 1 }, thumbFront: true },
-  thumb: { rot: { t1: -146, t2: 0, t3: 0 }, len: { ...FIST_LEN, t1: 0.55 } },
+  // thumbs up: the fist turns on its side (palm 90), the thumb stands straight up
+  thumb: { rot: { palm: 90, t1: 118, t2: 0, t3: 0 }, len: { ...FIST_LEN, t1: 0.9 } },
   ok: { rot: { i1: -30, i2: -62, i3: -58, m1: 0, r1: 6, p1: 14, t1: -22, t2: 40, t3: 34 }, len: { i1: 0.85 } },
   hold: { view: 'side', rot: { i1: -50, i2: -70, i3: -50, m1: -50, m2: -70, m3: -50, t1: 40, t2: 30 } },
   pinch: { view: 'side', rot: { i1: -28, i2: -35, i3: -20, m1: -70, m2: -80, m3: -60, t1: -6, t2: -8 } },
