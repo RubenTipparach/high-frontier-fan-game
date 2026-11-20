@@ -171,8 +171,14 @@ export function drawTracedFronts({ W, H, panel, emit }) {
     const r = { defs: '', svg: '' };
     out('col_teleoperators', `${linear('to-bg', [['0%', '#d8dde2'], ['100%', '#6a7480']], 1, 1)}${linear('to-vz', [['0%', '#f2f8ff'], ['100%', '#8ab0d0']], 1, 0)}${r.defs}${soft('to-v')}`,
       `${rect('url(#to-bg)')}<rect width="${W}" height="80" fill="#fff" opacity="0.35"/>${r.svg}
-       <g transform="translate(${f1(F.m('bot.hand_r')[0])},${f1(F.m('bot.hand_r')[1] - 4)})"><path d="M0,0 L-6,30" stroke="#3a7a3a" stroke-width="3"/><path d="M-3,14 q-12,-4 -14,6 q10,2 14,-6" fill="#4a9a4a"/><circle cx="0" cy="-6" r="11" fill="#c8202e"/><path d="M-9,-8 Q0,-19 9,-8 Q4,0 0,-4 Q-4,0 -9,-8 Z" fill="#e8404a"/></g>
-       ${F.g}<rect x="${f1(e[0] - s * 0.62)}" y="${f1(e[1] - s * 0.16)}" width="${f1(s * 1.24)}" height="${f1(s * 0.32)}" rx="${f1(s * 0.15)}" fill="url(#to-vz)"/>${rect('url(#to-v)')}`);
+       ${F.g}${(() => {
+         // the rose stands up out of the robot's grip, bloom above the joined hands;
+         // the robot's fingers close over the stem
+         const w = F.m('bot.hand_r'), t = F.m('bot.hand_r_tip'), g = [(w[0] + t[0]) / 2, (w[1] + t[1]) / 2];
+         return `<g transform="translate(${f1(g[0])},${f1(g[1])})"><path d="M3,14 Q0,-10 -4,-34" stroke="#3a7a3a" stroke-width="3" fill="none"/>
+           <path d="M-1,-14 q-14,-6 -18,4 q12,4 18,-4" fill="#4a9a4a"/><path d="M-2,-22 q12,-8 16,0 q-10,6 -16,0" fill="#4a9a4a"/>
+           <circle cx="-4" cy="-42" r="11" fill="#c8202e"/><path d="M-13,-44 Q-4,-55 5,-44 Q0,-36 -4,-40 Q-8,-36 -13,-44 Z" fill="#e8404a"/><path d="M-10,-36 q6,6 12,0" stroke="#9a1020" stroke-width="1.5" fill="none"/>
+           <rect x="-6" y="-4" width="12" height="9" rx="4" fill="#3a4250"/></g>`; })()}<rect x="${f1(e[0] - s * 0.62)}" y="${f1(e[1] - s * 0.16)}" width="${f1(s * 1.24)}" height="${f1(s * 0.32)}" rx="${f1(s * 0.15)}" fill="url(#to-vz)"/>${rect('url(#to-v)')}`);
   }
   // Boston Hexapods: in profile, pointing into the holo screen of her walker.
   if (has('col_boston_hexapods')) {

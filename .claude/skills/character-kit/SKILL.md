@@ -78,6 +78,20 @@ pipelines in Adobe Character Animator, Duik and Godot's cutout tutorial):
   a hand or foot on a target. Try both `bend` signs and look: one usually
   crosses the body or folds the elbow backwards.
 
+## Hands: the hand rig
+
+`scripts/rig2d/hand.mjs` is a second rig with the body's rules: a skeleton
+drawn once at rest (an open right hand, back view, fingers down; a side view
+for grips), rigid round-jointed phalanges with matching radii at every joint,
+and poses that only rotate bones (`rot`) or shorten a bone folded toward the
+viewer (`len`). Joint limits: a thumb's outer joints only curl toward the palm,
+and side-view finger joints only curl forward (the owner caught a thumb bent
+backwards). `HAND_POSES` are settings of the rig (relaxed, open, wave, fist,
+point, peace, thumb, ok, hold, pinch, flat). Pose new hands in
+`tools/rig2d/hand.html` (drag joints, fold sliders, copy the JSON). A look's
+`hands.L` / `hands.R` take a pose name or a pose object. Never draw hands as
+loose generated finger sticks; that was rejected twice.
+
 ## The code
 
 | File | What it is |
