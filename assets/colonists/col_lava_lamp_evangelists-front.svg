@@ -8,10 +8,13 @@
   <ellipse cx="150" cy="131.8" rx="44" ry="49.3" fill="url(#ll-skin)"/>
   <!-- solid hair cap over the crown + temples -->
   <path d="M106,129.6 Q104.2,79.0 150,77.2 Q195.8,79.0 194,129.6 Q177.3,109.8 160.6,108.9 Q150,112.4 139.4,108.9 Q122.7,109.8 106,129.6 Z" fill="#3a2414"/>
-  <!-- solid full beard around the jaw, dipping up to the cheeks -->
-  <path d="M108.2,129.6 Q106.0,159.1 128.0,175.8 Q150,186.4 172.0,175.8 Q194.0,159.1 191.8,129.6 Q172.0,146.8 161.4,149.4 Q150,144.1 138.6,149.4 Q128.0,146.8 108.2,129.6 Z" fill="#3a2414"/>
-  <!-- mustache bridging the beard under the nose -->
-  <path d="M134.2,148.5 Q150,142.4 165.8,148.5 Q150,153.8 134.2,148.5 Z" fill="#3a2414"/>
+  <!-- goatee: light stubble along the jaw, a trimmed chin beard joined to the
+       mustache at the mouth corners (Van Dyke), as on the printed card -->
+  <path d="M108.2,136.2 Q108.2,162.6 130.2,176.7 Q150,182.8 169.8,176.7 Q191.8,162.6 191.8,136.2 Q180.8,164.8 150,167.0 Q119.2,164.8 108.2,136.2 Z" fill="#3a2414" opacity="0.22"/>
+  <path d="M134.2,151.2 L136.8,163.5 Q139.4,179.3 150,181.1 Q160.6,179.3 163.2,163.5 L165.8,151.2 L161.9,152.0 L158.8,161.7 Q150,164.4 141.2,161.7 L138.1,152.0 Z" fill="#3a2414"/>
+  <!-- mustache under the nose, then the mouth in the gap above the beard -->
+  <path d="M135.0,150.3 Q150,144.1 165.0,150.3 Q150,153.8 135.0,150.3 Z" fill="#3a2414"/>
+  <path d="M143.0,156.4 Q150,158.2 157.0,156.4" stroke="#5a2e22" stroke-width="2" fill="none" stroke-linecap="round"/>
   <!-- two SEPARATE eyebrows -->
   <path d="M127.1,120.4 q7.0,-4.4 15.0,0.9" stroke="#3a2414" stroke-width="3.5" fill="none" stroke-linecap="round"/>
   <path d="M157.9,121.2 q7.9,-4.4 15.0,0.9" stroke="#3a2414" stroke-width="3.5" fill="none" stroke-linecap="round"/>

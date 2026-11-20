@@ -142,7 +142,7 @@ export function drawM4(h) {
   // 7. Lava Lamp Evangelists / Sunburn League: a preacher before a glowing
   // laurel emblem; back, the nanite "goo" glowing in an arm.
   emit('col_lava_lamp_evangelists', 'front', panel({ defs: `${bg('ll-bg', '#5a3a1e', '#140a04')}<linearGradient id="ll-skin" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#d8a07a"/><stop offset="100%" stop-color="#8a5a3c"/></linearGradient>`,
-    inner: `${rect('url(#ll-bg)')}${beardedManFace({ hcx: CX, hcy: CY - 20, r: 44, skin: 'url(#ll-skin)', hair: '#3a2414', body: '#2a2a32' })}
+    inner: `${rect('url(#ll-bg)')}${beardedManFace({ hcx: CX, hcy: CY - 20, r: 44, skin: 'url(#ll-skin)', hair: '#3a2414', body: '#2a2a32', beard: 'goatee' })}
       <g transform="translate(${CX},${CY + 104})" fill="none" stroke="#ff9a3a" stroke-width="4" stroke-linecap="round">${[-1, 1].map((d) => `<path d="M${d * 8},18 Q${d * 46},0 ${d * 30},-40"/>`).join('')}</g>
       <circle cx="${CX}" cy="${CY + 78}" r="8" fill="#ffb35a"/><path d="M${CX},${CY + 86} v26 M${CX - 12},${CY + 96} h24" stroke="#ffb35a" stroke-width="5" stroke-linecap="round"/>` }));
   emit('col_lava_lamp_evangelists', 'back', panel({ defs: purpleBackDefs('ll2-bg'),

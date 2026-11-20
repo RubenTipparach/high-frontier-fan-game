@@ -13,10 +13,12 @@
   <ellipse cx="150" cy="151.8" rx="46" ry="51.5" fill="url(#sc2-skin)"/>
   <!-- solid hair cap over the crown + temples -->
   <path d="M104,149.5 Q102.2,96.6 150,94.8 Q197.8,96.6 196,149.5 Q178.5,128.8 161.0,127.9 Q150,131.6 139.0,127.9 Q121.5,128.8 104,149.5 Z" fill="#1a1008"/>
-  <!-- solid full beard around the jaw, dipping up to the cheeks -->
-  <path d="M106.3,149.5 Q104.0,180.3 127.0,197.8 Q150,208.8 173.0,197.8 Q196.0,180.3 193.7,149.5 Q173.0,167.4 162.0,170.2 Q150,164.7 138.0,170.2 Q127.0,167.4 106.3,149.5 Z" fill="#1a1008"/>
-  <!-- mustache bridging the beard under the nose -->
-  <path d="M133.4,169.3 Q150,162.8 166.6,169.3 Q150,174.8 133.4,169.3 Z" fill="#1a1008"/>
+  <!-- full beard along the jaw: thin sideburns from the hair, the top edge low on
+       the cheeks so the face shows (a top edge at eye level read as a mask) -->
+  <path d="M105.4,149.5 Q104.0,180.3 127.0,197.8 Q150,208.8 173.0,197.8 Q196.0,180.3 194.6,149.5 L189.1,150.9 Q186.8,174.8 169.3,179.4 Q150,184.0 130.7,179.4 Q113.2,174.8 110.9,150.9 Z" fill="#1a1008"/>
+  <!-- mustache under the nose, then the mouth in the gap above the beard -->
+  <path d="M134.4,171.1 Q150,164.7 165.6,171.1 Q150,174.8 134.4,171.1 Z" fill="#1a1008"/>
+  <path d="M142.6,177.6 Q150,179.4 157.4,177.6" stroke="#5a2e22" stroke-width="2" fill="none" stroke-linecap="round"/>
   <!-- two SEPARATE eyebrows -->
   <path d="M126.1,139.8 q7.4,-4.6 15.6,0.9" stroke="#1a1008" stroke-width="3.5" fill="none" stroke-linecap="round"/>
   <path d="M158.3,140.8 q8.3,-4.6 15.6,0.9" stroke="#1a1008" stroke-width="3.5" fill="none" stroke-linecap="round"/>
