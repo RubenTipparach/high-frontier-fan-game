@@ -109,7 +109,7 @@ function crewSectionHeading(text, tip) {
   if (tip) h.setAttribute('title', tip);
   return h;
 }
-import { COLONISTS, COLONISTS_BY_ID } from '../../data/colonists.js';
+import { COLONISTS, COLONISTS_BY_ID, SPACEBORN_COLONISTS } from '../../data/colonists.js';
 import { BERNALS, BERNALS_BY_ID, solarCellThrustBonus, bernalPrivilegeGrant } from '../../data/bernals.js';
 // The pure support-chain resolver (rules 1+2 modifier path), used to fold a
 // Bernal crawler's reactor / generator thrust modifiers into its thrust budget,
@@ -32886,6 +32886,10 @@ function renderPatents() {
   // M4 contracts: their own tab in an M4 game, and as a read-only catalog for
   // anyone who may play M4 (admins, playtesters) in any other game.
   const m4Types = (isM4() || isM4Preview()) ? ['contract'] : [];
+  // M4 spaceborn (Spacer) colonists: in an M4 + M2 game, and in the same
+  // read-only catalog M4 previewers see in any other game.
+  const spacebornShown = (isM4() && isM2()) || isM4Preview();
+  if (spacebornShown) m4Types.push('spaceborn');
   const types = [...PATENT_TYPES, 'supports', 'crew', ...expansionTypes, ...m2Types, ...m4Types];
   const counts = Object.fromEntries(PATENT_TYPES.map((t) => [t, patentsByType(t).length]));
   for (const t of expansionTypes) counts[t] = patentsByType(t).length;
@@ -32894,6 +32898,7 @@ function renderPatents() {
   counts.colonist = COLONISTS.length;
   counts.bernal = BERNALS.length;
   counts.contract = CONTRACTS.length;
+  counts.spaceborn = SPACEBORN_COLONISTS.length;
   // Drop the "(soon)" suffix once M1 is live; the cards are playable then.
   const m1Live = isM1();
   const TYPE_LABEL = {
@@ -32903,6 +32908,7 @@ function renderPatents() {
     'colonist': 'Colonists',
     'bernal': 'Bernals',
     'contract': 'Contracts',
+    'spaceborn': 'Spacer colonists',
   };
   // Seed initial active tab from a pending programmatic open
   // (openPatentsSupports), falling back to the first type.
@@ -33251,6 +33257,7 @@ function renderPatents() {
       if (isM2()) for (const c of COLONISTS) if (cardMatchesQuery(c, q)) { grid.appendChild(decorateForHand(c, 'colonist')); hits++; }
       if (isM2()) for (const c of BERNALS) if (cardMatchesQuery(c, q)) { grid.appendChild(decorateForHand(c, 'bernal')); hits++; }
       if (isM4() || isM4Preview()) for (const c of CONTRACTS) if (contractTileMatches(c, q)) { grid.appendChild(contractLibraryTile(c)); hits++; }
+      if (spacebornShown) for (const c of SPACEBORN_COLONISTS) if (cardMatchesQuery(c, q)) { grid.appendChild(decorateForHand(c, 'colonist')); hits++; }
       if (!hits) {
         const empty = document.createElement('p');
         empty.className = 'muted patent-search-empty';
@@ -33273,6 +33280,11 @@ function renderPatents() {
     if (filter === 'colonist') {
       // M2 colonist cards (white working face / purple promoted face).
       for (const c of COLONISTS) grid.appendChild(decorateForHand(c, 'colonist'));
+      return;
+    }
+    if (filter === 'spaceborn') {
+      // M4 spaceborn colonists (white working face / purple promoted face).
+      for (const c of SPACEBORN_COLONISTS) grid.appendChild(decorateForHand(c, 'colonist'));
       return;
     }
     if (filter === 'bernal') {
