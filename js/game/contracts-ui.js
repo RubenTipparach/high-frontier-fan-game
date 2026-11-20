@@ -13,7 +13,7 @@
 import {
   CONTRACTS_BY_ID, CONTRACT_PAIRS, CONTRACT_PAIR_NAMES, CONTRACT_BID_MAX, contractFace,
 } from '../../data/contracts.js';
-import { renderContractCard, richText, setContractProgressSource, setContractReadySource, fulfillButtonHtml } from './contract-card.js';
+import { renderContractCard, richText, setContractProgressSource, setContractReadySource, setContractDebtSource, fulfillButtonHtml } from './contract-card.js';
 import { SITES_BY_ID } from '../../data/sites.js';
 import { lagrangeLabel } from '../../data/lagrange-labels.js';
 import { nodeLabelOf } from '../../data/map-labels.js';
@@ -83,6 +83,25 @@ const hasContractAbility = (p, key) => (p && p.fulfilledContracts || [])
 // Connections (4B2f): a deck is also open when you have a delegate in either
 // of its ideologies.
 const delegateIn = (s, k, pid) => (((s && s.assembly && s.assembly.delegates) || {})[k] || {})[pid] > 0;
+// Mishap Insurance (4B5a): one late fee per late contract, on any late turn
+// while this turn's fee is unpaid. Free to use while the law is in force,
+// otherwise lobbied with a Centrist delegate. Returns null, or { free }.
+function mishapOption(id) {
+  const s = snap(); const p = me();
+  if (!s || !p || !D || !D.myTurn() || !s.m0) return null;
+  const tp = p.timepiece;
+  const meta = (p.contractMeta || {})[id] || {};
+  if (!tp || tp.contractId !== id || !tp.deadbeat || meta.default || meta.insuranceUsed || meta.insuredTurn) return null;
+  if (!p.turnStartedLate || (p.lateFeePaidThisTurn | 0) > 0) return null;
+  if (lawKeys(s, null).has('centrist')) return { free: true };
+  if (p.lobbiedThisTurn || !delegateIn(s, 'centrist', p.profileId)) return null;
+  const ok = (p.aqua | 0) >= 1 || (usesSoloAssembly(s) && lawKeys(s, null).has('unity'));
+  return ok ? { free: false } : null;
+}
+const mishapLobbyable = (id) => !!mishapOption(id);
+const mishapBtn = (id) => (mishapOption(id) || {}).free
+  ? `<button type="button" data-act="mishap" data-id="${id}" title="Mishap Insurance is the active law: the Pool pays this late fee (once per contract).">🛡 Use Mishap Insurance</button>`
+  : `<button type="button" data-act="mishap" data-id="${id}" title="Pay 1 aqua and discard a Centrist delegate: the Pool pays this late fee (once per contract).">🛡 Lobby Mishap Insurance</button>`;
 
 // ---- fulfill readiness ----------------------------------------------------------
 // Which boosted contracts of mine would announce a step (or be fulfilled) where
@@ -91,6 +110,21 @@ const delegateIn = (s, k, pid) => (((s && s.assembly && s.assembly.delegates) ||
 let _ready = new Map();   // cardId -> { final }
 let _readyKey = null;
 setContractReadySource((id) => _ready.get(id) || null);
+// The repaid line on a contract card: shown once a contract is late, in
+// default, or has anything paid on it (any player's, the table can see it).
+setContractDebtSource((id) => {
+  const s = snap();
+  if (!s || !s.m4) return null;
+  for (const q of (s.players || [])) {
+    const meta = (q.contractMeta || {})[id];
+    if (!meta) continue;
+    const late = !!(q.timepiece && q.timepiece.contractId === id && q.timepiece.deadbeat);
+    if (!late && !meta.default && !(meta.paid > 0)) return null;
+    const f = contractFace(id, meta.side || 'blue');
+    return f ? { paid: meta.paid | 0, debt: (f.advance | 0) * (meta.boosted ? 1 : 2) } : null;
+  }
+  return null;
+});
 function boostedContractIds(p) {
   if (!p) return [];
   return Object.keys(p.contractMeta || {}).filter((id) => !(p.contractHand || []).includes(id)
@@ -145,9 +179,56 @@ document.addEventListener('click', (e) => {
 
 // Before the turn ends: a contract that could be fulfilled right here pops up
 // with its Fulfill button. Resolves true to go on ending the turn.
+// A late contract whose fee this turn is still unpaid (4B5): ending the turn
+// now defaults it and hands over the default chit. Null when nothing is owed.
+function lateFeeOwed(s, p) {
+  const tp = p && p.timepiece;
+  if (!s || !s.m4 || !tp || !tp.deadbeat || !p.turnStartedLate) return null;
+  const meta = (p.contractMeta || {})[tp.contractId] || {};
+  if (meta.default || meta.insuredTurn) return null;
+  const f = faceOf(p, tp.contractId);
+  if (!f) return null;
+  const owed = f.lateFee - (p.lateFeePaidThisTurn | 0);
+  return owed > 0 ? { id: tp.contractId, side: meta.side || 'blue', name: f.name, owed, chitVp: meta.side === 'gold' ? 6 : 3 } : null;
+}
+function lateFeeWarning(s, p, due) {
+  return new Promise((resolve) => {
+    document.getElementById('m4-late-warning')?.remove();
+    const ov = document.createElement('div');
+    ov.id = 'm4-late-warning';
+    ov.className = 'm4c-overlay m4c-fulfilled m4c-endturn m4c-late';
+    const canPay = (p.aqua | 0) >= due.owed;
+    const held = s.defaultChit && s.defaultChit.profileId === p.profileId;
+    ov.innerHTML = `<div class="m4c-modal" role="dialog" aria-modal="true" aria-label="Late fee due">
+      <div class="m4c-head"><h3>⏰ Late fee due</h3><button type="button" class="m4c-close" aria-label="Close">✕</button></div>
+      <div class="m4c-body m4c-endturn-body"><div class="m4c-endturn-item">${cardThumb(due.id, due.side)}
+        <p class="m4c-late-text">Pay <b>${due.owed} aqua</b> or <b>${esc(due.name)}</b> defaults${held ? '' : ` and you take the default chit (<b>-${due.chitVp} VP</b>)`}.</p>
+        <button type="button" class="m4c-ful-ok" data-late="pay" ${canPay ? '' : 'disabled'}>💸 Pay late fee (${due.owed})</button>
+        ${mishapLobbyable(due.id) ? `<button type="button" class="m4c-ful-ok" data-late="mishap">🛡 ${mishapOption(due.id).free ? 'Use' : 'Lobby'} Mishap Insurance</button>` : ''}
+      </div></div>
+      <div class="m4c-endturn-foot"><button type="button" class="m4c-endturn-skip m4c-late-skip">End turn and default</button></div></div>`;
+    const done = (v) => { ov.remove(); resolve(v); };
+    ov.addEventListener('click', async (e) => {
+      if (e.target === ov || e.target.closest('.m4c-close')) { done(false); return; }
+      if (e.target.closest('.m4c-late-skip')) { done(true); return; }
+      const b = e.target.closest('[data-late]');
+      if (!b || b.disabled) return;
+      done(false);
+      if (b.dataset.late === 'pay') await payContractFee(due.id);
+      else await D.submitTurnOp({ kind: 'LOBBY', ideology: 'centrist' });
+    });
+    ov.querySelectorAll('.m4-fulfill-btn').forEach((x) => x.remove());
+    document.body.appendChild(ov);
+  });
+}
+
 export async function contractsBeforeEndTurn() {
   const s = snap(); const p = me();
-  if (!s || !s.m4 || !p || !D || !D.dryRun) return true;
+  if (!s || !s.m4 || !p || !D) return true;
+  // First the late fee: an unpaid one defaults the contract at the end of turn.
+  const due = lateFeeOwed(s, p);
+  if (due && !(await lateFeeWarning(s, p, due))) return false;
+  if (!D.dryRun) return true;
   const ids = boostedContractIds(p);
   if (!ids.length) return true;
   const ready = await checkReady(ids);
@@ -280,7 +361,10 @@ function locationOf(p, id) {
 
 // The Completed contracts tab, opened from the Contracts chip in the stack row.
 export function openCompletedContracts() {
-  _tab = 'yours';
+  // Nothing completed or in play yet: the market is what there is to see.
+  const p = me();
+  const mine = p && ((p.fulfilledContracts || []).length || Object.keys(p.contractMeta || {}).length);
+  _tab = mine ? 'yours' : 'market';
   _panelOpen = true;
   renderPanel();
 }
@@ -307,8 +391,13 @@ export function showContractWhere(id) {
   ov.className = 'm4c-overlay';
   ov.innerHTML = `<div class="m4c-modal m4c-where" role="dialog" aria-label="Contract">
     <div class="m4c-head"><h3>⏱ ${esc((faceOf(p, id) || {}).name || '')}</h3><button type="button" class="m4c-close" aria-label="Close">✕</button></div>
-    <div class="m4c-where-body">${cardThumb(id, meta.side)}<div class="m4c-where-loc">📍 ${esc(locationOf(p, id) || 'In a stack')}</div></div></div>`;
+    <div class="m4c-where-body">${cardThumb(id, meta.side)}<div class="m4c-where-loc">📍 ${esc(locationOf(p, id) || 'In a stack')}</div>
+      ${mishapLobbyable(id) ? `<div class="m4c-btns">${mishapBtn(id)}</div>` : ''}</div></div>`;
   const close = () => ov.remove();
+  ov.querySelector('[data-act="mishap"]')?.addEventListener('click', async () => {
+    close();
+    await D.submitTurnOp({ kind: 'LOBBY', ideology: 'centrist' });
+  });
   ov.addEventListener('click', (e) => { if (e.target === ov) close(); });
   ov.querySelector('.m4c-close').addEventListener('click', close);
   document.body.appendChild(ov);
@@ -318,7 +407,7 @@ let _tab = null;        // 'market' | 'yours'
 // May the viewer start a contract auction now (the end of their Fundraise)?
 function canAuctionNow(s, p, myTurn) {
   return !!(s && p && myTurn && p.fundraisedThisTurn && !p.contractAuctionDone && !p.timepiece && !s.auction
-    && !s.anarchy && !s.war);
+    && !s.anarchy && !s.war && !(D.handFull && D.handFull(p)));
 }
 // The three pair decks, top card up. A deck you may auction carries one
 // Auction button; one you may not is greyed out with none (owner 2026-11-18).
@@ -331,8 +420,11 @@ function decksHtml(s, p, auctionOpen) {
       && CONTRACT_PAIRS[pair].some((k) => delegateIn(s, k, p.profileId));
     const top = deck[0];
     const open = (byLaw || byConnections) && !!top;
+    // The default-chit holder may not put a manned contract up (4B2d).
+    const topFace = top ? contractFace(top, s.contractSide === 'gold' ? 'gold' : 'blue') : null;
+    const stigma = !!(topFace && topFace.manned && s.defaultChit && s.defaultChit.profileId === p.profileId);
     const btn = auctionOpen && open
-      ? `<div class="m4c-btns"><button type="button" data-act="auction" data-pair="${pair}">Auction</button></div>` : '';
+      ? `<div class="m4c-btns"><button type="button" data-act="auction" data-pair="${pair}" ${stigma ? 'disabled title="Default chit: no manned contracts."' : ''}>Auction</button></div>` : '';
     return `<div class="m4c-deck ${open ? 'open' : 'closed'}" ${open ? '' : 'aria-disabled="true"'}>
       <div class="m4c-deck-head"><b>${CONTRACT_PAIR_NAMES[pair]}</b>
         <span>${deck.length} left</span>
@@ -399,6 +491,7 @@ function renderPanel() {
       <div class="m4c-note">${esc(where)}</div>
       <div class="m4c-btns">${myTurn ? `<button type="button" data-act="fulfill" data-id="${id}">Fulfill here</button>` : ''}
       ${myTurn && late ? `<button type="button" data-act="pay" data-id="${id}" data-max="${f.lateFee}">Pay late fee (${f.lateFee})</button>` : ''}
+      ${mishapLobbyable(id) ? mishapBtn(id) : ''}
       ${myTurn && abandonBlock(s, p, id) === null ? `<button type="button" data-act="abandon" data-id="${id}">Abandon (Anarchy)</button>` : ''}</div></div>`;
   }).join('');
   const partnerLine = (x) => ((x.partners || []).length
@@ -566,6 +659,7 @@ async function onAct(b) {
   else if (act === 'iso-buy') await D.submitTurnOp({ kind: 'ISOTOPE_EXCHANGE', action: 'buy', amount: 1 });
   else if (act === 'iso-tank') await D.submitTurnOp({ kind: 'ISOTOPE_EXCHANGE', action: 'deposit' });
   else if (act === 'pay') await payContractFee(id);
+  else if (act === 'mishap') await D.submitTurnOp({ kind: 'LOBBY', ideology: 'centrist' });
   else if (act === 'abandon') await abandonContract(id);
   if (act === 'auction') closePanel();
   else if (_panelOpen) renderPanel();
@@ -654,9 +748,25 @@ export async function abandonContract(id) {
 
 // ---- the auction overlay ----------------------------------------------------------
 let _yearsDraft = null;
+// Minimize, as every auction does: the overlay collapses to an Auction button
+// in the turn bar. A new lot always opens expanded.
+let _caMin = false;
+let _caKey = null;
+let _caLast = null;
+export function setContractAuctionMinimized(on) {
+  _caMin = !!on;
+  if (_caLast) renderContractAuction(_caLast);
+}
 export function renderContractAuction(a) {
   let el = document.getElementById('m4-contract-auction');
-  if (!a) { if (el) el.remove(); _yearsDraft = null; return; }
+  if (!a) {
+    if (el) el.remove();
+    _yearsDraft = null; _caMin = false; _caKey = null; _caLast = null;
+    if (D && D.setTurnAction) D.setTurnAction('contract-auction', null);
+    return;
+  }
+  _caLast = a;
+  if (_caKey !== a.cardId) { _caKey = a.cardId; _caMin = false; }
   const s = snap();
   const p = me();
   if (!el) {
@@ -668,10 +778,17 @@ export function renderContractAuction(a) {
   const face = contractFace(a.cardId, a.side || 'blue');
   const myId = p && p.profileId;
   const iAmAuctioneer = myId === a.auctioneerId;
-  const blocked = p && (p.timepiece ? 'Timepiece out.'
-    : (face.manned && s.defaultChit && s.defaultChit.profileId === myId ? 'Default chit: no manned bids.' : null));
-  const waiting = (s.players || []).filter((q) => q.profileId !== a.auctioneerId && !(a.acted || []).includes(q.profileId)
-    && !q.timepiece && !(face.manned && s.defaultChit && s.defaultChit.profileId === q.profileId));
+  // Who may not bid (4B3): a timepiece already out (a contract on the clock),
+  // the default chit on a manned contract, or the academia hand limit.
+  const barOf = (q) => (!q ? null : q.timepiece ? 'Timepiece out.'
+    : (face.manned && s.defaultChit && s.defaultChit.profileId === q.profileId) ? 'Default chit: no manned bids.'
+      : (D.handFull && D.handFull(q)) ? 'Hand full: 4 cards.' : null);
+  const blocked = iAmAuctioneer ? null : barOf(p);
+  // The bidders still owed an answer: the engine's own list when it is there.
+  const waitIds = Array.isArray(a.waitingOn) ? a.waitingOn.filter((id) => id !== a.auctioneerId) : null;
+  const waiting = (s.players || []).filter((q) => q.profileId !== a.auctioneerId && (waitIds
+    ? waitIds.includes(q.profileId)
+    : (!(a.acted || []).includes(q.profileId) && !barOf(q))));
   const settled = !waiting.length;
   if (_yearsDraft == null || _yearsDraft > a.low) _yearsDraft = Math.max(0, a.low - (iAmAuctioneer ? 0 : 1));
   // The dial: each bid is its bidder's timepiece on the slot that many years
@@ -708,10 +825,16 @@ export function renderContractAuction(a) {
   let controls = '';
   if (blocked) controls = `<p class="muted">${blocked}</p>`;
   else {
+    // What you have set now: your standing bid, and a greyed button while the
+    // picker still shows that same bid.
+    const isSet = myBid != null && myBid === _yearsDraft;
     controls = `<select id="m4c-years" aria-label="Your bid in years">${opts}</select>
-      <button type="button" data-act="bid">Submit ${_yearsDraft} yr</button>
+      <button type="button" data-act="bid" ${isSet ? 'disabled' : ''}>${isSet ? `✓ ${myBid} yr set` : `Submit ${_yearsDraft} yr`}</button>
       ${iAmAuctioneer ? '' : '<button type="button" data-act="pass">Pass</button>'}`;
   }
+  const mine = myBid != null
+    ? `<p class="m4c-mybid">Your bid: <b style="color:${esc((p && p.color) || '#e5e7eb')}">${myBid} yr</b>${myId === leaderId ? ' · winning' : ''}</p>`
+    : (p && (a.passed || []).includes(myId) ? '<p class="m4c-mybid">You passed</p>' : '');
   if (iAmAuctioneer) {
     // Ties (4B3g), as in a patent auction: the initiator wins a tie they are in;
     // otherwise they name the winner among the tied bidders.
@@ -721,15 +844,52 @@ export function renderContractAuction(a) {
       ? `<div class="m4c-btns">${tied.map((id) => `<button type="button" data-act="close" data-winner="${id}" ${settled ? '' : 'disabled'}>Award to @${esc(nameOf(id))} (${a.low} yr)</button>`).join('')}</div>`
       : `<div class="m4c-btns"><button type="button" data-act="close" ${settled ? '' : 'disabled'}>Close</button></div>`;
   }
+  // Who sits this lot out, and why.
+  const out = (s.players || []).filter((q) => q.profileId !== a.auctioneerId && barOf(q));
+  const outLine = out.length
+    ? `<p class="m4c-wait">Out: ${out.map((q) => `<span class="player-name" style="--player-color:${esc(q.color || 'currentColor')}">@${esc(q.name)}</span> (${esc(barOf(q).replace(/\.$/, '').replace(/:.*/, '').toLowerCase())})`).join(', ')}</p>`
+    : '';
   el.innerHTML = `<div class="m4c-modal" role="dialog" aria-label="Contract auction">
-    <div class="m4c-head"><h3>📜 Auction</h3><span class="muted">${CONTRACT_PAIR_NAMES[a.pair] || ''}</span></div>
+    <div class="m4c-head"><h3>📜 Auction</h3><span class="muted">${CONTRACT_PAIR_NAMES[a.pair] || ''}</span>
+      <button type="button" class="mp-mini-btn m4c-mini" title="Minimize" aria-label="Minimize">&minus;</button></div>
     <div class="m4c-auction-body">
       <div class="m4c-auction-card">${cardThumb(a.cardId, a.side || 'blue')}</div>
       <div class="m4c-auction-play">
         <div class="m4c-dial m4c-auction-dial">${dial}</div>
+        ${mine}
         <div class="m4c-controls">${controls}</div>
         <p class="m4c-wait">${settled ? `${esc(nameOf(a.auctioneerId))} to close` : `Waiting: ${waiting.map((q) => '@' + esc(q.name)).join(', ')}`}</p>
+        ${outLine}
       </div></div></div>`;
+  // Docked: the overlay hides and the turn bar carries the Auction button.
+  const myMove = !blocked && myId !== a.auctioneerId && !(a.acted || []).includes(myId);
+  const myClose = iAmAuctioneer && settled;
+  el.classList.toggle('m4c-minimized', _caMin);
+  if (D && D.setTurnAction) {
+    D.setTurnAction('contract-auction', _caMin ? {
+      label: '📜 Auction',
+      meta: myBid != null ? `you ${myBid} yr` : `${a.low} yr`,
+      needsAction: myMove || myClose,
+      onClick: () => setContractAuctionMinimized(false),
+    } : null);
+  }
+  // Nudges, as in a patent auction: the auctioneer can ping the bidders still
+  // owed an answer, or everyone else at the table.
+  if (iAmAuctioneer && D.nudgeButton) {
+    const others = (s.players || []).map((q) => q.profileId).filter((id) => id !== myId);
+    if (others.length) {
+      const wrap = document.createElement('div');
+      wrap.className = 'm4c-btns m4c-nudges';
+      wrap.append(
+        D.nudgeButton('👋 Nudge waiting', { waiting: true }, waiting.map((q) => q.profileId), 'Remind the bidders who have not bid or passed yet.'),
+        D.nudgeButton('👋 Nudge all', { all: true }, others, 'Remind every other player at the table.'),
+      );
+      const play = el.querySelector('.m4c-auction-play');
+      if (play) play.appendChild(wrap);
+    }
+  }
+  const mini = el.querySelector('.m4c-mini');
+  if (mini) mini.addEventListener('click', () => setContractAuctionMinimized(true));
   const sel = el.querySelector('#m4c-years');
   if (sel) sel.addEventListener('change', () => { _yearsDraft = Number(sel.value); renderContractAuction(a); });
   el.querySelectorAll('.dial-hit').forEach((h) => h.addEventListener('click', () => {

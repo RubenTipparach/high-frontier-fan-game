@@ -121,7 +121,7 @@ import { futureGoalForCard, checkFutureGoal, CENTAUR_SITE_IDS, GREEK_CAMP_IDS, T
 // M2 Colonist powers (FINAO halved etc.) - the same flags the engine reads.
 import { colonistPower } from '../../data/colonist-abilities.js';
 import { openBernalStackModal, openBernalFuelTank } from './bernal-modal.js';
-import { initContractsUi, closeContractsPanel, contractSpaceName, contractsBeforeEndTurn, refreshContractsUi, abandonBlock, contractFeeDue, payContractFee, abandonContract, timepieceBadge, renderContractAuctionStep, openCompletedContracts } from './contracts-ui.js';
+import { initContractsUi, closeContractsPanel, contractSpaceName, contractsBeforeEndTurn, setContractAuctionMinimized, refreshContractsUi, abandonBlock, contractFeeDue, payContractFee, abandonContract, timepieceBadge, renderContractAuctionStep, openCompletedContracts } from './contracts-ui.js';
 import { getBernalSprite } from './bernal-sprite.js';
 import { fuelTankCylinderMarkup, fuelTransferSectionMarkup } from './fuel-tank-view.js';
 // One client card-lookup: patents PLUS the M2 Bernal cards (which live in
@@ -132,6 +132,7 @@ import { fuelTankCylinderMarkup, fuelTransferSectionMarkup } from './fuel-tank-v
 // M4 contract cards are stack slots too (only ever present in an m4 game).
 import { CONTRACTS, CONTRACTS_BY_ID, contractFace, acetyleneTerms } from '../../data/contracts.js';
 import { renderContractCard } from './contract-card.js';
+import { CONTRACT_ABILITIES } from './contract-glyphs.js';
 const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...BERNALS_BY_ID, ...COLONISTS_BY_ID, ...CONTRACTS_BY_ID };
 import { renderAssemblyPanel, renderAssemblyLaws } from './assembly.js';
 import { uiIcon, cardPileBadge } from './ui-icons.js';
@@ -491,6 +492,12 @@ let _firstPlayerMin = false;
 let _freeCubeMin = false;
 let _auctionMin = false;
 let _eventMin = false;
+// The card picked in the Sunspot event chooser (Budget Cuts discard, Pad
+// Explosion tie). The chooser is redrawn on every board update, so the pick
+// lives here, keyed by the event, and survives a redraw (it used to fall back
+// to the first card, so a pick made just before another player acted was
+// silently swapped for the first card in hand).
+let _eventPick = { key: null, id: null };
 // Rising-edge tracker for auction turn notifications: remembers, per lot,
 // whether it was already "my turn" (bid/pass) or "my close" so a re-render
 // only toasts when the turn newly lands on me - e.g. the auctioneer raises
@@ -4679,6 +4686,7 @@ function renderEventChooser(snapshot) {
   if (!pending || !_online || !gameViewVisible()) {
     if (existing) existing.remove();
     setMpTurnAction('event', null);
+    _eventPick = { key: null, id: null };
     return;
   }
   const players = (snapshot.players || []);
@@ -4891,17 +4899,32 @@ function renderEventChooser(snapshot) {
   // A tied card's deployed radiator side, when the blast reported one.
   const padSides = (isPad && pending.optionSides && pending.optionSides[myId]) || null;
   const padSideOf = (id) => (padSides && padSides[id]) || null;
-  let selected = optionIds[0] || null;
+  // No card is preselected: Discard waits for the player's own pick.
+  if (_eventPick.key !== `${kind}` || !optionIds.includes(_eventPick.id)) {
+    if (_eventPick.key !== `${kind}`) _eventPick = { key: `${kind}`, id: null };
+    else _eventPick.id = null;
+  }
+  let selected = _eventPick.id;
 
   const confirm = document.createElement('button');
   confirm.type = 'button';
   confirm.className = 'modal-btn primary';
-  confirm.textContent = isCuts ? '\u2702\uFE0F Discard it' : '\u{1F9E8} Lose it';
-  confirm.disabled = !selected;
+  // The button names the card it acts on, so a pick scrolled out of sight on a
+  // phone is never a surprise.
+  const labelConfirm = () => {
+    const nm = selected ? ((lookup(selected) || {}).name || selected) : null;
+    confirm.textContent = isCuts
+      ? (nm ? `\u2702\uFE0F Discard ${nm}` : '\u2702\uFE0F Pick a card')
+      : (nm ? `\u{1F9E8} Lose ${nm}` : '\u{1F9E8} Pick a card');
+    confirm.disabled = !selected;
+  };
+  labelConfirm();
   confirm.addEventListener('click', () => {
     if (!selected) return;
     confirm.disabled = true;
-    submitEventChoice(selected, padLobby);
+    const id = selected;
+    _eventPick = { key: null, id: null };
+    submitEventChoice(id, padLobby);
   });
   actions.appendChild(confirm);
 
@@ -4934,7 +4957,7 @@ function renderEventChooser(snapshot) {
       tick.className = 'et-pick-tick';
       tick.textContent = '\u2713';
       pick.appendChild(tick);
-      const choose = () => { selected = id; confirm.disabled = false; repaint(); };
+      const choose = () => { selected = id; _eventPick = { key: `${kind}`, id }; labelConfirm(); repaint(); };
       pick.addEventListener('click', choose);
       pick.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); choose(); }
@@ -8306,7 +8329,7 @@ function showContractPins(title, nodes, auctionHidden) {
   x.type = 'button'; x.className = 'm4-loc-pins-x'; x.textContent = '✕'; x.setAttribute('aria-label', 'Close');
   x.addEventListener('click', () => {
     closeContractPins();
-    document.getElementById('m4-contract-auction')?.classList.remove('m4c-minimized');
+    setContractAuctionMinimized(false);
   });
   head.appendChild(x);
   box.appendChild(head);
@@ -8327,7 +8350,7 @@ function showContractPins(title, nodes, auctionHidden) {
     back.className = 'm4-loc-pins-back';
     back.textContent = '↩ Auction';
     back.addEventListener('click', () => {
-      document.getElementById('m4-contract-auction')?.classList.remove('m4c-minimized');
+      setContractAuctionMinimized(false);
       closeContractPins();
     });
     box.appendChild(back);
@@ -8377,8 +8400,9 @@ async function locateContractPlaces(link) {
   }
   closeContractsPanel();
   document.getElementById('m4-contract-where')?.remove();
+  // A live contract auction steps aside (minimized to the turn bar).
   const auction = document.getElementById('m4-contract-auction');
-  if (auction) auction.classList.add('m4c-minimized');
+  if (auction) setContractAuctionMinimized(true);
   let narrow = false;
   try { narrow = window.matchMedia('(max-width: 720px)').matches; } catch (e) { /* ignore */ }
   if (narrow) { try { showPane(null); } catch (e) { /* ignore */ } }
@@ -8530,6 +8554,7 @@ function actorsNeededClient(snapshot) {
     return snapshot.pendingFirstPlayer.chooserId != null ? [snapshot.pendingFirstPlayer.chooserId] : [];
   }
   const a = snapshot.auction;
+  if (a && a.kind === 'contract' && Array.isArray(a.waitingOn)) return a.waitingOn.slice();
   if (a) {
     if (auctionAllBiddersActed(a, snapshot.players)) return [a.auctioneerId];
     const acted = a.acted || [];
@@ -9190,7 +9215,7 @@ function renderAbilityBadges(p) {
     const b = document.createElement('span');
     b.className = 'mp-ability contract';
     b.textContent = '📜 ' + c.label;
-    b.title = `${c.label} - fulfilled contract ability (${c.from}): ${c.text}`;
+    b.title = `${c.label}: ${c.text} (${c.from})`;
     row.appendChild(b);
   }
   return row;
@@ -9224,7 +9249,10 @@ function contractAbilityChips(p) {
     if (!label && ab.acetyleneFactories) label = 'Acetylene at your Factories';
     if (!label && ab.elevatorLanderBurns) label = 'Elevator assist';
     if (!label) label = text.length > 28 ? text.slice(0, 26).replace(/\s+\S*$/, '') + '...' : text;
-    out.push({ label, text, from: face.name });
+    // A keyword ability ("Connections.") says what it does, off the reference
+    // card's one-liner, rather than repeating its own name.
+    const kw = Object.keys(CONTRACT_ABILITIES).find((k) => text.replace(/\.$/, '').trim() === k);
+    out.push({ label, text: kw ? CONTRACT_ABILITIES[kw] : text, from: face.name });
   }
   return out;
 }
@@ -10936,14 +10964,16 @@ function wireHandStrip() {
     });
     // M4 contracts are Hand cards (4B3h), drawn after the patents on the side
     // they were won on. They don't count toward the academia hand limit, so the
-    // count reads "N cards + M contracts". A default contract lies sideways in
-    // the hand (4B4d) and can never be boosted again.
+    // count reads "N cards + M contracts". They sit at the right end of the
+    // hand; a default contract (4B4d) is tagged Default and can never be
+    // boosted again.
     contracts.forEach((c) => {
       const card = lookup(c.id);
       if (!card) return;
       const face = c.side === 'gold' ? 'secondary' : 'primary';
       const wrap = document.createElement('div');
-      wrap.className = 'hand-slot is-contract' + (c.default ? ' is-default' : '');
+      wrap.className = 'hand-slot is-contract' + (c.default ? ' is-default' : '')
+        + (c === contracts[0] ? ' hand-contract-first' : '');
       if (isBoostMarked(c.id)) wrap.classList.add('is-boost-marked');
       wrap.appendChild(renderCard(card, { face }));
       const sideName = c.side === 'gold' ? 'gold' : (card.exodus ? 'exodus' : 'blue');
@@ -11393,14 +11423,16 @@ function renderStackSwitcher() {
       siteAvailable: true,
       isEmpty: false,
     },
-    // M4: once you have completed contracts, a Contracts chip beside the LEO
-    // Stack opens them (owner 2026-11-18).
+    // M4: a Contracts chip beside the LEO Stack, always there in an M4 game
+    // (owner 2026-11-19: it is the way into the contracts panel). It counts
+    // your completed contracts and opens them; with none yet it opens the market.
     ...(() => {
-      const done = (isM4() && (mySnapshotPlayer() || {}).fulfilledContracts) || [];
-      return done.length ? [{
+      if (!isM4()) return [];
+      const done = (mySnapshotPlayer() || {}).fulfilledContracts || [];
+      return [{
         id: 'contracts', glyphHtml: '<span class="chip-emoji">📜</span>', sub: 'Contracts', cards: done.length,
         title: `Completed contracts - ${done.length}`, siteAvailable: false, isEmpty: false, noPin: true,
-      }] : [];
+      }];
     })(),
     {
       id: 'rocket', icon: 'rocket', sub: 'Rocket', cards: rocketStack.length,
@@ -16008,7 +16040,8 @@ function enterManualMoveMode(opts = {}) {
     _manualOriginId = unit === 'factory' ? (opts.originPlannerId || null) : getStackSiteId('freighter');
   } else {
     const thrStats = getActiveThrusterStats();
-    const thrust = thrStats && Number.isFinite(thrStats.thrust) ? thrStats.thrust : 4;
+    // Gun Club arcjet: one more burn on this (the first) turn of the move.
+    const thrust = (thrStats && Number.isFinite(thrStats.thrust) ? thrStats.thrust : 4) + rocketArcjetBonus();
     _manualBudget = thrust;
     _manualBudgetMax = thrust;
     _manualPirouettes = activeThrusterBonusPivots();
@@ -25683,6 +25716,34 @@ function getRocketSite() {
     (x) => x.type === 'lagrange' && x.name === 'LEO'
   ) || null;
 }
+// WATER / HYDROGEN ARCJET (Baltimore Gun Club): "Colocated thruster gets a
+// bonus burn if it starts its move at LEO" (white face), "... LEO, your
+// Anchored Bernal, or your Factory" (black face). The crew must be on the
+// rocket's departure space (aboard, or in another of my stacks there), and
+// Anarchy suspends it. The same test as the engine's arcjetCredit,
+// so the planner offers the burn the move will grant: 1, or 0.
+function rocketArcjetBonus() {
+  if (!_online || !_onlineSnapshot || _onlineSnapshot.anarchy) return 0;
+  const me = mySnapshotPlayer();
+  const r = me && me.rocket;
+  if (!r) return 0;
+  // Colocated: aboard, or in any of my stacks on the space the rocket leaves
+  // (the LEO stack at LEO, an outpost / Bernal / Freighter parked there).
+  const here = r.siteId == null ? null : r.siteId;
+  const ID = 'crew_baltimore_gun_club';
+  const pick = (arr) => (arr || []).find((s) => s && s.id === ID) || null;
+  const same = (sid) => (sid == null ? null : sid) === here;
+  let slot = pick(r.stack) || (here == null ? pick(me.leo) : null);
+  for (const o of Object.values(me.outposts || {})) if (!slot && o && same(o.siteId)) slot = pick(o.cards);
+  for (const bn of (me.bernals || [])) if (!slot && bn && same(bn.siteId)) slot = pick(bn.stack);
+  if (!slot && me.freighter && same(me.freighter.siteId)) slot = pick(me.freighter.stack);
+  if (!slot) return 0;
+  if (here == null) return 1;
+  if (slot.face !== 'secondary') return 0;
+  if ((me.bernals || []).some((bn) => bn && bn.anchored && bn.siteId === here)) return 1;
+  const f = (_onlineSnapshot.factories || {})[here];
+  return f && f.ownerId === me.profileId ? 1 : 0;
+}
 function persistRocketSite() {
   if (isOnline()) return; // online state is server-owned; don't touch the solo save
   try {
@@ -28299,7 +28360,9 @@ async function moveRocket() {
   const _totals = getStackTotals();
   const _dryM = (_thrFuel && Number.isFinite(_thrFuel.dryMass)) ? _thrFuel.dryMass : _totals.dryMass;
   const _wetM = (_thrFuel && Number.isFinite(_thrFuel.wetMass)) ? _thrFuel.wetMass : _totals.wetMass;
-  const _stepsNeeded = _fuelOn ? Math.ceil(_perBurn * turn1Burns) : 0;
+  // The Gun Club arcjet's bonus burn is free, as the move charges it.
+  const _paidBurns = Math.max(0, turn1Burns - rocketArcjetBonus());
+  const _stepsNeeded = _fuelOn ? Math.ceil(_perBurn * _paidBurns) : 0;
   const _stepsAvail = blackStepsBetween(_dryM, _wetM);
   const _newWet = _stepsNeeded > 0 ? walkBlackDown(_wetM, _stepsNeeded) : _wetM;
   const fuelCost = _stepsNeeded > 0 ? Math.round((_wetM - _newWet) * 1e6) / 1e6 : 0;  // water spent
@@ -32049,6 +32112,9 @@ function planRocketRouteTo(destSite) {
     // Synodic Comet in any season, so the search stops treating those comets as
     // off the board. Every other seasonal space still gates normally.
     twThruster: !!(thrStats && thrStats.isTw),
+    // Baltimore Gun Club aboard, leaving a qualifying departure: +1 burn on the
+    // first turn of the move.
+    firstTurnBonus: rocketArcjetBonus(),
   });
   if (!result || !result.segments.length) {
     // Every map location is reachable from LEO (the route graph has no
@@ -36060,6 +36126,10 @@ initContractsUi({
   },
   toast: (msg, level) => { if (_onlineToast) _onlineToast(msg, level); },
   confirm: (opts) => confirmModal(opts),
+  setTurnAction: (key, spec) => setMpTurnAction(key, spec),
+  // The academia hand limit, Skunkworks aside (same check as a patent auction).
+  handFull: (p) => auctionHandFull(p),
+  nudgeButton: (label, opts, ids, title) => makeAuctionNudgeButton(_onlineSnapshot, label, opts, ids, title),
   // The name a player reads for a map space (a site, a Lagrange point, a hazard).
   spaceName: (slug) => {
     const n = _activeData && _activeData.sites ? _activeData.sites.find((x) => x.id2 === slug) : null;

@@ -5622,6 +5622,23 @@ function applyMoveFleet(state, op, player) {
   return { ok: true, state, rolled: anyRolled, log: logs.join(' ') || `${player.name} moved the factory fleet.` };
 }
 
+
+// The Baltimore Gun Club crew slot colocated with a rocket leaving `from`
+// (null = LEO): aboard the rocket, or in any of the player's stacks on that
+// same space. Null when it is nowhere there.
+function gunClubColocated(player, from) {
+  const ID = 'crew_baltimore_gun_club';
+  const pick = (arr) => (arr || []).find((s) => s && s.id === ID) || null;
+  const sameSpace = (siteId) => (siteId == null ? null : siteId) === (from == null ? null : from);
+  let slot = pick(player.rocket && player.rocket.stack);
+  if (slot) return slot;
+  if (from == null && (slot = pick(player.leo))) return slot;
+  for (const o of Object.values(player.outposts || {})) if (o && sameSpace(o.siteId) && (slot = pick(o.cards))) return slot;
+  for (const bn of (player.bernals || [])) if (bn && sameSpace(bn.siteId) && (slot = pick(bn.stack))) return slot;
+  if (player.freighter && sameSpace(player.freighter.siteId) && (slot = pick(player.freighter.stack))) return slot;
+  return null;
+}
+
 function applyMove(state, op, player) {
   // M1: a MOVE tagged for the freighter drives the freighter unit instead of
   // the rocket (a separate mover with its own, simpler movement model).
@@ -5880,9 +5897,12 @@ function applyMove(state, op, player) {
   // lock would leave the card doing nothing from turn one until an anchoring
   // that most games never reach. (Recorded here rather than left implicit -
   // this was reading as an accidental bypass of the whole privilege system.)
-  const baltimoreSlot = state.anarchy
-    ? null
-    : player.rocket.stack.find((s) => s.id === 'crew_baltimore_gun_club');
+  // "Colocated" is the card's word: the crew counts aboard the rocket, or in
+  // any of the player's stacks on the same space the rocket leaves from (the
+  // LEO stack when it leaves LEO, an outpost / Bernal / Freighter parked there).
+  // It used to count only aboard, so a Gun Club waiting in the LEO stack gave
+  // the departing rocket nothing (reported 2026-11-20).
+  const baltimoreSlot = state.anarchy ? null : gunClubColocated(player, from);
   let arcjetCredit = 0;
   if (baltimoreSlot) {
     const atLeo = from == null;
@@ -11632,14 +11652,51 @@ function mayRabbleRouse(state, player) {
   if (!state.anarchy || factionPrivilegesLocked(state, player)) return false;
   return playerOwnsAbility(player, 'RABBLE-ROUSER');
 }
+// Mishap Insurance (4B5a): it pays ONE late fee per late contract, on any late
+// turn (owner 2026-11-20: "once whenever"). With the law in force it is simply
+// used; otherwise it is lobbied (1 aqua, or none under the solitaire Unity law,
+// plus a Centrist delegate). Paid automatically when the law is in force at the
+// flip, which spends the same single use.
+function lobbyMishapInsurance(state, player, asm, laws, solo) {
+  if (!state.m4) return fail('bad_ideology');
+  const tp = player.timepiece;
+  const meta = tp && contractMetaOf(player, tp.contractId);
+  const face = tp && contractFaceOf(player, tp.contractId);
+  if (!tp || !tp.deadbeat || !meta || !face || meta.default) return fail('no_late_contract');
+  if (!player.turnStartedLate) return fail('no_late_fee_due');
+  if (meta.insuranceUsed) return fail('insurance_used');
+  if (meta.insuredTurn || (player.lateFeePaidThisTurn | 0) > 0) return fail('late_fee_already_paid');
+  const inForce = laws.active.has('centrist');
+  let how = 'with the law in force';
+  if (!inForce) {
+    if (placeCount(asm, 'centrist', player.profileId) <= 0) return fail('no_delegate_there');
+    const freeLobby = solo && laws.active.has('unity');
+    if (!freeLobby && (player.aqua | 0) < 1) return fail('insufficient_aqua');
+    if (!freeLobby) player.aqua -= 1;
+    setPlaceCount(asm, 'centrist', player.profileId, placeCount(asm, 'centrist', player.profileId) - 1);
+    player.lobbiedThisTurn = true;
+    how = `lobbied with ${freeLobby ? 'no aqua' : '1 aqua'} and a Centrist delegate`;
+  }
+  meta.paid += face.lateFee;
+  meta.insuredTurn = true;
+  meta.insuranceUsed = true;
+  const tail = maybeRepayDebt(state, player, tp.contractId);
+  return { ok: true, state, log: `${player.name} used Mishap Insurance (${how}): the Pool pays the ${face.lateFee}-aqua late fee on ${face.name}.${tail}` };
+}
 function applyLobby(state, op, player) {
   if (!state.m0) return fail('not_m0');
   const asm = assemblyOf(state);
   const solo = usesSoloAssembly(state);
   const laws = activeLaws(asm, state.activeLawStar, solo, !!state.anarchy);
+  const key = String(op.ideology || '');
+  // Mishap Insurance with the law in force is a use, not a lobby: no lobby slot.
+  if (key === 'centrist' && laws.active.has('centrist')) return lobbyMishapInsurance(state, player, asm, laws, solo);
   if (laws.lobbyingDisabled) return fail('lobbying_disabled');
   if (player.lobbiedThisTurn) return fail('already_lobbied');
-  const key = String(op.ideology || '');
+  // Mishap Insurance (4B5a): "You may lobby this Law." On the first turn a
+  // contract is late, a Centrist delegate (plus the usual aqua) has the Pool
+  // pay that turn's late fee, as if the law were in force when it flipped.
+  if (key === 'centrist') return lobbyMishapInsurance(state, player, asm, laws, solo);
   if (!IDEOLOGY_ORDER.includes(key)) return fail('bad_ideology');
   if (laws.active.has(key)) return fail('law_already_active');
   if (placeCount(asm, key, player.profileId) <= 0) return fail('no_delegate_there');
@@ -16262,6 +16319,9 @@ function contractPairsOpenTo(state, player) {
 // default chit bars manned contracts (4B2d / 4B6c).
 function contractBidBlock(state, player, cardId) {
   if (player.timepiece) return 'timepiece_in_use';
+  // Academia hand limit (4B3): four or more Hand cards (contracts don't count,
+  // 4B2a; they sit apart in contractHand) bars bidding, Skunkworks aside.
+  if (biddingBlockedByHand(state, player)) return 'hand_limit';
   const a = state.auction;
   const face = contractFace(cardId, (a && a.kind === 'contract' && a.cardId === cardId && a.side) || state.contractSide || 'blue');
   if (face && face.manned && state.defaultChit && state.defaultChit.profileId === player.profileId) return 'default_stigma';
@@ -16421,6 +16481,7 @@ function applyContractAuctionStart(state, op, ctx) {
   if (!player.fundraisedThisTurn) return fail('fundraise_first');
   if (player.contractAuctionDone) return fail('contract_auction_done');
   if (player.timepiece) return fail('timepiece_in_use');
+  if (biddingBlockedByHand(state, player)) return fail('hand_limit');
   if (state.anarchy || state.war) return fail('contract_auction_prohibited');
   const pair = String(op.pair || '');
   if (!CONTRACT_PAIRS[pair]) return fail('bad_deck');
@@ -16437,9 +16498,16 @@ function applyContractAuctionStart(state, op, ctx) {
     log += `${player.name} sent ${(CONTRACTS_BY_ID[top] || {}).name || top} to the bottom of the ${CONTRACT_PAIR_NAMES[pair]} contracts. `;
   }
   if (op.abandon) return { ok: true, state, log: `${log}${player.name} looked over the ${CONTRACT_PAIR_NAMES[pair]} contracts and walked away.` };
-  const cardId = deck.shift();
   // Gold side once the Isobank Contract Upheaval has happened (4B1b).
   const side = state.contractSide === 'gold' ? 'gold' : 'blue';
+  // The default-chit holder may not take a manned contract (4B2d / 4B6c), and
+  // opening the auction is the initiator's own 10-year bid, so they may not put
+  // one up either (they may still send it to the bottom with discardTop first).
+  const topFace = contractFace(deck[0], side);
+  if (topFace && topFace.manned && state.defaultChit && state.defaultChit.profileId === player.profileId) {
+    return fail('default_stigma');
+  }
+  const cardId = deck.shift();
   const face = contractFace(cardId, side);
   state.auction = {
     kind: 'contract', pair, cardId, side,
@@ -16720,6 +16788,7 @@ function contractClockTick(state) {
     if (meta && lawInForce(state, 'centrist')) {
       meta.paid += face.lateFee;
       meta.insuredTurn = true;
+      meta.insuranceUsed = true;   // the one Mishap payout this contract gets
       notes.push(`Mishap Insurance pays ${p.name}'s first late fee.`);
     }
   }
