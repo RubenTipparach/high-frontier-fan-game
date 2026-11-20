@@ -42,20 +42,32 @@ function sideRest() {
   Object.assign(J, { t0: [6, 10], t1: [14, 27], t2: [17, 40], t3: [18.5, 50] });
   return J;
 }
-const REST = { back: backRest(), side: sideRest() };
+// fist seen from the thumb side (owner's photo, 2026-11-20): the forearm comes in
+// from the left, the four curled fingers stack as rounded bars (index on top),
+// the thumb stands straight up off the top of the fist. Authored in that frame
+// and stored hand-local (forearm up, hand down): local = (-py, px).
+const PH = (x, y) => [-y, x];
+function fistSideRest() {
+  return { w: [0, 0], mc: PH(30, 10), t0: PH(16, -8), t1: PH(18, -28), t2: PH(20, -40), t3: PH(21, -48) };
+}
+const FIST_BARS = [   // photo frame: [x0, x1, y, r] index .. pinky
+  [24, 47, -4, 7.2], [24, 48, 9.5, 7.0], [23, 46, 22.5, 6.7], [22, 42, 34, 6.0],
+];
+const FIST_PALM = [[0, -13], [16, -16], [30, -13], [33, 6], [32, 30], [26, 41], [10, 42], [0, 38]];
+const REST = { back: backRest(), side: sideRest(), fistside: fistSideRest() };
 const RAD = { i: 6.3, m: 6.5, r: 6.1, p: 5.3 };   // knuckle radius; tapers 0.95 / 0.9 / 0.85 toward the tip
 const SIDE_RAD = { i: 7.2, m: 6.8 };
 
 // bones: name -> [from, to, parent]
 function bonesFor(view) {
   const B = { palm: ['w', 'mc', null] };
-  for (const f of view === 'side' ? ['i', 'm'] : FING) {
+  for (const f of view === 'side' ? ['i', 'm'] : view === 'fistside' ? [] : FING) {
     B[f + '1'] = [f + '0', f + '1', 'palm']; B[f + '2'] = [f + '1', f + '2', f + '1']; B[f + '3'] = [f + '2', f + '3', f + '2'];
   }
   B.t1 = ['t0', 't1', 'palm']; B.t2 = ['t1', 't2', 't1']; B.t3 = ['t2', 't3', 't2'];
   return B;
 }
-export const HAND_BONES = { back: bonesFor('back'), side: bonesFor('side') };
+export const HAND_BONES = { back: bonesFor('back'), side: bonesFor('side'), fistside: bonesFor('fistside') };
 
 // Joint limits. A thumb's two outer joints only FLEX (curl toward the palm:
 // clockwise in this view), never bend back; seen side-on the finger joints only
@@ -68,7 +80,7 @@ function limit(view, b, v) {
 }
 // FK: pose = { view, rot: { bone: deg }, len: { bone: k } } -> joints (100-unit box)
 export function handJoints(pose = {}) {
-  const view = pose.view === 'side' ? 'side' : 'back', R0 = REST[view], B = HAND_BONES[view];
+  const view = REST[pose.view] ? pose.view : 'back', R0 = REST[view], B = HAND_BONES[view];
   const J = { w: R0.w }, world = {};
   for (const [b, [a, c, par]] of Object.entries(B)) {
     const ang = (par ? world[par] : 0) + limit(view, b, (pose.rot && pose.rot[b]) || 0);
@@ -82,7 +94,7 @@ export function handJoints(pose = {}) {
   return { joints: J, world, view };
 }
 export function handAim(pose, b, p) {
-  const { joints } = handJoints(pose), [a, c] = HAND_BONES[pose.view === 'side' ? 'side' : 'back'][b];
+  const { joints } = handJoints(pose), [a, c] = HAND_BONES[REST[pose.view] ? pose.view : 'back'][b];
   const cur = sub(joints[c], joints[a]), want = sub(p, joints[a]);
   const d = (Math.atan2(want[1], want[0]) - Math.atan2(cur[1], cur[0])) * 180 / Math.PI;
   return ((((pose.rot && pose.rot[b]) || 0) + d + 540) % 360) - 180;
@@ -119,6 +131,20 @@ const PALM = {
 // thumb when it crosses in front, lines: gap lines } as path strings (100 units).
 export function handPieces(pose = {}) {
   const { joints: J, world, view } = handJoints(pose);
+  if (view === 'fistside') {
+    const turn = (p) => add(J.w, rot(PH(p[0], p[1]), world.palm || 0));
+    const body = [blob(FIST_PALM.map(turn))], lines = [], nails = [];
+    for (const [x0, x1, y, r] of FIST_BARS) body.push(capsule(turn([x0, y]), turn([x1, y]), r, r));
+    // the creases between the stacked fingers, and the nails tucked under each
+    for (let k = 0; k < 3; k++) { const y = (FIST_BARS[k][2] + FIST_BARS[k + 1][2]) / 2; lines.push(`M${P(turn([26, y]))}L${P(turn([FIST_BARS[k + 1][1] - 2, y]))}`); }
+    for (const [x0, x1, y, r] of FIST_BARS) nails.push(capsule(turn([x1 - 13, y + r * 0.25]), turn([x1 - 6, y + r * 0.25]), r * 0.42, r * 0.42));
+    const tr = [9.6, 8.6, 7.8, 7.0];
+    for (let k = 0; k < 3; k++) body.push(capsule(J['t' + k], J['t' + (k + 1)], tr[k], tr[k + 1]));
+    // thumbnail on the front of the thumb tip
+    const tipDir = unit(sub(J.t3, J.t2)), side = perp(tipDir);
+    nails.push(capsule(add(J.t2, add(mul(tipDir, 4), mul(side, -3.5))), add(J.t3, mul(side, -3.5)), 2.6, 2.6));
+    return { body, front: [], lines, nails, joints: J };
+  }
   const palmPts = PALM[view].map((p) => add(J.w, rot(sub(p, REST[view].w), world.palm || 0)));
   const body = [blob(palmPts)], front = [], lines = [];
   const fingers = view === 'side' ? ['m', 'i'] : ['p', 'r', 'm', 'i'];
@@ -155,7 +181,7 @@ export function handPieces(pose = {}) {
 }
 
 // ---- poses (rotations from the open rest hand) -----------------------------------------
-const fold = (f, deg = 0) => ({ [f + '1']: 0.5, [f + '2']: 0.12, [f + '3']: 0.05 });
+const fold = (f) => ({ [f + '1']: 0.36, [f + '2']: 0.02, [f + '3']: 0.01 });
 const FIST_LEN = { ...fold('i'), ...fold('m'), ...fold('r'), ...fold('p') };
 const THUMB_IN = { t1: 50, t2: 28, t3: 18 };            // across the folded fingers
 export const HAND_POSES = {
@@ -166,7 +192,7 @@ export const HAND_POSES = {
   point: { rot: { ...THUMB_IN }, len: { ...FIST_LEN, i1: 1, i2: 1, i3: 1 }, thumbFront: true },
   peace: { rot: { ...THUMB_IN, i1: -9, m1: 6 }, len: { ...FIST_LEN, i1: 1, i2: 1, i3: 1, m1: 1, m2: 1, m3: 1 }, thumbFront: true },
   // thumbs up: the fist turns on its side (palm 90), the thumb stands straight up
-  thumb: { rot: { palm: 90, t1: 118, t2: 0, t3: 0 }, len: { ...FIST_LEN, t1: 0.9 } },
+  thumb: { view: 'fistside', rot: { palm: -90 } },   // forearm from the side, thumb straight up
   // OK: index and thumb tips meet in a ring (thumb angles solved for contact)
   ok: { rot: { i1: -25, i2: -70, i3: -60, m1: 0, r1: 6, p1: 14, t1: -18, t2: 15, t3: 10 } },
   // hold: a C grip seen side-on, the thumb opposite the curled fingers with a gap for the object

@@ -254,11 +254,13 @@ const HU = 0.0042;
 // and crease lines, and the thumb on top when it crosses in front. `kind` is a
 // pose name or a hand pose object ({ view, rot, len, thumbFront }).
 export function handShapes(kind, fill) {
+  // flat, like the kits' hands: one colour, no shade, no crease lines (owner
+  // 2026-11-20: "do we even need shading there?")
   const pose = typeof kind === 'object' ? kind : (HAND_POSES[kind] || HAND_POSES.relaxed);
-  const { body, front, lines } = handPieces(pose);
-  const out = [{ ds: body, fill, so: 1.2, unit: HU }];
-  if (front.length) out.push({ ds: front, fill, so: 1.2, unit: HU });
-  out.push(...lines.map((d) => ({ d, stroke: shade(fill, 0.8), width: 1.1, unit: HU })));
+  const { body, front } = handPieces(pose);
+  const flat = (ds) => ({ d: ds.join(''), fill, unit: HU, pieces: ds });
+  const out = [{ ds: body, fill, flat: true, unit: HU }];
+  if (front.length) out.push({ ds: front, fill, flat: true, unit: HU });
   return out;
 }
 
@@ -328,6 +330,7 @@ function shapeSvg(sh, uid, i) {
   if (sh.unit) { const { unit, ...rest } = sh; return `<g transform="scale(${unit})">${shapeSvg(rest, uid, i)}</g>`; }
   if (sh.stroke) return `<path d="${sh.d}" fill="none" stroke="${sh.stroke}" stroke-width="${sh.width}" stroke-linecap="round"/>`;
   const op = sh.opacity != null ? ` opacity="${sh.opacity}"` : '';
+  if (sh.ds && sh.flat) return sh.ds.map((d) => `<path d="${d}" fill="${sh.fill}"/>`).join('');
   if (sh.ds) {
     // a union of pieces (a hand: palm + phalanges) shaded as ONE silhouette: the
     // dark tone peeks out on the shadow side, no clip (a many-piece clipPath
