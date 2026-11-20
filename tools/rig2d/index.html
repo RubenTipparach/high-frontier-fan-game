@@ -30,30 +30,13 @@
   <h1>Rig 2D</h1>
   <fieldset><legend>Pose</legend>
     <p class="muted">The character stands at rest facing you. Drag a joint to rotate the bone that ends there; drag the pelvis to move the figure.</p>
-    <label>Size <input id="scale" type="range" min="16" max="80" step="1"></label>
+    <label>Size <input id="scale" type="range" min="20" max="110" step="1"></label>
     <label><span>Arms behind</span><span><input id="behindL" type="checkbox"> left &nbsp; <input id="behindR" type="checkbox"> right</span></label>
     <label><span>Joints</span><span><input id="showJoints" type="checkbox" checked> show</span></label>
     <label>Name <input id="name" type="text" value="figure"></label>
-    <div class="row"><button id="load">Load saved</button></div>
+    <div class="row"><button id="load">Load saved</button><select id="preset"></select><button id="applyPreset">Pose preset</button></div>
   </fieldset>
-  <fieldset><legend>Look</legend>
-    <label>Sex <select data-look="sex"><option>female</option><option>male</option></select></label>
-    <label>Skin <input type="color" data-look="skin"></label>
-    <label>Hair <input type="color" data-look="hair"></label>
-    <label>Hair style <select data-look="hairStyle"><option>short</option><option>buzz</option><option>curly</option><option>long</option><option>bun</option><option>white</option><option>bald</option></select></label>
-    <label>Profile hair <select data-look="profileHair"><option>short</option><option>buzz</option><option>bob</option><option>long</option></select></label>
-    <label>Face <select data-look="face"><option value="front">front</option><option value="3qR">three-quarter right</option><option value="3qL">three-quarter left</option><option value="profileR">profile right</option><option value="profileL">profile left</option><option value="back">back</option></select></label>
-    <label>Top <select data-look="top"><option>tee</option><option>sport</option><option>shirt</option><option>suit</option><option>coat</option></select></label>
-    <label>Top colour <input type="color" data-look="topColor"></label>
-    <label>Sleeves <select data-look="sleeves"><option value="">by top</option><option>short</option><option>long</option></select></label>
-    <label>Trousers <input type="color" data-look="pants"></label>
-    <label>Shoes <input type="color" data-look="shoes"></label>
-    <label>Left hand <select data-hand="l"><option>relaxed</option><option>open</option><option>fist</option><option>grip</option><option>point</option></select></label>
-    <label>Right hand <select data-hand="r"><option>relaxed</option><option>open</option><option>fist</option><option>grip</option><option>point</option></select></label>
-    <label>Eyes closed <input type="checkbox" data-look="eyesClosed"></label>
-    <label>Smile <input type="checkbox" data-look="smile"></label>
-    <label>Visor <input type="checkbox" id="visor"></label>
-  </fieldset>
+  <fieldset id="look"></fieldset>
   <fieldset><legend>Save</legend>
     <div class="row"><button id="dlSvg">Download SVG</button><button id="copy">Copy figure JSON</button><button id="reset">Rest pose</button></div>
     <p class="muted">Save the figure JSON as <code>scripts/rig2d/figures/&lt;name&gt;.json</code>.</p>

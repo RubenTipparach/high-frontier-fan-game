@@ -8,6 +8,11 @@ metadata:
 
 # SVG human rig
 
+> Superseded 2026-11-20 by the `character-kit` skill (flat cut-out parts with
+> round joints, `scripts/rig2d/cutout.mjs`). The browser app at `tools/rig2d/`
+> now drives the cut-out kit. The skinned-mesh rig below (`figure.mjs`) is kept
+> only for reference; the owner rejected its seams and proportions.
+
 The owner, 2026-11-20, after generated figures came out as mannequins and traced
 renders were rejected ("'inspired drawings' not filters, not tracing"): "make a
 2d human rig, and pose that, swap out assets etc ... I would make a javascript
