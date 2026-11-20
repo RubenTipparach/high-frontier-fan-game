@@ -1,28 +1,70 @@
-// Colonist fronts with people DRAWN from 3D pose references (owner 2026-11-20:
-// "drawing SVGs based on 3d human renders" ... "'inspired drawings' not filters,
-// not tracing"). The MPFB bodies posed by scripts/blender/colonist_people.py are
-// reference only (scripts/blender/poses/<scene>.json); colonist-art-drawn.mjs
-// draws each person from that pose, and this module sets them over their vector
-// backdrops with the props attached at the pose's joints. A card without a pose
-// file is skipped (its earlier art stays).
 import { artKit } from './colonist-art-m4-fronts.mjs';
-import { drawKit, hasPose } from './colonist-art-drawn.mjs';
+import { drawCutout, skeleton, restPose, fk, reach, POSES } from './rig2d/cutout.mjs';
 
+// Colonist fronts with people from the cut-out character kit (owner 2026-11-20:
+// a 2D rig drawn once at rest and posed by rotating bones; see the
+// character-kit skill). Each card lists its people (look + pose); the vector
+// backdrops and props below hang off the posed joints.
 export const TRACED_FRONTS = new Set([
   'col_malcolm', 'col_heavy_water_survivalists', 'col_botany_bay_convicts', 'col_vatican_observers',
   'col_lloyd_s_salvage_co', 'col_house_of_saud', 'col_rock_rats_miners_union',
   'col_cobots', 'col_gabonese_mining_consortium', 'col_teleoperators', 'col_boston_hexapods',
   'col_vr_simulcasters', 'col_exoskeletalists',
-].filter(hasPose));
+]);
+const hasPose = (id) => !!FIGS[id];
 
-let DRAW = null;
+// people per card: { fid, look, pose(sk) }. Full figures, about 46 px a head.
+const at = (x, foot = 324, h = 46, rot = {}) => ({ ...restPose(x, foot, h), rot: { ...rot } });
+const FIGS = {
+  col_malcolm: [{ fid: 'malcolm', look: { body: 'male', skin: '#e2b48e', hair: '#5a3a22', hairStyle: 'tuft', face: 'sleepy', top: 'longsleeve', topColor: '#3a4a6a', bottomColor: '#2a2e36', hands: { L: 'fist', R: 'relaxed' } },
+    pose: (sk) => { let p = at(140, 324, 46, { head: -6, upperR: 10, foreR: -10 }); const J = fk(sk, p).joints; return reach(sk, p, 'L', [J.headBase[0] + 4, J.headBase[1] + 4], { bend: -1 }); } }],
+  col_heavy_water_survivalists: [{ fid: 'hw', look: { body: 'male', skin: '#c98a5e', hair: '#2a2420', hairStyle: 'buzz', face: 'neutral', top: 'tee', topColor: '#ecece8', bottomColor: '#4a5a3a', hands: { L: 'fist', R: 'fist' } },
+    pose: () => at(206, 324, 46, POSES.hipsHands) }],
+  col_botany_bay_convicts: [{ fid: 'bb', look: { body: 'male', skin: '#8a5a3a', hair: '#1e1a18', hairStyle: 'buzz', face: 'shout', top: 'jumpsuit', topColor: '#e8792a', hands: { L: 'fist', R: 'fist' } },
+    pose: () => at(150, 324, 44, { upperL: -112, foreL: -12, upperR: 112, foreR: 12, thighL: -6, thighR: 6 }) }],
+  col_vatican_observers: [
+    { fid: 'colleague', look: { body: 'female', skin: '#f0cfb2', hair: '#9a9a9a', hairStyle: 'bun', face: 'smile', top: 'jacket', topColor: '#26262c', collar: '#ffffff', bottomColor: '#1e1e22', blush: false }, pose: () => at(30, 330, 44) },
+    { fid: 'jesuit', look: { body: 'male', skin: '#e8c0a0', hair: '#bcbcbc', hairStyle: 'buzz', face: 'smile', top: 'jacket', topColor: '#1e1e24', collar: '#ffffff', bottomColor: '#1a1a1e', hands: { L: 'open', R: 'hold' }, blush: false },
+      pose: () => at(140, 324, 46, { upperL: -145, foreL: -18, upperR: 8 }) }],
+  col_lloyd_s_salvage_co: [
+    { fid: 'partner', look: { body: 'male', skin: '#6a4430', hair: '#1a1614', hairStyle: 'buzz', face: 'smirk', top: 'jacket', topColor: '#5a5e66', collar: '#e8e8e8', bottomColor: '#33363c', hands: { L: 'fist', R: 'fist' } }, pose: () => at(252, 318, 42, POSES.hipsHands) },
+    { fid: 'trader', look: { body: 'female', skin: '#f0c8a8', hair: '#d8b060', hairStyle: 'bob', face: 'grin', top: 'jacket', topColor: '#2a3a5a', collar: '#ffffff', bottomColor: '#232a3a', hands: { L: 'point', R: 'relaxed' } },
+      pose: () => at(92, 326, 46, { upperL: -100, foreL: -10 }) }],
+  col_house_of_saud: [{ fid: 'prince', look: { body: 'male', skin: '#c89468', hair: '#1a1410', hairStyle: 'buzz', face: 'sleepy', top: 'longsleeve', topColor: '#f6f4ee', bottomColor: '#ecebe4', shoes: '#c8b890', hands: { L: 'open', R: 'open' } },
+    pose: (sk) => { let p = at(150, 300, 46, { thighL: -78, shinL: 150, thighR: 78, shinR: -150 }); const J = fk(sk, p).joints; p = reach(sk, p, 'L', [J.knL[0] - 6, J.knL[1] - 8], { bend: -1 }); return reach(sk, p, 'R', [J.knR[0] + 6, J.knR[1] - 8], { bend: 1 }); } }],
+  col_rock_rats_miners_union: [{ fid: 'miner', look: { body: 'female', skin: '#d8a07a', hair: '#8a3a1a', hairStyle: 'ponytail', face: 'smirk', top: 'jumpsuit', topColor: '#c8862a', hands: { L: 'fist', R: 'relaxed' } },
+    pose: () => at(96, 326, 46, { upperL: -38, foreL: 78, handL: 20, upperR: 6 }) }],
+  col_cobots: [{ fid: 'cobw', look: { body: 'female', skin: '#7a4a2e', hair: '#1a1210', hairStyle: 'curly', face: 'smile', top: 'tee', topColor: '#4a7ab0', bottomColor: '#2a2e3a', hands: { L: 'open', R: 'relaxed' } },
+    pose: (sk) => reach(sk, at(92, 326, 46, { head: -6 }), 'L', [176, 150], { bend: 1 }) }],
+  col_gabonese_mining_consortium: [{ fid: 'boy', look: { body: 'male', skin: '#4a2e1e', hair: '#141010', hairStyle: 'buzz', face: 'smile', top: 'polo', topColor: '#2a8a5a', bottomColor: '#b8a070', hands: { L: 'fist', R: 'fist' } },
+    pose: (sk) => { let p = at(120, 326, 46); const J = fk(sk, p).joints, cy = J.headBase[1] - 0.45 * 46; p = reach(sk, p, 'L', [J.headBase[0] + 12, cy + 10], { bend: 1 }); return reach(sk, p, 'R', [J.headBase[0] - 12, cy + 10], { bend: -1 }); } }],
+  col_teleoperators: [{ fid: 'op', look: { body: 'female', skin: '#f0d0b0', hair: '#1e1a1a', hairStyle: 'bob', face: 'smile', top: 'jumpsuit', topColor: '#dfe2e8', hands: { L: 'open', R: 'relaxed' } },
+    pose: (sk) => reach(sk, at(88, 326, 46), 'L', [184, 168], { bend: 1 }) }],
+  col_boston_hexapods: [{ fid: 'eng', look: { body: 'female', skin: '#e8b890', hair: '#6a3a1e', hairStyle: 'bun', face: 'smile', top: 'longsleeve', topColor: '#d86a3a', bottomColor: '#2a3a5a', hands: { L: 'relaxed', R: 'point' } },
+    pose: (sk) => reach(sk, at(222, 326, 46), 'R', [150, 150], { bend: -1 }) }],
+  col_vr_simulcasters: [{ fid: 'sim', look: { body: 'female', skin: '#c8906a', hair: '#3a2418', hairStyle: 'long', face: 'grin', top: 'tee', topColor: '#8a2a6a', bottom: 'skirt', bottomColor: '#2a2a3a', hands: { L: 'open', R: 'relaxed' } },
+    pose: (sk) => reach(sk, at(84, 326, 46), 'L', [178, 140], { bend: 1 }) }],
+  col_vr_simulcasters_holo: [{ fid: 'holo', look: { body: 'male', skin: '#d0a080', hair: '#2a2a2a', hairStyle: 'tuft', face: 'grin', top: 'jacket', topColor: '#4a4a5a', bottomColor: '#2a2a32', hands: { L: 'relaxed', R: 'open' } },
+    pose: () => at(228, 316, 44, { upperR: 100, foreR: 10, upperL: -6 }) }],
+  col_exoskeletalists: [{ fid: 'hiker', look: { body: 'male', skin: '#a87050', hair: '#1a1414', hairStyle: 'tuft', face: 'grin', top: 'jacket', topColor: '#3a6a8a', collar: '#e0e4e8', bottomColor: '#3a3a42', hands: { L: 'fist', R: 'fist' } },
+    pose: () => at(150, 316, 46, { thighL: -18, shinL: 10, thighR: 10, shinR: -2, upperL: 16, foreL: -24, upperR: -14, foreR: 20, root: -2 }) }],
+};
+// MPFB joint names (the props were placed off them) -> kit joints
+const MAP = { pelvis: 'pelvis', spine_03: 'chest', spine_03_tip: 'neck', neck_01: 'neck', head: 'headBase', head_tip: 'headTop' };
+for (const [m, s] of [['l', 'L'], ['r', 'R']]) Object.assign(MAP, { [`upperarm_${m}`]: 'sh' + s, [`lowerarm_${m}`]: 'el' + s, [`hand_${m}`]: 'wr' + s, [`hand_${m}_tip`]: 'tip' + s, [`thigh_${m}`]: 'hip' + s, [`calf_${m}`]: 'kn' + s, [`foot_${m}`]: 'an' + s, [`foot_${m}_tip`]: 'toe' + s });
+
 function figure(id) {
-  const f = DRAW.sceneFigures(id);
-  return { g: `<defs>${f.defs}</defs>${f.g}`, m: f.m };
+  let g = ''; const J = {};
+  for (const f of FIGS[id]) {
+    const sk = skeleton(f.look.body), pose = f.pose(sk);
+    g += drawCutout({ id: `${id}-${f.fid}`, look: f.look, pose });
+    const { joints } = fk(sk, pose);
+    for (const [k, v] of Object.entries(MAP)) J[`${f.fid}.${k}`] = joints[v];
+  }
+  return { g, m: (k) => J[k] };
 }
 
 export function drawTracedFronts({ W, H, panel, emit }) {
-  DRAW = drawKit({ W, H });
   const { f1, rect, radial, linear, stars, rng, robotBust } = artKit({ W, H });
   const soft = (id) => radial(id, [['60%', '#000', 0], ['100%', '#000', 0.28]], '50%', '45%', '75%');
   const mid = (a, b, t = 0.5) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
@@ -116,8 +158,7 @@ export function drawTracedFronts({ W, H, panel, emit }) {
     out('col_gabonese_mining_consortium', `${linear('gm-sky', [['0%', '#7ab4dc'], ['70%', '#d8e8f0'], ['100%', '#f0e8d8']])}${soft('gm-v')}`,
       `${rect('url(#gm-sky)')}<g opacity="0.55" fill="#9ab0c4"><rect x="196" y="70" width="34" height="260"/><rect x="236" y="40" width="40" height="290"/><rect x="280" y="110" width="22" height="220"/></g>
        <g opacity="0.4" fill="#fff">${Array.from({ length: 24 }, (_, i) => `<rect x="${240 + (i % 4) * 9}" y="${54 + Math.floor(i / 4) * 20}" width="4" height="9"/>`).join('')}</g>${F.g}
-       <g transform="translate(${f1(e[0] + 8 * sc)},${f1(e[1])}) scale(${f1(sc)})"><rect x="-6" y="-13" width="36" height="16" rx="6" fill="#26282c"/><rect x="-6" y="2" width="36" height="16" rx="6" fill="#1e2024"/>
-       <circle cx="30" cy="-5" r="7" fill="#3a6a9a" stroke="#4a4e56" stroke-width="2"/><circle cx="30" cy="10" r="7" fill="#3a6a9a" stroke="#4a4e56" stroke-width="2"/><circle cx="28" cy="-7" r="2" fill="#fff"/></g>${rect('url(#gm-v)')}`);
+       <g transform="translate(${f1(e[0])},${f1(e[1] + 3 * sc)}) scale(${f1(sc)})"><rect x="-21" y="-9" width="42" height="18" rx="7" fill="#26282c"/><circle cx="-10" cy="0" r="10" fill="#1e2024"/><circle cx="10" cy="0" r="10" fill="#1e2024"/><circle cx="-10" cy="0" r="6.5" fill="#3a6a9a"/><circle cx="10" cy="0" r="6.5" fill="#3a6a9a"/><circle cx="-12" cy="-2" r="2" fill="#fff"/><circle cx="8" cy="-2" r="2" fill="#fff"/></g>${rect('url(#gm-v)')}`);
   }
   // Teleoperators: visor down, reaching toward the robot that holds her rose.
   if (has('col_teleoperators')) {

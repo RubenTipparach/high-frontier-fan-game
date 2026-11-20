@@ -370,3 +370,24 @@ export const POSES = {
   stride: { thighL: -16, shinL: 6, thighR: 8, upperL: 14, upperR: -6, foreR: 20, root: 2 },
   shrug: { upperL: -38, foreL: -95, upperR: 38, foreR: 95, head: 8 },
 };
+
+// Two-bone IK: the local angles that put side s's wrist (or ankle, limb 'leg') on
+// `target` (card px), keeping the rest of the pose. bend: +1 / -1 picks which way
+// the elbow / knee folds. Returns a new pose.
+export function reach(sk, pose, s, target, { limb = 'arm', bend = 1 } = {}) {
+  const [b1, b2, j0, j1, j2] = limb === 'arm' ? ['upper' + s, 'fore' + s, 'sh' + s, 'el' + s, 'wr' + s] : ['thigh' + s, 'shin' + s, 'hip' + s, 'kn' + s, 'an' + s];
+  const { joints, world } = fk(sk, pose);
+  const S = joints[j0], l1 = len(sub(sk.J[j1], sk.J[j0])) * pose.scale, l2 = len(sub(sk.J[j2], sk.J[j1])) * pose.scale;
+  const d0 = sub(target, S), d = Math.max(Math.abs(l1 - l2) + 1e-3, Math.min(l1 + l2 - 1e-3, len(d0)));
+  const base = Math.atan2(d0[1], d0[0]);
+  const a = Math.acos((l1 * l1 + d * d - l2 * l2) / (2 * l1 * d));
+  const u = base + bend * a;                                   // posed upper direction
+  const E = add(S, [Math.cos(u) * l1, Math.sin(u) * l1]);
+  const T = add(S, mul(unit(d0), d));
+  const v = Math.atan2(T[1] - E[1], T[0] - E[0]);
+  const restA = (x, y) => Math.atan2(sk.J[y][1] - sk.J[x][1], sk.J[y][0] - sk.J[x][0]);
+  const deg = (r) => (r * 180) / Math.PI;
+  const w1 = deg(u - restA(j0, j1)), w2 = deg(v - restA(j1, j2));
+  const norm = (x) => ((x + 540) % 360) - 180;
+  return { ...pose, rot: { ...pose.rot, [b1]: norm(w1 - world[PARENT[b1]]), [b2]: norm(w2 - w1) } };
+}
