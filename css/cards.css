@@ -702,9 +702,7 @@
    the art on both faces. */
 .card.type-colonist .card-face.has-art .card-blurb,
 .card.type-colonist .card-face.has-art .card-future {
-  background: rgba(0, 0, 0, 0.42) !important;   /* faint: the art stays visible, a light blur keeps the words legible */
-  -webkit-backdrop-filter: blur(1.5px);
-  backdrop-filter: blur(1.5px);
+  background: rgba(0, 0, 0, 0.42) !important;   /* faint, no blur (owner 2026-11-20): the art stays visible */
 }
 /* A colonist with no ability text renders an EMPTY .card-blurb element, which
    would otherwise show as a bare black bar. Collapse the box entirely when there
