@@ -25673,17 +25673,26 @@ function getRocketSite() {
 }
 // WATER / HYDROGEN ARCJET (Baltimore Gun Club): "Colocated thruster gets a
 // bonus burn if it starts its move at LEO" (white face), "... LEO, your
-// Anchored Bernal, or your Factory" (black face). The crew must ride the
-// rocket, and Anarchy suspends it. The same test as the engine's arcjetCredit,
+// Anchored Bernal, or your Factory" (black face). The crew must be on the
+// rocket's departure space (aboard, or in another of my stacks there), and
+// Anarchy suspends it. The same test as the engine's arcjetCredit,
 // so the planner offers the burn the move will grant: 1, or 0.
 function rocketArcjetBonus() {
   if (!_online || !_onlineSnapshot || _onlineSnapshot.anarchy) return 0;
   const me = mySnapshotPlayer();
   const r = me && me.rocket;
   if (!r) return 0;
-  const slot = (r.stack || []).find((s) => s && s.id === 'crew_baltimore_gun_club');
-  if (!slot) return 0;
+  // Colocated: aboard, or in any of my stacks on the space the rocket leaves
+  // (the LEO stack at LEO, an outpost / Bernal / Freighter parked there).
   const here = r.siteId == null ? null : r.siteId;
+  const ID = 'crew_baltimore_gun_club';
+  const pick = (arr) => (arr || []).find((s) => s && s.id === ID) || null;
+  const same = (sid) => (sid == null ? null : sid) === here;
+  let slot = pick(r.stack) || (here == null ? pick(me.leo) : null);
+  for (const o of Object.values(me.outposts || {})) if (!slot && o && same(o.siteId)) slot = pick(o.cards);
+  for (const bn of (me.bernals || [])) if (!slot && bn && same(bn.siteId)) slot = pick(bn.stack);
+  if (!slot && me.freighter && same(me.freighter.siteId)) slot = pick(me.freighter.stack);
+  if (!slot) return 0;
   if (here == null) return 1;
   if (slot.face !== 'secondary') return 0;
   if ((me.bernals || []).some((bn) => bn && bn.anchored && bn.siteId === here)) return 1;

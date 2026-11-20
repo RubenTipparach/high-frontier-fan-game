@@ -5580,6 +5580,23 @@ function applyMoveFleet(state, op, player) {
   return { ok: true, state, rolled: anyRolled, log: logs.join(' ') || `${player.name} moved the factory fleet.` };
 }
 
+
+// The Baltimore Gun Club crew slot colocated with a rocket leaving `from`
+// (null = LEO): aboard the rocket, or in any of the player's stacks on that
+// same space. Null when it is nowhere there.
+function gunClubColocated(player, from) {
+  const ID = 'crew_baltimore_gun_club';
+  const pick = (arr) => (arr || []).find((s) => s && s.id === ID) || null;
+  const sameSpace = (siteId) => (siteId == null ? null : siteId) === (from == null ? null : from);
+  let slot = pick(player.rocket && player.rocket.stack);
+  if (slot) return slot;
+  if (from == null && (slot = pick(player.leo))) return slot;
+  for (const o of Object.values(player.outposts || {})) if (o && sameSpace(o.siteId) && (slot = pick(o.cards))) return slot;
+  for (const bn of (player.bernals || [])) if (bn && sameSpace(bn.siteId) && (slot = pick(bn.stack))) return slot;
+  if (player.freighter && sameSpace(player.freighter.siteId) && (slot = pick(player.freighter.stack))) return slot;
+  return null;
+}
+
 function applyMove(state, op, player) {
   // M1: a MOVE tagged for the freighter drives the freighter unit instead of
   // the rocket (a separate mover with its own, simpler movement model).
@@ -5838,9 +5855,12 @@ function applyMove(state, op, player) {
   // lock would leave the card doing nothing from turn one until an anchoring
   // that most games never reach. (Recorded here rather than left implicit -
   // this was reading as an accidental bypass of the whole privilege system.)
-  const baltimoreSlot = state.anarchy
-    ? null
-    : player.rocket.stack.find((s) => s.id === 'crew_baltimore_gun_club');
+  // "Colocated" is the card's word: the crew counts aboard the rocket, or in
+  // any of the player's stacks on the same space the rocket leaves from (the
+  // LEO stack when it leaves LEO, an outpost / Bernal / Freighter parked there).
+  // It used to count only aboard, so a Gun Club waiting in the LEO stack gave
+  // the departing rocket nothing (reported 2026-11-20).
+  const baltimoreSlot = state.anarchy ? null : gunClubColocated(player, from);
   let arcjetCredit = 0;
   if (baltimoreSlot) {
     const atLeo = from == null;

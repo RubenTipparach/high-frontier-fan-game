@@ -923,7 +923,7 @@ check('THERMAL RESEARCH: a radiator BRIN would lose without the bonus survives t
 // ---- WATER / HYDROGEN ARCJET (Baltimore Gun Club) ----
 // "Colocated thruster gets a bonus burn if it starts its move at LEO
 // (black: ..., your Anchored Bernal, or your Factory)."
-function arcjet({ aboard, face = 'primary', anarchy = false, game = PROMO, idx = 0, at = null, ownFactory = false }) {
+function arcjet({ aboard, face = 'primary', anarchy = false, game = PROMO, idx = 0, at = null, ownFactory = false, inLeo = false, inOutpost = false }) {
   const st = playing(2, game);
   st.activeIndex = idx;
   const me = st.players[idx];
@@ -933,6 +933,11 @@ function arcjet({ aboard, face = 'primary', anarchy = false, game = PROMO, idx =
   me.rocket.siteId = at;
   me.rocket.stack = [{ id: 'thr_dumbo', kind: 'patent', face: 'primary' }, { id: 'rea_cermet_nerva_fission', kind: 'patent', face: 'primary' }];
   if (aboard) me.rocket.stack.push({ id: 'crew_baltimore_gun_club', kind: 'crew', face });
+  // Colocated without being aboard: waiting in the LEO stack, or in an outpost
+  // on the space the rocket leaves from.
+  me.leo = (me.leo || []).filter((x) => x.id !== 'crew_baltimore_gun_club');
+  if (inLeo) me.leo.push({ id: 'crew_baltimore_gun_club', kind: 'crew', face });
+  if (inOutpost) me.outposts = { A: { letter: 'A', siteId: at, cards: [{ id: 'crew_baltimore_gun_club', kind: 'crew', face }], tank: 0 } };
   me.rocket.activeThrusterId = 'thr_dumbo';
   me.rocket.tank = 20;
   me.aqua = 40;   // FINAO any liftoff hazard so the ship is never lost before the breakdown
@@ -951,6 +956,11 @@ check('HYDROGEN ARCJET: +1 burn leaving your own Factory; the white face gets no
   eq(arcjet({ aboard: true, face: 'primary', at: 'hathor', ownFactory: true }), 0, 'Water at own Factory');
   eq(arcjet({ aboard: true, face: 'secondary', at: 'hathor', ownFactory: false }), 0, 'Hydrogen at a site with no Factory');
   eq(arcjet({ aboard: true, face: 'secondary' }), 1, 'Hydrogen at LEO');
+});
+check('ARCJET is COLOCATED, not only aboard: the LEO stack at LEO, an outpost at the departure', () => {
+  eq(arcjet({ aboard: false, inLeo: true }), 1, 'Gun Club in the LEO stack, rocket leaving LEO');
+  eq(arcjet({ aboard: false, inLeo: true, face: 'secondary', at: 'hathor', ownFactory: true }), 0, 'Gun Club at LEO, rocket leaving a Factory elsewhere');
+  eq(arcjet({ aboard: false, inOutpost: true, face: 'secondary', at: 'hathor', ownFactory: true }), 1, 'Hydrogen Gun Club in an outpost at my own Factory');
 });
 check('WATER ARCJET: suspended by Anarchy; NOT locked by M2 (deliberate exemption)', () => {
   eq(arcjet({ aboard: true, anarchy: true }), 0, 'Anarchy');
