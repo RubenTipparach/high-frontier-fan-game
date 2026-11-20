@@ -13,7 +13,7 @@
 import {
   CONTRACTS_BY_ID, CONTRACT_PAIRS, CONTRACT_PAIR_NAMES, CONTRACT_BID_MAX, contractFace,
 } from '../../data/contracts.js';
-import { renderContractCard, richText, setContractProgressSource, setContractReadySource, fulfillButtonHtml } from './contract-card.js';
+import { renderContractCard, richText, setContractProgressSource, setContractReadySource, setContractDebtSource, fulfillButtonHtml } from './contract-card.js';
 import { SITES_BY_ID } from '../../data/sites.js';
 import { lagrangeLabel } from '../../data/lagrange-labels.js';
 import { nodeLabelOf } from '../../data/map-labels.js';
@@ -83,20 +83,25 @@ const hasContractAbility = (p, key) => (p && p.fulfilledContracts || [])
 // Connections (4B2f): a deck is also open when you have a delegate in either
 // of its ideologies.
 const delegateIn = (s, k, pid) => (((s && s.assembly && s.assembly.delegates) || {})[k] || {})[pid] > 0;
-// Mishap Insurance may be lobbied (4B5a) on the first turn a contract is late,
-// with a Centrist delegate, while the law is not already in force.
-function mishapLobbyable(id) {
+// Mishap Insurance (4B5a): one late fee per late contract, on any late turn
+// while this turn's fee is unpaid. Free to use while the law is in force,
+// otherwise lobbied with a Centrist delegate. Returns null, or { free }.
+function mishapOption(id) {
   const s = snap(); const p = me();
-  if (!s || !p || !D || !D.myTurn() || !s.m0) return false;
+  if (!s || !p || !D || !D.myTurn() || !s.m0) return null;
   const tp = p.timepiece;
   const meta = (p.contractMeta || {})[id] || {};
-  if (!tp || tp.contractId !== id || !tp.deadbeat || meta.default || !meta.firstLate || meta.insuredTurn) return false;
-  if (!p.turnStartedLate || p.lobbiedThisTurn) return false;
-  if (lawKeys(s, null).has('centrist')) return false;
-  if (!delegateIn(s, 'centrist', p.profileId)) return false;
-  return (p.aqua | 0) >= 1 || (usesSoloAssembly(s) && lawKeys(s, null).has('unity'));
+  if (!tp || tp.contractId !== id || !tp.deadbeat || meta.default || meta.insuranceUsed || meta.insuredTurn) return null;
+  if (!p.turnStartedLate || (p.lateFeePaidThisTurn | 0) > 0) return null;
+  if (lawKeys(s, null).has('centrist')) return { free: true };
+  if (p.lobbiedThisTurn || !delegateIn(s, 'centrist', p.profileId)) return null;
+  const ok = (p.aqua | 0) >= 1 || (usesSoloAssembly(s) && lawKeys(s, null).has('unity'));
+  return ok ? { free: false } : null;
 }
-const mishapBtn = (id) => `<button type="button" data-act="mishap" data-id="${id}" title="Pay 1 aqua and discard a Centrist delegate: the Pool pays this turn's late fee.">🛡 Lobby Mishap Insurance</button>`;
+const mishapLobbyable = (id) => !!mishapOption(id);
+const mishapBtn = (id) => (mishapOption(id) || {}).free
+  ? `<button type="button" data-act="mishap" data-id="${id}" title="Mishap Insurance is the active law: the Pool pays this late fee (once per contract).">🛡 Use Mishap Insurance</button>`
+  : `<button type="button" data-act="mishap" data-id="${id}" title="Pay 1 aqua and discard a Centrist delegate: the Pool pays this late fee (once per contract).">🛡 Lobby Mishap Insurance</button>`;
 
 // ---- fulfill readiness ----------------------------------------------------------
 // Which boosted contracts of mine would announce a step (or be fulfilled) where
@@ -105,6 +110,21 @@ const mishapBtn = (id) => `<button type="button" data-act="mishap" data-id="${id
 let _ready = new Map();   // cardId -> { final }
 let _readyKey = null;
 setContractReadySource((id) => _ready.get(id) || null);
+// The repaid line on a contract card: shown once a contract is late, in
+// default, or has anything paid on it (any player's, the table can see it).
+setContractDebtSource((id) => {
+  const s = snap();
+  if (!s || !s.m4) return null;
+  for (const q of (s.players || [])) {
+    const meta = (q.contractMeta || {})[id];
+    if (!meta) continue;
+    const late = !!(q.timepiece && q.timepiece.contractId === id && q.timepiece.deadbeat);
+    if (!late && !meta.default && !(meta.paid > 0)) return null;
+    const f = contractFace(id, meta.side || 'blue');
+    return f ? { paid: meta.paid | 0, debt: (f.advance | 0) * (meta.boosted ? 1 : 2) } : null;
+  }
+  return null;
+});
 function boostedContractIds(p) {
   if (!p) return [];
   return Object.keys(p.contractMeta || {}).filter((id) => !(p.contractHand || []).includes(id)
@@ -184,7 +204,7 @@ function lateFeeWarning(s, p, due) {
       <div class="m4c-body m4c-endturn-body"><div class="m4c-endturn-item">${cardThumb(due.id, due.side)}
         <p class="m4c-late-text">Pay <b>${due.owed} aqua</b> or <b>${esc(due.name)}</b> defaults${held ? '' : ` and you take the default chit (<b>-${due.chitVp} VP</b>)`}.</p>
         <button type="button" class="m4c-ful-ok" data-late="pay" ${canPay ? '' : 'disabled'}>💸 Pay late fee (${due.owed})</button>
-        ${mishapLobbyable(due.id) ? `<button type="button" class="m4c-ful-ok" data-late="mishap">🛡 Lobby Mishap Insurance</button>` : ''}
+        ${mishapLobbyable(due.id) ? `<button type="button" class="m4c-ful-ok" data-late="mishap">🛡 ${mishapOption(due.id).free ? 'Use' : 'Lobby'} Mishap Insurance</button>` : ''}
       </div></div>
       <div class="m4c-endturn-foot"><button type="button" class="m4c-endturn-skip m4c-late-skip">End turn and default</button></div></div>`;
     const done = (v) => { ov.remove(); resolve(v); };
@@ -400,8 +420,11 @@ function decksHtml(s, p, auctionOpen) {
       && CONTRACT_PAIRS[pair].some((k) => delegateIn(s, k, p.profileId));
     const top = deck[0];
     const open = (byLaw || byConnections) && !!top;
+    // The default-chit holder may not put a manned contract up (4B2d).
+    const topFace = top ? contractFace(top, s.contractSide === 'gold' ? 'gold' : 'blue') : null;
+    const stigma = !!(topFace && topFace.manned && s.defaultChit && s.defaultChit.profileId === p.profileId);
     const btn = auctionOpen && open
-      ? `<div class="m4c-btns"><button type="button" data-act="auction" data-pair="${pair}">Auction</button></div>` : '';
+      ? `<div class="m4c-btns"><button type="button" data-act="auction" data-pair="${pair}" ${stigma ? 'disabled title="Default chit: no manned contracts."' : ''}>Auction</button></div>` : '';
     return `<div class="m4c-deck ${open ? 'open' : 'closed'}" ${open ? '' : 'aria-disabled="true"'}>
       <div class="m4c-deck-head"><b>${CONTRACT_PAIR_NAMES[pair]}</b>
         <span>${deck.length} left</span>
