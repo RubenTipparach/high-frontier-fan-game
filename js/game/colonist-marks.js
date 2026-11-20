@@ -1,6 +1,6 @@
-// M4 colonist card marks, as printed on the Spaceborn deck (both faces):
-// every spaceborn Human carries the yellow humans-aboard triangle and the
-// baby-in-a-ball Spaceborn emblem; every M4 Robot carries the purple gear.
+// Colonist card marks, as printed (both faces, both decks): every Human carries
+// the yellow humans-aboard triangle, a spaceborn Human also the baby-in-a-ball
+// Spaceborn emblem, and every Robot the purple gear.
 // Signed off by the owner 2026-11-20 (tracker A5a / A6).
 import { mannedGlyph } from './contract-glyphs.js';
 
@@ -27,9 +27,12 @@ export const ROBOT_GEAR = (size = 34) => `<svg class="col-mark-robot" width="${s
   <circle cx="24" cy="24" r="7" fill="#2b2238" stroke="#4b3d66" stroke-width="1.2"/>
 </svg>`;
 
-// The marks row for an M4 colonist card, or '' for any other card.
+// The marks row for a colonist card, as printed on both decks: every Robot the
+// gear, every Human the humans-aboard triangle, and a spaceborn Human the
+// Spaceborn emblem too (owner 2026-11-20, from the M2 card scans). '' for any
+// other card.
 export function colonistMarksHtml(card) {
-  if (!card || card.type !== 'colonist' || !card.spaceborn) return '';
+  if (!card || card.type !== 'colonist') return '';
   if (card.colonistKind === 'Robot') return ROBOT_GEAR();
-  return `${mannedGlyph({ size: 26 })}${SPACEBORN_EMBLEM()}`;
+  return `${mannedGlyph({ size: 26 })}${card.spaceborn ? SPACEBORN_EMBLEM() : ''}`;
 }

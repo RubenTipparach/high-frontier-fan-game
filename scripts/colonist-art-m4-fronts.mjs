@@ -103,7 +103,7 @@ export function artKit({ W, H }) {
       + (p.earring ? `<circle cx="${f1(cx - s * 0.98)}" cy="${f1(cy + s * 0.38)}" r="${f1(s * 0.07)}" fill="${p.earring}"/>` : '');
     const head = `<path d="M${f1(cx - s * 0.98)},${f1(cy - s * 0.2)} Q${f1(cx - s * 1.0)},${f1(cy + s * 0.65)} ${f1(cx - s * 0.45)},${f1(cy + s * 0.98)} Q${cx},${f1(cy + s * (p.female ? 1.12 : 1.16))} ${f1(cx + s * 0.45)},${f1(cy + s * 0.98)} Q${f1(cx + s * 1.0)},${f1(cy + s * 0.65)} ${f1(cx + s * 0.98)},${f1(cy - s * 0.2)} Q${f1(cx + s * 0.98)},${f1(cy - s * 1.1)} ${cx},${f1(cy - s * 1.1)} Q${f1(cx - s * 0.98)},${f1(cy - s * 1.1)} ${f1(cx - s * 0.98)},${f1(cy - s * 0.2)} Z" fill="url(#${id}-sk)"/>`;
     const rim = p.rim ? `<path d="M${f1(cx + s * 0.97)},${f1(cy - s * 0.2)} Q${f1(cx + s * 0.99)},${f1(cy + s * 0.65)} ${f1(cx + s * 0.45)},${f1(cy + s * 0.97)}" stroke="${p.rim}" stroke-width="3" fill="none" opacity="0.55" stroke-linecap="round"/>` : '';
-    return { defs: defs + vz, svg: `<g>${hairBack}${body}${neck}${collar}${ears}${head}${face}${hairFront}${rim}${p.extra || ''}</g>` };
+    return { defs: defs + vz, svg: p.noBody ? `<g>${hairBack}${ears}${head}${face}${hairFront}${rim}${p.extra || ''}</g>` : `<g>${hairBack}${body}${neck}${collar}${ears}${head}${face}${hairFront}${rim}${p.extra || ''}</g>` };
   };
 
   // a white service robot head + shoulders, shaded

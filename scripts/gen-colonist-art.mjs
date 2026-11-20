@@ -18,6 +18,8 @@
 //     illustration than the front (new subject, or the same subject
 //     transformed), never a recolour of the same shapes.
 import { drawM2Fronts, REDONE_M2_FRONTS } from './colonist-art-m2-fronts.mjs';
+import { drawPeopleFronts, PEOPLE_FRONTS } from './colonist-art-people.mjs';
+import { drawTracedFronts, TRACED_FRONTS } from './colonist-art-traced.mjs';
 import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { drawM4 } from './colonist-art-m4.mjs';
 import { dirname, join } from 'node:path';
@@ -68,9 +70,12 @@ function writeArt(id, side, svg) {
 }
 // The second-pass M2 fronts (colonist-art-m2-fronts.mjs) replace the ones below.
 function emit(id, side, svg) {
-  if (side === 'front' && REDONE_M2_FRONTS.has(id)) return;
+  if (side === 'front' && (REDONE_M2_FRONTS.has(id) || PEOPLE_FRONTS.has(id) || TRACED_FRONTS.has(id))) return;
   writeArt(id, side, svg);
 }
+// The second-pass M2 fronts, minus the cards with people (drawn by colonist-art-people.mjs).
+const writeM2 = (id, side, svg) => (side === 'front' && (PEOPLE_FRONTS.has(id) || TRACED_FRONTS.has(id)) ? null : writeArt(id, side, svg));
+const writePeople = (id, side, svg) => (side === 'front' && TRACED_FRONTS.has(id) ? null : writeArt(id, side, svg));
 
 // ---- Reusable silhouette primitives (shared shapes, varied by params so no
 // two colonists look identical despite sharing a body-plan) ----
@@ -960,7 +965,9 @@ const CX = W * 0.5, CY = H * 0.46;
 // helpers. A CANDIDATE set beside their Blender versions, so they never enter
 // COLONIST_ART_IDS below until the user picks a version.
 drawM4({ W, H, panel, starsField, purpleBackDefs, emit, beardedManFace, biomechArm, profileHeadChip, sailScene });
-drawM2Fronts({ W, H, panel, emit: writeArt });
+drawM2Fronts({ W, H, panel, emit: writeM2 });
+drawPeopleFronts({ W, H, panel, emit: writePeople });
+drawTracedFronts({ W, H, panel, emit: writeArt });
 
 console.log(`wrote ${manifest.length} SVGs to assets/colonists/`);
 

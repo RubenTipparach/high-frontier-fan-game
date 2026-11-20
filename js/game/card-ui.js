@@ -592,7 +592,7 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
       face.classList.add('has-art');
     }
   }
-  // M4 colonist marks (humans aboard + Spaceborn, or the Robot gear), both faces.
+  // Colonist marks (humans aboard, + Spaceborn on M4 Humans, or the Robot gear), both faces.
   const marks = colonistMarksHtml(card);
   if (marks) {
     const body = face.querySelector('.card-body');

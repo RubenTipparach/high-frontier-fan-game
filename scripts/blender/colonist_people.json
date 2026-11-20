@@ -1,0 +1,1218 @@
+{
+ "_comment": "One scene per colonist card with people. Figures: MPFB phenotype, CC0 MakeHuman assets, flat colours, and a pose that AIMS bones at armature-space directions (each body faces -Y before its 'turn', +Z up, the figure's left is +X). hand_<side>_shape: fist | relaxed | open | grip | point. Camera in metres; 'look' is a point or 'figure:bone'.",
+ "scenes": [
+  {
+   "id": "col_malcolm",
+   "camera": [
+    -0.5,
+    -0.95,
+    1.6
+   ],
+   "look": [
+    0.02,
+    0.0,
+    1.5
+   ],
+   "lens": 62,
+   "figures": [
+    {
+     "id": "malcolm",
+     "sex": "male",
+     "age": 24,
+     "race": {
+      "caucasian": 1
+     },
+     "weight": 0.4,
+     "skin": "#e8bea0",
+     "hair": "short02",
+     "hair_color": "#5a3a20",
+     "eyebrows": "eyebrow006",
+     "clothes": [
+      "male_casualsuit06"
+     ],
+     "cloth": "#3a3f4c",
+     "pose": {
+      "upperarm_r": {
+       "aim": [
+        -0.15,
+        -0.6,
+        -0.78
+       ]
+      },
+      "lowerarm_r": {
+       "aim": [
+        0.22,
+        -0.3,
+        0.93
+       ]
+      },
+      "hand_r": {
+       "aim": [
+        0.2,
+        -0.15,
+        0.97
+       ]
+      },
+      "hand_r_shape": "fist",
+      "upperarm_l": {
+       "aim": [
+        0.15,
+        0.05,
+        -1
+       ]
+      },
+      "lowerarm_l": {
+       "aim": [
+        0.1,
+        -0.2,
+        -1
+       ]
+      },
+      "neck_01": {
+       "rot": [
+        "x",
+        -4
+       ]
+      },
+      "head": [
+       {
+        "rot": [
+         "z",
+         26
+        ]
+       },
+       {
+        "rot": [
+         "x",
+         -8
+        ]
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "col_heavy_water_survivalists",
+   "camera": [
+    -0.35,
+    -1.9,
+    1.32
+   ],
+   "look": [
+    -0.22,
+    0,
+    1.22
+   ],
+   "lens": 58,
+   "figures": [
+    {
+     "id": "hw",
+     "sex": "female",
+     "age": 58,
+     "race": {
+      "asian": 0.6,
+      "caucasian": 0.4
+     },
+     "weight": 0.5,
+     "skin": "#c9946e",
+     "hair": "long01",
+     "hair_color": "#1a1410",
+     "clothes": [
+      "female_casualsuit01"
+     ],
+     "cloth": "#eef0f2",
+     "turn": -12,
+     "pose": {
+      "upperarm_r": {
+       "aim": [
+        -0.2,
+        -0.05,
+        -1
+       ]
+      },
+      "lowerarm_r": {
+       "aim": [
+        -0.05,
+        -0.25,
+        -1
+       ]
+      },
+      "hand_r_shape": "relaxed",
+      "upperarm_l": {
+       "aim": [
+        0.2,
+        0.0,
+        -1
+       ]
+      },
+      "lowerarm_l": {
+       "aim": [
+        0.08,
+        -0.2,
+        -1
+       ]
+      },
+      "hand_l_shape": "relaxed",
+      "head": [
+       {
+        "rot": [
+         "z",
+         -8
+        ]
+       },
+       {
+        "rot": [
+         "x",
+         4
+        ]
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "col_botany_bay_convicts",
+   "camera": [
+    0.12,
+    -1.25,
+    1.5
+   ],
+   "look": [
+    0,
+    -0.45,
+    1.38
+   ],
+   "lens": 34,
+   "figures": [
+    {
+     "id": "bb",
+     "sex": "female",
+     "age": 30,
+     "race": {
+      "caucasian": 0.7,
+      "african": 0.3
+     },
+     "weight": 0.42,
+     "skin": "#d8a47e",
+     "hair": "ponytail01",
+     "hair_color": "#6a3a1e",
+     "clothes": [
+      "female_casualsuit02"
+     ],
+     "cloth": "#6a3a2a",
+     "pose": {
+      "upperarm_r": {
+       "aim": [
+        -0.35,
+        -0.85,
+        0.1
+       ]
+      },
+      "lowerarm_r": {
+       "aim": [
+        -0.55,
+        -0.75,
+        0.3
+       ]
+      },
+      "hand_r_shape": "fist",
+      "upperarm_l": {
+       "aim": [
+        0.35,
+        -0.85,
+        0.1
+       ]
+      },
+      "lowerarm_l": {
+       "aim": [
+        0.55,
+        -0.75,
+        0.3
+       ]
+      },
+      "hand_l_shape": "fist",
+      "spine_03": {
+       "rot": [
+        "x",
+        -4
+       ]
+      },
+      "head": {
+       "rot": [
+        "x",
+        -4
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "col_vatican_observers",
+   "camera": [
+    -0.25,
+    -2.3,
+    1.32
+   ],
+   "look": [
+    0.0,
+    0,
+    1.15
+   ],
+   "lens": 42,
+   "figures": [
+    {
+     "id": "jesuit",
+     "sex": "male",
+     "age": 64,
+     "race": {
+      "caucasian": 1
+     },
+     "weight": 0.45,
+     "at": [
+      0.08,
+      0,
+      0
+     ],
+     "skin": "#e8c0a6",
+     "hair": "short01",
+     "hair_color": "#e6e4e0",
+     "clothes": [
+      "male_elegantsuit01"
+     ],
+     "cloth": "#1c1c22",
+     "turn": 14,
+     "pose": {
+      "upperarm_l": {
+       "aim": [
+        0.55,
+        -0.15,
+        0.1
+       ]
+      },
+      "lowerarm_l": {
+       "aim": [
+        0.1,
+        -0.15,
+        1
+       ]
+      },
+      "hand_l": {
+       "aim": [
+        0.05,
+        -0.05,
+        1
+       ]
+      },
+      "hand_l_shape": "open",
+      "upperarm_r": {
+       "aim": [
+        -0.2,
+        -0.2,
+        -1
+       ]
+      },
+      "lowerarm_r": {
+       "aim": [
+        0.15,
+        -0.8,
+        -0.55
+       ]
+      },
+      "hand_r_shape": "grip",
+      "head": [
+       {
+        "rot": [
+         "z",
+         18
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "id": "colleague",
+     "sex": "female",
+     "age": 40,
+     "race": {
+      "caucasian": 0.5,
+      "asian": 0.5
+     },
+     "weight": 0.45,
+     "at": [
+      -0.85,
+      0.15,
+      0
+     ],
+     "skin": "#d8a882",
+     "hair": "bob02",
+     "hair_color": "#2a1a10",
+     "clothes": [
+      "female_elegantsuit01"
+     ],
+     "cloth": "#2a2a30",
+     "turn": -80,
+     "pose": {
+      "upperarm_r": {
+       "aim": [
+        -0.15,
+        0,
+        -1
+       ]
+      },
+      "upperarm_l": {
+       "aim": [
+        0.15,
+        0,
+        -1
+       ]
+      },
+      "lowerarm_l": {
+       "aim": [
+        0.1,
+        -0.4,
+        -0.9
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "col_lloyd_s_salvage_co",
+   "camera": [
+    -0.3,
+    -1.5,
+    1.5
+   ],
+   "look": [
+    0.18,
+    0,
+    1.38
+   ],
+   "lens": 50,
+   "figures": [
+    {
+     "id": "trader",
+     "sex": "male",
+     "age": 32,
+     "race": {
+      "caucasian": 1
+     },
+     "weight": 0.42,
+     "at": [
+      -0.08,
+      0,
+      0
+     ],
+     "turn": 28,
+     "skin": "#e6bc9c",
+     "hair": "short03",
+     "hair_color": "#2a1a10",
+     "clothes": [
+      "male_casualsuit03"
+     ],
+     "cloth": "#5a4a6a",
+     "pose": {
+      "upperarm_l": {
+       "aim": [
+        0.55,
+        -0.6,
+        -0.2
+       ]
+      },
+      "lowerarm_l": {
+       "aim": [
+        0.35,
+        -0.75,
+        0.55
+       ]
+      },
+      "hand_l_shape": "point",
+      "upperarm_r": {
+       "aim": [
+        -0.15,
+        0,
+        -1
+       ]
+      },
+      "head": {
+       "rot": [
+        "z",
+        20
+       ]
+      }
+     }
+    },
+    {
+     "id": "partner",
+     "sex": "male",
+     "age": 40,
+     "race": {
+      "african": 0.6,
+      "caucasian": 0.4
+     },
+     "weight": 0.5,
+     "at": [
+      0.78,
+      0.35,
+      0
+     ],
+     "turn": -35,
+     "skin": "#8a5a3e",
+     "hair": "short04",
+     "hair_color": "#120a06",
+     "clothes": [
+      "male_casualsuit02"
+     ],
+     "cloth": "#4a3a2e",
+     "pose": {
+      "upperarm_r": {
+       "aim": [
+        -0.15,
+        0,
+        -1
+       ]
+      },
+      "upperarm_l": {
+       "aim": [
+        0.15,
+        0,
+        -1
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "col_house_of_saud",
+   "camera": [
+    0,
+    -2.3,
+    1.35
+   ],
+   "look": [
+    0,
+    0,
+    1.18
+   ],
+   "lens": 46,
+   "figures": [
+    {
+     "id": "prince",
+     "sex": "male",
+     "age": 20,
+     "race": {
+      "caucasian": 0.6,
+      "african": 0.2,
+      "asian": 0.2
+     },
+     "weight": 0.4,
+     "at": [
+      0,
+      0,
+      0.45
+     ],
+     "skin": "#c89670",
+     "hair": "short02",
+     "hair_color": "#3a2410",
+     "clothes": [
+      "male_casualsuit05"
+     ],
+     "cloth": "#a89a52",
+     "pose": {
+      "thigh_l": {
+       "aim": [
+        0.75,
+        -0.62,
+        0.05
+       ]
+      },
+      "calf_l": {
+       "aim": [
+        -0.85,
+        -0.2,
+        -0.05
+       ]
+      },
+      "foot_l": {
+       "aim": [
+        -0.6,
+        -0.2,
+        0.3
+       ]
+      },
+      "thigh_r": {
+       "aim": [
+        -0.75,
+        -0.62,
+        0.05
+       ]
+      },
+      "calf_r": {
+       "aim": [
+        0.85,
+        -0.2,
+        -0.05
+       ]
+      },
+      "foot_r": {
+       "aim": [
+        0.6,
+        -0.2,
+        0.3
+       ]
+      },
+      "upperarm_l": {
+       "aim": [
+        0.4,
+        -0.1,
+        -0.9
+       ]
+      },
+      "lowerarm_l": {
+       "aim": [
+        0.25,
+        -0.75,
+        -0.4
+       ]
+      },
+      "hand_l": {
+       "aim": [
+        0.3,
+        -0.7,
+        -0.2
+       ]
+      },
+      "hand_l_shape": "open",
+      "upperarm_r": {
+       "aim": [
+        -0.4,
+        -0.1,
+        -0.9
+       ]
+      },
+      "lowerarm_r": {
+       "aim": [
+        -0.25,
+        -0.75,
+        -0.4
+       ]
+      },
+      "hand_r": {
+       "aim": [
+        -0.3,
+        -0.7,
+        -0.2
+       ]
+      },
+      "hand_r_shape": "open",
+      "head": {
+       "rot": [
+        "x",
+        12
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "col_rock_rats_miners_union",
+   "camera": [
+    -0.3,
+    -1.45,
+    1.42
+   ],
+   "look": [
+    -0.22,
+    0,
+    1.32
+   ],
+   "lens": 50,
+   "figures": [
+    {
+     "id": "miner",
+     "sex": "female",
+     "age": 26,
+     "race": {
+      "african": 1
+     },
+     "weight": 0.42,
+     "turn": -18,
+     "skin": "#7a4c32",
+     "hair": "short01",
+     "hair_color": "#120a06",
+     "clothes": [
+      "female_sportsuit01"
+     ],
+     "cloth": "#f2f2f4",
+     "pose": {
+      "upperarm_r": {
+       "aim": [
+        -0.6,
+        0.1,
+        -0.8
+       ]
+      },
+      "lowerarm_r": {
+       "aim": [
+        0.4,
+        -0.3,
+        -0.85
+       ]
+      },
+      "hand_r_shape": "relaxed",
+      "upperarm_l": {
+       "aim": [
+        0.2,
+        0,
+        -1
+       ]
+      },
+      "lowerarm_l": {
+       "aim": [
+        0.1,
+        -0.2,
+        -1
+       ]
+      },
+      "head": [
+       {
+        "rot": [
+         "z",
+         -20
+        ]
+       },
+       {
+        "rot": [
+         "y",
+         8
+        ]
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "col_cobots",
+   "camera": [
+    -0.25,
+    -1.5,
+    1.45
+   ],
+   "look": [
+    0.3,
+    0,
+    1.33
+   ],
+   "lens": 46,
+   "figures": [
+    {
+     "id": "cobw",
+     "sex": "female",
+     "age": 30,
+     "race": {
+      "african": 0.85,
+      "caucasian": 0.15
+     },
+     "weight": 0.4,
+     "turn": 14,
+     "skin": "#9a6a4c",
+     "hair": "afro01",
+     "hair_color": "#140a06",
+     "clothes": [
+      "female_sportsuit01"
+     ],
+     "cloth": "#f4f6f8",
+     "pose": {
+      "upperarm_r": {
+       "aim": [
+        -0.2,
+        0,
+        -1
+       ]
+      },
+      "upperarm_l": {
+       "aim": [
+        0.25,
+        -0.1,
+        -1
+       ]
+      },
+      "lowerarm_l": {
+       "aim": [
+        -0.2,
+        -0.75,
+        -0.6
+       ]
+      },
+      "hand_l_shape": "relaxed",
+      "neck_01": {
+       "rot": [
+        "x",
+        10
+       ]
+      },
+      "head": [
+       {
+        "rot": [
+         "z",
+         -24
+        ]
+       },
+       {
+        "rot": [
+         "x",
+         10
+        ]
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "col_gabonese_mining_consortium",
+   "camera": [
+    -1.2,
+    -0.75,
+    1.32
+   ],
+   "look": [
+    0.05,
+    -0.05,
+    1.3
+   ],
+   "lens": 55,
+   "figures": [
+    {
+     "id": "boy",
+     "sex": "male",
+     "age": 12,
+     "race": {
+      "african": 1
+     },
+     "weight": 0.35,
+     "skin": "#6e4630",
+     "hair": "short01",
+     "hair_color": "#0a0604",
+     "clothes": [
+      "male_casualsuit06"
+     ],
+     "cloth": "#f6f2ea",
+     "pose": {
+      "upperarm_r": {
+       "aim": [
+        -0.35,
+        -0.8,
+        0.2
+       ]
+      },
+      "lowerarm_r": {
+       "aim": [
+        0.5,
+        -0.3,
+        0.82
+       ]
+      },
+      "hand_r_shape": "grip",
+      "upperarm_l": {
+       "aim": [
+        0.35,
+        -0.8,
+        0.2
+       ]
+      },
+      "lowerarm_l": {
+       "aim": [
+        -0.5,
+        -0.3,
+        0.82
+       ]
+      },
+      "hand_l_shape": "grip",
+      "head": {
+       "rot": [
+        "x",
+        -6
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "col_teleoperators",
+   "camera": [
+    -0.35,
+    -1.55,
+    1.42
+   ],
+   "look": [
+    0.32,
+    0,
+    1.33
+   ],
+   "lens": 50,
+   "figures": [
+    {
+     "id": "op",
+     "sex": "female",
+     "age": 28,
+     "race": {
+      "african": 0.7,
+      "asian": 0.3
+     },
+     "weight": 0.4,
+     "turn": 30,
+     "skin": "#7a4e34",
+     "hair": "short01",
+     "hair_color": "#120a06",
+     "clothes": [
+      "female_casualsuit01"
+     ],
+     "cloth": "#24272e",
+     "pose": {
+      "upperarm_l": {
+       "aim": [
+        0.35,
+        -0.85,
+        0.15
+       ]
+      },
+      "lowerarm_l": {
+       "aim": [
+        0.2,
+        -0.95,
+        0.3
+       ]
+      },
+      "hand_l_shape": "open",
+      "upperarm_r": {
+       "aim": [
+        -0.2,
+        0,
+        -1
+       ]
+      },
+      "head": {
+       "rot": [
+        "z",
+        6
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "col_boston_hexapods",
+   "camera": [
+    0.15,
+    -1.55,
+    1.45
+   ],
+   "look": [
+    -0.12,
+    0,
+    1.35
+   ],
+   "lens": 48,
+   "figures": [
+    {
+     "id": "eng",
+     "sex": "female",
+     "age": 62,
+     "race": {
+      "caucasian": 1
+     },
+     "weight": 0.45,
+     "at": [
+      0.25,
+      0,
+      0
+     ],
+     "turn": -70,
+     "skin": "#f0d0b8",
+     "hair": "bob01",
+     "hair_color": "#e6e2dc",
+     "clothes": [
+      "female_elegantsuit01"
+     ],
+     "cloth": "#f2f4f6",
+     "pose": {
+      "upperarm_r": {
+       "aim": [
+        -0.6,
+        -0.75,
+        0.15
+       ]
+      },
+      "lowerarm_r": {
+       "aim": [
+        -0.5,
+        -0.8,
+        0.3
+       ]
+      },
+      "hand_r_shape": "point",
+      "upperarm_l": {
+       "aim": [
+        0.15,
+        0,
+        -1
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "col_vr_simulcasters",
+   "camera": [
+    0.0,
+    -1.7,
+    1.42
+   ],
+   "look": [
+    0.0,
+    0,
+    1.3
+   ],
+   "lens": 45,
+   "figures": [
+    {
+     "id": "sim",
+     "sex": "female",
+     "age": 27,
+     "race": {
+      "african": 0.9,
+      "caucasian": 0.1
+     },
+     "weight": 0.42,
+     "at": [
+      -0.32,
+      0,
+      0
+     ],
+     "turn": 35,
+     "skin": "#8a5a3e",
+     "hair": "afro01",
+     "hair_color": "#140a06",
+     "clothes": [
+      "female_casualsuit02"
+     ],
+     "cloth": "#8a4aa8",
+     "pose": {
+      "upperarm_l": {
+       "aim": [
+        0.6,
+        -0.5,
+        -0.3
+       ]
+      },
+      "lowerarm_l": {
+       "aim": [
+        0.35,
+        -0.35,
+        0.87
+       ]
+      },
+      "hand_l_shape": "open",
+      "upperarm_r": {
+       "aim": [
+        -0.2,
+        0,
+        -1
+       ]
+      },
+      "head": {
+       "rot": [
+        "z",
+        18
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "col_vr_simulcasters_holo",
+   "camera": [
+    0.0,
+    -1.7,
+    1.42
+   ],
+   "look": [
+    0.0,
+    0,
+    1.3
+   ],
+   "lens": 45,
+   "figures": [
+    {
+     "id": "holo",
+     "sex": "male",
+     "age": 35,
+     "race": {
+      "caucasian": 0.5,
+      "asian": 0.5
+     },
+     "weight": 0.45,
+     "at": [
+      0.36,
+      0.1,
+      0
+     ],
+     "turn": -35,
+     "skin": "#9ff0ff",
+     "hair": "short02",
+     "hair_color": "#5ad8f0",
+     "clothes": [
+      "male_casualsuit01"
+     ],
+     "cloth": "#5ad8f0",
+     "pose": {
+      "upperarm_r": {
+       "aim": [
+        -0.6,
+        -0.5,
+        -0.3
+       ]
+      },
+      "lowerarm_r": {
+       "aim": [
+        -0.35,
+        -0.35,
+        0.87
+       ]
+      },
+      "hand_r_shape": "open",
+      "upperarm_l": {
+       "aim": [
+        0.2,
+        0,
+        -1
+       ]
+      },
+      "head": {
+       "rot": [
+        "z",
+        -14
+       ]
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "col_exoskeletalists",
+   "camera": [
+    0.4,
+    -3.0,
+    1.0
+   ],
+   "look": [
+    0,
+    0,
+    0.95
+   ],
+   "lens": 52,
+   "figures": [
+    {
+     "id": "hiker",
+     "sex": "male",
+     "age": 34,
+     "race": {
+      "caucasian": 1
+     },
+     "weight": 0.45,
+     "turn": -90,
+     "skin": "#e8c0a0",
+     "hair": "short02",
+     "hair_color": "#c8a060",
+     "clothes": [
+      "male_casualsuit04"
+     ],
+     "cloth": "#e8eaee",
+     "pose": {
+      "thigh_l": {
+       "aim": [
+        -0.05,
+        -0.5,
+        -0.86
+       ]
+      },
+      "calf_l": {
+       "aim": [
+        0,
+        0.15,
+        -1
+       ]
+      },
+      "thigh_r": {
+       "aim": [
+        0.05,
+        0.4,
+        -0.92
+       ]
+      },
+      "calf_r": {
+       "aim": [
+        0,
+        0.6,
+        -0.8
+       ]
+      },
+      "upperarm_r": {
+       "aim": [
+        -0.15,
+        -0.35,
+        -0.92
+       ]
+      },
+      "lowerarm_r": {
+       "aim": [
+        0,
+        -0.7,
+        -0.7
+       ]
+      },
+      "hand_r_shape": "grip",
+      "upperarm_l": {
+       "aim": [
+        0.15,
+        0.35,
+        -0.92
+       ]
+      },
+      "lowerarm_l": {
+       "aim": [
+        0.05,
+        0.1,
+        -1
+       ]
+      },
+      "spine_02": {
+       "rot": [
+        "x",
+        8
+       ]
+      },
+      "head": {
+       "rot": [
+        "x",
+        -6
+       ]
+      }
+     }
+    }
+   ]
+  }
+ ]
+}
