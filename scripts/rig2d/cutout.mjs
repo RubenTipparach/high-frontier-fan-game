@@ -154,7 +154,7 @@ export const OPTIONS = {
   beard: ['', 'short', 'full'],
   top: ['tee', 'polo', 'longsleeve', 'jacket', 'jumpsuit'],
   bottom: ['trousers', 'shorts', 'skirt'],
-  hand: ['relaxed', 'fist', 'open', 'point', 'peace', 'thumb', 'hold'],
+  hand: ['relaxed', 'open', 'wave', 'fist', 'point', 'peace', 'thumb', 'ok', 'hold', 'pinch', 'flat'],
 };
 
 // ---- parts -------------------------------------------------------------------------
@@ -246,22 +246,88 @@ function hairShapes(style, cy, body) {
 // Hand shapes in local coords: origin at the wrist, +y along the hand bone,
 // +x toward the body for the RIGHT hand (mirrored for the left). One head = 1.
 export const HAND_SCALE = 0.85;   // the hand shapes are drawn at this size about the wrist
-export function handShape(kind) {
-  const w = 0.085;
-  const palm = blob([[-w, 0.0], [w * 0.9, 0.0], [w * 1.05, 0.14], [w * 0.9, 0.28], [0.0, 0.33], [-w * 0.95, 0.28], [-w * 1.05, 0.13]]);
-  const thumbSide = (a, b, r = 0.035) => capsule(a, b, r, r * 0.9);
-  const finger = (a, b, r = 0.034) => capsule(a, b, r, r * 0.92);
-  switch (kind) {
-    case 'fist': return [blob([[-0.09, 0.0], [0.09, 0.0], [0.11, 0.12], [0.09, 0.22], [-0.08, 0.23], [-0.11, 0.12]]), thumbSide([0.08, 0.06], [0.03, 0.17])];
-    case 'open': return [palm, finger([-0.06, 0.25], [-0.1, 0.42]), finger([-0.02, 0.27], [-0.025, 0.46]), finger([0.025, 0.27], [0.04, 0.45]), finger([0.06, 0.24], [0.1, 0.39], 0.025), thumbSide([0.07, 0.08], [0.17, 0.2])];
-    case 'point': return [blob([[-0.09, 0.0], [0.09, 0.0], [0.11, 0.12], [0.09, 0.22], [-0.08, 0.23], [-0.11, 0.12]]), finger([0.05, 0.17], [0.06, 0.42]), thumbSide([0.08, 0.06], [0.03, 0.17])];
-    case 'peace': return [blob([[-0.09, 0.0], [0.09, 0.0], [0.11, 0.12], [0.09, 0.22], [-0.08, 0.23], [-0.11, 0.12]]), finger([0.05, 0.17], [0.1, 0.42]), finger([0.0, 0.18], [-0.04, 0.42]), thumbSide([0.08, 0.06], [0.03, 0.17])];
-    case 'thumb': return [blob([[-0.09, 0.0], [0.09, 0.0], [0.11, 0.12], [0.09, 0.22], [-0.08, 0.23], [-0.11, 0.12]]), thumbSide([0.06, 0.06], [0.2, 0.02], 0.038)];
-    case 'hold': return [blob([[-0.09, 0.0], [0.09, 0.0], [0.11, 0.12], [0.09, 0.22], [-0.08, 0.23], [-0.11, 0.12]]), thumbSide([0.08, 0.04], [0.13, 0.13])];
-    case 'relaxed':
-    default: return [palm, thumbSide([0.075, 0.07], [0.1, 0.22])];
+// ---- finger rig (owner 2026-11-20: "you do need better hand kits ... would it
+// help to have fingers rig too?"). A palm plus four fingers of two segments and
+// a thumb of two, each a capsule with round knuckles. A finger pose per digit:
+// [spread, bend1, bend2, len1, len2]: spread / bends in degrees in the picture
+// plane (positive toward the thumb side), len = foreshortening (a finger curled
+// toward or away from the viewer gets shorter). Local coords: origin at the
+// wrist, +y down the hand, +x toward the thumb (right hand; the left mirrors).
+// ---- finger rig (owner 2026-11-20: "you really need a finger rig kit") --------
+// A palm plus four fingers of three phalanges and a thumb of two, in a 100-unit
+// box (wrist at 0,0, fingertips toward +y, thumb toward +x for the right hand;
+// the left mirrors). Fingers are as wide as their spacing, so they touch like
+// the kits' hands; a gap line runs between neighbours. A finger pose is
+//   { spread (deg), curl (0..1: folded toward the viewer, so it shortens),
+//     bend (deg in the picture plane, toward the thumb side) }
+// and the thumb { angle, bend, curl }. Presets are only settings of these.
+// Scaled to the kit at 100 units = 0.42 head.
+const HU = 0.0042;
+const FINGERS = [   // index, middle, ring, pinky: knuckle, phalanx lengths, radius
+  { k: [17, 44], l: [22, 14, 11], r: 6.3 }, { k: [6, 47], l: [24, 15, 12], r: 6.5 },
+  { k: [-5, 46], l: [22, 14, 11], r: 6.1 }, { k: [-16, 42], l: [17, 11, 9], r: 5.3 },
+];
+const PALMS = {
+  front: [[-18, 0], [17, 0], [22, 18], [24, 40], [17, 50], [6, 53], [-6, 52], [-17, 48], [-23, 38], [-22, 16]],
+  side: [[-11, 0], [11, 0], [13, 20], [13, 42], [7, 52], [-5, 52], [-12, 44], [-13, 20]],
+};
+const F = (spread, curl = 0, bend = 0) => ({ spread, curl, bend });
+const FOLD = (s = 0) => F(s, 1, 0);
+export const HAND_POSES = {
+  relaxed: { fingers: [F(4, 0.15, 6), F(1, 0.15, 5), F(-2, 0.15, 4), F(-4, 0.15, 3)], thumb: { angle: 18, bend: 6 } },
+  open: { fingers: [F(13), F(3), F(-6), F(-16)], thumb: { angle: 52, bend: 10 } },
+  wave: { fingers: [F(5), F(1), F(-3), F(-7)], thumb: { angle: 38, bend: 6 } },
+  fist: { fingers: [FOLD(2), FOLD(), FOLD(), FOLD(-2)], thumb: { angle: -62, bend: -10, over: true } },
+  point: { fingers: [F(2), FOLD(), FOLD(), FOLD(-2)], thumb: { angle: -62, bend: -10, over: true } },
+  peace: { fingers: [F(10), F(-5), FOLD(), FOLD(-2)], thumb: { angle: -62, bend: -10, over: true } },
+  thumb: { fingers: [FOLD(2), FOLD(), FOLD(), FOLD(-2)], thumb: { angle: 172, bend: 0 } },
+  ok: { fingers: [F(22, 0.3, 125), F(2), F(-6), F(-15)], thumb: { angle: 64, bend: -42 } },
+  hold: { palm: 'side', fingers: [F(4, 0, 170)], thumb: { angle: 60, bend: 30 } },
+  pinch: { palm: 'side', fingers: [F(0, 0, 80)], thumb: { angle: 42, bend: 16 } },
+  flat: { palm: 'side', fingers: [F(0)], thumb: { angle: 12, bend: 0 } },
+};
+const dirOf = (deg) => { const r = (deg * Math.PI) / 180; return [Math.sin(r), Math.cos(r)]; };
+// pose -> { ds: silhouette pieces (path strings, kit units), lines: gap lines, over: pieces drawn on top }
+export function handRig(kind) {
+  const P0 = typeof kind === 'object' ? kind : (HAND_POSES[kind] || HAND_POSES.relaxed);
+  const side = P0.palm === 'side', u = (p) => mul(p, HU);
+  const ds = [blob(PALMS[side ? 'side' : 'front'].map(u))], lines = [], over = [];
+  // side view: the four fingers stack behind one another, so draw one broad finger
+  const fingerDefs = side ? [{ k: [1, 50], l: [23, 15, 12], r: 8.6 }] : FINGERS;
+  const chains = fingerDefs.map((Fd, i) => {
+    const fp = P0.fingers[i], base = Fd.k;
+    const fs = [1 - 0.5 * fp.curl, 1 - 0.85 * fp.curl, 1 - fp.curl];          // folded toward the viewer
+    const bs = [0.4, 0.35, 0.25].map((k) => fp.bend * k);
+    let p = base, a = fp.spread; const pts = [base];
+    for (let s2 = 0; s2 < 3; s2++) { a += bs[s2]; p = add(p, mul(dirOf(a), Fd.l[s2] * fs[s2])); pts.push(p); }
+    const rs = [Fd.r, Fd.r * 0.97, Fd.r * 0.93, Fd.r * 0.88];
+    for (let s2 = 0; s2 < 3; s2++) if (len(sub(pts[s2 + 1], pts[s2])) > 0.3 || s2 === 0) ds.push(capsule(u(pts[s2]), u(pts[s2 + 1]), rs[s2] * HU, rs[s2 + 1] * HU));
+    return { pts, r: Fd.r, fold: fp.curl > 0.6 };
+  });
+  // gap lines between touching neighbours (front view only): along the shared edge
+  if (!side) for (let i = 0; i < chains.length - 1; i++) {
+    const A = chains[i], B = chains[i + 1];
+    const tip = Math.min(A.pts.length, B.pts.length) - 1;
+    const mid = (k) => mul(add(A.pts[k], B.pts[k]), 0.5);
+    const ends = [mid(0), mid(tip)];
+    if (len(sub(ends[1], ends[0])) > 4 && len(sub(A.pts[tip], B.pts[tip])) < A.r + B.r + 3) lines.push(`M${P(u(add(ends[0], [0, 4])))}L${P(u(ends[1]))}`);
+    if (A.fold && B.fold) lines.push(`M${P(u(add(mid(1), [0, -2])))}L${P(u(add(mid(1), [0, 7])))}`);
   }
+  // thumb: from the heel of the palm on the thumb side
+  const T = P0.thumb || { angle: 20, bend: 0 }, tb = side ? [8, 16] : [17, 14];
+  const t1 = add(tb, mul(dirOf(T.angle), 20 * (1 - 0.5 * (T.curl || 0)))), t2 = add(t1, mul(dirOf(T.angle + (T.bend || 0)), 16 * (1 - 0.8 * (T.curl || 0))));
+  const thumb = [capsule(u(tb), u(t1), 8.8 * HU, 8 * HU), capsule(u(t1), u(t2), 8 * HU, 7.2 * HU)];
+  (T.over ? over : ds).push(...thumb);
+  return { ds, lines, over };
 }
+// The hand as kit shapes in one colour (one shaded silhouette + creases).
+export function handShapes(kind, fill) {
+  const { ds, lines, over } = handRig(kind);
+  const out = [{ ds, fill, so: 0.012 }, ...lines.map((d) => ({ d, stroke: shade(fill, 0.8), width: 0.007 }))];
+  if (over.length) out.push({ ds: over, fill, so: 0.012 });
+  return out;
+}
+export function handShape(kind) { return handRig(kind).ds; }
 
 function clothes(look) {
   const top = look.top, long = top === 'longsleeve' || top === 'jacket' || top === 'jumpsuit';
@@ -309,7 +375,7 @@ export function buildParts(look) {
     const fore = [{ d: capsule(J['el' + s], J['wr' + s], R.el, R.wr), fill: C.long ? cloth : skin, shade: true }];
     if (C.long) fore.push({ d: `M${P(add(J['wr' + s], [-R.wr * 1.15, -0.08]))}L${P(add(J['wr' + s], [R.wr * 1.15, -0.08]))}`, stroke: shade(cloth, 0.78), width: 0.03 });
     parts['fore' + s] = { bone: 'fore' + s, layer: 51, side: s, shapes: fore };
-    const hands = handShape(L.hands[s]).map((d) => ({ d, fill: skin, shade: true, so: 0.028 }));
+    const hands = handShapes(L.hands[s], skin);
     parts['hand' + s] = { bone: 'hand' + s, layer: 52, side: s, mirror: k, origin: J['wr' + s], handScale: ST.hand, shapes: hands };
     // legs
     const thighFill = C.short || C.skirt ? skin : C.pants;
@@ -328,6 +394,12 @@ export function buildParts(look) {
 function shapeSvg(sh, uid, i) {
   if (sh.stroke) return `<path d="${sh.d}" fill="none" stroke="${sh.stroke}" stroke-width="${sh.width}" stroke-linecap="round"/>`;
   const op = sh.opacity != null ? ` opacity="${sh.opacity}"` : '';
+  if (sh.ds) {
+    // a union of pieces (a hand: palm + finger segments) shaded as ONE silhouette,
+    // so no crescent or seam shows where a finger meets the palm
+    const id = `${uid}c${i}`, all = (fill, xf = '') => sh.ds.map((d) => `<path d="${d}" fill="${fill}"${xf}/>`).join('');
+    return `<clipPath id="${id}">${sh.ds.map((d) => `<path d="${d}"/>`).join('')}</clipPath>${all(shade(sh.fill))}<g clip-path="url(#${id})">${all(sh.fill, ` transform="translate(${-(sh.so || 0.055)},0.01)"`)}</g>`;
+  }
   if (!sh.shade) return `<path d="${sh.d}" fill="${sh.fill}"${op}/>`;
   const id = `${uid}c${i}`;
   // shade crescent: the shape in the dark tone, the lit tone offset toward the light on top
@@ -391,7 +463,7 @@ export function drawHead({ id = 'h', look = {}, x, y, size }) {
 }
 // A hand alone, wrist at [x, y], pointing down.
 export function drawHand({ id = 'hand', kind, skin = DEFAULT_LOOK.skin, x, y, size, side = 'R' }) {
-  const shapes = handShape(kind).map((d) => ({ d, fill: skin, shade: true, so: 0.028 }));
+  const shapes = handShapes(kind, skin);
   let body = ''; shapes.forEach((s, i) => { body += shapeSvg(s, id, i); });
   const k = size * HAND_SCALE;
   return `<g transform="translate(${f2(x)},${f2(y)}) scale(${f2(side === 'L' ? -k : k)},${f2(k)})">${body}</g>`;
@@ -461,7 +533,7 @@ function robotParts(sk, L) {
   for (const [s, k] of [['L', 1], ['R', -1]]) {
     parts['upper' + s] = { bone: 'upper' + s, layer: 50, side: s, shapes: [{ d: ell(J['sh' + s][0], J['sh' + s][1], R.sh * 1.25, R.sh * 1.25), fill: plate, shade: true }, ...limb(J['sh' + s], J['el' + s], R.sh, R.el).slice(1)] };
     parts['fore' + s] = { bone: 'fore' + s, layer: 51, side: s, shapes: limb(J['el' + s], J['wr' + s], R.el, R.wr) };
-    parts['hand' + s] = { bone: 'hand' + s, layer: 52, side: s, mirror: k, origin: J['wr' + s], shapes: handShape(L.hands[s]).map((d) => ({ d, fill: joint, shade: true, so: 0.028 })) };
+    parts['hand' + s] = { bone: 'hand' + s, layer: 52, side: s, mirror: k, origin: J['wr' + s], shapes: handShapes(L.hands[s], joint) };
     parts['thigh' + s] = { bone: 'thigh' + s, layer: 10, side: s, shapes: limb(J['hip' + s], J['kn' + s], R.hip * 0.85, R.kn) };
     parts['shin' + s] = { bone: 'shin' + s, layer: 11, side: s, shapes: limb(J['kn' + s], J['an' + s], R.kn, R.an * 1.1) };
     const a = J['an' + s];

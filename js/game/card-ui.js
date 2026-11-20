@@ -238,7 +238,9 @@ export function renderCard(card, { type, supplied, onSupportClick, face, radSide
   const _crewOpts = { onSupportClick, privilegeDisabled };
   const kind = type || (card.faces && card.faces.primary && card.faces.primary.role ? 'crew' : 'patent');
   const el = document.createElement('div');
-  el.className = `card kind-${kind}` + (kind === 'patent' ? ` type-${card.type}` : '')
+  // type-<card.type> on every patent; a colonist keeps type-colonist however it
+  // was drawn (its text-over-art backing hangs off it).
+  el.className = `card kind-${kind}` + (kind === 'patent' || card.type === 'colonist' ? ` type-${card.type}` : '')
     // A ROBOTIC colonist is only obtained by ET Production, so (like a freighter /
     // TW thruster) its WORKING front is a BLACK card, not the white-Human face.
     + (card.type === 'colonist' && card.colonistKind === 'Robot' ? ' colonist-robot' : '')
