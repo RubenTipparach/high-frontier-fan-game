@@ -10925,14 +10925,16 @@ function wireHandStrip() {
     });
     // M4 contracts are Hand cards (4B3h), drawn after the patents on the side
     // they were won on. They don't count toward the academia hand limit, so the
-    // count reads "N cards + M contracts". A default contract lies sideways in
-    // the hand (4B4d) and can never be boosted again.
+    // count reads "N cards + M contracts". They sit at the right end of the
+    // hand; a default contract (4B4d) is tagged Default and can never be
+    // boosted again.
     contracts.forEach((c) => {
       const card = lookup(c.id);
       if (!card) return;
       const face = c.side === 'gold' ? 'secondary' : 'primary';
       const wrap = document.createElement('div');
-      wrap.className = 'hand-slot is-contract' + (c.default ? ' is-default' : '');
+      wrap.className = 'hand-slot is-contract' + (c.default ? ' is-default' : '')
+        + (c === contracts[0] ? ' hand-contract-first' : '');
       if (isBoostMarked(c.id)) wrap.classList.add('is-boost-marked');
       wrap.appendChild(renderCard(card, { face }));
       const sideName = c.side === 'gold' ? 'gold' : (card.exodus ? 'exodus' : 'blue');
