@@ -159,9 +159,56 @@ document.addEventListener('click', (e) => {
 
 // Before the turn ends: a contract that could be fulfilled right here pops up
 // with its Fulfill button. Resolves true to go on ending the turn.
+// A late contract whose fee this turn is still unpaid (4B5): ending the turn
+// now defaults it and hands over the default chit. Null when nothing is owed.
+function lateFeeOwed(s, p) {
+  const tp = p && p.timepiece;
+  if (!s || !s.m4 || !tp || !tp.deadbeat || !p.turnStartedLate) return null;
+  const meta = (p.contractMeta || {})[tp.contractId] || {};
+  if (meta.default || meta.insuredTurn) return null;
+  const f = faceOf(p, tp.contractId);
+  if (!f) return null;
+  const owed = f.lateFee - (p.lateFeePaidThisTurn | 0);
+  return owed > 0 ? { id: tp.contractId, side: meta.side || 'blue', name: f.name, owed, chitVp: meta.side === 'gold' ? 6 : 3 } : null;
+}
+function lateFeeWarning(s, p, due) {
+  return new Promise((resolve) => {
+    document.getElementById('m4-late-warning')?.remove();
+    const ov = document.createElement('div');
+    ov.id = 'm4-late-warning';
+    ov.className = 'm4c-overlay m4c-fulfilled m4c-endturn m4c-late';
+    const canPay = (p.aqua | 0) >= due.owed;
+    const held = s.defaultChit && s.defaultChit.profileId === p.profileId;
+    ov.innerHTML = `<div class="m4c-modal" role="dialog" aria-modal="true" aria-label="Late fee due">
+      <div class="m4c-head"><h3>⏰ Late fee due</h3><button type="button" class="m4c-close" aria-label="Close">✕</button></div>
+      <div class="m4c-body m4c-endturn-body"><div class="m4c-endturn-item">${cardThumb(due.id, due.side)}
+        <p class="m4c-late-text">Pay <b>${due.owed} aqua</b> or <b>${esc(due.name)}</b> defaults${held ? '' : ` and you take the default chit (<b>-${due.chitVp} VP</b>)`}.</p>
+        <button type="button" class="m4c-ful-ok" data-late="pay" ${canPay ? '' : 'disabled'}>💸 Pay late fee (${due.owed})</button>
+        ${mishapLobbyable(due.id) ? `<button type="button" class="m4c-ful-ok" data-late="mishap">🛡 Lobby Mishap Insurance</button>` : ''}
+      </div></div>
+      <div class="m4c-endturn-foot"><button type="button" class="m4c-endturn-skip m4c-late-skip">End turn and default</button></div></div>`;
+    const done = (v) => { ov.remove(); resolve(v); };
+    ov.addEventListener('click', async (e) => {
+      if (e.target === ov || e.target.closest('.m4c-close')) { done(false); return; }
+      if (e.target.closest('.m4c-late-skip')) { done(true); return; }
+      const b = e.target.closest('[data-late]');
+      if (!b || b.disabled) return;
+      done(false);
+      if (b.dataset.late === 'pay') await payContractFee(due.id);
+      else await D.submitTurnOp({ kind: 'LOBBY', ideology: 'centrist' });
+    });
+    ov.querySelectorAll('.m4-fulfill-btn').forEach((x) => x.remove());
+    document.body.appendChild(ov);
+  });
+}
+
 export async function contractsBeforeEndTurn() {
   const s = snap(); const p = me();
-  if (!s || !s.m4 || !p || !D || !D.dryRun) return true;
+  if (!s || !s.m4 || !p || !D) return true;
+  // First the late fee: an unpaid one defaults the contract at the end of turn.
+  const due = lateFeeOwed(s, p);
+  if (due && !(await lateFeeWarning(s, p, due))) return false;
+  if (!D.dryRun) return true;
   const ids = boostedContractIds(p);
   if (!ids.length) return true;
   const ready = await checkReady(ids);
