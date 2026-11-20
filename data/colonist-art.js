@@ -28,7 +28,6 @@ export const COLONIST_ART_IDS = new Set([
   'col_combat_quadrupeds',
   'col_sensor_web_sail',
   'col_nano_3d_printers',
-  'col_lava_lamp_evangelists',
   'col_gabonese_mining_consortium',
   'col_prehensilists',
   'col_exoskeletalists',
@@ -38,4 +37,5 @@ export const COLONIST_ART_IDS = new Set([
   'col_vr_simulcasters',
   'col_transhuman_activists',
   'col_clone_entrepreneurs',
+  'col_lava_lamp_evangelists',
 ]);
