@@ -132,6 +132,7 @@ import { fuelTankCylinderMarkup, fuelTransferSectionMarkup } from './fuel-tank-v
 // M4 contract cards are stack slots too (only ever present in an m4 game).
 import { CONTRACTS, CONTRACTS_BY_ID, contractFace, acetyleneTerms } from '../../data/contracts.js';
 import { renderContractCard } from './contract-card.js';
+import { CONTRACT_ABILITIES } from './contract-glyphs.js';
 const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...BERNALS_BY_ID, ...COLONISTS_BY_ID, ...CONTRACTS_BY_ID };
 import { renderAssemblyPanel, renderAssemblyLaws } from './assembly.js';
 import { uiIcon, cardPileBadge } from './ui-icons.js';
@@ -9187,7 +9188,7 @@ function renderAbilityBadges(p) {
     const b = document.createElement('span');
     b.className = 'mp-ability contract';
     b.textContent = '📜 ' + c.label;
-    b.title = `${c.label} - fulfilled contract ability (${c.from}): ${c.text}`;
+    b.title = `${c.label}: ${c.text} (${c.from})`;
     row.appendChild(b);
   }
   return row;
@@ -9221,7 +9222,10 @@ function contractAbilityChips(p) {
     if (!label && ab.acetyleneFactories) label = 'Acetylene at your Factories';
     if (!label && ab.elevatorLanderBurns) label = 'Elevator assist';
     if (!label) label = text.length > 28 ? text.slice(0, 26).replace(/\s+\S*$/, '') + '...' : text;
-    out.push({ label, text, from: face.name });
+    // A keyword ability ("Connections.") says what it does, off the reference
+    // card's one-liner, rather than repeating its own name.
+    const kw = Object.keys(CONTRACT_ABILITIES).find((k) => text.replace(/\.$/, '').trim() === k);
+    out.push({ label, text: kw ? CONTRACT_ABILITIES[kw] : text, from: face.name });
   }
   return out;
 }
