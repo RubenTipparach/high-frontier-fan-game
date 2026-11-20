@@ -3,15 +3,15 @@
 // pelvis, y down, the figure's left at +x) with the bones it is skinned to.
 // Swappable per figure: skin tone, hair, face, top (tee | shirt | suit | coat |
 // sport), sleeves, trousers, shoes, hand shapes.
-import { makeRig, posedJoints, smoothClosed, smoothOpen, vec, lerp, REST } from './rig.mjs';
+import { makeRig, fkJoints, smoothClosed, smoothOpen, vec, lerp, REST } from './rig.mjs';
 const { sub, add, mul, len, unit, perp, f1 } = vec;
 
 const mirror = (pts) => pts.map(([x, y]) => [-x, y]);
 const sideBones = (chain, s) => chain.map((b) => b.replace(/L$/, s));
 
 // ---- body meshes (left side; the right is mirrored) ----------------------------
-const ARM = [[0.7, -2.3], [0.96, -2.26], [1.09, -2.02], [1.11, -1.6], [1.06, -1.12], [1.03, -0.8], [1.09, -0.42], [1.07, 0.0], [1.05, 0.42],
-  [0.9, 0.45], [0.86, 0.02], [0.8, -0.48], [0.78, -0.8], [0.74, -1.2], [0.7, -1.6], [0.66, -1.95]];
+const ARM = [[0.7, -2.27], [0.9, -2.15], [1.03, -1.96], [1.07, -1.6], [1.04, -1.12], [1.01, -0.8], [1.06, -0.42], [1.04, 0.0], [1.02, 0.44],
+  [0.88, 0.46], [0.85, 0.02], [0.8, -0.48], [0.78, -0.8], [0.75, -1.2], [0.72, -1.6], [0.68, -1.95]];
 const LEG = [[0.74, 0.0], [0.76, 0.6], [0.68, 1.4], [0.62, 1.95], [0.64, 2.45], [0.58, 3.2], [0.53, 3.72],
   [0.31, 3.72], [0.29, 3.2], [0.25, 2.45], [0.26, 1.95], [0.18, 1.2], [0.06, 0.55], [0.03, 0.12]];
 export const TORSO_REST = [[0.26, -2.34], [0.7, -2.31], [0.88, -2.16], [0.82, -1.9], [0.72, -1.3], [0.62, -0.72], [0.68, -0.12], [0.62, 0.3],
@@ -22,14 +22,14 @@ const SHOE = [[0.56, 3.62], [0.6, 3.86], [0.62, 4.1], [0.5, 4.16], [0.3, 4.14], 
 // ---- clothing meshes ------------------------------------------------------------
 // built explicitly: neckline left, down the left side, across the hem, up the right side, neckline right
 function topMesh(hem, neck) {
-  const L = [[0.74, -2.33], [0.95, -2.19], [0.9, -1.88], [0.79, -1.3], [0.71, -0.7], [0.75, -0.1], [0.78, hem]];
+  const L = [[0.72, -2.27], [0.9, -2.12], [0.86, -1.88], [0.78, -1.4], [0.67, -0.92], [0.65, -0.6], [0.73, -0.1], [0.77, hem]];
   const R = mirror(L).reverse();
   const nk = neck === 'v' ? [[-0.3, -2.37], [0, -1.86], [0.3, -2.37]] : neck === 'collar' ? [[-0.28, -2.42], [-0.12, -2.1], [0, -2.0], [0.12, -2.1], [0.28, -2.42]] : [[-0.3, -2.37], [-0.14, -2.21], [0, -2.17], [0.14, -2.21], [0.3, -2.37]];
   return [...nk, ...L, ...R];
 }
-const SLEEVE_SHORT = [[0.68, -2.36], [0.97, -2.3], [1.13, -2.02], [1.16, -1.62], [1.15, -1.36], [0.68, -1.36], [0.64, -1.95]];
-const SLEEVE_LONG = [[0.68, -2.36], [0.97, -2.3], [1.13, -2.02], [1.15, -1.6], [1.1, -1.12], [1.08, -0.8], [1.13, -0.42], [1.11, 0.0], [1.09, 0.34],
-  [0.86, 0.37], [0.83, 0.0], [0.77, -0.48], [0.75, -0.8], [0.71, -1.2], [0.67, -1.6], [0.62, -1.95]];
+const SLEEVE_SHORT = [[0.66, -2.3], [0.9, -2.18], [1.06, -1.97], [1.11, -1.62], [1.11, -1.42], [0.76, -1.42], [0.7, -1.92]];
+const SLEEVE_LONG = [[0.66, -2.3], [0.9, -2.18], [1.06, -1.97], [1.1, -1.6], [1.07, -1.12], [1.05, -0.8], [1.1, -0.42], [1.08, 0.0], [1.06, 0.36],
+  [0.84, 0.39], [0.81, 0.0], [0.76, -0.48], [0.74, -0.8], [0.71, -1.2], [0.68, -1.6], [0.64, -1.95]];
 const PANT_LEG = [[0.79, -0.2], [0.82, 0.6], [0.72, 1.4], [0.66, 1.95], [0.66, 2.45], [0.62, 3.2], [0.6, 3.68],
   [0.26, 3.68], [0.25, 3.2], [0.22, 2.45], [0.22, 1.95], [0.14, 1.2], [0.03, 0.6], [0.0, 0.25]];
 const PANT_HIP = [[-0.76, -0.25], [0.76, -0.25], [0.8, 0.3], [0.2, 0.55], [0, 0.4], [-0.2, 0.55], [-0.8, 0.3]];
@@ -37,11 +37,11 @@ const PANT_HIP = [[-0.76, -0.25], [0.76, -0.25], [0.8, 0.3], [0.2, 0.55], [0, 0.
 // hands in the hand bone's frame: x across (thumb at +x for the left hand), y from
 // the wrist (0) toward the fingertips (1)
 const HANDS = {
-  open: [[-0.2, 0], [-0.24, 0.32], [-0.22, 0.95], [-0.12, 1.0], [-0.1, 0.5], [-0.06, 1.06], [0.04, 1.06], [0.05, 0.52], [0.12, 1.0], [0.2, 0.94], [0.2, 0.42], [0.32, 0.3], [0.34, 0.12], [0.2, 0.08], [0.18, 0]],
-  relaxed: [[-0.2, 0], [-0.24, 0.35], [-0.2, 0.86], [-0.06, 0.95], [0.08, 0.9], [0.18, 0.78], [0.2, 0.4], [0.3, 0.28], [0.3, 0.12], [0.18, 0.06], [0.17, 0]],
-  fist: [[-0.2, 0], [-0.24, 0.3], [-0.22, 0.62], [-0.08, 0.7], [0.1, 0.68], [0.22, 0.56], [0.24, 0.3], [0.2, 0]],
-  grip: [[-0.2, 0], [-0.25, 0.32], [-0.22, 0.7], [-0.06, 0.78], [0.12, 0.74], [0.24, 0.58], [0.25, 0.3], [0.2, 0]],
-  point: [[-0.2, 0], [-0.24, 0.3], [-0.2, 0.62], [-0.06, 0.66], [-0.05, 1.08], [0.05, 1.1], [0.07, 0.66], [0.22, 0.58], [0.24, 0.3], [0.2, 0]],
+  relaxed: [[-0.12, 0], [-0.16, 0.25], [-0.17, 0.55], [-0.15, 0.82], [-0.08, 0.98], [0.02, 1.0], [0.1, 0.9], [0.13, 0.62], [0.19, 0.48], [0.22, 0.33], [0.16, 0.2], [0.12, 0]],
+  open: [[-0.12, 0], [-0.17, 0.3], [-0.2, 0.88], [-0.13, 0.92], [-0.1, 0.55], [-0.06, 1.02], [0.01, 1.03], [0.03, 0.57], [0.08, 0.98], [0.14, 0.95], [0.13, 0.5], [0.26, 0.42], [0.28, 0.3], [0.17, 0.2], [0.12, 0]],
+  fist: [[-0.12, 0], [-0.17, 0.25], [-0.18, 0.52], [-0.12, 0.64], [0.02, 0.67], [0.14, 0.6], [0.2, 0.45], [0.19, 0.24], [0.12, 0]],
+  grip: [[-0.12, 0], [-0.18, 0.28], [-0.18, 0.6], [-0.08, 0.72], [0.06, 0.72], [0.17, 0.6], [0.2, 0.38], [0.14, 0.18], [0.12, 0]],
+  point: [[-0.12, 0], [-0.17, 0.25], [-0.17, 0.55], [-0.09, 0.62], [-0.07, 1.05], [0.01, 1.07], [0.04, 0.62], [0.15, 0.56], [0.2, 0.4], [0.17, 0.2], [0.12, 0]],
 };
 
 const shade = (hex, k) => {
@@ -53,28 +53,21 @@ const shade = (hex, k) => {
 // look: { skin, hair, hairStyle, eyes, sex, top: tee|shirt|suit|coat|sport, topColor,
 //         sleeves: short|long, pants, shoes, hands: {l, r}, faceProps }
 // heads: { bust, profile } from the card art kit (drawn faces).
-// A pose: { joints: {name: [x, y]} in card units, yaw, headYaw (degrees, 0 = facing
-// the viewer, +90 = facing screen right), nearArm / nearLeg: 'L' | 'R' }.
-export function poseFromMarks(marks, fid) {
-  return { joints: posedJoints(marks, fid), yaw: marks[`${fid}.spine_03_yaw`] || 0, headYaw: marks[`${fid}.head_yaw`] || 0,
-    nearArm: marks[`${fid}.near_arm`] === 'l' ? 'L' : 'R', nearLeg: marks[`${fid}.near_leg`] === 'l' ? 'L' : 'R' };
-}
-// The rest pose placed on the card: standing, facing the viewer, `h` px per head.
-export function restPose(cx = 150, footY = 320, h = 38) {
-  const joints = {};
-  for (const [k, [x, y]] of Object.entries(REST)) joints[k] = [cx + x * h, footY + (y - 4.1) * h];
-  return { joints, yaw: 0, headYaw: 0, nearArm: 'R', nearLeg: 'R' };
+// A pose: { root: [x, y] (the pelvis on the card), scale (px per head), rot: { bone:
+// local degrees }, armsBehind: ['L'|'R'] }. The rest pose is all zeros: the
+// character standing, facing the viewer, arms down.
+export function restPose(cx = 150, footY = 322, h = 36) {
+  return { root: [cx, footY - 4.1 * h], scale: h, rot: {}, armsBehind: [] };
 }
 
-export function drawFigure({ id, marks, fid, pose, look, heads }) {
-  pose = pose || poseFromMarks(marks, fid);
-  const J = pose.joints;
+export function drawFigure({ id, fid, pose, look, heads }) {
+  pose = pose || restPose();
+  const J = fkJoints(pose).joints;
   const hb = J.headBase, ht = J.headTop;
-  const scale = len(sub(ht, hb)) / 0.9;          // rest head bone is 0.9 units
+  const scale = pose.scale;
   const R = makeRig(J, scale);
-  const hyaw = look.face === 'front' ? 0 : look.face === 'profileR' ? 90 : look.face === 'profileL' ? -90 : look.face === 'back' ? 180 : (pose.headYaw || 0);
-  const nearArm = pose.nearArm || 'R', farArm = nearArm === 'L' ? 'R' : 'L';
-  const nearLeg = pose.nearLeg || 'R', farLeg = nearLeg === 'L' ? 'R' : 'L';
+  const hyaw = look.face === 'profileR' ? 90 : look.face === 'profileL' ? -90 : look.face === 'back' ? 180 : look.face === '3qR' ? 35 : look.face === '3qL' ? -35 : 0;
+  const behind = pose.armsBehind || [];
   const fid2 = fid || id;
   const skin = look.skin, skinS = shade(skin, 0.78);
   const top = look.topColor || '#888', topS = shade(top, 0.7), topH = shade(top, 1.15);
@@ -128,7 +121,7 @@ export function drawFigure({ id, marks, fid, pose, look, heads }) {
   const neck = mesh(NECK, ['neckB', 'upperChest'], SKIN) + line([[-0.18, -2.25], [0, -2.18], [0.18, -2.25]], ['upperChest'], skinS, 2, 0.4);
 
   // head: drawn 3/4 face or profile, by head yaw; sized and tilted to the head bone
-  const hc = lerp(hb, ht, 0.42), r = scale * 0.43;
+  const hc = lerp(hb, ht, 0.45), r = scale * 0.49;
   const tilt = (Math.atan2(ht[0] - hb[0], hb[1] - ht[1]) * 180) / Math.PI;
   let head;
   const hairC = look.hair || '#2a1a10';
@@ -142,6 +135,6 @@ export function drawFigure({ id, marks, fid, pose, look, heads }) {
   defs.push(head.defs || '');
   const headSvg = `<g transform="rotate(${f1(tilt)} ${f1(hc[0])} ${f1(hc[1])})">${head.svg}</g>`;
 
-  const svg = `<g class="rig ${fid2}">${arm(farArm)}${leg(farLeg)}${leg(nearLeg)}${mesh(PANT_HIP, ['spine', 'pelL', 'pelR', 'thighL', 'thighR'], PANTF)}${neck}${torso}${headSvg}${arm(nearArm)}</g>`;
+  const svg = `<g class="rig ${fid2}">${behind.map(arm).join('')}${leg('L')}${leg('R')}${mesh(PANT_HIP, ['spine', 'pelL', 'pelR', 'thighL', 'thighR'], PANTF)}${neck}${torso}${headSvg}${['L', 'R'].filter((s) => !behind.includes(s)).map(arm).join('')}</g>`;
   return { defs: defs.join(''), svg, joints: J, scale };
 }

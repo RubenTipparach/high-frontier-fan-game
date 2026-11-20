@@ -119,3 +119,39 @@ export function smoothOpen(pts) {
   return d;
 }
 export const vec = { sub, add, mul, dot, len, unit, perp, lerp, f1 };
+
+// ---- forward kinematics (owner 2026-11-20: rig a front-facing character, then
+// pose it by rotating its bones; never pose something already posed) ----
+// Each bone's parent; rotating a bone turns everything below it about its start.
+export const PARENT = {
+  spine: null, upperChest: 'spine', neckB: 'upperChest', head: 'neckB',
+  clavL: 'upperChest', upperL: 'clavL', foreL: 'upperL', handL: 'foreL',
+  clavR: 'upperChest', upperR: 'clavR', foreR: 'upperR', handR: 'foreR',
+  pelL: null, thighL: 'pelL', shinL: 'thighL', footL: 'shinL',
+  pelR: null, thighR: 'pelR', shinR: 'thighR', footR: 'shinR',
+};
+const ORDER = Object.keys(PARENT);   // parents come before children
+const rot = ([x, y], deg) => { const a = (deg * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a); return [x * c - y * s, x * s + y * c]; };
+
+// pose = { root: [x, y] (the pelvis on the card), scale (px per head), rot: { bone: degrees } }
+// Degrees are LOCAL (relative to the parent), positive = clockwise on screen.
+export function fkJoints(pose) {
+  const world = {};          // bone -> accumulated angle
+  const J = { pelvis: pose.root };
+  for (const b of ORDER) {
+    const [a, c] = BONES[b];
+    const ang = (PARENT[b] ? world[PARENT[b]] : 0) + ((pose.rot && pose.rot[b]) || 0);
+    world[b] = ang;
+    const off = sub(REST[c], REST[a]);
+    J[c] = add(J[a], mul(rot(off, ang), pose.scale));
+  }
+  return { joints: J, world };
+}
+// The local angle that points bone b (from its start joint) at p, given the pose.
+export function aimBone(pose, b, p) {
+  const { joints, world } = fkJoints(pose);
+  const [a, c] = BONES[b];
+  const cur = sub(joints[c], joints[a]), want = sub(p, joints[a]);
+  const d = (Math.atan2(want[1], want[0]) - Math.atan2(cur[1], cur[0])) * 180 / Math.PI;
+  return (((pose.rot && pose.rot[b]) || 0) + d + 540) % 360 - 180;
+}
