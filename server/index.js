@@ -19,7 +19,7 @@ import { WebSocketServer } from 'ws';
 import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
 import { CONTRACTS_BY_ID } from '../data/contracts.js';
-import { contractStepPlaces, applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, liveScoreboard, rocketSolarZone, auctionWaitingOn, driveTutorialBots, migrateGloryCrewBindings, elevatorConnectedFactorySet, pinnedFactorySlugs, playerHasColonistPower, playerCrewReactorKinds, decksFor, repairSpeciesDeckSplit, repairSirensAssembly, autoFixGlitches, canLooseOutpostWater, outpostWater } from './game/engine.js';
+import { contractStepPlaces, applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, liveScoreboard, rocketSolarZone, auctionWaitingOn, inSpacerUnion, driveTutorialBots, migrateGloryCrewBindings, elevatorConnectedFactorySet, pinnedFactorySlugs, playerHasColonistPower, playerCrewReactorKinds, decksFor, repairSpeciesDeckSplit, repairSirensAssembly, autoFixGlitches, canLooseOutpostWater, outpostWater } from './game/engine.js';
 import { randomSeed, makeRng, shuffle } from './game/rng.js';
 import { COLONISTS } from '../data/colonists.js';
 import { siteBySlug, nodeBySlug, resolveNodeRef, leoSlug } from './game/planner-graph.js';
@@ -1098,8 +1098,9 @@ app.post('/lobbies', requireProfile, (req, res) => {
     if (withVariant.length || body.ceoSolo || body.tutorial) {
       return res.status(400).json({ error: 'm4_no_variants', detail: withVariant });
     }
-    // M4 with M2 is allowed (owner 2026-11-18: "start building m4 + m2"). It was
-    // refused from 2026-11-17 while the M2 side of M4 was unbuilt.
+    // M4 with M2 is refused again until isotope monetization is finished (owner
+    // 2026-11-20). The M4 + M2 rules stay in the engine; only new rooms wait.
+    if (m2) return res.status(400).json({ error: 'm4_no_m2' });
     m0 = 1;
   }
   // A room runs AT MOST ONE variant (see VARIANT_KEYS). Rejected rather than
@@ -1742,8 +1743,11 @@ app.post('/lobbies/:id/settings', requireProfile, (req, res) => {
   if (body.m1 !== undefined) { sets.push('m1 = ?'); args.push(body.m1 ? 1 : 0); }
   // M2 is released (v1.3.0): any host may toggle it pre-start (a ceoSolo room may
   // carry it too - Futures in solo).
-  // M4 combines with M2 (owner 2026-11-18).
+  // M4 does not combine with M2 until isotope monetization is finished (owner
+  // 2026-11-20): refuse a save that would leave both on.
   const m4After = (body.m4 !== undefined && m4Allowed(req)) ? !!body.m4 : !!lobby.m4;
+  const m2After = body.m2 !== undefined ? !!body.m2 : !!lobby.m2;
+  if (m4After && m2After) return res.status(400).json({ error: 'm4_no_m2' });
   // M4 does not combine with a variant (V9 Sirens included, owner 2026-11-18):
   // the same refusal the create route gives.
   if (m4After && (lobby.sirens || lobby.hermes || lobby.altruism || lobby.ceo_solo || lobby.tutorial)) {
@@ -2009,6 +2013,7 @@ function redactRoutes(rawState, viewerId) {
   if (Array.isArray(clone.colonistQueue)) {
     clone.colonistQueueCount = clone.colonistQueue.length;
   }
+  if (Array.isArray(clone.spacebornQueue)) clone.spacebornQueueCount = clone.spacebornQueue.length;
   return clone;
 }
 
@@ -2056,6 +2061,11 @@ function gameView(gameId, viewerId = null) {
   // Who the open auction is waiting on, by the engine's rules (a seat that
   // cannot take the lot never owes an answer). Hot seat follows this list to
   // know which seat to hand the device to.
+  // M4 + M2 (4C2): who is in the Spacer Union, for the Spaceborn / Earthborn
+  // tag beside each name.
+  if (viewState && viewState.m4 && viewState.m2 && Array.isArray(viewState.players)) {
+    for (const p of viewState.players) p.spacerUnion = inSpacerUnion(viewState, p);
+  }
   if (viewState && viewState.auction && rawState) {
     viewState.auction = { ...viewState.auction, waitingOn: auctionWaitingOn(rawState).map((p) => p.profileId) };
   }

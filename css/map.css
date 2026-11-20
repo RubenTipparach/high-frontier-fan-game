@@ -9542,6 +9542,18 @@ html.battery-save *::after {
   gap: 4px;
   margin: 2px 0 4px 22px;
 }
+.mp-born-tag {
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 2px 5px;
+  margin: 0 2px;
+  border-radius: 4px;
+  flex: 0 0 auto;
+  letter-spacing: 0.02em;
+}
+.mp-born-tag.spaceborn { background: rgba(167, 139, 250, 0.18); color: #c4b5fd; border: 1px solid rgba(167, 139, 250, 0.45); }
+.mp-born-tag.earthborn { background: rgba(74, 222, 128, 0.12); color: #86efac; border: 1px solid rgba(74, 222, 128, 0.4); }
 .mp-hand-lock {
   font-size: 12px;
   line-height: 1;

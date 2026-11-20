@@ -109,7 +109,7 @@ function crewSectionHeading(text, tip) {
   if (tip) h.setAttribute('title', tip);
   return h;
 }
-import { COLONISTS, COLONISTS_BY_ID } from '../../data/colonists.js';
+import { COLONISTS, COLONISTS_BY_ID, SPACEBORN_COLONISTS } from '../../data/colonists.js';
 import { BERNALS, BERNALS_BY_ID, solarCellThrustBonus, bernalPrivilegeGrant } from '../../data/bernals.js';
 // The pure support-chain resolver (rules 1+2 modifier path), used to fold a
 // Bernal crawler's reactor / generator thrust modifiers into its thrust budget,
@@ -6437,7 +6437,7 @@ function buildColonySection(me) {
     'Berths: 1 per anchored Bernal, 2 when the Bernal is promoted to a Lab. The Spacefaring Future adds one.'));
   if (inHand.length) {
     badges.appendChild(mkBadge(`🤖 ${inHand.length}`, 'robots in hand', '',
-      'Robot colonists in your hand never count toward the limit. Build one at a factory matching its spectral, sell it for 3 aqua, or discard it back to the queue.'));
+      'A Robot in hand is not in space, so it does not count yet. ET Produce it at a factory of its spectral type; over the limit, a colonist goes back to the queue.'));
   }
   badges.appendChild(mkBadge(`${queueN}`, 'in the queue', '',
     'Colonists waiting to exomigrate, face down - who arrives is revealed on landing.'));
@@ -6538,7 +6538,7 @@ function openExomigrateModal(me) {
   const note = document.createElement('p');
   note.className = 'muted';
   note.style.margin = '0 0 10px';
-  note.textContent = 'The topmost colonist leaves the queue and boards your station (free action). A Robot drawn on the way goes to your hand instead (build it later at a matching factory) and the draw continues.';
+  note.textContent = 'Free action. A Robot drawn goes to your hand; draw again.';
   modal.appendChild(note);
 
   // Destination is the player's CHOICE (user 2026-07-07): a colonist boards your
@@ -6611,6 +6611,24 @@ function openExomigrateModal(me) {
     modal.appendChild(delegateRow);
   }
 
+  // M4 + M2 (4C2): which queue to draw from.
+  let queueSel = null;
+  if (snap.m4 && snap.m2 && Array.isArray(snap.spacebornQueue)) {
+    const row = document.createElement('label');
+    row.style.cssText = 'display:flex;gap:6px;align-items:center;margin:0 0 10px';
+    row.appendChild(document.createTextNode('Queue '));
+    queueSel = document.createElement('select');
+    queueSel.className = 'exo-queue';
+    for (const [v, t] of [['earthborn', `Earthborn (${(snap.colonistQueue || []).length})`], ['spaceborn', `Spaceborn (${snap.spacebornQueue.length})`]]) {
+      const o = document.createElement('option');
+      o.value = v; o.textContent = t;
+      queueSel.appendChild(o);
+    }
+    if (me.spacerUnion) queueSel.value = 'spaceborn';
+    row.appendChild(queueSel);
+    modal.appendChild(row);
+  }
+
   // IMMIGRANT (New Pilgrims): optionally name a specialty first; the queue is
   // searched for the first Human with it (if any), then shuffled.
   let specialtySel = null;
@@ -6644,6 +6662,7 @@ function openExomigrateModal(me) {
     const op = { kind: 'EXOMIGRATE', to: chosenTo };
     if (delegateRow && !delegateRow._cb.checked) op.placeDelegate = false;
     if (specialtySel && specialtySel.value) op.specialty = specialtySel.value;
+    if (queueSel) op.queue = queueSel.value;
     const ok = await submitOnlineOp(op);
     if (ok) {
       const after = mySnapshotPlayer();
@@ -6686,7 +6705,7 @@ function showExomigrateGains(after, beforeHand, beforeHeld) {
     const note = document.createElement('p');
     note.className = 'muted';
     note.style.margin = '0 0 10px';
-    note.textContent = 'Robots drawn on the way went to your hand - they never count toward your colonist limit. Build one at a factory matching its spectral, sell it for 3 aqua, or discard it back to the queue.';
+    note.textContent = 'Robots go to your hand. They count against your colonist limit once ET Produced.';
     modal.appendChild(note);
   }
   modal.appendChild(cardPickGrid(gained.map((e) => ({
@@ -6723,8 +6742,8 @@ function openDownsizePicker(held, onPick) {
   note.className = 'mp-trade-colo no-colo';
   const emancipated = !!(_onlineSnapshot && _onlineSnapshot.robotsEmancipated);
   note.textContent = emancipated
-    ? 'Building this colonist puts you over your limit - retire one to make room. A Human returns to the colonist queue; an emancipated Robot is retired from the game for good.'
-    : 'Building this colonist puts you over your limit - retire one to make room. A Human returns to the colonist queue; a Robot returns to your hand.';
+    ? 'Over your colonist limit: return a colonist to the queue (an emancipated Robot leaves the game).'
+    : 'Over your colonist limit: return a colonist to the queue.';
   modal.appendChild(note);
   let picked = null;
   const commit = document.createElement('button');
@@ -8862,6 +8881,14 @@ function renderMpPlayer(p, isMe, isActive) {
   // everywhere.
   stats.textContent = `${onlineSiteLabel(rkt.siteId)} · 💧${p.aqua || 0} · ${vp}vp`;
   head.append(dot, name);
+  // M4 + M2 (4C2): Spaceborn (Spacer Union) or Earthborn, beside the name.
+  if (_onlineSnapshot && _onlineSnapshot.m4 && _onlineSnapshot.m2 && Array.isArray(_onlineSnapshot.spacebornQueue)) {
+    const born = document.createElement('span');
+    born.className = `mp-born-tag ${p.spacerUnion ? 'spaceborn' : 'earthborn'}`;
+    born.textContent = p.spacerUnion ? 'Spaceborn' : 'Earthborn';
+    born.dataset.tip = p.spacerUnion ? 'Spacer Union' : 'Earthborn';
+    head.append(born);
+  }
   if (lockIcon) head.append(lockIcon);
   head.append(locPin, stats);
   // Per-player "All cards" overview button, headed by this player's name +
@@ -9978,6 +10005,8 @@ function humanizeOnlineOpError(code, detail) {
     abandon_at_leo_or_bernal: 'Bring the contract back to LEO or to an anchored Bernal to abandon it (or abandon it from your hand).',
     military_contract_cannot_abandon: 'A military contract can never be abandoned.',
     needs_beo_colony: 'Implanting needs a BEO Colony: one of your Bernals anchored Dirtside (not your Home Bernal).',
+    needs_beo_colony_since_turn_start: 'Spaceborn needs a BEO Colony held since the start of your turn.',
+    spacer_union: 'Spacer Union: no earthborn while you hold a spaceborn.',
     no_colonist_here: 'No Colonist is aboard that Bernal.',
     no_colony: 'Not your Colony.',
     enterprise_needs_peace: 'Not during War.',
@@ -9990,7 +10019,17 @@ function humanizeOnlineOpError(code, detail) {
     chit_in_use: 'You only have one chit of that shape, and it is implanted elsewhere: juggle it off a Colonist aboard first.',
     chit_not_colocated: 'That chit is on a Colonist who is not aboard this Bernal.',
     parenthood_not_yet: 'Parenthood needs M2: implant the heart\'s other side.',
-    needs_augmentation: 'This Colonist needs at least one augmentation to Promote.',
+    parenthood_earthborn_only: 'Parenthood: an earthborn Human only.',
+    child_pending: 'You already have a child on the Sunspot Cycle.',
+    child_choice_due: 'Your child has come of age: choose who takes the parent\'s place.',
+    not_in_earthborn_queue: 'Pick an earthborn Human from the Colonist queue.',
+    parent_gone: 'The parent is no longer aboard.',
+    no_child_due: 'The child has not come of age yet.',
+    needs_augmentation: (detail && detail.need > 1)
+      ? `Promoting this needs your Colonists here with ${detail.need} different augmentations${detail.have != null ? ` (you have ${detail.have})` : ''}.`
+      : 'This Colonist needs at least one augmentation to Promote.',
+    promote_needs_dirtside: 'A Bernal promotes only at a Dirtside Colony.',
+    promote_needs_gold_contract: 'Promoting to a TW thruster needs a completed gold-side or Exodus contract.',
     nothing_to_implant: 'Choose an augmentation to implant.',
   };
   if (M4_ERRORS[code]) return M4_ERRORS[code];
@@ -12970,7 +13009,7 @@ function pickColonistsToDischarge(colonists, n, bernalName) {
     const head = document.createElement('h3');
     head.textContent = `⚓ Send ${n} colonist${n === 1 ? '' : 's'} home`;
     const blurb = document.createElement('p');
-    blurb.innerHTML = `Unanchoring ${esc(bernalName)} lowers your colonist limit. Choose <b>${n}</b> colonist${n === 1 ? '' : 's'} to return to the queue (a Human goes to the back of the queue; a Robot to your hand).`;
+    blurb.innerHTML = `Unanchoring ${esc(bernalName)} lowers your colonist limit. Choose <b>${n}</b> colonist${n === 1 ? '' : 's'} to return to the queue (they go back to the queue).`;
     const actions = document.createElement('div'); actions.className = 'turn-confirm-actions';
     ok.type = 'button'; ok.className = 'popup-btn primary';
     ok.addEventListener('click', () => { if (selected.size === n) close([...selected]); });
@@ -32913,6 +32952,10 @@ function renderPatents() {
   // M4 contracts: their own tab in an M4 game, and as a read-only catalog for
   // anyone who may play M4 (admins, playtesters) in any other game.
   const m4Types = (isM4() || isM4Preview()) ? ['contract'] : [];
+  // M4 spaceborn (Spacer) colonists: in an M4 + M2 game, and in the same
+  // read-only catalog M4 previewers see in any other game.
+  const spacebornShown = (isM4() && isM2()) || isM4Preview();
+  if (spacebornShown) m4Types.push('spaceborn');
   const types = [...PATENT_TYPES, 'supports', 'crew', ...expansionTypes, ...m2Types, ...m4Types];
   const counts = Object.fromEntries(PATENT_TYPES.map((t) => [t, patentsByType(t).length]));
   for (const t of expansionTypes) counts[t] = patentsByType(t).length;
@@ -32921,6 +32964,7 @@ function renderPatents() {
   counts.colonist = COLONISTS.length;
   counts.bernal = BERNALS.length;
   counts.contract = CONTRACTS.length;
+  counts.spaceborn = SPACEBORN_COLONISTS.length;
   // Drop the "(soon)" suffix once M1 is live; the cards are playable then.
   const m1Live = isM1();
   const TYPE_LABEL = {
@@ -32930,6 +32974,7 @@ function renderPatents() {
     'colonist': 'Colonists',
     'bernal': 'Bernals',
     'contract': 'Contracts',
+    'spaceborn': 'Spacer colonists',
   };
   // Seed initial active tab from a pending programmatic open
   // (openPatentsSupports), falling back to the first type.
@@ -33278,6 +33323,7 @@ function renderPatents() {
       if (isM2()) for (const c of COLONISTS) if (cardMatchesQuery(c, q)) { grid.appendChild(decorateForHand(c, 'colonist')); hits++; }
       if (isM2()) for (const c of BERNALS) if (cardMatchesQuery(c, q)) { grid.appendChild(decorateForHand(c, 'bernal')); hits++; }
       if (isM4() || isM4Preview()) for (const c of CONTRACTS) if (contractTileMatches(c, q)) { grid.appendChild(contractLibraryTile(c)); hits++; }
+      if (spacebornShown) for (const c of SPACEBORN_COLONISTS) if (cardMatchesQuery(c, q)) { grid.appendChild(decorateForHand(c, 'colonist')); hits++; }
       if (!hits) {
         const empty = document.createElement('p');
         empty.className = 'muted patent-search-empty';
@@ -33300,6 +33346,11 @@ function renderPatents() {
     if (filter === 'colonist') {
       // M2 colonist cards (white working face / purple promoted face).
       for (const c of COLONISTS) grid.appendChild(decorateForHand(c, 'colonist'));
+      return;
+    }
+    if (filter === 'spaceborn') {
+      // M4 spaceborn colonists (white working face / purple promoted face).
+      for (const c of SPACEBORN_COLONISTS) grid.appendChild(decorateForHand(c, 'colonist'));
       return;
     }
     if (filter === 'bernal') {
@@ -35130,7 +35181,7 @@ const MP_LOG_ICONS = {
   // M4 contracts (4B): the auction is in years, the timepiece is a clock.
   AUCTION_CONTRACT_START: '📜', AUCTION_CONTRACT_BID: '⏳', AUCTION_CONTRACT_PASS: '🚫', AUCTION_CONTRACT_CLOSE: '⏱',
   // M4 isotope monetization (4D1d): gold beads at the Bank, sold / bought at Earth.
-  ISOTOPE_EXCHANGE: '🟡',
+  ISOTOPE_EXCHANGE: '🟡', CHILD_COMES_OF_AGE: '👶',
   FULFILL_CONTRACT: '🏁', PAY_LATE_FEE: '⏰', IMPLANT: '🦾', ABANDON_CONTRACT: '🗑', INSIGHT: '🔎',
   AUCTION_RESET: '↺', AUCTION_SELL: '✅',
   PICK_CREW: '🧑‍🚀', SET_SPECIES: '\u{1F9DC}', SET_FIRST_PLAYER: '🥇', FREE_CUBE: '🧊',

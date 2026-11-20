@@ -37,6 +37,7 @@ export function setAugChitHook(hook) { _augChitHook = hook || null; }
 // the art. Only the 18 shipped colonists have art, so a card with no asset
 // simply keeps its plain body (the guard below reads a manifest set).
 import { COLONIST_ART_IDS } from '../../data/colonist-art.js';
+import { colonistMarksHtml } from './colonist-marks.js';
 // Patent card art (thrusters first; scripts/fetch-card-art.py -> assets/cards/).
 // A plain background picture behind the card body, nothing else: the card
 // layout is untouched (unlike the colonist .has-art recipe, which docks the
@@ -237,7 +238,9 @@ export function renderCard(card, { type, supplied, onSupportClick, face, radSide
   const _crewOpts = { onSupportClick, privilegeDisabled };
   const kind = type || (card.faces && card.faces.primary && card.faces.primary.role ? 'crew' : 'patent');
   const el = document.createElement('div');
-  el.className = `card kind-${kind}` + (kind === 'patent' ? ` type-${card.type}` : '')
+  // type-<card.type> on every patent; a colonist keeps type-colonist however it
+  // was drawn (its text-over-art backing hangs off it).
+  el.className = `card kind-${kind}` + (kind === 'patent' || card.type === 'colonist' ? ` type-${card.type}` : '')
     // A ROBOTIC colonist is only obtained by ET Production, so (like a freighter /
     // TW thruster) its WORKING front is a BLACK card, not the white-Human face.
     + (card.type === 'colonist' && card.colonistKind === 'Robot' ? ' colonist-robot' : '')
@@ -589,6 +592,18 @@ function buildFace(card, sideName, kind, supplied, opts = {}) {
       const artSide = sideName === 'secondary' ? 'back' : 'front';
       body.style.backgroundImage = `url("${assetUrl(`assets/colonists/${card.id}-${artSide}.svg`)}")`;
       face.classList.add('has-art');
+    }
+  }
+  // Colonist marks (humans aboard, + Spaceborn on M4 Humans, or the Robot gear), both faces.
+  const marks = colonistMarksHtml(card);
+  if (marks) {
+    const body = face.querySelector('.card-body');
+    if (body) {
+      const m = document.createElement('div');
+      m.className = 'colonist-marks' + (card.colonistKind === 'Robot' ? ' robot' : '')
+        + (face.querySelector('.card-thrust') ? ' beside-thrust' : '');
+      m.innerHTML = marks;
+      body.appendChild(m);
     }
   }
   const patentArt = CARD_ART[card.id] && CARD_ART[card.id][sideName];

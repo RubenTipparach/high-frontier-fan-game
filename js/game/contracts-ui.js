@@ -603,7 +603,26 @@ function augmentationsHtml(s, p, myTurn) {
     }).join('') : '<p class="muted">No Colonists aboard.</p>';
   }
   return `<h4>Augmentations</h4>
-    <div class="m4c-augs">${chips}</div>${station}`;
+    <div class="m4c-augs">${chips}</div>${station}${childHtml(s, p, myTurn)}`;
+}
+// Parenthood (4C5): the child chit sits on the Sunspot Cycle 9 years on. Once it
+// is passed, pick an earthborn Human from the queue to take the parent's place.
+function childHtml(s, p, myTurn) {
+  const c = p.childChit;
+  if (!c) return '';
+  const parent = (COLONISTS_BY_ID[c.parentId] || {}).name || c.parentId;
+  if (!c.grown) {
+    const left = Math.max(0, (c.due | 0) - (s.clockTicks | 0));
+    return `<div class="m4c-child">${augmentGlyph('heart', { size: 22 })} <b>${esc(parent)}</b>'s child: ${left} year${left === 1 ? '' : 's'} to go</div>`;
+  }
+  const picks = (s.colonistQueue || []).filter((id) => {
+    const col = COLONISTS_BY_ID[id] || {};
+    return col.colonistKind === 'Human' && !col.spaceborn;
+  });
+  const opts = picks.map((id) => `<option value="${esc(id)}">${esc(COLONISTS_BY_ID[id].name)}</option>`).join('');
+  return `<div class="m4c-child grown">${augmentGlyph('heart', { size: 22 })} <b>${esc(parent)}</b>'s child comes of age
+    ${myTurn && opts ? `<div class="m4c-controls"><select data-child-pick>${opts}</select>
+      <button type="button" class="primary" data-act="child">Take the parent's place</button></div>` : ''}</div>`;
 }
 
 async function onAct(b) {
@@ -629,6 +648,10 @@ async function onAct(b) {
       const remove = a && a.colonistId !== col ? [shape] : [];
       await D.submitTurnOp({ kind: 'IMPLANT', bernal: Number(b.dataset.bernal), remove, implants: [{ colonistId: col, shape, side }] });
     }
+  }
+  else if (act === 'child') {
+    const v = document.querySelector('#m4-contracts-panel [data-child-pick]');
+    if (v && v.value) await D.submitTurnOp({ kind: 'CHILD_COMES_OF_AGE', colonistId: v.value });
   }
   else if (act === 'augment') { openAugmentWizard(b.dataset.shape); return; }
   else if (act === 'chit-view') { openChitSides(b.dataset.shape); return; }

@@ -1,0 +1,160 @@
+{
+"cobw.head": [
+78.5,
+133.4
+],
+"cobw.head_tip": [
+81.3,
+90.0
+],
+"cobw.neck_01": [
+70.8,
+159.2
+],
+"cobw.neck_01_tip": [
+78.5,
+133.4
+],
+"cobw.hand_l": [
+143.3,
+292.0
+],
+"cobw.hand_l_tip": [
+146.3,
+298.3
+],
+"cobw.hand_r": [
+24.3,
+327.0
+],
+"cobw.hand_r_tip": [
+25.4,
+336.3
+],
+"cobw.lowerarm_l": [
+129.3,
+242.7
+],
+"cobw.lowerarm_l_tip": [
+143.3,
+292.0
+],
+"cobw.lowerarm_r": [
+18.5,
+260.5
+],
+"cobw.lowerarm_r_tip": [
+24.3,
+327.0
+],
+"cobw.upperarm_l": [
+112.6,
+182.8
+],
+"cobw.upperarm_l_tip": [
+129.3,
+242.7
+],
+"cobw.upperarm_r": [
+31.0,
+188.9
+],
+"cobw.upperarm_r_tip": [
+18.5,
+260.5
+],
+"cobw.thigh_l": [
+97.6,
+302.1
+],
+"cobw.thigh_l_tip": [
+111.5,
+395.4
+],
+"cobw.thigh_r": [
+50.9,
+313.8
+],
+"cobw.thigh_r_tip": [
+45.9,
+421.4
+],
+"cobw.foot_l": [
+115.5,
+487.8
+],
+"cobw.foot_l_tip": [
+131.3,
+520.7
+],
+"cobw.foot_r": [
+40.0,
+528.4
+],
+"cobw.foot_r_tip": [
+49.2,
+570.3
+],
+"cobw.calf_l": [
+111.5,
+395.4
+],
+"cobw.calf_l_tip": [
+115.5,
+487.8
+],
+"cobw.calf_r": [
+45.9,
+421.4
+],
+"cobw.calf_r_tip": [
+40.0,
+528.4
+],
+"cobw.spine_01": [
+69.5,
+280.0
+],
+"cobw.spine_01_tip": [
+71.5,
+265.1
+],
+"cobw.spine_03": [
+72.7,
+241.5
+],
+"cobw.spine_03_tip": [
+73.6,
+199.8
+],
+"cobw.pelvis": [
+75.7,
+306.0
+],
+"cobw.pelvis_tip": [
+69.5,
+280.0
+],
+"cobw.clavicle_l": [
+78.1,
+178.8
+],
+"cobw.clavicle_l_tip": [
+112.6,
+182.8
+],
+"cobw.clavicle_r": [
+66.2,
+179.5
+],
+"cobw.clavicle_r_tip": [
+31.0,
+188.9
+],
+"cobw.head_yaw": 9.3,
+"cobw.head_pitch": -23.3,
+"cobw.spine_03_yaw": 34.2,
+"cobw.spine_03_pitch": -3.6,
+"cobw.near_arm": "r",
+"cobw.near_leg": "r"
+}
