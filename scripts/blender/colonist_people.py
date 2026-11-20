@@ -227,11 +227,25 @@ def render_scene(sc):
     from bpy_extras.object_utils import world_to_camera_view
     marks = {}
     for fid, rig in rigs.items():
-        for bn in ("head", "neck_01", "hand_l", "hand_r", "lowerarm_l", "lowerarm_r", "upperarm_l", "upperarm_r", "foot_l", "foot_r", "calf_l", "calf_r", "spine_03", "pelvis"):
+        for bn in ("head", "neck_01", "hand_l", "hand_r", "lowerarm_l", "lowerarm_r", "upperarm_l", "upperarm_r",
+                   "thigh_l", "thigh_r", "foot_l", "foot_r", "calf_l", "calf_r", "spine_01", "spine_03", "pelvis", "clavicle_l", "clavicle_r"):
             pb = rig.pose.bones[bn]
             for end, co in (("", pb.head), ("_tip", pb.tail)):
                 v = world_to_camera_view(s, cam, rig.matrix_world @ co)
                 marks[f"{fid}.{bn}{end}"] = [round(v.x * 300, 1), round((1 - v.y) * 330, 1)]
+        # Which way the head and the chest face, seen from the camera: yaw in degrees
+        # (0 = facing the viewer, +90 = facing screen right, 180 = facing away), and
+        # which arm / leg is nearer the camera (for draw order).
+        cm = cam.matrix_world.to_3x3()
+        cx, cz = cm @ Vector((1, 0, 0)), cm @ Vector((0, 0, 1))
+        for bn in ("head", "spine_03"):
+            pb = rig.pose.bones[bn]
+            fwd = rig.matrix_world.to_3x3() @ pb.matrix.to_3x3() @ pb.bone.matrix_local.to_3x3().inverted() @ Vector((0, -1, 0))
+            marks[f"{fid}.{bn}_yaw"] = round(math.degrees(math.atan2(fwd.dot(cx), fwd.dot(cz))), 1)
+            marks[f"{fid}.{bn}_pitch"] = round(math.degrees(math.asin(max(-1, min(1, fwd.dot(cm @ Vector((0, 1, 0))))))), 1)
+        dist = lambda bn: (rig.matrix_world @ rig.pose.bones[bn].head - cam.location).length
+        marks[f"{fid}.near_arm"] = "l" if dist("upperarm_l") < dist("upperarm_r") else "r"
+        marks[f"{fid}.near_leg"] = "l" if dist("thigh_l") < dist("thigh_r") else "r"
     json.dump(marks, open(os.path.join(OUT, sc["id"] + ".json"), "w"), indent=0)
     print("RENDERED", s.render.filepath)
 

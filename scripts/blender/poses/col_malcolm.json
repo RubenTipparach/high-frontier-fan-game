@@ -63,6 +63,22 @@
 53.4,
 401.8
 ],
+"malcolm.thigh_l": [
+181.6,
+427.1
+],
+"malcolm.thigh_l_tip": [
+206.6,
+615.2
+],
+"malcolm.thigh_r": [
+88.6,
+456.0
+],
+"malcolm.thigh_r_tip": [
+81.8,
+678.9
+],
 "malcolm.foot_l": [
 217.9,
 799.2
@@ -95,6 +111,14 @@
 67.1,
 905.4
 ],
+"malcolm.spine_01": [
+132.4,
+386.9
+],
+"malcolm.spine_01_tip": [
+132.1,
+354.5
+],
 "malcolm.spine_03": [
 127.5,
 333.0
@@ -110,5 +134,27 @@
 "malcolm.pelvis_tip": [
 132.4,
 386.9
-]
+],
+"malcolm.clavicle_l": [
+148.8,
+199.4
+],
+"malcolm.clavicle_l_tip": [
+232.4,
+220.4
+],
+"malcolm.clavicle_r": [
+130.3,
+200.9
+],
+"malcolm.clavicle_r_tip": [
+43.1,
+241.6
+],
+"malcolm.head_yaw": 54.4,
+"malcolm.head_pitch": 8.1,
+"malcolm.spine_03_yaw": 28.8,
+"malcolm.spine_03_pitch": -4.6,
+"malcolm.near_arm": "r",
+"malcolm.near_leg": "r"
 }

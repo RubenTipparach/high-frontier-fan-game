@@ -17,6 +17,74 @@ export const PEOPLE_FRONTS = new Set([
   'col_vr_simulcasters', 'col_exoskeletalists',
 ]);
 
+// Drawing primitives shared with colonist-art-drawn.mjs: tapered limbs, hands,
+// arms, a slim torso, and a true profile head.
+export function poseKit({ W, H }) {
+  const { f1, radial, linear } = artKit({ W, H });
+  const P = (pt) => `${f1(pt[0])},${f1(pt[1])}`;
+  // ---- posable pieces ----------------------------------------------------------
+  // A tapered limb segment a -> b (rounded ends).
+  const limb = (a, b, wa, wb, fill) => {
+    const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1, nx = -dy / L, ny = dx / L;
+    return `<path d="M${f1(a[0] + nx * wa / 2)},${f1(a[1] + ny * wa / 2)} L${f1(b[0] + nx * wb / 2)},${f1(b[1] + ny * wb / 2)} L${f1(b[0] - nx * wb / 2)},${f1(b[1] - ny * wb / 2)} L${f1(a[0] - nx * wa / 2)},${f1(a[1] - ny * wa / 2)} Z" fill="${fill}"/>`
+      + `<circle cx="${f1(a[0])}" cy="${f1(a[1])}" r="${f1(wa / 2)}" fill="${fill}"/><circle cx="${f1(b[0])}" cy="${f1(b[1])}" r="${f1(wb / 2)}" fill="${fill}"/>`;
+  };
+  // A hand at wrist `w`, pointing along `deg`; `pose` open | fist | point | grip.
+  // `flip` mirrors the thumb side.
+  const hand = (w, deg, s, skin, pose = 'open', flip = 1) => {
+    const fingers = pose === 'open'
+      ? [-0.32, -0.11, 0.1, 0.3].map((y, i) => `<rect x="${f1(s * 0.75)}" y="${f1(s * (y - 0.1))}" width="${f1(s * (0.62 - Math.abs(i - 1.5) * 0.07))}" height="${f1(s * 0.2)}" rx="${f1(s * 0.1)}"/>`).join('')
+      : pose === 'point'
+        ? `<rect x="${f1(s * 0.75)}" y="${f1(-s * 0.32)}" width="${f1(s * 0.75)}" height="${f1(s * 0.2)}" rx="${f1(s * 0.1)}"/><rect x="${f1(s * 0.62)}" y="${f1(-s * 0.1)}" width="${f1(s * 0.32)}" height="${f1(s * 0.42)}" rx="${f1(s * 0.15)}"/>`
+        : `<rect x="${f1(s * 0.62)}" y="${f1(-s * 0.38)}" width="${f1(s * 0.38)}" height="${f1(s * 0.76)}" rx="${f1(s * 0.18)}"/>`;
+    return `<g transform="translate(${f1(w[0])},${f1(w[1])}) rotate(${f1(deg)}) scale(1,${flip})" fill="${skin}">
+      <ellipse cx="${f1(s * 0.42)}" cy="0" rx="${f1(s * 0.42)}" ry="${f1(s * 0.38)}"/>${fingers}
+      <ellipse cx="${f1(s * 0.42)}" cy="${f1(-s * 0.42)}" rx="${f1(s * 0.28)}" ry="${f1(s * 0.12)}" transform="rotate(-30 ${f1(s * 0.42)} ${f1(-s * 0.42)})"/></g>`;
+  };
+  const angle = (a, b) => (Math.atan2(b[1] - a[1], b[0] - a[0]) * 180) / Math.PI;
+  // An arm: shoulder -> elbow -> wrist, with a sleeve, then the hand.
+  const arm = ({ sh, el, wr, w = 22, sleeve = 'long', cloth, skin, pose = 'open', flip = 1, hs = 18 }) =>
+    limb(sh, el, w, w * 0.82, cloth)
+    + limb(el, wr, w * 0.78, w * 0.6, sleeve === 'long' ? cloth : skin)
+    + (sleeve === 'long' ? `<circle cx="${f1(wr[0])}" cy="${f1(wr[1])}" r="${f1(w * 0.34)}" fill="${skin}"/>` : '')
+    + hand(wr, angle(el, wr), hs, skin, pose, flip);
+  // A slim torso between the shoulders and the hips, with soft folds.
+  const torso = ({ shL, shR, hipL, hipR, cloth, fold = '#000', neckline = null }) => {
+    const mL = [(shL[0] + hipL[0]) / 2 + 4, (shL[1] + hipL[1]) / 2], mR = [(shR[0] + hipR[0]) / 2 - 4, (shR[1] + hipR[1]) / 2];
+    return `<path d="M${P(shL)} Q${f1((shL[0] + shR[0]) / 2)},${f1(Math.min(shL[1], shR[1]) - 6)} ${P(shR)} Q${P(mR)} ${P(hipR)} L${P(hipL)} Q${P(mL)} ${P(shL)} Z" fill="${cloth}"/>
+      <path d="M${f1(shL[0] + 14)},${f1(shL[1] + 20)} Q${f1(mL[0] + 18)},${f1(mL[1] + 10)} ${f1(hipL[0] + 20)},${f1(hipL[1] - 4)} M${f1(shR[0] - 16)},${f1(shR[1] + 26)} Q${f1(mR[0] - 14)},${f1(mR[1] + 14)} ${f1(hipR[0] - 18)},${f1(hipR[1] - 6)}" stroke="${fold}" stroke-width="2" fill="none" opacity="0.14"/>
+      ${neckline || ''}`;
+  };
+  // A true PROFILE head facing `dir` (1 right, -1 left), centred on the skull.
+  const profile = ({ id, cx, cy, r, dir = 1, skin, hair, hairHi, style = 'short', eye = '#3a2414', female = false, lips = '#b0605a', brow }) => {
+    const [sk0, sk1] = skin;
+    const defs = `${radial(`${id}-pk`, [['0%', sk0], ['100%', sk1]], dir > 0 ? '65%' : '35%', '40%', '80%')}${linear(`${id}-ph`, [['0%', hairHi || hair], ['100%', hair]], 0.3, 1)}`;
+    const k = (x, y) => `${f1(x)},${f1(y)}`;
+    const hairPath = {
+      short: `M0.42,-0.86 Q0.1,-1.22 -0.55,-1.0 Q-1.08,-0.62 -0.98,0.15 Q-0.86,0.42 -0.62,0.3 Q-0.55,-0.25 -0.2,-0.45 Q0.2,-0.6 0.62,-0.6 Z`,
+      long: `M0.42,-0.86 Q0.1,-1.22 -0.55,-1.0 Q-1.1,-0.6 -1.05,0.4 Q-1.0,1.2 -0.7,1.75 L-0.25,1.7 Q-0.5,1.0 -0.55,0.3 Q-0.5,-0.3 -0.15,-0.48 Q0.25,-0.6 0.62,-0.58 Z`,
+      bob: `M0.45,-0.86 Q0.1,-1.25 -0.6,-1.02 Q-1.12,-0.6 -1.02,0.3 Q-0.95,0.75 -0.6,0.82 L-0.45,0.4 Q-0.5,-0.25 -0.15,-0.48 Q0.25,-0.62 0.66,-0.55 Z`,
+      buzz: `M0.4,-0.88 Q0.05,-1.15 -0.55,-0.98 Q-1.0,-0.62 -0.94,0.05 Q-0.8,0.05 -0.7,-0.1 Q-0.6,-0.55 -0.2,-0.7 Q0.15,-0.78 0.55,-0.72 Z`,
+    }[style];
+    const tf = `translate(${f1(cx)},${f1(cy)}) scale(${f1(r * dir)},${f1(r)})`;
+    return { defs, svg: `<g transform="${tf}">
+      <path d="M-0.28,0.55 L-0.4,1.7 L0.5,1.7 L0.4,0.7 Z" fill="${sk1}"/>
+      <path d="M0.4,0.7 Q0.1,0.95 -0.3,0.75" fill="#000" opacity="0.15"/>
+      <circle cx="-0.08" cy="-0.12" r="0.94" fill="url(#${id}-pk)"/>
+      <path d="M0.3,-0.92 Q0.72,-0.72 0.78,-0.3 Q0.8,-0.2 0.84,-0.1 Q0.98,0.1 1.04,0.18 Q1.02,0.24 0.86,0.27 Q0.88,0.33 0.9,0.38 Q0.86,0.42 0.84,0.44 Q0.9,0.5 0.86,0.56 Q${female ? '0.78,0.8 0.56,0.86' : '0.8,0.82 0.6,0.9'} Q0.3,0.95 0.05,0.78 L-0.2,0.5 Z" fill="url(#${id}-pk)"/>
+      <path d="M0.84,0.44 Q0.76,0.46 0.7,0.44" stroke="${lips}" stroke-width="0.05" fill="none" opacity="0.9"/>
+      <path d="M0.88,0.37 Q0.8,0.42 0.74,0.44 Q0.82,0.52 0.86,0.55 Z" fill="${lips}" opacity="${female ? 0.85 : 0.45}"/>
+      <path d="M0.42,-0.14 Q0.55,-0.22 0.66,-0.12 Q0.55,-0.06 0.42,-0.14 Z" fill="#f4efe8"/><circle cx="0.58" cy="-0.13" r="0.05" fill="${eye}"/>
+      <path d="M0.4,-0.18 Q0.55,-0.27 0.68,-0.16" stroke="#2a1a10" stroke-width="0.035" fill="none"/>
+      <path d="M0.36,-0.32 Q0.55,-0.42 0.76,-0.3" stroke="${brow || hair}" stroke-width="${female ? 0.05 : 0.08}" fill="none" stroke-linecap="round"/>
+      <path d="M0.82,0.06 Q0.86,0.18 0.92,0.2" stroke="#000" stroke-width="0.03" fill="none" opacity="0.25"/>
+      <ellipse cx="-0.12" cy="0.02" rx="0.15" ry="0.24" fill="${sk1}"/><path d="M-0.15,-0.08 Q-0.05,0.02 -0.14,0.12" stroke="#000" stroke-width="0.03" fill="none" opacity="0.25"/>
+      <path d="${hairPath}" fill="url(#${id}-ph)"/>
+    </g>` };
+  };
+  return { limb, hand, angle, arm, torso, profile };
+}
+
 export function drawPeopleFronts({ W, H, panel, emit }) {
   const { f1, rect, radial, linear, vignette, stars, rng, bust, robotBust } = artKit({ W, H });
   const P = (pt) => `${f1(pt[0])},${f1(pt[1])}`;

@@ -63,6 +63,22 @@
 -24.7,
 248.2
 ],
+"miner.thigh_l": [
+96.6,
+323.3
+],
+"miner.thigh_l_tip": [
+108.1,
+433.8
+],
+"miner.thigh_r": [
+42.2,
+324.8
+],
+"miner.thigh_r_tip": [
+30.3,
+437.2
+],
 "miner.foot_l": [
 112.1,
 548.5
@@ -95,6 +111,14 @@
 29.7,
 553.4
 ],
+"miner.spine_01": [
+70.9,
+290.1
+],
+"miner.spine_01_tip": [
+70.0,
+274.0
+],
 "miner.spine_03": [
 69.3,
 247.9
@@ -110,5 +134,27 @@
 "miner.pelvis_tip": [
 70.9,
 290.1
-]
+],
+"miner.clavicle_l": [
+75.6,
+177.7
+],
+"miner.clavicle_l_tip": [
+115.8,
+187.4
+],
+"miner.clavicle_r": [
+62.0,
+177.8
+],
+"miner.clavicle_r_tip": [
+19.0,
+188.1
+],
+"miner.head_yaw": -16.0,
+"miner.head_pitch": -0.8,
+"miner.spine_03_yaw": 3.8,
+"miner.spine_03_pitch": -3.7,
+"miner.near_arm": "l",
+"miner.near_leg": "l"
 }

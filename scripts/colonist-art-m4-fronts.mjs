@@ -66,7 +66,9 @@ export function artKit({ W, H }) {
         hairFront = `<path d="M${f1(cx - s * 1.0)},${f1(cy - s * 0.05)} Q${f1(cx - s * 1.05)},${f1(cy - s * 1.15)} ${cx},${f1(cy - s * 1.15)} Q${f1(cx + s * 1.05)},${f1(cy - s * 1.15)} ${f1(cx + s * 1.0)},${f1(cy - s * 0.05)} Q${f1(cx + s * 0.75)},${f1(cy - s * 0.7)} ${f1(cx - s * 0.1)},${f1(cy - s * 0.66)} Q${f1(cx - s * 0.7)},${f1(cy - s * 0.6)} ${f1(cx - s * 1.0)},${f1(cy - s * 0.05)} Z" fill="${hr}"/>`;
         break;
       case 'long':
-        hairBack = `<path d="M${f1(cx - s * 1.05)},${f1(cy - s * 0.4)} Q${f1(cx - s * 1.3)},${f1(cy + s * 1.0)} ${f1(cx - s * 1.0)},${f1(cy + s * 1.9)} L${f1(cx + s * 1.0)},${f1(cy + s * 1.9)} Q${f1(cx + s * 1.3)},${f1(cy + s * 1.0)} ${f1(cx + s * 1.05)},${f1(cy - s * 0.4)} Z" fill="${hr}"/>`;
+        // two curtains falling at the sides to the shoulders; nothing under the chin
+        // (hair across the jaw read as a beard on the drawn women).
+        hairBack = [-1, 1].map((k) => `<path d="M${f1(cx + k * s * 0.6)},${f1(cy - s * 0.9)} Q${f1(cx + k * s * 1.35)},${f1(cy - s * 0.2)} ${f1(cx + k * s * 1.25)},${f1(cy + s * 1.0)} Q${f1(cx + k * s * 1.2)},${f1(cy + s * 1.6)} ${f1(cx + k * s * 1.4)},${f1(cy + s * 2.0)} L${f1(cx + k * s * 0.82)},${f1(cy + s * 1.9)} Q${f1(cx + k * s * 0.8)},${f1(cy + s * 1.2)} ${f1(cx + k * s * 0.7)},${f1(cy + s * 0.6)} Z" fill="${hr}"/>`).join('');
         hairFront = `<path d="M${f1(cx - s * 1.02)},${f1(cy + s * 0.2)} Q${f1(cx - s * 1.08)},${f1(cy - s * 1.2)} ${cx},${f1(cy - s * 1.18)} Q${f1(cx + s * 1.08)},${f1(cy - s * 1.2)} ${f1(cx + s * 1.02)},${f1(cy + s * 0.2)} Q${f1(cx + s * 0.85)},${f1(cy - s * 0.5)} ${f1(cx + s * 0.2)},${f1(cy - s * 0.7)} Q${f1(cx - s * 0.5)},${f1(cy - s * 0.55)} ${f1(cx - s * 1.02)},${f1(cy + s * 0.2)} Z" fill="${hr}"/>`;
         break;
       case 'buzz':

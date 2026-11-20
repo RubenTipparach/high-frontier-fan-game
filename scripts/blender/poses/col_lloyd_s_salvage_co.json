@@ -63,6 +63,22 @@
 11.0,
 249.8
 ],
+"trader.thigh_l": [
+98.1,
+282.1
+],
+"trader.thigh_l_tip": [
+114.8,
+394.4
+],
+"trader.thigh_r": [
+44.7,
+298.3
+],
+"trader.thigh_r_tip": [
+44.4,
+432.9
+],
 "trader.foot_l": [
 121.6,
 513.7
@@ -95,6 +111,14 @@
 38.3,
 580.8
 ],
+"trader.spine_01": [
+68.6,
+256.1
+],
+"trader.spine_01_tip": [
+68.1,
+236.1
+],
 "trader.spine_03": [
 63.6,
 223.8
@@ -111,6 +135,28 @@
 68.6,
 256.1
 ],
+"trader.clavicle_l": [
+78.2,
+139.9
+],
+"trader.clavicle_l_tip": [
+124.5,
+153.8
+],
+"trader.clavicle_r": [
+67.9,
+140.1
+],
+"trader.clavicle_r_tip": [
+21.2,
+159.0
+],
+"trader.head_yaw": 65.8,
+"trader.head_pitch": -1.8,
+"trader.spine_03_yaw": 45.8,
+"trader.spine_03_pitch": -3.0,
+"trader.near_arm": "r",
+"trader.near_leg": "r",
 "partner.head": [
 251.6,
 103.6
@@ -175,6 +221,22 @@
 199.6,
 203.4
 ],
+"partner.thigh_l": [
+275.3,
+250.7
+],
+"partner.thigh_l_tip": [
+281.8,
+340.5
+],
+"partner.thigh_r": [
+226.3,
+247.0
+],
+"partner.thigh_r_tip": [
+216.0,
+331.9
+],
 "partner.foot_l": [
 287.9,
 439.1
@@ -207,6 +269,14 @@
 207.8,
 423.8
 ],
+"partner.spine_01": [
+251.2,
+225.1
+],
+"partner.spine_01_tip": [
+251.4,
+210.9
+],
 "partner.spine_03": [
 251.9,
 199.9
@@ -222,5 +292,27 @@
 "partner.pelvis_tip": [
 251.2,
 225.1
-]
+],
+"partner.clavicle_l": [
+256.7,
+141.5
+],
+"partner.clavicle_l_tip": [
+297.5,
+150.9
+],
+"partner.clavicle_r": [
+246.9,
+141.4
+],
+"partner.clavicle_r_tip": [
+208.1,
+149.8
+],
+"partner.head_yaw": -17.3,
+"partner.head_pitch": -4.2,
+"partner.spine_03_yaw": -17.3,
+"partner.spine_03_pitch": -4.2,
+"partner.near_arm": "l",
+"partner.near_leg": "l"
 }

@@ -63,6 +63,22 @@
 22.0,
 268.3
 ],
+"op.thigh_l": [
+87.8,
+307.5
+],
+"op.thigh_l_tip": [
+102.5,
+402.3
+],
+"op.thigh_r": [
+49.1,
+323.5
+],
+"op.thigh_r_tip": [
+48.5,
+438.7
+],
 "op.foot_l": [
 104.0,
 499.3
@@ -95,6 +111,14 @@
 41.6,
 557.1
 ],
+"op.spine_01": [
+59.9,
+287.3
+],
+"op.spine_01_tip": [
+63.8,
+271.0
+],
 "op.spine_03": [
 66.2,
 246.0
@@ -110,5 +134,27 @@
 "op.pelvis_tip": [
 59.9,
 287.3
-]
+],
+"op.clavicle_l": [
+70.8,
+180.1
+],
+"op.clavicle_l_tip": [
+100.2,
+183.8
+],
+"op.clavicle_r": [
+61.0,
+181.0
+],
+"op.clavicle_r_tip": [
+33.2,
+191.2
+],
+"op.head_yaw": 59.4,
+"op.head_pitch": -1.6,
+"op.spine_03_yaw": 53.4,
+"op.spine_03_pitch": -1.8,
+"op.near_arm": "r",
+"op.near_leg": "r"
 }

@@ -63,6 +63,22 @@
 140.4,
 311.7
 ],
+"boy.thigh_l": [
+136.0,
+386.8
+],
+"boy.thigh_l_tip": [
+156.6,
+474.5
+],
+"boy.thigh_r": [
+108.5,
+408.1
+],
+"boy.thigh_r_tip": [
+123.7,
+512.2
+],
 "boy.foot_l": [
 153.5,
 576.7
@@ -95,6 +111,14 @@
 106.9,
 646.7
 ],
+"boy.spine_01": [
+118.1,
+370.9
+],
+"boy.spine_01_tip": [
+116.8,
+352.5
+],
 "boy.spine_03": [
 113.5,
 345.1
@@ -110,5 +134,27 @@
 "boy.pelvis_tip": [
 118.1,
 370.9
-]
+],
+"boy.clavicle_l": [
+133.9,
+275.5
+],
+"boy.clavicle_l_tip": [
+153.5,
+287.0
+],
+"boy.clavicle_r": [
+128.8,
+277.5
+],
+"boy.clavicle_r_tip": [
+102.1,
+310.7
+],
+"boy.head_yaw": 60.7,
+"boy.head_pitch": 5.6,
+"boy.spine_03_yaw": 60.8,
+"boy.spine_03_pitch": -0.4,
+"boy.near_arm": "r",
+"boy.near_leg": "r"
 }

@@ -1,34 +1,28 @@
-// Colonist fronts built from POSED 3D RENDERS (owner 2026-11-20: "pulling in
-// human modeling skills from fps game demo ... and then drawing SVGs based on 3d
-// human renders"). Each person is an MPFB body posed and rendered by
-// scripts/blender/colonist_people.py, traced to flat-colour vector layers by
-// scripts/trace_render.py, and stored as scripts/blender/traced/<scene>.svg with
-// its key bone positions in <scene>.json (card units). This module puts each
-// traced figure over its vector backdrop and attaches the props at those bone
-// positions. A card whose traced files are missing is skipped (the earlier
-// version of its art stays).
-import { readFileSync, existsSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+// Colonist fronts with people DRAWN from 3D pose references (owner 2026-11-20:
+// "drawing SVGs based on 3d human renders" ... "'inspired drawings' not filters,
+// not tracing"). The MPFB bodies posed by scripts/blender/colonist_people.py are
+// reference only (scripts/blender/poses/<scene>.json); colonist-art-drawn.mjs
+// draws each person from that pose, and this module sets them over their vector
+// backdrops with the props attached at the pose's joints. A card without a pose
+// file is skipped (its earlier art stays).
 import { artKit } from './colonist-art-m4-fronts.mjs';
-
-const TRACED = join(dirname(fileURLToPath(import.meta.url)), 'blender', 'traced');
+import { drawKit, hasPose } from './colonist-art-drawn.mjs';
 
 export const TRACED_FRONTS = new Set([
   'col_malcolm', 'col_heavy_water_survivalists', 'col_botany_bay_convicts', 'col_vatican_observers',
   'col_lloyd_s_salvage_co', 'col_house_of_saud', 'col_rock_rats_miners_union',
   'col_cobots', 'col_gabonese_mining_consortium', 'col_teleoperators', 'col_boston_hexapods',
   'col_vr_simulcasters', 'col_exoskeletalists',
-].filter((id) => existsSync(join(TRACED, `${id}.svg`))));
+].filter(hasPose));
 
+let DRAW = null;
 function figure(id) {
-  const svg = readFileSync(join(TRACED, `${id}.svg`), 'utf8');
-  const g = svg.slice(svg.indexOf('<g id="figure"'), svg.lastIndexOf('</svg>'));
-  const marks = existsSync(join(TRACED, `${id}.json`)) ? JSON.parse(readFileSync(join(TRACED, `${id}.json`), 'utf8')) : {};
-  return { g, m: (k) => marks[k] || [150, 160] };
+  const f = DRAW.sceneFigures(id);
+  return { g: `<defs>${f.defs}</defs>${f.g}`, m: f.m };
 }
 
 export function drawTracedFronts({ W, H, panel, emit }) {
+  DRAW = drawKit({ W, H });
   const { f1, rect, radial, linear, stars, rng, robotBust } = artKit({ W, H });
   const soft = (id) => radial(id, [['60%', '#000', 0], ['100%', '#000', 0.28]], '50%', '45%', '75%');
   const mid = (a, b, t = 0.5) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
@@ -148,7 +142,7 @@ export function drawTracedFronts({ W, H, panel, emit }) {
   // VR Simulcasters: she reaches for the life-size hologram she streams.
   if (has('col_vr_simulcasters')) {
     const F = figure('col_vr_simulcasters');
-    const Hg = existsSync(join(TRACED, 'col_vr_simulcasters_holo.svg')) ? figure('col_vr_simulcasters_holo') : null;
+    const Hg = hasPose('col_vr_simulcasters_holo') ? figure('col_vr_simulcasters_holo') : null;
     out('col_vr_simulcasters', `${linear('vr-bg', [['0%', '#c8b890'], ['100%', '#4a3a28']], 1, 1)}${soft('vr-v')}
        <filter id="vr-holo"><feColorMatrix type="matrix" values="0.2 0.2 0.2 0 0.25  0.35 0.35 0.35 0 0.55  0.4 0.4 0.4 0 0.6  0 0 0 0.75 0"/></filter>`,
       `${rect('url(#vr-bg)')}<path d="M0,0 L80,0 L60,${H} L0,${H} Z" fill="#6a4a2a" opacity="0.35"/>

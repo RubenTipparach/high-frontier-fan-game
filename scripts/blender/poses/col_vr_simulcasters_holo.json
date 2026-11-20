@@ -63,6 +63,22 @@
 140.3,
 165.4
 ],
+"holo.thigh_l": [
+256.0,
+250.6
+],
+"holo.thigh_l_tip": [
+259.7,
+347.4
+],
+"holo.thigh_r": [
+210.5,
+243.1
+],
+"holo.thigh_r_tip": [
+198.4,
+328.9
+],
 "holo.foot_l": [
 266.4,
 450.5
@@ -95,6 +111,14 @@
 192.0,
 417.4
 ],
+"holo.spine_01": [
+234.7,
+223.0
+],
+"holo.spine_01_tip": [
+234.6,
+208.4
+],
 "holo.spine_03": [
 236.5,
 197.3
@@ -110,5 +134,27 @@
 "holo.pelvis_tip": [
 234.7,
 223.0
-]
+],
+"holo.clavicle_l": [
+236.7,
+136.7
+],
+"holo.clavicle_l_tip": [
+275.9,
+146.7
+],
+"holo.clavicle_r": [
+227.5,
+136.6
+],
+"holo.clavicle_r_tip": [
+191.5,
+145.4
+],
+"holo.head_yaw": -49.1,
+"holo.head_pitch": -2.6,
+"holo.spine_03_yaw": -35.1,
+"holo.spine_03_pitch": -3.3,
+"holo.near_arm": "l",
+"holo.near_leg": "l"
 }

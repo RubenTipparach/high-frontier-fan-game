@@ -63,6 +63,22 @@
 127.2,
 165.0
 ],
+"jesuit.thigh_l": [
+179.3,
+197.1
+],
+"jesuit.thigh_l_tip": [
+186.3,
+257.8
+],
+"jesuit.thigh_r": [
+144.0,
+199.2
+],
+"jesuit.thigh_r_tip": [
+141.4,
+263.1
+],
 "jesuit.foot_l": [
 186.1,
 333.3
@@ -95,6 +111,14 @@
 139.1,
 342.4
 ],
+"jesuit.spine_01": [
+160.7,
+176.3
+],
+"jesuit.spine_01_tip": [
+160.5,
+165.7
+],
 "jesuit.spine_03": [
 158.1,
 159.8
@@ -111,6 +135,28 @@
 160.7,
 176.3
 ],
+"jesuit.clavicle_l": [
+166.2,
+115.0
+],
+"jesuit.clavicle_l_tip": [
+193.3,
+123.3
+],
+"jesuit.clavicle_r": [
+159.8,
+114.9
+],
+"jesuit.clavicle_r_tip": [
+132.6,
+122.5
+],
+"jesuit.head_yaw": 38.3,
+"jesuit.head_pitch": -3.3,
+"jesuit.spine_03_yaw": 20.3,
+"jesuit.spine_03_pitch": -3.9,
+"jesuit.near_arm": "r",
+"jesuit.near_leg": "r",
 "colleague.head": [
 -1.0,
 121.4
@@ -175,6 +221,22 @@
 7.4,
 185.3
 ],
+"colleague.thigh_l": [
+7.6,
+224.0
+],
+"colleague.thigh_l_tip": [
+2.9,
+282.9
+],
+"colleague.thigh_r": [
+9.6,
+218.1
+],
+"colleague.thigh_r_tip": [
+6.1,
+269.3
+],
 "colleague.foot_l": [
 7.0,
 346.5
@@ -207,6 +269,14 @@
 10.5,
 323.0
 ],
+"colleague.spine_01": [
+15.7,
+206.6
+],
+"colleague.spine_01_tip": [
+12.2,
+197.3
+],
 "colleague.spine_03": [
 9.7,
 183.3
@@ -222,5 +292,27 @@
 "colleague.pelvis_tip": [
 15.7,
 206.6
-]
+],
+"colleague.clavicle_l": [
+7.1,
+149.2
+],
+"colleague.clavicle_l_tip": [
+2.0,
+153.4
+],
+"colleague.clavicle_r": [
+7.6,
+149.0
+],
+"colleague.clavicle_r_tip": [
+6.1,
+151.5
+],
+"colleague.head_yaw": -73.8,
+"colleague.head_pitch": -1.2,
+"colleague.spine_03_yaw": -73.8,
+"colleague.spine_03_pitch": -1.2,
+"colleague.near_arm": "l",
+"colleague.near_leg": "l"
 }
