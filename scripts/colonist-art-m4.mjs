@@ -1,3 +1,4 @@
+import { drawM4Fronts, REDONE_FRONTS } from './colonist-art-m4-fronts.mjs';
 // Module 4 (Exodus) colonists: the SVG version of their card-body art, drawn
 // with the same recipe and primitives as the M2 deck (scripts/gen-colonist-art.mjs
 // calls drawM4 and hands it its helpers; docs/colonist-art-guide.md). 16 cards:
@@ -37,7 +38,10 @@ function shirtLaurel(x, y, k) {
 }
 
 export function drawM4(h) {
-  const { W, H, panel, starsField, purpleBackDefs, emit, beardedManFace, biomechArm, profileHeadChip, sailScene } = h;
+  const { W, H, panel, starsField, purpleBackDefs, beardedManFace, biomechArm, profileHeadChip, sailScene } = h;
+  // Second-pass fronts (colonist-art-m4-fronts.mjs) replace these ones.
+  const emit = (id, side, svg) => (side === 'front' && REDONE_FRONTS.has(id) ? null : h.emit(id, side, svg));
+  drawM4Fronts(h);
   const CX = W * 0.5, CY = H * 0.46;
   const bg = (id, c0, c1, cx = '50%', cy = '40%') =>
     `<radialGradient id="${id}" cx="${cx}" cy="${cy}" r="85%"><stop offset="0%" stop-color="${c0}"/><stop offset="100%" stop-color="${c1}"/></radialGradient>`;
