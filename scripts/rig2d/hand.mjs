@@ -177,7 +177,7 @@ export const HAND_POSES = {
   // thumb on top. Each finger's first bone folds toward the viewer (short), the
   // middle bone turns back across the palm (the stacked bars), the tip tucks in.
   thumb: { rot: { palm: -90, t1: -55, t2: 0, t3: 0, i2: 180, m2: 180, r2: 180, p2: 180, i3: 20, m3: 20, r3: 20, p3: 20 },
-    len: { i1: 0.42, m1: 0.42, r1: 0.42, p1: 0.42, i2: 0.95, m2: 0.95, r2: 0.95, p2: 1.0, i3: 0.35, m3: 0.35, r3: 0.35, p3: 0.35 } },
+    len: { t1: 0.6, t2: 0.7, t3: 0.65, i1: 0.42, m1: 0.42, r1: 0.42, p1: 0.42, i2: 0.95, m2: 0.95, r2: 0.95, p2: 1.0, i3: 0.35, m3: 0.35, r3: 0.35, p3: 0.35 } },
   // OK: index and thumb tips meet in a ring (thumb angles solved for contact)
   ok: { rot: { i1: -25, i2: -70, i3: -60, m1: 0, r1: 6, p1: 14, t1: -18, t2: 15, t3: 10 } },
   // hold: a C grip seen side-on, the thumb opposite the curled fingers with a gap for the object

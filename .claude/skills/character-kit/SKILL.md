@@ -94,7 +94,8 @@ hands need shading at all; the kits' hands have none). A thumbs-up is POSED
 from the rig, never drawn as a special shape (the owner: "that's violating every
 rule"): the hand turned on its side (palm -90), palm to the viewer, each
 finger's first bone folded toward the viewer (short), its middle bone turned
-back across the palm (the stacked bars, finely outlined), thumb straight up. A look's
+back across the palm (flat, the scalloped edge shows them), thumb straight up
+and short. A look's
 `hands.L` / `hands.R` take a pose name or a pose object. Never draw hands as
 loose generated finger sticks; that was rejected twice.
 

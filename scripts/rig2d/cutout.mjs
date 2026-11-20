@@ -260,7 +260,9 @@ export function handShapes(kind, fill) {
   const { body, front, over = [] } = handPieces(pose);
   const out = [{ ds: body, fill, flat: true, unit: HU }];
   // fingers folded over the palm: the same flat colour, a fine outline
-  for (const d of over) out.push({ d, fill, outline: shade(fill, 0.8), unit: HU });
+  // folded fingers stay in the same flat colour: the scalloped edge of the
+  // fist carries them (owner: "flat shaded hands are best")
+  if (over.length) out.push({ ds: over, fill, flat: true, unit: HU });
   if (front.length) out.push({ ds: front, fill, flat: true, unit: HU });
   return out;
 }
