@@ -16797,7 +16797,7 @@ function childClockTick(state) {
 function childChoiceDue(state, player) {
   const c = state.m4 && state.m2 && player.childChit;
   if (!c || !c.grown) return false;
-  if (!playerStacks(player).some((st) => st.slots.some((sl) => isColonistSlot(sl) && sl.id === c.parentId))) return false;
+  if (![...playerStacks(player)].some((st) => st.slots.some((sl) => isColonistSlot(sl) && sl.id === c.parentId))) return false;
   return (state.colonistQueue || []).some((id) => { const k = COLONISTS_BY_ID[id]; return k && k.colonistKind === 'Human' && !k.spaceborn; });
 }
 // CHILD_COMES_OF_AGE op = { colonistId }: the earthborn chosen as the child.
