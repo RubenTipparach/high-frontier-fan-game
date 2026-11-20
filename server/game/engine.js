@@ -28,7 +28,7 @@
 
 import { PATENTS_BY_ID as _PATENTS_BY_ID, radiatorRadHardness } from '../../data/patents.js';
 import { BERNALS_BY_ID, solarCellThrustBonus, bernalPrivilegeGrant } from '../../data/bernals.js';
-import { COLONISTS_BY_ID } from '../../data/colonists.js';
+import { COLONISTS_BY_ID, isSpacebornColonist } from '../../data/colonists.js';
 // One card-lookup table for the engine: patents PLUS the M2 Bernal + Colonist
 // cards (which live in data/bernals.js / data/colonists.js, not PATENTS,
 // because patents.js can't import them - circular). Both only ever ENTER play
@@ -1359,7 +1359,9 @@ function cardNameOf(id) {
 function decksFor(state, player) {
   return (state.sirenDecks && isSirenPlayer(state, player)) ? state.sirenDecks : state.decks;
 }
-function colonistQueueFor(state, player) {
+function colonistQueueFor(state, player, which = null) {
+  // M4 + M2 (4C2): the spaceborn queue, when asked for by name.
+  if (which === 'spaceborn' && Array.isArray(state.spacebornQueue)) return state.spacebornQueue;
   if (state.sirenColonistQueue && isSirenPlayer(state, player)) return state.sirenColonistQueue;
   return (state.colonistQueue = state.colonistQueue || []);
 }
@@ -1540,12 +1542,15 @@ function countColonists(player) {
 // bottom of the queue; a Robot returns to its owner's HAND (a hand Robot is
 // patent-like - sellable, buildable, and no longer counted against the
 // colonist limit). Returns a short log phrase.
-function retireColonistId(state, player, cardId) {
+function retireColonistId(state, player, cardId, opts = {}) {
   const id = String(cardId);
   // M4 (4C4e): a Decommissioned Colonist's augmentation chits return to supply.
   if (state && state.m4 && player && player.augments) {
     for (const k of Object.keys(player.augments)) if (player.augments[k] && player.augments[k].colonistId === id) delete player.augments[k];
   }
+  // Parenthood: a parent who leaves play before the child is ten takes the
+  // child chit with it.
+  if (state && state.m4 && player && player.childChit && player.childChit.parentId === id) delete player.childChit;
   const card = PATENTS_BY_ID[id];
   if (card && card.colonistKind === 'Robot') {
     // Post-Emancipation, a Robot counts as Human and "cannot enter a hand"
@@ -1556,11 +1561,48 @@ function retireColonistId(state, player, cardId) {
     if (state.robotsEmancipated) {
       return `${(card && card.name) || id} (emancipated Robot) is retired from the game`;
     }
+    // A colonist discarded to make room (the colonist limit) goes back to
+    // the deck, a Robot included (user 2026-11-19).
+    if (opts.toQueue) {
+      const rq = (state && state.m4 && Array.isArray(state.spacebornQueue)) ? 'spaceborn' : null;
+      colonistQueueFor(state, player, rq).push(id);
+      return `${(card && card.name) || id} (Robot) returned to the ${rq ? 'spaceborn' : 'colonist'} queue`;
+    }
     (player.hand = player.hand || []).push(id);
     return `${(card && card.name) || id} (Robot) returned to the hand`;
   }
-  colonistQueueFor(state, player).push(id);
-  return `${(card && card.name) || id} returned to the colonist queue`;
+  // M4 + M2: a spaceborn Human goes back under the spaceborn queue.
+  const which = (state && state.m4 && Array.isArray(state.spacebornQueue) && card && card.spaceborn) ? 'spaceborn' : null;
+  colonistQueueFor(state, player, which).push(id);
+  return `${(card && card.name) || id} returned to the ${which ? 'spaceborn' : 'colonist'} queue`;
+}
+// ---- M4 + M2: the Spacer Union (4C2) --------------------------------------------
+// Two queues: earthborn (M2 Humans) and spaceborn (M4 spaceborn colonists plus
+// every Robot). A player holding any spaceborn card (in play, or a Robot in
+// hand) is in the Spacer Union and may not draw earthborn, unless they hold no
+// Colonist at all. Rank & File (4C2e) dissolves the Union for good.
+function spacerUnionGame(state) {
+  return !!(state && state.m4 && state.m2 && Array.isArray(state.spacebornQueue));
+}
+export function inSpacerUnion(state, player) {
+  if (!spacerUnionGame(state) || state.spacerUnionDissolved || !player) return false;
+  for (const e of colonistLocations(player)) if (isSpacebornColonist(e.slot.id)) return true;
+  return (player.hand || []).some((id) => isSpacebornColonist(id) && (COLONISTS_BY_ID[id] || {}).colonistKind === 'Robot');
+}
+// Joining (4C2c): discard every earthborn Colonist the player has in play (not a
+// Felony). They go under the earthborn queue.
+function discardEarthborns(state, player) {
+  const gone = [];
+  for (const st of playerStacks(player)) {
+    for (let i = st.slots.length - 1; i >= 0; i--) {
+      const sl = st.slots[i];
+      if (!isColonistSlot(sl) || isSpacebornColonist(sl.id)) continue;
+      st.slots.splice(i, 1);
+      retireColonistId(state, player, sl.id);
+      gone.push((COLONISTS_BY_ID[sl.id] || {}).name || sl.id);
+    }
+  }
+  return gone;
 }
 // Where a card goes when a HAZARD / RAD / FLARE / GLITCH roll decommissions it
 // out of a stack. The caller has already pulled the slot; this only decides the
@@ -8724,9 +8766,37 @@ function applyDeployBernal(state, op, player) {
 // colonist's printed ideology (O2a), then a vote tally runs (auto when the
 // winner is unique; a tie leaves the star where it is).
 function exomigrateOne(state, player, opts = {}) {
+  // M4 + M2 (4C2): pick the queue. A Spacer Union member draws spaceborn by
+  // default (they may not draw earthborn); everyone else earthborn.
+  let which = null;
+  let joining = false;
+  if (spacerUnionGame(state)) {
+    const member = inSpacerUnion(state, player);
+    which = opts.queue === 'spaceborn' || opts.queue === 'earthborn' ? opts.queue : (member ? 'spaceborn' : 'earthborn');
+    const earthEmpty = !(state.colonistQueue || []).length;
+    const spaceEmpty = !(state.spacebornQueue || []).length;
+    // Rank & File (4C2e): after the Union dissolves, an empty queue sends
+    // everyone to the other one, BEO Colony or not.
+    if (state.spacerUnionDissolved && which === 'earthborn' && earthEmpty && !spaceEmpty) which = 'spaceborn';
+    if (state.spacerUnionDissolved && which === 'spaceborn' && spaceEmpty && !earthEmpty) which = 'earthborn';
+    const forced = state.spacerUnionDissolved && (earthEmpty || spaceEmpty);
+    if (which === 'earthborn' && member && countColonists(player) > 0) return { ok: false, error: 'spacer_union' };
+    // 4C2a: a BEO Colony owned since the beginning of the turn.
+    if (which === 'spaceborn' && !forced && !player.beoAtTurnStart) return { ok: false, error: 'needs_beo_colony_since_turn_start' };
+    joining = which === 'spaceborn' && !member && !state.spacerUnionDissolved;
+  }
+  const res = exomigrateDraw(state, player, { ...opts, which });
+  if (!res.ok || !joining) return res;
+  // Joining the Spacer Union (4C2c): only once a spaceborn is actually in play
+  // (a Robot to the hand alone also makes you a member, 4C2d).
+  if (!inSpacerUnion(state, player)) return res;
+  const gone = discardEarthborns(state, player);
+  return { ...res, log: `${res.log} Joined the Spacer Union${gone.length ? `: ${gone.join(', ')} discarded` : ''}.` };
+}
+function exomigrateDraw(state, player, opts = {}) {
   // Under a Sirens species split each species migrates from its OWN half of the
   // queue; one shared queue in every other game.
-  const queue = colonistQueueFor(state, player);
+  const queue = colonistQueueFor(state, player, opts.which);
   if (countColonists(player) >= colonistAllowance(player)) return { ok: false, error: 'no_colonist_slot' };
   // Destination (opts.to): 'leo', or 'bernal<i>' naming one of the player's
   // ANCHORED Bernals - the colonist boards the station directly (user decision
@@ -8828,6 +8898,7 @@ function exomigrateOne(state, player, opts = {}) {
   // exomigration immediately draws again, until a colonist lands in space or
   // the queue runs dry.
   const robotsDrawn = [];
+  const robotIds = [];
   let cardId = null;
   let card = null;
   while (queue.length) {
@@ -8839,14 +8910,28 @@ function exomigrateOne(state, player, opts = {}) {
     // like any Human - don't skim it to the hand.
     if (c.colonistKind === 'Robot' && !state.robotsEmancipated) {
       (player.hand = player.hand || []).push(String(id));
-      robotsDrawn.push(c.name || id);
+      robotsDrawn.push(c.name || id); robotIds.push(String(id));
       continue;
     }
     cardId = id; card = c;
     break;
   }
+  // M4 + M2 (4C2b): several Robots drawn in one spaceborn exomigration: keep
+  // one, the rest go back and the spaceborn queue is shuffled.
+  let robotsBack = [];
+  if (state.m4 && Array.isArray(state.spacebornQueue) && queue === state.spacebornQueue && robotsDrawn.length > 1) {
+    const kept = player.hand.splice(player.hand.length - robotIds.length, robotIds.length);
+    player.hand.push(kept[0]);
+    robotsBack = kept.slice(1);
+    queue.push(...robotsBack);
+    const gen = makeRng(state.seed, state.rng.cursor);
+    const mixed = shuffle(gen, queue.slice());
+    state.rng.cursor = gen.cursor;
+    queue.splice(0, queue.length, ...mixed);
+    robotsDrawn.splice(1);
+  }
   const robotNote = immigrantNote + (robotsDrawn.length
-    ? `${robotsDrawn.join(' and ')} (Robot${robotsDrawn.length === 1 ? '' : 's'}) joined the hand; `
+    ? `${robotsDrawn.join(' and ')} (Robot${robotsDrawn.length === 1 ? '' : 's'}) to the hand${robotsBack.length ? ` (${robotsBack.length} other Robot${robotsBack.length === 1 ? '' : 's'} back to the spaceborn queue)` : ''}; `
     : '');
   if (!cardId) {
     // The queue drained mid-draw (Handy skimmed the rest to hand). This is the
@@ -8939,6 +9024,8 @@ function emancipateRobots(state, dest) {
     p.hand = keep;
   }
   state.robotsEmancipated = true;
+  // 4C2e Rank & File: emancipation dissolves the Spacer Union for good.
+  if (spacerUnionGame(state)) state.spacerUnionDissolved = true;
   if (!robots.length) return null;
   if (!dest) return null;
   const gen = makeRng(state.seed, state.rng.cursor);
@@ -8958,6 +9045,7 @@ function applyExomigrate(state, op, player) {
     to: op.to,
     placeDelegate: op.placeDelegate !== false,
     specialty: op.specialty,
+    queue: op.queue,
     // Player-invoked exomigration CAN pause for a tie pick (unlike the automatic
     // mid-op exomigrations, which resolve ties quietly): a tied vote after the
     // arriving delegate seats leaves the active-law star for the player to set
@@ -9001,7 +9089,7 @@ function dischargeExcessColonists(state, player, preferredIds) {
     const pick = all.find((e) => wanted.has(String(e.slot.id))) || all[all.length - 1];
     wanted.delete(String(pick.slot.id));
     removeColonistSlot(player, pick);
-    notes.push(retireColonistId(state, player, pick.slot.id));
+    notes.push(retireColonistId(state, player, pick.slot.id, { toQueue: true }));
   }
   return notes;
 }
@@ -11082,7 +11170,7 @@ function applyEtProduce(state, op, player) {
       }
       if (!loc) return fail('bad_downsize');
       removeColonistSlot(player, loc);
-      downNote = ` Downsized: ${retireColonistId(state, player, downId)}.`;
+      downNote = ` Downsized: ${retireColonistId(state, player, downId, { toQueue: true })}.`;
     }
     player.hand.splice(hIdx, 1);
     const cSlot = { id: cardId, kind: 'colonist', face: 'primary' };
@@ -12841,6 +12929,8 @@ function applyPromote(state, op, player) {
     if (fr.promoted || fr.face === 'secondary') return fail('already_promoted');
     const card = PATENTS_BY_ID[fr.cardId];
     if (!promotionSiteAt(state, fr.siteId, card && card.promotionColony, 'freighter', player)) return fail('no_promotion_colony');
+    // M4 + M2 (4C7e): Colonists there with 2 different augmentations.
+    if (state.m4 && state.m2 && augShapesAt(player, fr.siteId) < 2) return fail('needs_augmentation', { need: 2, have: augShapesAt(player, fr.siteId) });
     const spentFr = takePromotionOp(state, player, fr.siteId);
     if (!spentFr) return fail('no_ops_left');
     fr.face = 'secondary'; fr.promoted = true;
@@ -12876,6 +12966,12 @@ function applyPromote(state, op, player) {
     const card = PATENTS_BY_ID[cardId];
     const need = card && card.promotionColony;
     if (!bernalPromotionColocated(state, bn, need)) return fail('no_promotion_colony');
+    // M4 + M2 (4C7e): Colonists aboard with 3 different augmentations, and the
+    // Promotion Colony must be a Dirtside (the Bernal anchored Dirtside).
+    if (state.m4 && state.m2) {
+      if (isHomeBernal(bn)) return fail('promote_needs_dirtside');
+      if (augShapesAt(player, bn.siteId) < 3) return fail('needs_augmentation', { need: 3, have: augShapesAt(player, bn.siteId) });
+    }
     const spentBn = takePromotionOp(state, player, bn.siteId);
     if (!spentBn) return fail('no_ops_left');
     bn.face = 'secondary'; bn.promoted = true;
@@ -12923,6 +13019,12 @@ function applyPromote(state, op, player) {
   if (card.type !== 'gw-thruster') return fail('not_promotable');
   if (slot.face === 'secondary') return fail('already_promoted');
   if (!promotionSiteAt(state, siteId, card.promotionColony, 'gw-thruster', player)) return fail('no_promotion_colony');
+  // M4 + M2 (4C7e): Colonists there with 4 different augmentations, and a
+  // completed gold-side or Exodus contract.
+  if (state.m4 && state.m2) {
+    if (augShapesAt(player, siteId) < 4) return fail('needs_augmentation', { need: 4, have: augShapesAt(player, siteId) });
+    if (!hasGoldOrExodusContract(player)) return fail('promote_needs_gold_contract');
+  }
   const spentGw = takePromotionOp(state, player, siteId);
   if (!spentGw) return fail('no_ops_left');
   slot.face = 'secondary';
@@ -13595,6 +13697,7 @@ const FUNCTIONAL = {
   REFUEL: applyRefuel,
   CASH_WATER: applyCashWater,
   ISOTOPE_EXCHANGE: applyIsotopeExchange,
+  CHILD_COMES_OF_AGE: applyChildComesOfAge,
   DUMP: applyDump,
   CAN_FUEL: applyCanFuel,
   LOAD_FUEL: applyLoadFuel,
@@ -13652,7 +13755,7 @@ function pickPayload(op) {
     case 'HOMESTEAD': return { siteId: op.siteId, productCardId: op.productCardId, colonistCardId: op.colonistCardId };
     case 'FREE_INSPIRATION': return {};
     case 'NANOFACTURE': return { cardId: op.cardId, cardIds: op.cardIds, ...(op.freeDelegate ? { freeDelegate: op.freeDelegate } : {}) };
-    case 'EXOMIGRATE': return { ...(op.to != null ? { to: op.to } : {}), ...(op.placeDelegate === false ? { placeDelegate: false } : {}), ...(op.specialty ? { specialty: op.specialty } : {}) };
+    case 'EXOMIGRATE': return { ...(op.to != null ? { to: op.to } : {}), ...(op.placeDelegate === false ? { placeDelegate: false } : {}), ...(op.specialty ? { specialty: op.specialty } : {}), ...(op.queue ? { queue: op.queue } : {}) };
     case 'SET_LAW_STAR': return { star: op.star };
     case 'SWAP_BIG_CUBE': return { factorySiteId: op.factorySiteId };
     case 'BUILD_ELEVATOR': return { pairKey: op.pairKey, hazardPay: !!op.hazardPay };
@@ -13683,6 +13786,7 @@ function pickPayload(op) {
     case 'CASH_WATER': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}),
       ...(op.cardId != null ? { cardId: op.cardId, holder: op.holder } : {}) };
     case 'DUMP': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
+    case 'CHILD_COMES_OF_AGE': return { colonistId: op.colonistId };
     case 'ISOTOPE_EXCHANGE': return { action: op.action, amount: op.amount, ...(op.cardId != null ? { cardId: op.cardId, holder: op.holder } : {}) };
     case 'CAN_FUEL': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
     // TRANSFER_FUEL_CARD and LOAD_FREIGHTER_WATER were MISSING here, so they
@@ -13844,6 +13948,8 @@ function openTurnFor(state, player) {
     player.contractAuctionDone = false;
     player.lateFeePaidThisTurn = 0;
     player.implantFreeUsed = false;
+    // 4C2a: whether a BEO Colony was owned since the start of this turn.
+    if (state.m2) player.beoAtTurnStart = hasBeoColony(state, player);
     if (player.transportUsed) delete player.transportUsed;
     player.turnStartedLate = !!(player.timepiece && player.timepiece.deadbeat);
     if (player.rocket) {
@@ -14233,6 +14339,8 @@ function noteSirenUranianLanding(state, player) {
 function applyEndTurn(state, _op, player) {
   // M4 Insight: the research auction it announced must be started this turn.
   if (player.insightPending) return fail('insight_auction_due');
+  // Parenthood: a grown child is chosen before the turn ends.
+  if (childChoiceDue(state, player)) return fail('child_choice_due');
   if (mustExomigrate(state, player)) return fail('must_exomigrate');
   // BLUE PLANET: settle the coming aerobrake hazard now, before the turn passes.
   let bluePlanetNote = '';
@@ -16600,6 +16708,7 @@ function applyAbandonContract(state, op, player) {
 function contractClockTick(state) {
   if (!state.m4) return;
   state.clockTicks = (state.clockTicks | 0) + 1;
+  childClockTick(state);
   const notes = [];
   for (const p of state.players) {
     const tp = p.timepiece;
@@ -16667,6 +16776,64 @@ function contractScoring(state) {
 // fulfilled contracts) and its partner enterprises (other players' fulfilled
 // contracts carrying its delegate), 4B8d.
 const AUG_SHAPES = ['heart', 'jar', 'hexagon', 'splat', 'battery', 'triangle'];
+// ---- Parenthood (4C5, M4 + M2) -------------------------------------------------
+// The heart's side 1 places the child chit 9 years ahead on the Sunspot Cycle.
+// When the Cube moves past it, at the start of the parent's next turn the child
+// is ten: the life-support Colonist is Decommissioned and replaced, in the same
+// place, by an earthborn Colonist of the player's choice from the whole
+// earthborn queue (then shuffled). Promoted parent: the child comes in Promoted
+// (Wunderkind, 4C5d). The child inherits the parent's augmentations, the heart
+// on its other side (4C5e). player.childChit = { parentId, due, slot, grown }.
+const CHILD_YEARS = 9;
+function childClockTick(state) {
+  if (!(state.m4 && state.m2)) return;
+  for (const p of state.players) {
+    const c = p.childChit;
+    if (c && !c.grown && (state.clockTicks | 0) > c.due) c.grown = true;
+  }
+}
+// A grown child holds End Turn only while the choice can be made: the parent is
+// still aboard and the queue holds an earthborn Human.
+function childChoiceDue(state, player) {
+  const c = state.m4 && state.m2 && player.childChit;
+  if (!c || !c.grown) return false;
+  if (!playerStacks(player).some((st) => st.slots.some((sl) => isColonistSlot(sl) && sl.id === c.parentId))) return false;
+  return (state.colonistQueue || []).some((id) => { const k = COLONISTS_BY_ID[id]; return k && k.colonistKind === 'Human' && !k.spaceborn; });
+}
+// CHILD_COMES_OF_AGE op = { colonistId }: the earthborn chosen as the child.
+function applyChildComesOfAge(state, op, player) {
+  if (!(state.m4 && state.m2)) return fail('not_m4');
+  const c = player.childChit;
+  if (!c || !c.grown) return fail('no_child_due');
+  const childId = String(op.colonistId || '');
+  const queue = state.colonistQueue || [];
+  const card = COLONISTS_BY_ID[childId];
+  if (!queue.includes(childId) || !card || card.colonistKind !== 'Human' || card.spaceborn) return fail('not_in_earthborn_queue');
+  let at = null;
+  for (const st of playerStacks(player)) {
+    const i = st.slots.findIndex((sl) => isColonistSlot(sl) && sl.id === c.parentId);
+    if (i >= 0) { at = { st, i }; break; }
+  }
+  if (!at) { delete player.childChit; return fail('parent_gone'); }
+  const parentSlot = at.st.slots[at.i];
+  const wunderkind = parentSlot.face === 'secondary';
+  queue.splice(queue.indexOf(childId), 1);
+  // Inheritance (4C5e): every chit on the parent moves to the child, the heart
+  // turned to its other side.
+  for (const [shape, a] of Object.entries(player.augments || {})) {
+    if (a && a.colonistId === c.parentId) player.augments[shape] = { colonistId: childId, side: shape === 'heart' ? 2 : a.side };
+  }
+  at.st.slots.splice(at.i, 1, { id: childId, kind: 'colonist', face: wunderkind ? 'secondary' : 'primary' });
+  const parentNote = retireColonistId(state, player, c.parentId);
+  const gen = makeRng(state.seed, state.rng.cursor);
+  const rest = shuffle(gen, queue.slice());
+  state.rng.cursor = gen.cursor;
+  queue.splice(0, queue.length, ...rest);
+  delete player.childChit;
+  syncCrewAugmentMarks(state);
+  return { ok: true, state, noUndo: true,
+    log: `${player.name}'s child comes of age: ${card.name} takes the parent's place${wunderkind ? ' Promoted (Wunderkind)' : ''} and inherits its augmentations; ${parentNote}.` };
+}
 function portfolioShapes(state, player) {
   const out = new Set();
   const add = (f) => { for (const s of ((contractFace(f.id, f.side) || {}).cybernetics || [])) out.add(s); };
@@ -16683,6 +16850,17 @@ function portfolioShapes(state, player) {
 // side anchored bernal").
 function hasBeoColony(state, player) {
   return (player.bernals || []).some((bn) => bn && bn.anchored && !isHomeBernal(bn));
+}
+// M4 + M2 (4C7e): the different augmentation chits on your Colonists at a site,
+// the ones "doing the Promotion" of a unit there.
+function augShapesAt(player, siteId) {
+  const here = new Set();
+  for (const e of colonistLocations(player)) if (e.siteId === siteId) here.add(e.slot.id);
+  return Object.values(player.augments || {}).filter((a) => a && here.has(a.colonistId)).length;
+}
+// Completed a gold-side (4B1b) or Exodus (4B1c) contract.
+function hasGoldOrExodusContract(player) {
+  return (player.fulfilledContracts || []).some((f) => f && (f.side === 'gold' || f.side === 'exodus' || (CONTRACTS_BY_ID[f.id] || {}).exodus));
 }
 function colonistAugCount(player, colonistId) {
   return Object.values(player.augments || {}).filter((a) => a && a.colonistId === colonistId).length;
@@ -16713,6 +16891,9 @@ function applyImplant(state, op, player) {
     const a = player.augments[shape];
     if (!a) return fail('no_such_chit', { shape });
     if (!ids.has(a.colonistId)) return fail('chit_not_colocated', { shape });
+    // While the child is a preteen it is part of the heart (4C5b): the heart
+    // stays where it is until the child comes of age.
+    if (shape === 'heart' && player.childChit) return fail('child_pending');
     delete player.augments[shape];
     parts.push(`took the ${shape} chit off ${cardNameOf(a.colonistId)}`);
   }
@@ -16725,11 +16906,19 @@ function applyImplant(state, op, player) {
     if (!portfolio.has(shape)) return fail('not_in_portfolio', { shape });
     if (!ids.has(colonistId)) return fail('colonist_not_here');
     if (player.augments[shape]) return fail('chit_in_use', { shape, on: player.augments[shape].colonistId });
-    // The heart's Parenthood side (4C5) needs M2 (owner 2026-11-18), and M4 does
-    // not run with M2 yet: implant side 2.
-    if (shape === 'heart' && side === 1) return fail('parenthood_not_yet');
+    // Parenthood (4C5, M2): the heart's side 1 goes only on an earthborn Human
+    // (4C4h), and places the child chit 9 years ahead on the Sunspot Cycle.
+    if (shape === 'heart' && side === 1) {
+      const pc = COLONISTS_BY_ID[colonistId] || {};
+      if (pc.spaceborn || pc.colonistKind !== 'Human') return fail('parenthood_earthborn_only');
+      if (player.childChit) return fail('child_pending');
+    }
     player.augments[shape] = { colonistId, side };
     parts.push(`implanted the ${shape} augmentation (side ${side}) in ${cardNameOf(colonistId)}`);
+    if (shape === 'heart' && side === 1) {
+      player.childChit = { parentId: colonistId, due: (state.clockTicks | 0) + CHILD_YEARS, slot: (state.turn + CHILD_YEARS) % SLOTS };
+      parts.push(`a child is on the way (${CHILD_YEARS} years)`);
+    }
   }
   if (free) player.implantFreeUsed = true;
   else player.opsRemaining -= 1;

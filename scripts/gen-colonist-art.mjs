@@ -17,6 +17,10 @@
 //     css/cards.css already uses for every promoted face) - a DIFFERENT
 //     illustration than the front (new subject, or the same subject
 //     transformed), never a recolour of the same shapes.
+import { drawM2Fronts, REDONE_M2_FRONTS } from './colonist-art-m2-fronts.mjs';
+import { drawPeopleFronts, PEOPLE_FRONTS } from './colonist-art-people.mjs';
+import { drawTracedFronts, drawKitBacks, TRACED_FRONTS, KIT_BACKS } from './colonist-art-traced.mjs';
+import { drawUpgradedBacks, UPGRADED_BACKS } from './colonist-art-backs.mjs';
 import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { drawM4 } from './colonist-art-m4.mjs';
 import { dirname, join } from 'node:path';
@@ -61,10 +65,19 @@ function purpleBackDefs(id) {
 }
 
 const manifest = [];
-function emit(id, side, svg) {
+function writeArt(id, side, svg) {
   writeFileSync(join(OUT, `${id}-${side}.svg`), svg);
   manifest.push({ id, side });
 }
+// The second-pass M2 fronts (colonist-art-m2-fronts.mjs) replace the ones below.
+function emit(id, side, svg) {
+  if (side === 'front' && (REDONE_M2_FRONTS.has(id) || PEOPLE_FRONTS.has(id) || TRACED_FRONTS.has(id))) return;
+  if (side === 'back' && (KIT_BACKS.has(id) || UPGRADED_BACKS.has(id))) return;   // redrawn in the second pass
+  writeArt(id, side, svg);
+}
+// The second-pass M2 fronts, minus the cards with people (drawn by colonist-art-people.mjs).
+const writeM2 = (id, side, svg) => (side === 'front' && (PEOPLE_FRONTS.has(id) || TRACED_FRONTS.has(id)) ? null : writeArt(id, side, svg));
+const writePeople = (id, side, svg) => (side === 'front' && TRACED_FRONTS.has(id) ? null : writeArt(id, side, svg));
 
 // ---- Reusable silhouette primitives (shared shapes, varied by params so no
 // two colonists look identical despite sharing a body-plan) ----
@@ -89,7 +102,7 @@ function hoodedFigure({ cx, cy, robeColor, robeColor2, faceColor = '#0d0b12', tr
 // than a floating head on a long stalk. `body` is the shoulder/clothing
 // colour. Shared by Renaissance Man (Malcolm back) + Josephson Implants
 // (Siren back), differentiated by skin tone + surrounding scene.
-function beardedManFace({ hcx, hcy, r, skin, hair, body = '#3a2c5c', eyeColor = '#160e08' }) {
+function beardedManFace({ hcx, hcy, r, skin, hair, body = '#3a2c5c', eyeColor = '#160e08', beard = 'full' }) {
   const s = r;
   const neckTop = hcy + s * 0.95;   // hidden behind the lower beard
   const neckBot = hcy + s * 1.5;    // short visible neck
@@ -101,10 +114,15 @@ function beardedManFace({ hcx, hcy, r, skin, hair, body = '#3a2c5c', eyeColor = 
   <ellipse cx="${hcx}" cy="${hcy}" rx="${s}" ry="${(s*1.12).toFixed(1)}" fill="${skin}"/>
   <!-- solid hair cap over the crown + temples -->
   <path d="M${hcx-s},${(hcy-s*0.05).toFixed(1)} Q${(hcx-s*1.04).toFixed(1)},${(hcy-s*1.2).toFixed(1)} ${hcx},${(hcy-s*1.24).toFixed(1)} Q${(hcx+s*1.04).toFixed(1)},${(hcy-s*1.2).toFixed(1)} ${hcx+s},${(hcy-s*0.05).toFixed(1)} Q${(hcx+s*0.62).toFixed(1)},${(hcy-s*0.5).toFixed(1)} ${(hcx+s*0.24).toFixed(1)},${(hcy-s*0.52).toFixed(1)} Q${hcx},${(hcy-s*0.44).toFixed(1)} ${(hcx-s*0.24).toFixed(1)},${(hcy-s*0.52).toFixed(1)} Q${(hcx-s*0.62).toFixed(1)},${(hcy-s*0.5).toFixed(1)} ${hcx-s},${(hcy-s*0.05).toFixed(1)} Z" fill="${hair}"/>
-  <!-- solid full beard around the jaw, dipping up to the cheeks -->
-  <path d="M${(hcx-s*0.95).toFixed(1)},${(hcy-s*0.05).toFixed(1)} Q${(hcx-s*1.0).toFixed(1)},${(hcy+s*0.62).toFixed(1)} ${(hcx-s*0.5).toFixed(1)},${(hcy+s).toFixed(1)} Q${hcx},${(hcy+s*1.24).toFixed(1)} ${(hcx+s*0.5).toFixed(1)},${(hcy+s).toFixed(1)} Q${(hcx+s*1.0).toFixed(1)},${(hcy+s*0.62).toFixed(1)} ${(hcx+s*0.95).toFixed(1)},${(hcy-s*0.05).toFixed(1)} Q${(hcx+s*0.5).toFixed(1)},${(hcy+s*0.34).toFixed(1)} ${(hcx+s*0.26).toFixed(1)},${(hcy+s*0.4).toFixed(1)} Q${hcx},${(hcy+s*0.28).toFixed(1)} ${(hcx-s*0.26).toFixed(1)},${(hcy+s*0.4).toFixed(1)} Q${(hcx-s*0.5).toFixed(1)},${(hcy+s*0.34).toFixed(1)} ${(hcx-s*0.95).toFixed(1)},${(hcy-s*0.05).toFixed(1)} Z" fill="${hair}"/>
-  <!-- mustache bridging the beard under the nose -->
-  <path d="M${(hcx-s*0.36).toFixed(1)},${(hcy+s*0.38).toFixed(1)} Q${hcx},${(hcy+s*0.24).toFixed(1)} ${(hcx+s*0.36).toFixed(1)},${(hcy+s*0.38).toFixed(1)} Q${hcx},${(hcy+s*0.5).toFixed(1)} ${(hcx-s*0.36).toFixed(1)},${(hcy+s*0.38).toFixed(1)} Z" fill="${hair}"/>
+${beard === 'goatee' ? `  <!-- goatee: light stubble along the jaw, a trimmed chin beard joined to the
+       mustache at the mouth corners (Van Dyke), as on the printed card -->
+  <path d="M${(hcx-s*0.95).toFixed(1)},${(hcy+s*0.1).toFixed(1)} Q${(hcx-s*0.95).toFixed(1)},${(hcy+s*0.7).toFixed(1)} ${(hcx-s*0.45).toFixed(1)},${(hcy+s*1.02).toFixed(1)} Q${hcx},${(hcy+s*1.16).toFixed(1)} ${(hcx+s*0.45).toFixed(1)},${(hcy+s*1.02).toFixed(1)} Q${(hcx+s*0.95).toFixed(1)},${(hcy+s*0.7).toFixed(1)} ${(hcx+s*0.95).toFixed(1)},${(hcy+s*0.1).toFixed(1)} Q${(hcx+s*0.7).toFixed(1)},${(hcy+s*0.75).toFixed(1)} ${hcx},${(hcy+s*0.8).toFixed(1)} Q${(hcx-s*0.7).toFixed(1)},${(hcy+s*0.75).toFixed(1)} ${(hcx-s*0.95).toFixed(1)},${(hcy+s*0.1).toFixed(1)} Z" fill="${hair}" opacity="0.22"/>
+  <path d="M${(hcx-s*0.36).toFixed(1)},${(hcy+s*0.44).toFixed(1)} L${(hcx-s*0.3).toFixed(1)},${(hcy+s*0.72).toFixed(1)} Q${(hcx-s*0.24).toFixed(1)},${(hcy+s*1.08).toFixed(1)} ${hcx},${(hcy+s*1.12).toFixed(1)} Q${(hcx+s*0.24).toFixed(1)},${(hcy+s*1.08).toFixed(1)} ${(hcx+s*0.3).toFixed(1)},${(hcy+s*0.72).toFixed(1)} L${(hcx+s*0.36).toFixed(1)},${(hcy+s*0.44).toFixed(1)} L${(hcx+s*0.27).toFixed(1)},${(hcy+s*0.46).toFixed(1)} L${(hcx+s*0.2).toFixed(1)},${(hcy+s*0.68).toFixed(1)} Q${hcx},${(hcy+s*0.74).toFixed(1)} ${(hcx-s*0.2).toFixed(1)},${(hcy+s*0.68).toFixed(1)} L${(hcx-s*0.27).toFixed(1)},${(hcy+s*0.46).toFixed(1)} Z" fill="${hair}"/>` : `  <!-- full beard along the jaw: thin sideburns from the hair, the top edge low on
+       the cheeks so the face shows (a top edge at eye level read as a mask) -->
+  <path d="M${(hcx-s*0.97).toFixed(1)},${(hcy-s*0.05).toFixed(1)} Q${(hcx-s*1.0).toFixed(1)},${(hcy+s*0.62).toFixed(1)} ${(hcx-s*0.5).toFixed(1)},${(hcy+s).toFixed(1)} Q${hcx},${(hcy+s*1.24).toFixed(1)} ${(hcx+s*0.5).toFixed(1)},${(hcy+s).toFixed(1)} Q${(hcx+s*1.0).toFixed(1)},${(hcy+s*0.62).toFixed(1)} ${(hcx+s*0.97).toFixed(1)},${(hcy-s*0.05).toFixed(1)} L${(hcx+s*0.85).toFixed(1)},${(hcy-s*0.02).toFixed(1)} Q${(hcx+s*0.8).toFixed(1)},${(hcy+s*0.5).toFixed(1)} ${(hcx+s*0.42).toFixed(1)},${(hcy+s*0.6).toFixed(1)} Q${hcx},${(hcy+s*0.7).toFixed(1)} ${(hcx-s*0.42).toFixed(1)},${(hcy+s*0.6).toFixed(1)} Q${(hcx-s*0.8).toFixed(1)},${(hcy+s*0.5).toFixed(1)} ${(hcx-s*0.85).toFixed(1)},${(hcy-s*0.02).toFixed(1)} Z" fill="${hair}"/>`}
+  <!-- mustache under the nose, then the mouth in the gap above the beard -->
+  <path d="M${(hcx-s*0.34).toFixed(1)},${(hcy+s*0.42).toFixed(1)} Q${hcx},${(hcy+s*0.28).toFixed(1)} ${(hcx+s*0.34).toFixed(1)},${(hcy+s*0.42).toFixed(1)} Q${hcx},${(hcy+s*0.5).toFixed(1)} ${(hcx-s*0.34).toFixed(1)},${(hcy+s*0.42).toFixed(1)} Z" fill="${hair}"/>
+  <path d="M${(hcx-s*0.16).toFixed(1)},${(hcy+s*0.56).toFixed(1)} Q${hcx},${(hcy+s*0.6).toFixed(1)} ${(hcx+s*0.16).toFixed(1)},${(hcy+s*0.56).toFixed(1)}" stroke="#5a2e22" stroke-width="2" fill="none" stroke-linecap="round"/>
   <!-- two SEPARATE eyebrows -->
   <path d="M${(hcx-s*0.52).toFixed(1)},${(hcy-s*0.26).toFixed(1)} q${(s*0.16).toFixed(1)},-${(s*0.1).toFixed(1)} ${(s*0.34).toFixed(1)},${(s*0.02).toFixed(1)}" stroke="${hair}" stroke-width="3.5" fill="none" stroke-linecap="round"/>
   <path d="M${(hcx+s*0.18).toFixed(1)},${(hcy-s*0.24).toFixed(1)} q${(s*0.18).toFixed(1)},-${(s*0.1).toFixed(1)} ${(s*0.34).toFixed(1)},${(s*0.02).toFixed(1)}" stroke="${hair}" stroke-width="3.5" fill="none" stroke-linecap="round"/>
@@ -949,6 +967,11 @@ const CX = W * 0.5, CY = H * 0.46;
 // helpers. A CANDIDATE set beside their Blender versions, so they never enter
 // COLONIST_ART_IDS below until the user picks a version.
 drawM4({ W, H, panel, starsField, purpleBackDefs, emit, beardedManFace, biomechArm, profileHeadChip, sailScene });
+drawM2Fronts({ W, H, panel, emit: writeM2 });
+drawPeopleFronts({ W, H, panel, emit: writePeople });
+drawTracedFronts({ W, H, panel, emit: writeArt });
+drawKitBacks({ W, H, panel, emit: writeArt });
+drawUpgradedBacks({ W, H, panel, emit: writeArt });
 
 console.log(`wrote ${manifest.length} SVGs to assets/colonists/`);
 

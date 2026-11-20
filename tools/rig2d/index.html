@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rig 2D</title>
+<style>
+  :root { --bg: #15181f; --panel: #1f242e; --line: #343b48; --ink: #e6e9ef; --muted: #8e97a8; --accent: #6ab0ff; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 13px/1.4 system-ui, sans-serif; display: grid; grid-template-columns: 1fr 320px; height: 100vh; }
+  #stage { display: grid; place-items: center; overflow: auto; padding: 16px; }
+  #card { width: 600px; height: 660px; background: #fff; border-radius: 10px; box-shadow: 0 6px 30px #0008; touch-action: none; }
+  aside { background: var(--panel); border-left: 1px solid var(--line); overflow: auto; padding: 12px 14px; }
+  h1 { font-size: 15px; margin: 0 0 10px; }
+  fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 0 0 10px; padding: 8px 10px; }
+  legend { color: var(--muted); padding: 0 4px; }
+  label { display: grid; grid-template-columns: 96px 1fr; align-items: center; gap: 6px; margin: 4px 0; }
+  select, input[type=text], button { background: #12151b; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; font: inherit; }
+  input[type=color] { width: 100%; height: 26px; border: 1px solid var(--line); background: none; border-radius: 6px; }
+  button { cursor: pointer; } button:hover { border-color: var(--accent); }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .joint { cursor: grab; } .joint:hover { fill: var(--accent); }
+  textarea { width: 100%; height: 120px; background: #12151b; color: var(--ink); border: 1px solid var(--line); border-radius: 6px; font: 11px monospace; }
+  .muted { color: var(--muted); }
+</style>
+</head>
+<body>
+<div id="stage"><svg id="card" viewBox="0 0 300 330"></svg></div>
+<aside>
+  <h1>Rig 2D</h1>
+  <fieldset><legend>Pose</legend>
+    <p class="muted">The character stands at rest facing you. Drag a joint to rotate the bone that ends there; drag the pelvis to move the figure.</p>
+    <label>Size <input id="scale" type="range" min="20" max="110" step="1"></label>
+    <label><span>Arms behind</span><span><input id="behindL" type="checkbox"> left &nbsp; <input id="behindR" type="checkbox"> right</span></label>
+    <label><span>Joints</span><span><input id="showJoints" type="checkbox" checked> show</span></label>
+    <label>Name <input id="name" type="text" value="figure"></label>
+    <div class="row"><button id="load">Load saved</button><select id="preset"></select><button id="applyPreset">Pose preset</button></div>
+  </fieldset>
+  <fieldset id="look"></fieldset>
+  <fieldset><legend>Save</legend>
+    <div class="row"><button id="dlSvg">Download SVG</button><button id="copy">Copy figure JSON</button><button id="reset">Rest pose</button></div>
+    <p class="muted">Save the figure JSON as <code>scripts/rig2d/figures/&lt;name&gt;.json</code>.</p>
+    <textarea id="json" spellcheck="false"></textarea>
+    <div class="row"><button id="apply">Apply JSON</button></div>
+  </fieldset>
+</aside>
+<script type="module" src="./app.js"></script>
+</body>
+</html>

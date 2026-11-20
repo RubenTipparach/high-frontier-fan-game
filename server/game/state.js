@@ -38,7 +38,7 @@
 
 import { PATENTS } from '../../data/patents.js';
 import { BERNALS } from '../../data/bernals.js';
-import { COLONISTS } from '../../data/colonists.js';
+import { COLONISTS, SPACEBORN_COLONISTS, COLONISTS_BY_ID } from '../../data/colonists.js';
 import { CREW } from '../../data/crew.js';
 import { freshAssembly, IDEOLOGY_ORDER, seatStartingDelegate, seatCeoSoloCentristDelegate } from '../../data/assembly.js';
 import { hotSeatId, hotSeatName, clampHotSeats } from '../../data/hot-seat.js';
@@ -462,7 +462,13 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
   // drawn from the TOP; a retired colonist goes to the BOTTOM. Shuffled AFTER
   // the decks so a non-M2 game's deal is byte-for-byte unchanged (the queue
   // just consumes extra RNG at the end, and only when m2 is on).
-  const colonistQueue = m2 ? shuffle(gen, COLONISTS.map((c) => c.id)) : [];
+  let colonistQueue = m2 ? shuffle(gen, COLONISTS.map((c) => c.id)) : [];
+  // M4 + M2 (4A5h, 4C2): two queues. The earthborn queue keeps M2's Humans; the
+  // spaceborn queue (shuffled after everything else, below) takes the M4
+  // spaceborn colonists plus every Robot. Filtering keeps the RNG order, so a
+  // game without M4 deals exactly as before.
+  const m2Robots = (m2 && m4) ? colonistQueue.filter((id) => (COLONISTS_BY_ID[id] || {}).colonistKind === 'Robot') : [];
+  if (m2 && m4) colonistQueue = colonistQueue.filter((id) => !m2Robots.includes(id));
   // M4 contract decks (4B1, C4): one per ideology pair, blue side up, shuffled
   // AFTER every other draw so an m4-off game's deal is byte-for-byte unchanged.
   let contractDecks = null;
@@ -471,6 +477,8 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
     contractDecks = {};
     for (const pair of Object.keys(raw)) contractDecks[pair] = shuffle(gen, raw[pair]);
   }
+  const spacebornQueue = (m2 && m4) ? shuffle(gen, [...SPACEBORN_COLONISTS.map((c) => c.id), ...m2Robots]) : null;
+
   // Playing with Futures (M2) runs the long game (rule 1D "d.": 7 Solar
   // Cycles), so an M2 room that didn't pick a length defaults to 7 rounds.
   // V5 Hermes Fall FORCES its own length: two Seniority Disks in the centre of
@@ -708,6 +716,9 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
     // Exomigration (2A6) draws from the front; a retired colonist re-queues at
     // the back. Empty (and never touched) in a non-M2 game.
     colonistQueue,
+    // M4 + M2 (4C2): the spaceborn queue, and whether the Spacer Union was
+    // dissolved (Rank & File, 4C2e).
+    ...(spacebornQueue ? { spacebornQueue, spacerUnionDissolved: false } : {}),
     // M2 Futures ledger (1D): { [futureKey]: { ownerId, cardId, vp, endgame } }.
     // A named Future completes ONCE per game, by one player (1D1a) - this map is
     // that exclusivity. Empty in a non-M2 game.

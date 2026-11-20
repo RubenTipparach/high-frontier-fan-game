@@ -1,0 +1,160 @@
+{
+"prince.head": [
+150.0,
+15.0
+],
+"prince.head_tip": [
+150.0,
+-18.0
+],
+"prince.neck_01": [
+150.0,
+35.4
+],
+"prince.neck_01_tip": [
+150.0,
+15.0
+],
+"prince.hand_l": [
+225.1,
+121.0
+],
+"prince.hand_l_tip": [
+228.9,
+123.0
+],
+"prince.hand_r": [
+74.9,
+121.0
+],
+"prince.hand_r_tip": [
+71.1,
+123.0
+],
+"prince.lowerarm_l": [
+204.9,
+98.6
+],
+"prince.lowerarm_l_tip": [
+225.1,
+121.0
+],
+"prince.lowerarm_r": [
+95.1,
+98.6
+],
+"prince.lowerarm_r_tip": [
+74.9,
+121.0
+],
+"prince.upperarm_l": [
+186.0,
+55.9
+],
+"prince.upperarm_l_tip": [
+204.9,
+98.6
+],
+"prince.upperarm_r": [
+114.0,
+55.9
+],
+"prince.upperarm_r_tip": [
+95.1,
+98.6
+],
+"prince.thigh_l": [
+170.0,
+141.5
+],
+"prince.thigh_l_tip": [
+238.4,
+140.0
+],
+"prince.thigh_r": [
+130.0,
+141.5
+],
+"prince.thigh_r_tip": [
+61.6,
+140.0
+],
+"prince.foot_l": [
+151.1,
+146.4
+],
+"prince.foot_l_tip": [
+124.9,
+133.9
+],
+"prince.foot_r": [
+148.9,
+146.4
+],
+"prince.foot_r_tip": [
+175.1,
+133.9
+],
+"prince.calf_l": [
+238.4,
+140.0
+],
+"prince.calf_l_tip": [
+151.1,
+146.4
+],
+"prince.calf_r": [
+61.6,
+140.0
+],
+"prince.calf_r_tip": [
+148.9,
+146.4
+],
+"prince.spine_01": [
+150.0,
+124.8
+],
+"prince.spine_01_tip": [
+150.0,
+112.1
+],
+"prince.spine_03": [
+150.0,
+101.0
+],
+"prince.spine_03_tip": [
+150.0,
+75.0
+],
+"prince.pelvis": [
+150.0,
+141.2
+],
+"prince.pelvis_tip": [
+150.0,
+124.8
+],
+"prince.clavicle_l": [
+154.4,
+49.1
+],
+"prince.clavicle_l_tip": [
+186.0,
+55.9
+],
+"prince.clavicle_r": [
+145.6,
+49.1
+],
+"prince.clavicle_r_tip": [
+114.0,
+55.9
+],
+"prince.head_yaw": 0.0,
+"prince.head_pitch": -18.0,
+"prince.spine_03_yaw": 0.0,
+"prince.spine_03_pitch": -6.0,
+"prince.near_arm": "r",
+"prince.near_leg": "r"
+}

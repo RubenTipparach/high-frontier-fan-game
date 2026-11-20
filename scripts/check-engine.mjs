@@ -12235,6 +12235,117 @@ check('M4: the first gold bead refined monetizes isotope and flips the contract 
   return `monetized + decks flipped to gold (${Object.values(r.state.contractDecks).map((d) => d.length).join('/')} cards)${open.ok ? '; the next auction deals gold' : ''}; M1+M2 alone untouched`;
 });
 
+check('M4 + M2 Spacer Union (4C2): spaceborn needs a BEO Colony, joining discards earthborns, members cannot draw earthborn', () => {
+  const { st, P } = augGame({ colonists: ['col_biomechs'] });
+  assert(Array.isArray(st.spacebornQueue) && st.spacebornQueue.length && !st.colonistQueue.some((id) => (COLONISTS_BY_ID[id] || {}).colonistKind === 'Robot'),
+    'queues not split: robots belong in the spaceborn queue');
+  const human = st.spacebornQueue.find((id) => (COLONISTS_BY_ID[id] || {}).colonistKind === 'Human');
+  st.spacebornQueue.splice(st.spacebornQueue.indexOf(human), 1); st.spacebornQueue.unshift(human);
+  P.beoAtTurnStart = false;
+  let r = op(st, 'EXOMIGRATE', P.profileId, { queue: 'spaceborn', placeDelegate: false });
+  assert(!r.ok && r.error === 'needs_beo_colony_since_turn_start', `no BEO at turn start: ${r.error || 'accepted'}`);
+  P.beoAtTurnStart = true;
+  r = op(st, 'EXOMIGRATE', P.profileId, { queue: 'spaceborn', placeDelegate: false });
+  assert(r.ok, `spaceborn draw: ${r.error}`);
+  const Q = pl(r.state, P.profileId);
+  const ids = Q.bernals.flatMap((bn) => (bn.stack || []).map((x) => x.id));
+  assert(ids.includes(human) && !ids.includes('col_biomechs'), `spaceborn aboard, earthborn discarded: ${ids}`);
+  assert(/Spacer Union/.test(r.log) && r.state.colonistQueue.includes('col_biomechs'), `log / earthborn back in queue: ${r.log}`);
+  const e = op(r.state, 'EXOMIGRATE', P.profileId, { queue: 'earthborn', placeDelegate: false });
+  assert(!e.ok && e.error === 'spacer_union', `a member drew earthborn: ${e.error || 'accepted'}`);
+  // Zero bleed-through: an M2 game without M4 has one queue and no Union.
+  const m2 = startedGame({ m2: true });
+  assert(!m2.spacebornQueue && m2.colonistQueue.some((id) => (COLONISTS_BY_ID[id] || {}).colonistKind === 'Robot'), 'M2 alone changed its queue');
+  return `refused without BEO; ${COLONISTS_BY_ID[human].name} joined, Biomechs discarded; earthborn refused to a member; M2 alone untouched`;
+});
+
+check('M4 + M2 Robots (4C2b): several Robots drawn in one spaceborn exomigration, keep one, the rest go back', () => {
+  const { st, P } = augGame({ colonists: [] });
+  const isRobot = (id) => (COLONISTS_BY_ID[id] || {}).colonistKind === 'Robot';
+  const robots = st.spacebornQueue.filter(isRobot).slice(0, 3);
+  const human = st.spacebornQueue.find((id) => !isRobot(id));
+  const rest = st.spacebornQueue.filter((id) => !robots.includes(id) && id !== human);
+  st.spacebornQueue.splice(0, st.spacebornQueue.length, ...robots, human, ...rest);
+  P.beoAtTurnStart = true; P.hand = [];
+  const r = op(st, 'EXOMIGRATE', P.profileId, { queue: 'spaceborn', placeDelegate: false });
+  assert(r.ok, `spaceborn draw: ${r.error}`);
+  const Q = pl(r.state, P.profileId);
+  const handRobots = Q.hand.filter(isRobot);
+  assert(handRobots.length === 1 && handRobots[0] === robots[0], `kept robots: ${handRobots}`);
+  assert(robots.slice(1).every((id) => r.state.spacebornQueue.includes(id)), 'the other Robots went back to the spaceborn queue');
+  assert(Q.bernals.some((bn) => (bn.stack || []).some((x) => x.id === human)), 'the Human boarded');
+  return r.log;
+});
+
+check('M4 + M2 Parenthood (4C5): heart side 1 on an earthborn, the child comes of age 9 years on and inherits', () => {
+  // Heart is on M4N217F (blue). Biomechs is an earthborn Human.
+  const { st, P } = augGame({ colonists: ['col_biomechs'], contracts: ['M4N217F', 'M4N222F'] });
+  assert((COLONISTS_BY_ID.col_biomechs || {}).colonistKind === 'Human', 'Biomechs should be Human');
+  let r = op(st, 'IMPLANT', P.profileId, { bernal: 0, implants: [{ colonistId: 'col_biomechs', shape: 'heart', side: 1 }, { colonistId: 'col_biomechs', shape: 'jar', side: 2 }] });
+  assert(r.ok, `implant parenthood: ${r.error}`);
+  let Q = pl(r.state, P.profileId);
+  assert(Q.childChit && Q.childChit.parentId === 'col_biomechs', `child chit: ${JSON.stringify(Q.childChit)}`);
+  // Nine years later (clock ticks past due): grown, and the turn cannot end until a child is chosen.
+  r.state.clockTicks = Q.childChit.due + 1; Q.childChit.grown = true;
+  const end = op(r.state, 'END_TURN', P.profileId);
+  assert(!end.ok && end.error === 'child_choice_due', `end turn with a grown child: ${end.error || 'accepted'}`);
+  const pick = r.state.colonistQueue.find((id) => (COLONISTS_BY_ID[id] || {}).colonistKind === 'Human');
+  const c = op(r.state, 'CHILD_COMES_OF_AGE', P.profileId, { colonistId: pick });
+  assert(c.ok, `coming of age: ${c.error}`);
+  Q = pl(c.state, P.profileId);
+  const ids = Q.bernals[0].stack.map((x) => x.id);
+  assert(ids.includes(pick) && !ids.includes('col_biomechs') && !Q.childChit, `child replaced parent: ${ids}`);
+  assert(Q.augments.heart.colonistId === pick && Q.augments.heart.side === 2 && Q.augments.jar.colonistId === pick, `inheritance: ${JSON.stringify(Q.augments)}`);
+  assert(!c.state.colonistQueue.includes(pick) && c.state.colonistQueue.includes('col_biomechs'), 'queue: child out, parent back');
+  // A spaceborn or a Robot cannot take Parenthood.
+  const sb = augGame({ colonists: ['col_lava_lamp_evangelists'], contracts: ['M4N217F'] });
+  const bad = op(sb.st, 'IMPLANT', sb.P.profileId, { bernal: 0, implants: [{ colonistId: 'col_lava_lamp_evangelists', shape: 'heart', side: 1 }] });
+  assert(!bad.ok && bad.error === 'parenthood_earthborn_only', `spaceborn parenthood: ${bad.error || 'accepted'}`);
+  return `child chit placed; END_TURN held; ${COLONISTS_BY_ID[pick].name} replaced Biomechs with heart (side 2) and jar; spaceborn refused`;
+});
+
+check('M4 + M2 promotion counts (4C7e): a Bernal needs 3 different augmentations aboard and a Dirtside anchor', () => {
+  // Find a Bernal + Space where an M2-only promotion succeeds, then require the
+  // M4 counts on the same board.
+  const sites = allSiteSlugs();
+  const base = augGame({ colonists: [], dirtside: false }).st;
+  let found = null;
+  for (const bern of BERNALS.filter((c) => c.promotionColony)) {
+    for (const siteId of sites) {
+      const st = structuredClone(base); const P = currentPlayerOf(st);
+      st.m4 = false;
+      P.bernals = [{ cardId: bern.id, figure: 'kalpana', face: 'primary', siteId, anchored: true, home: false,
+        stack: [{ id: 'col_biomechs', kind: 'colonist', face: 'primary' }, { id: 'col_botany_bay_convicts', kind: 'colonist', face: 'primary' }],
+        tank: 0, wiring: {}, route: [] }];
+      P.opsRemaining = 4;
+      if (op(st, 'PROMOTE', P.profileId, { unit: 'bernal', cardId: bern.id }).ok) { found = { bern, siteId }; break; }
+    }
+    if (found) break;
+  }
+  assert(found, 'no Bernal promotes anywhere in an M2 game');
+  const mk = (augs) => {
+    const st = structuredClone(base); const P = currentPlayerOf(st);
+    P.bernals = [{ cardId: found.bern.id, figure: 'kalpana', face: 'primary', siteId: found.siteId, anchored: true, home: false,
+      stack: [{ id: 'col_biomechs', kind: 'colonist', face: 'primary' }, { id: 'col_botany_bay_convicts', kind: 'colonist', face: 'primary' }],
+      tank: 0, wiring: {}, route: [] }];
+    P.opsRemaining = 4;
+    P.augments = Object.fromEntries(augs.map(([shape, colonistId]) => [shape, { colonistId, side: 2 }]));
+    return { st, P };
+  };
+  let g = mk([['jar', 'col_biomechs'], ['splat', 'col_botany_bay_convicts']]);
+  let r = op(g.st, 'PROMOTE', g.P.profileId, { unit: 'bernal', cardId: found.bern.id });
+  assert(!r.ok && r.error === 'needs_augmentation', `2 augmentations promoted a Bernal: ${r.error || 'accepted'}`);
+  g = mk([['jar', 'col_biomechs'], ['splat', 'col_botany_bay_convicts'], ['triangle', 'col_biomechs']]);
+  r = op(g.st, 'PROMOTE', g.P.profileId, { unit: 'bernal', cardId: found.bern.id });
+  assert(r.ok, `3 different augmentations should promote: ${r.error}`);
+  // The Home Bernal is not Dirtside.
+  g = mk([['jar', 'col_biomechs'], ['splat', 'col_botany_bay_convicts'], ['triangle', 'col_biomechs']]);
+  g.P.bernals[0].home = true;
+  r = op(g.st, 'PROMOTE', g.P.profileId, { unit: 'bernal', cardId: found.bern.id });
+  assert(!r.ok, 'a Home Bernal promoted under M4 + M2');
+  return `${found.bern.name} at ${found.siteId}: 2 refused, 3 promoted, Home refused (${r.error})`;
+});
+
 // The smoke verdict above runs before the checks added below it; this one
 // covers every check in the file.
 if (failures) {

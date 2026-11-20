@@ -1,0 +1,160 @@
+{
+"sim.head": [
+77.2,
+124.4
+],
+"sim.head_tip": [
+74.9,
+87.4
+],
+"sim.neck_01": [
+72.1,
+149.7
+],
+"sim.neck_01_tip": [
+77.2,
+124.4
+],
+"sim.hand_l": [
+185.1,
+147.5
+],
+"sim.hand_l_tip": [
+187.2,
+140.8
+],
+"sim.hand_r": [
+33.5,
+290.4
+],
+"sim.hand_r_tip": [
+34.6,
+297.7
+],
+"sim.lowerarm_l": [
+160.1,
+190.9
+],
+"sim.lowerarm_l_tip": [
+185.1,
+147.5
+],
+"sim.lowerarm_r": [
+27.7,
+235.8
+],
+"sim.lowerarm_r_tip": [
+33.5,
+290.4
+],
+"sim.upperarm_l": [
+108.2,
+170.5
+],
+"sim.upperarm_l_tip": [
+160.1,
+190.9
+],
+"sim.upperarm_r": [
+38.4,
+174.3
+],
+"sim.upperarm_r_tip": [
+27.7,
+235.8
+],
+"sim.thigh_l": [
+95.5,
+274.6
+],
+"sim.thigh_l_tip": [
+107.9,
+356.3
+],
+"sim.thigh_r": [
+55.3,
+283.2
+],
+"sim.thigh_r_tip": [
+51.0,
+376.1
+],
+"sim.foot_l": [
+111.0,
+438.6
+],
+"sim.foot_l_tip": [
+125.0,
+464.9
+],
+"sim.foot_r": [
+46.2,
+469.7
+],
+"sim.foot_r_tip": [
+54.5,
+502.6
+],
+"sim.calf_l": [
+107.9,
+356.3
+],
+"sim.calf_l_tip": [
+111.0,
+438.6
+],
+"sim.calf_r": [
+51.0,
+376.1
+],
+"sim.calf_r_tip": [
+46.2,
+469.7
+],
+"sim.spine_01": [
+71.1,
+255.3
+],
+"sim.spine_01_tip": [
+73.0,
+242.0
+],
+"sim.spine_03": [
+74.0,
+221.4
+],
+"sim.spine_03_tip": [
+74.8,
+184.7
+],
+"sim.pelvis": [
+76.6,
+277.1
+],
+"sim.pelvis_tip": [
+71.1,
+255.3
+],
+"sim.clavicle_l": [
+78.5,
+166.5
+],
+"sim.clavicle_l_tip": [
+108.2,
+170.5
+],
+"sim.clavicle_r": [
+68.4,
+167.0
+],
+"sim.clavicle_r_tip": [
+38.4,
+174.3
+],
+"sim.head_yaw": 53.1,
+"sim.head_pitch": -2.4,
+"sim.spine_03_yaw": 35.1,
+"sim.spine_03_pitch": -3.3,
+"sim.near_arm": "r",
+"sim.near_leg": "r"
+}

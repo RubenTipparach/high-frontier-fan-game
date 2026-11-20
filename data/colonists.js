@@ -32,4 +32,27 @@ export const COLONISTS = (CARD_DATA['Colonists'] || [])
     return c;
   });
 
-export const COLONISTS_BY_ID = Object.fromEntries(COLONISTS.map((c) => [c.id, c]));
+// M4 (Exodus) spaceborn colonists, from the sheet's Spaceborn Colonists tab
+// through the same builder. They join play only in an M4 + M2 game, from the
+// spaceborn queue (4C2); COLONISTS above stays the M2 (earthborn) set, so a game
+// without M4 never sees them.
+export const SPACEBORN_COLONISTS = (CARD_DATA['Spaceborn Colonists'] || [])
+  .filter((row) => row && row.Name)
+  .map((row) => {
+    const c = buildPatent('Colonists', row);
+    c.specialty = cleanField(row['Specialty']);
+    c.ideology = cleanField(row['Ideology']);
+    c.colonistKind = cleanField(row['Type']);
+    c.spectralType = cleanField(row['Spectral Type']);
+    c.spaceborn = true;
+    return c;
+  });
+
+export const COLONISTS_BY_ID = Object.fromEntries([...COLONISTS, ...SPACEBORN_COLONISTS].map((c) => [c.id, c]));
+// 4C2: the spaceborn queue holds the spaceborn colonists plus every Robot (M2's
+// included); the earthborn queue keeps only M2's Humans. "Spaceborn" for the
+// Spacer Union is any card from that queue.
+export const isSpacebornColonist = (id) => {
+  const c = COLONISTS_BY_ID[id];
+  return !!(c && (c.spaceborn || c.colonistKind === 'Robot'));
+};

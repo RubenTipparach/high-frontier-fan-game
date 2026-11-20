@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
-import { contractStepPlaces, applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, liveScoreboard, rocketSolarZone, auctionWaitingOn, driveTutorialBots, migrateGloryCrewBindings, elevatorConnectedFactorySet, pinnedFactorySlugs, playerHasColonistPower, playerCrewReactorKinds, decksFor, repairSpeciesDeckSplit, repairSirensAssembly, autoFixGlitches, canLooseOutpostWater, outpostWater } from './game/engine.js';
+import { contractStepPlaces, applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, liveScoreboard, rocketSolarZone, auctionWaitingOn, inSpacerUnion, driveTutorialBots, migrateGloryCrewBindings, elevatorConnectedFactorySet, pinnedFactorySlugs, playerHasColonistPower, playerCrewReactorKinds, decksFor, repairSpeciesDeckSplit, repairSirensAssembly, autoFixGlitches, canLooseOutpostWater, outpostWater } from './game/engine.js';
 import { randomSeed, makeRng, shuffle } from './game/rng.js';
 import { COLONISTS } from '../data/colonists.js';
 import { siteBySlug, nodeBySlug, resolveNodeRef, leoSlug } from './game/planner-graph.js';
@@ -2008,6 +2008,7 @@ function redactRoutes(rawState, viewerId) {
   if (Array.isArray(clone.colonistQueue)) {
     clone.colonistQueueCount = clone.colonistQueue.length;
   }
+  if (Array.isArray(clone.spacebornQueue)) clone.spacebornQueueCount = clone.spacebornQueue.length;
   return clone;
 }
 
@@ -2055,6 +2056,11 @@ function gameView(gameId, viewerId = null) {
   // Who the open auction is waiting on, by the engine's rules (a seat that
   // cannot take the lot never owes an answer). Hot seat follows this list to
   // know which seat to hand the device to.
+  // M4 + M2 (4C2): who is in the Spacer Union, for the Spaceborn / Earthborn
+  // tag beside each name.
+  if (viewState && viewState.m4 && viewState.m2 && Array.isArray(viewState.players)) {
+    for (const p of viewState.players) p.spacerUnion = inSpacerUnion(viewState, p);
+  }
   if (viewState && viewState.auction && rawState) {
     viewState.auction = { ...viewState.auction, waitingOn: auctionWaitingOn(rawState).map((p) => p.profileId) };
   }

@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hand Rig</title>
+<style>
+  :root { --bg:#15181f; --panel:#1f242e; --line:#343b48; --ink:#e6e9ef; --muted:#8e97a8; --accent:#6ab0ff; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:13px/1.4 system-ui,sans-serif; display:grid; grid-template-columns:1fr 300px; height:100vh; }
+  #stage { display:grid; place-items:center; padding:16px; }
+  #hand { width:520px; height:620px; background:#c9bab2; border-radius:10px; touch-action:none; }
+  aside { background:var(--panel); border-left:1px solid var(--line); padding:12px 14px; overflow:auto; }
+  label { display:grid; grid-template-columns:90px 1fr; gap:6px; align-items:center; margin:5px 0; }
+  select, button, textarea { background:#12151b; color:var(--ink); border:1px solid var(--line); border-radius:6px; padding:4px 6px; font:inherit; }
+  textarea { width:100%; height:150px; font:11px monospace; }
+  .joint { cursor:grab; }
+</style></head>
+<body>
+<div id="stage"><svg id="hand" viewBox="-60 -15 120 143"></svg></div>
+<aside>
+  <h3 style="margin:0 0 8px">Hand rig</h3>
+  <label>Preset <select id="preset"></select></label>
+  <label>View <select id="view"><option>back</option><option>side</option></select></label>
+  <label>Thumb in front <input type="checkbox" id="thumbFront"></label>
+  <div id="folds"></div>
+  <label>Skin <input type="color" id="skin" value="#f2c4a0"></label>
+  <label>Joints <input type="checkbox" id="showJ" checked></label>
+  <p style="color:var(--muted)">Drag a joint to rotate the bone that ends there. Fold shortens a finger that curls toward you.</p>
+  <button id="copy">Copy pose JSON</button> <button id="apply">Apply JSON</button>
+  <textarea id="json" spellcheck="false"></textarea>
+</aside>
+<script type="module">
+import { handJoints, handAim, HAND_BONES, HAND_POSES } from '../../scripts/rig2d/hand.mjs';
+import { handShapes } from '../../scripts/rig2d/cutout.mjs';
+const $ = (s) => document.querySelector(s), svg = $('#hand');
+let pose = JSON.parse(JSON.stringify(HAND_POSES.relaxed));
+$('#preset').innerHTML = Object.keys(HAND_POSES).map((k) => `<option>${k}</option>`).join('');
+const FING = { i: 'index', m: 'middle', r: 'ring', p: 'pinky', t: 'thumb' };
+$('#folds').innerHTML = Object.entries(FING).map(([f, n]) => `<label>${n} fold <input type="range" min="0" max="1" step="0.05" data-f="${f}"></label>`).join('');
+const endsAt = () => { const B = HAND_BONES[pose.view === 'side' ? 'side' : 'back'], m = {}; for (const [b, [, c]] of Object.entries(B)) m[c] = b; return m; };
+function foldOf(f) { const l = pose.len || {}; return 1 - (l[f + '1'] ?? 1); }
+function setFold(f, v) {
+  pose.len = { ...(pose.len || {}) };
+  if (f === 't') { pose.len.t2 = 1 - v * 0.5; pose.len.t3 = 1 - v * 0.8; }
+  else { pose.len[f + '1'] = 1 - v * 0.5; pose.len[f + '2'] = 1 - v * 0.88; pose.len[f + '3'] = 1 - v * 0.95; }
+}
+function render() {
+  const fill = $('#skin').value;
+  const shapes = handShapes(pose, fill).map((s, i) => {
+    if (s.stroke) return `<path d="${s.d}" fill="none" stroke="${s.stroke}" stroke-width="${s.width}" stroke-linecap="round"/>`;
+    return s.ds.map((d) => `<path d="${d}" fill="#00000022" transform="translate(1.2,0.2)"/>`).join('') + s.ds.map((d) => `<path d="${d}" fill="${s.fill}"/>`).join('');
+  }).join('');
+  let j = '';
+  if ($('#showJ').checked) {
+    const { joints } = handJoints(pose), E = endsAt();
+    for (const [b, [a, c]] of Object.entries(HAND_BONES[pose.view === 'side' ? 'side' : 'back'])) { const p = joints[a], q = joints[c]; j += `<line x1="${p[0]}" y1="${p[1]}" x2="${q[0]}" y2="${q[1]}" stroke="#ff5aa0" stroke-width="0.5"/>`; }
+    for (const [k, p] of Object.entries(joints)) if (E[k]) j += `<circle class="joint" data-j="${k}" cx="${p[0]}" cy="${p[1]}" r="2" fill="#ff5aa0" stroke="#fff" stroke-width="0.4"><title>${E[k]}</title></circle>`;
+  }
+  svg.innerHTML = shapes + j;
+  $('#json').value = JSON.stringify(pose);
+}
+function sync() {
+  $('#view').value = pose.view === 'side' ? 'side' : 'back'; $('#thumbFront').checked = !!pose.thumbFront;
+  for (const el of document.querySelectorAll('[data-f]')) el.value = foldOf(el.dataset.f === 't' ? 't' : el.dataset.f);
+}
+let drag = null;
+const pt = (e) => { const p = svg.createSVGPoint(); p.x = e.clientX; p.y = e.clientY; const q = p.matrixTransform(svg.getScreenCTM().inverse()); return [q.x, q.y]; };
+svg.addEventListener('pointerdown', (e) => { const k = e.target.dataset && e.target.dataset.j; if (!k) return; svg.setPointerCapture(e.pointerId); drag = endsAt()[k]; });
+svg.addEventListener('pointermove', (e) => { if (!drag) return; pose.rot = { ...(pose.rot || {}), [drag]: Math.round(handAim(pose, drag, pt(e))) }; render(); });
+svg.addEventListener('pointerup', () => { drag = null; });
+$('#preset').addEventListener('input', (e) => { pose = JSON.parse(JSON.stringify(HAND_POSES[e.target.value])); sync(); render(); });
+$('#view').addEventListener('input', (e) => { pose.view = e.target.value; render(); });
+$('#thumbFront').addEventListener('input', (e) => { pose.thumbFront = e.target.checked; render(); });
+document.addEventListener('input', (e) => { if (e.target.dataset.f) { setFold(e.target.dataset.f, +e.target.value); render(); } });
+$('#skin').addEventListener('input', render); $('#showJ').addEventListener('input', render);
+$('#copy').addEventListener('click', () => navigator.clipboard && navigator.clipboard.writeText($('#json').value));
+$('#apply').addEventListener('click', () => { try { pose = JSON.parse($('#json').value); sync(); render(); } catch (err) { alert(err.message); } });
+sync(); render();
+</script>
+</body></html>
