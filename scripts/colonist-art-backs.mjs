@@ -91,12 +91,22 @@ export function drawUpgradedBacks({ W, H, panel, emit }) {
     for (let r = 0; r < 5; r++) for (let k = 0; k < 6 + r * 6; k++) { const a = (k / (6 + r * 6)) * Math.PI * 2 + r; cubes += cube(150 + Math.cos(a) * r * 26, 170 + Math.sin(a) * r * 26, 1.3 - r * 0.15, 1 - r * 0.16); }
     out('col_programmable_matter', `${glow('nm-g', '#e8d8ff', 0.8)}`, `<circle cx="150" cy="170" r="90" fill="url(#nm-g)"/>${cubes}${cube(150, 170, 2.2, 1)}`); }
 
-  // Frankenstein Navigator: a stitched face, half machine, one red eye.
-  out('col_security_system', `${linear('fn-plate', [['0%', '#e8ecf2'], ['100%', '#7a8494']], 1, 0)}${glow('fn-eye', '#ff3a3a', 0.9)}`,
-    `${drawHead({ id: 'fn', look: { body: 'male', skin: '#c8d0a8', hair: '#1a1a1a', hairStyle: 'buzz', face: 'neutral', blush: false }, x: 150, y: 170, size: 230 })}
-     <path d="M150,58 L150,286 Q232,270 246,170 Q240,70 150,58 Z" fill="url(#fn-plate)"/><circle cx="185" cy="172" r="30" fill="url(#fn-eye)"/><circle cx="185" cy="172" r="11" fill="#ff2020"/>
-     <g stroke="#3a3a3a" stroke-width="3"><path d="M150,90 V270"/>${[100, 130, 160, 190, 220, 250].map((y) => `<path d="M142,${y} H158"/>`).join('')}</g>
-     <g fill="#5a6474">${[[200, 110], [220, 230], [170, 250]].map(([x, y]) => `<circle cx="${x}" cy="${y}" r="4"/>`).join('')}</g>`);
+  // Frankenstein Navigator: the face split down the middle, flesh on his right,
+  // all machine on his left: the metal half takes the head's own outline.
+  { const look = { style: 'slim', body: 'male', skin: '#c8d0a8', hair: '#1a1a1a', hairStyle: 'buzz', face: 'neutral', blush: false };
+    const head = (id) => drawHead({ id, look, x: 150, y: 170, size: 230 });
+    const ey = 170 + 0.02 * 230, mx = 150 + 0.15 * 230;
+    out('col_security_system', `${linear('fn-plate', [['0%', '#f2f5f9'], ['55%', '#b8c0cc'], ['100%', '#5a6474']], 1, 0)}${glow('fn-eye', '#ff3a3a', 0.9)}
+      <filter id="fn-w" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 1 0"/></filter>
+      <mask id="fn-m"><g filter="url(#fn-w)">${head('fnm')}</g></mask><clipPath id="fn-r"><rect x="150" y="0" width="150" height="${H}"/></clipPath>`,
+      `${head('fn')}
+       <g clip-path="url(#fn-r)"><rect width="${W}" height="${H}" fill="url(#fn-plate)" mask="url(#fn-m)"/>
+         <g stroke="#7a8494" stroke-width="2" fill="none" opacity="0.8"><path d="M150,${f1(ey - 70)} Q210,${f1(ey - 60)} 254,${f1(ey - 30)}"/><path d="M150,${f1(ey + 58)} Q200,${f1(ey + 64)} 240,${f1(ey + 40)}"/></g>
+         <circle cx="${f1(mx)}" cy="${f1(ey)}" r="30" fill="url(#fn-eye)"/><circle cx="${f1(mx)}" cy="${f1(ey)}" r="15" fill="#2a2e36"/><circle cx="${f1(mx)}" cy="${f1(ey)}" r="9" fill="#ff2020"/><circle cx="${f1(mx - 3)}" cy="${f1(ey - 3)}" r="2.5" fill="#fff"/>
+         <g fill="#3a4250">${[0, 1, 2, 3].map((k) => `<rect x="${154 + k * 7}" y="${f1(ey + 52)}" width="4" height="12" rx="1.5"/>`).join('')}</g>
+         <g fill="#5a6474">${[[200, ey - 92], [236, ey - 6], [214, ey + 86], [174, ey + 104]].map(([x, y]) => `<circle cx="${x}" cy="${f1(y)}" r="4"/>`).join('')}</g></g>
+       <path d="M150,${f1(ey - 118)} V${f1(ey + 118)}" stroke="#2a2a2a" stroke-width="3"/>
+       <g stroke="#2a2a2a" stroke-width="3">${[-90, -60, -30, 0, 30, 60, 90].map((d) => `<path d="M142,${f1(ey + d)} H150"/>`).join('')}</g>`); }
 
   // Josephson Implants: a bearded man with a crown of humming implants.
   out('col_siren_cybernautics_inc', `${glow('ji-g', '#9af0ff', 0.6)}`,

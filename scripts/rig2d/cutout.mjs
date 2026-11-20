@@ -137,7 +137,8 @@ export function blob(pts) {
 }
 const mirror = (pts, k) => pts.map(([x, y]) => [x * k, y]);
 const sym = (half) => [...half, ...half.slice().reverse().map(([x, y]) => [-x, y])];   // half from top-centre down the +x side
-const ell = (cx, cy, rx, ry) => `M${f2(cx - rx)},${f2(cy)}a${f2(rx)},${f2(ry)} 0 1 0 ${f2(2 * rx)},0a${f2(rx)},${f2(ry)} 0 1 0 ${f2(-2 * rx)},0Z`;
+const f3 = (n) => (+n).toFixed(3).replace(/\.?0+$/, '') || '0';   // small dots need the precision: a rounded radius can bend the arcs into a figure-8
+const ell = (cx, cy, rx, ry) => `M${f3(cx - rx)},${f3(cy)}a${f3(rx)},${f3(ry)} 0 1 0 ${f3(2 * rx)},0a${f3(rx)},${f3(ry)} 0 1 0 ${f3(-2 * rx)},0Z`;
 
 // ---- looks -------------------------------------------------------------------------
 export const DEFAULT_LOOK = {
