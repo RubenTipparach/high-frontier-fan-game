@@ -14,8 +14,7 @@ export const REDONE_FRONTS = new Set([
 
 const f1 = (n) => (+n).toFixed(1);
 
-export function drawM4Fronts({ W, H, panel, emit }) {
-  const CX = W / 2;
+export function artKit({ W, H }) {
   const rect = (fill, extra = '') => `<rect width="${W}" height="${H}" fill="${fill}" ${extra}/>`;
   const radial = (id, stops, cx = '50%', cy = '45%', r = '80%') =>
     `<radialGradient id="${id}" cx="${cx}" cy="${cy}" r="${r}">${stops.map(([o, c, a = 1]) => `<stop offset="${o}" stop-color="${c}" stop-opacity="${a}"/>`).join('')}</radialGradient>`;
@@ -40,7 +39,7 @@ export function drawM4Fronts({ W, H, panel, emit }) {
       ${linear(`${id}-hr`, [['0%', p.hairHi || p.hair], ['100%', p.hair]], 0.3, 1)}`;
     const neckW = s * (p.female ? 0.36 : 0.44);
     const shoulderY = cy + s * 1.55;
-    const body = `<path d="M${f1(cx - s * 2.6)},${H + 2} Q${f1(cx - s * 2.3)},${f1(shoulderY + s * 0.1)} ${f1(cx - s * 0.9)},${f1(shoulderY - s * 0.12)} L${f1(cx + s * 0.9)},${f1(shoulderY - s * 0.12)} Q${f1(cx + s * 2.3)},${f1(shoulderY + s * 0.1)} ${f1(cx + s * 2.6)},${H + 2} Z" fill="url(#${id}-sh)"/>`;
+    const body = `<path d="M${f1(cx - s * 2.6)},${H + 2} Q${f1(cx - s * 2.3)},${f1(shoulderY + s * 0.1)} ${f1(cx - s * 0.9)},${f1(shoulderY - s * 0.12)} L${f1(cx + s * 0.9)},${f1(shoulderY - s * 0.12)} Q${f1(cx + s * 2.3)},${f1(shoulderY + s * 0.1)} ${f1(cx + s * 2.6)},${H + 2} Z" fill="${p.shirtFill || `url(#${id}-sh)`}"/>`;
     const neck = `<path d="M${f1(cx - neckW)},${f1(cy + s * 0.7)} L${f1(cx - neckW * 1.05)},${f1(shoulderY)} Q${f1(cx)},${f1(shoulderY + s * 0.32)} ${f1(cx + neckW * 1.05)},${f1(shoulderY)} L${f1(cx + neckW)},${f1(cy + s * 0.7)} Z" fill="${sk1}"/>
       <path d="M${f1(cx - neckW)},${f1(cy + s * 0.8)} Q${f1(cx)},${f1(cy + s * 1.15)} ${f1(cx + neckW)},${f1(cy + s * 0.8)}" fill="#000" opacity="0.18"/>`;
     const collar = p.collar === 'v'
@@ -73,13 +72,19 @@ export function drawM4Fronts({ W, H, panel, emit }) {
       case 'buzz':
         hairFront = `<path d="M${f1(cx - s * 0.97)},${f1(cy - s * 0.2)} Q${f1(cx - s * 0.98)},${f1(cy - s * 1.14)} ${cx},${f1(cy - s * 1.13)} Q${f1(cx + s * 0.98)},${f1(cy - s * 1.14)} ${f1(cx + s * 0.97)},${f1(cy - s * 0.2)} Q${f1(cx + s * 0.8)},${f1(cy - s * 0.78)} ${cx},${f1(cy - s * 0.8)} Q${f1(cx - s * 0.8)},${f1(cy - s * 0.78)} ${f1(cx - s * 0.97)},${f1(cy - s * 0.2)} Z" fill="${hr}" opacity="0.92"/>`;
         break;
+      case 'bald':
+        hairFront = '';
+        break;
       case 'white':
       default:
         hairFront = `<path d="M${f1(cx - s * 1.0)},${f1(cy - s * 0.05)} Q${f1(cx - s * 1.06)},${f1(cy - s * 1.2)} ${f1(cx + s * 0.05)},${f1(cy - s * 1.2)} Q${f1(cx + s * 1.06)},${f1(cy - s * 1.15)} ${f1(cx + s * 1.0)},${f1(cy - s * 0.05)} Q${f1(cx + s * 0.85)},${f1(cy - s * 0.62)} ${f1(cx + s * 0.35)},${f1(cy - s * 0.66)} Q${f1(cx - s * 0.2)},${f1(cy - s * 0.85)} ${f1(cx - s * 1.0)},${f1(cy - s * 0.05)} Z" fill="${hr}"/>`;
     }
     const ex = (k) => f1(cx + t * s * 0.12 + k * s * 0.36);
     const eyeY = f1(cy - s * 0.05);
-    const eyes = p.visor
+    const eyes = p.eyesClosed
+      ? [-1, 1].map((k) => `<path d="M${f1(+ex(k) - s * 0.18)},${eyeY} Q${ex(k)},${f1(+eyeY + s * 0.1)} ${f1(+ex(k) + s * 0.18)},${eyeY}" stroke="#2a1a10" stroke-width="2" fill="none" stroke-linecap="round"/>
+         <path d="M${f1(+ex(k) - s * 0.2)},${f1(+eyeY - s * 0.22)} Q${ex(k)},${f1(+eyeY - s * 0.3)} ${f1(+ex(k) + s * 0.22)},${f1(+eyeY - s * 0.22)}" stroke="${p.brow || p.hair}" stroke-width="${f1(s * 0.07)}" fill="none" stroke-linecap="round"/>`).join('')
+      : p.visor
       ? `<rect x="${f1(cx - s * 0.98)}" y="${f1(cy - s * 0.32)}" width="${f1(s * 1.96)}" height="${f1(s * 0.48)}" rx="${f1(s * 0.22)}" fill="url(#${id}-vz)"/>
          <rect x="${f1(cx - s * 0.8)}" y="${f1(cy - s * 0.24)}" width="${f1(s * 1.0)}" height="${f1(s * 0.08)}" rx="2" fill="#fff" opacity="0.55"/>`
       : [-1, 1].map((k) => `<ellipse cx="${ex(k)}" cy="${eyeY}" rx="${f1(s * 0.17)}" ry="${f1(s * 0.1)}" fill="#f4efe8"/>
@@ -128,6 +133,13 @@ export function drawM4Fronts({ W, H, panel, emit }) {
       <circle cx="${cx}" cy="${cy}" r="${r}" fill="url(#${id}-night)"/>`,
   });
   const night = (id) => radial(`${id}-night`, [['55%', '#000', 0], ['100%', '#000', 0.55]], '35%', '30%', '80%');
+
+  return { f1, rect, radial, linear, vignette, stars, rng, bust, robotBust, earth, night };
+}
+
+export function drawM4Fronts({ W, H, panel, emit }) {
+  const CX = W / 2;
+  const { rect, radial, linear, vignette, stars, rng, bust, robotBust, earth, night } = artKit({ W, H });
 
   // ================= ROBOTS =================
   // Cobots: a woman shoulder to shoulder with a white service robot, cool lab light.

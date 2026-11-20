@@ -17,6 +17,7 @@
 //     css/cards.css already uses for every promoted face) - a DIFFERENT
 //     illustration than the front (new subject, or the same subject
 //     transformed), never a recolour of the same shapes.
+import { drawM2Fronts, REDONE_M2_FRONTS } from './colonist-art-m2-fronts.mjs';
 import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { drawM4 } from './colonist-art-m4.mjs';
 import { dirname, join } from 'node:path';
@@ -61,9 +62,14 @@ function purpleBackDefs(id) {
 }
 
 const manifest = [];
-function emit(id, side, svg) {
+function writeArt(id, side, svg) {
   writeFileSync(join(OUT, `${id}-${side}.svg`), svg);
   manifest.push({ id, side });
+}
+// The second-pass M2 fronts (colonist-art-m2-fronts.mjs) replace the ones below.
+function emit(id, side, svg) {
+  if (side === 'front' && REDONE_M2_FRONTS.has(id)) return;
+  writeArt(id, side, svg);
 }
 
 // ---- Reusable silhouette primitives (shared shapes, varied by params so no
@@ -954,6 +960,7 @@ const CX = W * 0.5, CY = H * 0.46;
 // helpers. A CANDIDATE set beside their Blender versions, so they never enter
 // COLONIST_ART_IDS below until the user picks a version.
 drawM4({ W, H, panel, starsField, purpleBackDefs, emit, beardedManFace, biomechArm, profileHeadChip, sailScene });
+drawM2Fronts({ W, H, panel, emit: writeArt });
 
 console.log(`wrote ${manifest.length} SVGs to assets/colonists/`);
 
