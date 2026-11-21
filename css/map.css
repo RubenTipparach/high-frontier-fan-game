@@ -9585,6 +9585,7 @@ html.battery-save *::after {
 .enterprise-offer { margin-top: 6px; }
 .mp-trade-enterprise { margin-top: 4px; }
 .mp-ability.contract { background: rgba(201, 133, 18, 0.18); color: #f6dfb2; border-color: #8a5d12; }
+.mp-ability.default-chit { background: rgba(185, 28, 28, 0.2); color: #fecaca; border-color: #991b1b; }
 
 /* Builder modal: a focused, backdropped dialog. */
 .mp-modal-back {

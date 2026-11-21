@@ -9176,7 +9176,10 @@ function renderAbilityBadges(p) {
   const beamer = playerPowersatBeamedBy(p);
   // M4: the abilities of this player's fulfilled contracts (4B2f), one chip each.
   const contractAbilities = (_onlineSnapshot && _onlineSnapshot.m4) ? contractAbilityChips(p) : [];
-  if (!own && !borrowed.length && !showPowersat && !beamer && !contractAbilities.length) return null;
+  // M4: the default chit (4B6), on whoever holds it.
+  const chit = _onlineSnapshot && _onlineSnapshot.m4 && _onlineSnapshot.defaultChit;
+  const holdsChit = !!(chit && chit.profileId === p.profileId);
+  if (!own && !borrowed.length && !showPowersat && !beamer && !contractAbilities.length && !holdsChit) return null;
   const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
   const row = document.createElement('div');
   row.className = 'mp-ability-badges';
@@ -9211,11 +9214,19 @@ function renderAbilityBadges(p) {
       + (perm ? ' (permanent, irreversible)' : `, ${g.turnsRemaining} turn(s) left`);
     row.appendChild(b);
   }
+  if (holdsChit) {
+    const vp = chit.side === 'gold' ? 6 : 3;
+    const b = document.createElement('span');
+    b.className = 'mp-ability default-chit';
+    b.textContent = `🏷 Default chit -${vp} VP`;
+    b.setAttribute('data-tip', `Default chit (${chit.side === 'gold' ? 'gold' : 'blue'} side): -${vp} VP at game end; no bids on manned contracts.`);
+    row.appendChild(b);
+  }
   for (const c of contractAbilities) {
     const b = document.createElement('span');
     b.className = 'mp-ability contract';
     b.textContent = '📜 ' + c.label;
-    b.title = `${c.label}: ${c.text} (${c.from})`;
+    b.setAttribute('data-tip', `${c.label}: ${c.text} (${c.from})`);
     row.appendChild(b);
   }
   return row;
