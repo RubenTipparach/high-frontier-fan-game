@@ -11388,6 +11388,14 @@ check('When fulfilling: Planetary Protection busts the site and seats 2 delegate
   return `Ceres busted + 2 Equality delegates; Beehive at Eureka struck ${struck} / dry ${dry} (re-roll offered)`;
 });
 
+check('contract auctions ignore the academia hand limit (owner 2026-11-21)', () => {
+  const st = m4Game();
+  for (const q of st.players) q.hand = st.decks.thruster.splice(0, 6);
+  const res = winContract(st, 'M4N228F', { by: 'rival' });
+  assert(pl(res.st, res.winner).contractHand.includes(res.c.id), 'the full-hand bidder did not win the contract');
+  return 'with 6 cards in every hand: started, bid on and won';
+});
+
 check('a late contract: pay the fee each turn or default; debt repayment discards it with the chit', () => {
   let st = m4Game();
   const res = winContract(st, 'M4N228F', { years: 0 });

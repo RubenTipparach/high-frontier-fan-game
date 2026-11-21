@@ -430,12 +430,11 @@ function auctionBar(s, p) {
   if (!s || !p || !D.myTurn() || !p.fundraisedThisTurn || p.contractAuctionDone || s.auction) return '';
   if (s.anarchy || s.war) return `No contract auctions during ${s.war ? 'War' : 'Anarchy'}.`;
   if (p.timepiece) return 'Your timepiece is on the Sunspot Cycle.';
-  if (D.handFull && D.handFull(p)) return `Academia hand limit: ${(p.hand || []).length} cards in hand. Discard to 3 to auction.`;
   return '';
 }
 function canAuctionNow(s, p, myTurn) {
   return !!(s && p && myTurn && p.fundraisedThisTurn && !p.contractAuctionDone && !p.timepiece && !s.auction
-    && !s.anarchy && !s.war && !(D.handFull && D.handFull(p)));
+    && !s.anarchy && !s.war);
 }
 // The three pair decks, top card up. A deck you may auction carries one
 // Auction button; one you may not is greyed out with none (owner 2026-11-18).
@@ -468,7 +467,7 @@ export function renderContractAuctionStep(host, done) {
   const s = snap(); const p = me();
   host.innerHTML = '';
   if (!canAuctionNow(s, p, D.myTurn())) {
-    // Fundraised, auction not yet held, but barred: say why (4B3a, b) instead
+    // Fundraised, auction not yet held, but barred: say why (4B3b) instead
     // of the step silently not appearing.
     const why = auctionBar(s, p);
     if (!why) return false;
@@ -831,10 +830,9 @@ export function renderContractAuction(a) {
   const myId = p && p.profileId;
   const iAmAuctioneer = myId === a.auctioneerId;
   // Who may not bid (4B3): a timepiece already out (a contract on the clock),
-  // the default chit on a manned contract, or the academia hand limit.
+  // or the default chit on a manned contract. No hand limit on contracts.
   const barOf = (q) => (!q ? null : q.timepiece ? 'Timepiece out.'
-    : (face.manned && s.defaultChit && s.defaultChit.profileId === q.profileId) ? 'Default chit: no manned bids.'
-      : (D.handFull && D.handFull(q)) ? 'Hand full: 4 cards.' : null);
+    : (face.manned && s.defaultChit && s.defaultChit.profileId === q.profileId) ? 'Default chit: no manned bids.' : null);
   const blocked = iAmAuctioneer ? null : barOf(p);
   // The bidders still owed an answer: the engine's own list when it is there.
   const waitIds = Array.isArray(a.waitingOn) ? a.waitingOn.filter((id) => id !== a.auctioneerId) : null;

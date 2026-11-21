@@ -16319,9 +16319,8 @@ function contractPairsOpenTo(state, player) {
 // default chit bars manned contracts (4B2d / 4B6c).
 function contractBidBlock(state, player, cardId) {
   if (player.timepiece) return 'timepiece_in_use';
-  // Academia hand limit (4B3): four or more Hand cards (contracts don't count,
-  // 4B2a; they sit apart in contractHand) bars bidding, Skunkworks aside.
-  if (biddingBlockedByHand(state, player)) return 'hand_limit';
+  // No academia hand limit on contract auctions (owner ruling 2026-11-21): a
+  // full patent hand neither bars starting one nor bidding in one.
   const a = state.auction;
   const face = contractFace(cardId, (a && a.kind === 'contract' && a.cardId === cardId && a.side) || state.contractSide || 'blue');
   if (face && face.manned && state.defaultChit && state.defaultChit.profileId === player.profileId) return 'default_stigma';
@@ -16481,7 +16480,6 @@ function applyContractAuctionStart(state, op, ctx) {
   if (!player.fundraisedThisTurn) return fail('fundraise_first');
   if (player.contractAuctionDone) return fail('contract_auction_done');
   if (player.timepiece) return fail('timepiece_in_use');
-  if (biddingBlockedByHand(state, player)) return fail('hand_limit');
   if (state.anarchy || state.war) return fail('contract_auction_prohibited');
   const pair = String(op.pair || '');
   if (!CONTRACT_PAIRS[pair]) return fail('bad_deck');
