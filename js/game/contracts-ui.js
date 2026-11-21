@@ -115,6 +115,8 @@ setContractReadySource((id) => _ready.get(id) || null);
 function payNow(s, q, id, f, left) {
   const p = me();
   if (!p || q.profileId !== p.profileId || !D || !D.myTurn() || !contractFeeDue(id)) return 0;
+  // In default the late fee cap is gone: pay off what the aqua covers.
+  if (((p.contractMeta || {})[id] || {}).default) return Math.max(0, Math.min(left, p.aqua | 0));
   return Math.max(0, Math.min(f.lateFee - (p.lateFeePaidThisTurn | 0), left));
 }
 // The repaid line on a contract card: shown once a contract is late, in
@@ -508,7 +510,7 @@ function renderPanel() {
     return `<div class="m4c-item">${cardThumb(id, meta.side)}
       <div class="m4c-note">${esc(where)}</div>
       <div class="m4c-btns">${myTurn ? `<button type="button" data-act="fulfill" data-id="${id}">Fulfill here</button>` : ''}
-      ${myTurn && contractFeeDue(id) ? `<button type="button" data-act="pay" data-id="${id}" data-max="${f.lateFee}">${late ? `Pay late fee (${f.lateFee})` : 'Pay toward debt'}</button>` : ''}
+      ${myTurn && contractFeeDue(id) ? `<button type="button" data-act="pay" data-id="${id}" data-max="${f.lateFee}">${late ? `Pay late fee (${f.lateFee})` : 'Pay off debt'}</button>` : ''}
       ${mishapLobbyable(id) ? mishapBtn(id) : ''}
       ${myTurn && abandonBlock(s, p, id) === null ? `<button type="button" data-act="abandon" data-id="${id}">Abandon (Anarchy)</button>` : ''}</div></div>`;
   }).join('');
@@ -744,10 +746,18 @@ export async function payContractFee(id) {
   const p = me();
   const f = p && faceOf(p, id);
   if (!f) return;
-  const owedTurn = f.lateFee - ((p.lateFeePaidThisTurn) | 0);
-  if (owedTurn <= 0) { D.toast('You have paid this turn\'s late fee.', 'info'); return; }
   const meta = (p.contractMeta || {})[id] || {};
   const left = (f.advance | 0) * (meta.boosted ? 1 : 2) - (meta.paid | 0);
+  if (left <= 0) return;
+  // In default: no per-turn cap, pay off as much as the aqua covers.
+  if (meta.default) {
+    const amt = Math.min(left, p.aqua | 0);
+    if (amt <= 0) { D.toast('No aqua to pay with.', 'info'); return; }
+    await D.submitTurnOp({ kind: 'PAY_LATE_FEE', cardId: id, amount: amt });
+    return;
+  }
+  const owedTurn = f.lateFee - ((p.lateFeePaidThisTurn) | 0);
+  if (owedTurn <= 0) { D.toast('You have paid this turn\'s late fee.', 'info'); return; }
   const cap = Math.max(1, Math.min(owedTurn, left));
   await D.submitTurnOp({ kind: 'PAY_LATE_FEE', cardId: id, amount: Math.min(cap, p.aqua | 0) || cap });
 }

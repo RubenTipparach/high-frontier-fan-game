@@ -10993,7 +10993,7 @@ function wireHandStrip() {
       if (contractFeeDue(c.id)) {
         const pq = document.createElement('button');
         pq.type = 'button'; pq.className = 'hand-q q-pay'; pq.textContent = '💸';
-        pq.title = c.default ? 'Pay toward the debt (up to the late fee this turn)' : 'Pay this turn\'s late fee';
+        pq.title = c.default ? 'Pay off the debt' : 'Pay this turn\'s late fee';
         pq.addEventListener('click', (ev) => { ev.stopPropagation(); if (isOnlineMyTurn()) payContractFee(c.id); else setStatus('Wait for your turn.'); });
         quick.appendChild(pq);
       }
