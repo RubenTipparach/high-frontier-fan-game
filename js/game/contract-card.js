@@ -147,7 +147,7 @@ export function renderContractFace(face) {
         ${face.Manned ? mannedGlyph() : '<span></span>'}
         <span class="m4-pay">${advanceBadge(face.Advance)}<span>Advance</span></span>
       </div>
-      ${face.Debt ? `<div class="m4-repaid" data-tip="Aqua paid toward the advance (late fees). Paid off, the contract is discarded.">💧 Repaid <b>${face.Debt.paid | 0}</b> / ${face.Debt.debt | 0} aqua</div>` : ''}
+      ${face.Debt ? `<div class="m4-repaid" data-tip="Aqua paid toward the advance (late fees). Paid off, the contract is discarded.">💧 Repaid <b>${face.Debt.paid | 0}</b> / ${face.Debt.debt | 0} aqua${face.Debt.pay > 0 ? `<button type="button" class="m4-pay-btn" data-pay="${esc(face.CardId)}">💸 Pay ${face.Debt.pay}</button>` : ''}</div>` : ''}
       <div class="card-footer m4-footer"><span>${SIDE_LABEL[side] || side}</span><code>${esc(face.Code)}</code></div>
     </div></div>`;
   if (face.Ready && face.CardId) {
