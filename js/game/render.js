@@ -3448,11 +3448,10 @@ export class MapRenderer {
     // alpha) so the preview reads as "same route, just queued
     // for a future turn".
     const sortedLater = [...laterByTurn].sort((a, b) => b[0] - a[0]);
-    for (const [turn, segs] of sortedLater) {
-      const alpha = Math.max(0.22, 0.55 - (turn - 2) * 0.08);
-      ctx.lineWidth = 2.5 / eff;
-      ctx.strokeStyle = `rgba(${PAL.later}, ${alpha})`;
-      ctx.setLineDash([6 / eff, 5 / eff]);
+    // The plotted route always reads on top of the board's lines: each stroke
+    // sits on a dark casing, so a leg running along a bold signposted route
+    // (the same yellow) still shows as the route.
+    const pathOf = (segs) => {
       ctx.beginPath();
       for (const seg of segs) {
         const sa = this.data.byId[seg.from];
@@ -3461,6 +3460,17 @@ export class MapRenderer {
         ctx.moveTo(sa.x, sa.y);
         ctx.lineTo(sb.x, sb.y);
       }
+    };
+    for (const [turn, segs] of sortedLater) {
+      const alpha = Math.max(0.5, 0.85 - (turn - 2) * 0.08);
+      pathOf(segs);
+      ctx.setLineDash([]);
+      ctx.lineWidth = 5.5 / eff;
+      ctx.strokeStyle = 'rgba(8, 6, 20, 0.85)';
+      ctx.stroke();
+      ctx.lineWidth = 2.5 / eff;
+      ctx.strokeStyle = `rgba(${PAL.later}, ${alpha})`;
+      ctx.setLineDash([6 / eff, 5 / eff]);
       ctx.stroke();
     }
     ctx.setLineDash([]);
@@ -3469,6 +3479,10 @@ export class MapRenderer {
     // a Navigate-to inspection route, but here it specifically
     // means "you can fly this much this turn."
     if (turn1.length) {
+      pathOf(turn1);
+      ctx.lineWidth = 7 / eff;
+      ctx.strokeStyle = 'rgba(8, 6, 20, 0.85)';
+      ctx.stroke();
       ctx.lineWidth = 4 / eff;
       ctx.shadowBlur = 6 / eff;
       ctx.shadowColor = PAL.glow;
