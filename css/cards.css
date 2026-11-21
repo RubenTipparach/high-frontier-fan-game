@@ -931,7 +931,7 @@
   opacity: 0;
   transform: translateY(2px);
   transition: opacity 0.14s ease-out, transform 0.14s ease-out;
-  z-index: 9999;
+  z-index: 100001;
   box-shadow: 0 6px 14px rgba(0, 0, 0, 0.45);
   font-family: inherit;
   letter-spacing: 0.2px;
