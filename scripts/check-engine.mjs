@@ -11413,8 +11413,19 @@ check('a late contract: pay the fee each turn or default; debt repayment discard
   st = r2.state;
   if (st.pendingSeniority) st = op(st, 'PLACE_SENIORITY', st.pendingSeniority.chooserId, { place: 'freedom' }).state;
   assert(B().contractMeta[c.id].default && st.defaultChit && st.defaultChit.profileId === B().profileId, 'default + chit');
-  // Debt = 2x advance (never boosted). Pay it down a fee at a time.
+  // Debt = 2x advance (never boosted). In default there is no per-turn late
+  // fee cap (owner 2026-11-21): more than the fee in one payment is fine, more
+  // than the debt left is not. Then pay the rest down.
   const debt = face.advance * 2;
+  while (currentPlayerOf(st).profileId !== B().profileId) st = endTurns(st, 1);
+  B().aqua = 99;
+  const over = op(st, 'PAY_LATE_FEE', B().profileId, { cardId: c.id, amount: debt - B().contractMeta[c.id].paid + 1 });
+  assert(!over.ok && over.error === 'over_debt', `over debt: ${over.error}`);
+  const big = Math.min(face.lateFee + 1, debt - B().contractMeta[c.id].paid - 1);
+  const rb = op(st, 'PAY_LATE_FEE', B().profileId, { cardId: c.id, amount: big });
+  assert(rb.ok, `default pays past the late fee: ${rb.error}`); st = rb.state;
+  const rb2 = op(st, 'PAY_LATE_FEE', B().profileId, { cardId: c.id, amount: 1 });
+  assert(rb2.ok, `default pays twice in a turn: ${rb2.error}`); st = rb2.state;
   let guard = 0;
   while (B().contractMeta[c.id] && guard++ < 40) {
     if (currentPlayerOf(st).profileId !== B().profileId) { st = endTurns(st, 1); continue; }

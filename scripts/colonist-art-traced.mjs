@@ -9,13 +9,45 @@ export const TRACED_FRONTS = new Set([
   'col_malcolm', 'col_heavy_water_survivalists', 'col_botany_bay_convicts', 'col_vatican_observers',
   'col_lloyd_s_salvage_co', 'col_house_of_saud', 'col_rock_rats_miners_union',
   'col_cobots', 'col_gabonese_mining_consortium', 'col_teleoperators', 'col_boston_hexapods',
-  'col_vr_simulcasters', 'col_exoskeletalists',
+  'col_vr_simulcasters', 'col_exoskeletalists', 'col_juiced_cosmonauts',
 ]);
 const hasPose = (id) => !!FIGS[id];
+
+// Juiced Cosmonauts: where his fists grip the handles, and the hammer and sickle
+// drawn once in a 0..100 box (poster layout: hammer head upper left, its grip
+// lower right; a tapering sickle blade over it, its handle lower left). Two tones
+// like the kit: the base and one shade on the side away from the light.
+// jcEmblem maps the two grip points onto the two fists.
+const JC_FISTS = { R: [146, 156], L: [256, 156] };
+const JC_GRIPS = { sickle: [8, 90], hammer: [92, 90] };
+function jcEmblem(fistS, fistH, base = '#e8402a', shade = '#b8281a') {
+  const f = (n) => n.toFixed(1);
+  const [ga, gb] = [JC_GRIPS.sickle, JC_GRIPS.hammer];
+  const k = Math.hypot(fistH[0] - fistS[0], fistH[1] - fistS[1]) / Math.hypot(gb[0] - ga[0], gb[1] - ga[1]);
+  const th = Math.atan2(fistH[1] - fistS[1], fistH[0] - fistS[0]) - Math.atan2(gb[1] - ga[1], gb[0] - ga[0]);
+  const T = ([x, y]) => { const X = (x - ga[0]) * k, Y = (y - ga[1]) * k; return [fistS[0] + X * Math.cos(th) - Y * Math.sin(th), fistS[1] + X * Math.sin(th) + Y * Math.cos(th)]; };
+  const arc = (cx, cy, r, a0, a1, n = 32) => Array.from({ length: n + 1 }, (_, i) => { const a = (a0 + (a1 - a0) * i / n) * Math.PI / 180; return [cx + Math.cos(a) * r, cy + Math.sin(a) * r]; });
+  const d = (pts) => pts.map((q, i) => { const [x, y] = T(q); return `${i ? 'L' : 'M'}${f(x)},${f(y)}`; }).join(' ') + ' Z';
+  const seg = (a, b, w) => { const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy), nx = -dy / L * w / 2, ny = dx / L * w / 2; return [[a[0] + nx, a[1] + ny], [b[0] + nx, b[1] + ny], [b[0] - nx, b[1] - ny], [a[0] - nx, a[1] - ny]]; };
+  const shadeHalf = (q) => [[(q[0][0] + q[3][0]) / 2, (q[0][1] + q[3][1]) / 2], [(q[1][0] + q[2][0]) / 2, (q[1][1] + q[2][1]) / 2], q[2], q[3]];
+  const outer = arc(56, 54, 36, 172, 352), inner = arc(61, 60, 29, 356, 168);
+  const bandIn = arc(61, 60, 29, 352, 170), bandMid = arc(58.5, 57, 32.5, 170, 352);
+  const root = [(outer[0][0] + inner[inner.length - 1][0]) / 2, (outer[0][1] + inner[inner.length - 1][1]) / 2 - 3];
+  const sH = seg([ga[0] - 4, ga[1] + 10], root, 8);
+  const hTop = [20, 22], hH = seg([gb[0] + 7, gb[1] + 7], hTop, 8);
+  const ux = hTop[0] - gb[0], uy = hTop[1] - gb[1], L = Math.hypot(ux, uy), px = -uy / L, py = ux / L, c = [hTop[0] + ux / L * 4, hTop[1] + uy / L * 4];
+  const head = seg([c[0] - px * 18, c[1] - py * 18], [c[0] + px * 12, c[1] + py * 12], 14);
+  return `<path d="${d(hH)}" fill="${base}"/><path d="${d(shadeHalf(hH))}" fill="${shade}"/>
+    <path d="${d([...outer, ...inner])}" fill="${base}"/><path d="${d([...bandMid, ...bandIn])}" fill="${shade}"/>
+    <path d="${d(head)}" fill="${base}"/><path d="${d(shadeHalf(head))}" fill="${shade}"/>
+    <path d="${d(sH)}" fill="${base}"/><path d="${d(shadeHalf(sH))}" fill="${shade}"/>`;
+}
 
 // people per card: { fid, look, pose(sk) }. Full figures, about 46 px a head.
 const at = (x, foot = 324, h = 46, rot = {}) => ({ ...restPose(x, foot, h), rot: { ...rot } });
 const FIGS = {
+  col_juiced_cosmonauts: [{ fid: 'cos', look: { body: 'male', skin: '#e8b890', hair: '#6a4a2a', hairStyle: 'buzz', face: 'smile', top: 'jumpsuit', topColor: '#d8402a', bottomColor: '#d8402a', shoes: '#3a3a40', hands: { L: 'fist', R: 'fist' }, blush: false },
+    pose: (sk) => { let p = at(199, 500, 50); p = reach(sk, p, 'L', JC_FISTS.L, { bend: -1 }); return reach(sk, p, 'R', JC_FISTS.R, { bend: 1 }); } }],
   col_malcolm: [{ fid: 'malcolm', look: { body: 'male', skin: '#e2b48e', hair: '#5a3a22', hairStyle: 'tuft', face: 'sleepy', top: 'longsleeve', topColor: '#3a4a6a', bottomColor: '#2a2e36', hands: { L: 'fist', R: 'relaxed' } },
     pose: (sk) => { let p = at(140, 324, 46, { head: -6, upperR: 10, foreR: -10 }); const J = fk(sk, p).joints; return reach(sk, p, 'L', [J.headBase[0] + 4, J.headBase[1] + 4], { bend: -1 }); } }],
   col_heavy_water_survivalists: [{ fid: 'hw', look: { body: 'male', skin: '#c98a5e', hair: '#2a2420', hairStyle: 'buzz', face: 'neutral', top: 'tee', topColor: '#ecece8', bottomColor: '#4a5a3a', hands: { L: 'fist', R: 'fist' } },
@@ -103,6 +135,28 @@ export function drawTracedFronts({ W, H, panel, emit }) {
     out('col_botany_bay_convicts', `${radial('bb-bg', [['0%', '#fff4e0'], ['55%', '#f0c890'], ['100%', '#a86a3a']], '50%', '40%')}${soft('bb-v')}`,
       `${rect('url(#bb-bg)')}<g stroke="#fff" stroke-width="2" opacity="0.4">${Array.from({ length: 16 }, (_, i) => { const t = (i / 16) * Math.PI * 2; return `<line x1="${f1(c[0])}" y1="${f1(c[1] - 30)}" x2="${f1(c[0] + Math.cos(t) * 90)}" y2="${f1(c[1] - 30 + Math.sin(t) * 90)}"/>`; }).join('')}</g>
        ${F.g}${chain}${fly}${rect('url(#bb-v)')}`);
+  }
+  // Juiced Cosmonauts: the Soviet space poster on the card. A cosmonaut in a
+  // red suit, helmet on, holds a giant hammer and sickle overhead in both
+  // fists; rockets streak past red stars over a pale globe. He stands right of
+  // centre so the thrust triangle leaves his face clear.
+  if (has('col_juiced_cosmonauts')) {
+    const F = figure('col_juiced_cosmonauts');
+    const fl = mid(F.m('cos.hand_l'), F.m('cos.hand_l_tip')), fr = mid(F.m('cos.hand_r'), F.m('cos.hand_r_tip')), hd = F.m('cos.head'), ht = F.m('cos.head_tip');
+    const hc = mid(hd, ht, 0.5), hr = Math.hypot(ht[0] - hd[0], ht[1] - hd[1]) * 0.78;
+    const star = (x, y, R) => { const pts = []; for (let k = 0; k < 10; k++) { const a = -Math.PI / 2 + k * Math.PI / 5, r = k % 2 ? R * 0.42 : R; pts.push(`${f1(x + Math.cos(a) * r)},${f1(y + Math.sin(a) * r)}`); } return `<polygon points="${pts.join(' ')}" fill="#e8302a"/>`; };
+    const rocket = (x0, y0, x1, y1) => `<path d="M${x0},${y0} Q${f1((x0 + x1) / 2 - 10)},${f1((y0 + y1) / 2 + 6)} ${x1},${y1}" stroke="#fff" stroke-width="1.6" fill="none" opacity="0.8" stroke-dasharray="1 3"/><circle cx="${x1}" cy="${y1}" r="2.4" fill="#fff"/>`;
+    out('col_juiced_cosmonauts', `${linear('jc-bg', [['0%', '#1a2048'], ['100%', '#2a3a7a']])}${radial('jc-globe', [['0%', '#ffffff'], ['100%', '#b8c4dc']], '40%', '35%')}${soft('jc-v')}`,
+      `${rect('url(#jc-bg)')}${stars(40, 63)}
+       ${rocket(20, 120, 70, 30)}${rocket(40, 220, 96, 150)}${rocket(300, 150, 262, 70)}${rocket(290, 260, 270, 200)}
+       ${[[70, 30, 7], [262, 70, 7], [96, 150, 5], [240, 22, 5], [270, 200, 5]].map(([x, y, r]) => star(x, y, r)).join('')}
+       <circle cx="196" cy="320" r="118" fill="url(#jc-globe)"/><g stroke="#8a9ac0" stroke-width="1.2" fill="none" opacity="0.6"><ellipse cx="196" cy="320" rx="118" ry="40"/><ellipse cx="196" cy="320" rx="50" ry="118"/></g>
+       ${jcEmblem(fr, fl)}
+       ${F.g}
+       <circle cx="${f1(hc[0])}" cy="${f1(hc[1])}" r="${f1(hr)}" fill="#cfe8ff" fill-opacity="0.22" stroke="#f4f4f0" stroke-width="7"/><path d="M${f1(hc[0] - hr * 0.55)},${f1(hc[1] - hr * 0.5)} Q${f1(hc[0] - hr * 0.2)},${f1(hc[1] - hr * 0.8)} ${f1(hc[0] + hr * 0.25)},${f1(hc[1] - hr * 0.72)}" stroke="#fff" stroke-width="4" fill="none" opacity="0.75" stroke-linecap="round"/><path d="M${f1(hc[0] - hr * 0.8)},${f1(hc[1] + hr * 0.75)} Q${f1(hc[0])},${f1(hc[1] + hr * 1.08)} ${f1(hc[0] + hr * 0.8)},${f1(hc[1] + hr * 0.75)}" stroke="#c8c8c0" stroke-width="8" fill="none" stroke-linecap="round"/><text x="${f1(hc[0])}" y="${f1(hc[1] - hr + 9)}" text-anchor="middle" font-family="sans-serif" font-weight="800" font-size="7" fill="#d81e10">СССР</text>
+       
+       ${rect('url(#jc-v)')}
+       <rect x="0" y="292" width="${W}" height="38" fill="#d81e10"/><text x="232" y="321" text-anchor="middle" font-family="sans-serif" font-weight="900" font-size="25" fill="#ffd040" letter-spacing="3">СЛАВА!</text>`);
   }
   // Vatican Observers: the Jesuit's raised hand by a gold IHS medallion, a
   // flashlight in the other hand, a colleague at the edge.

@@ -16709,7 +16709,8 @@ function beehiveProspect(state, player, slug) {
 }
 
 // PAY_LATE_FEE (4B5b): a free action, up to the contract's late fee per turn,
-// placed on the contract. Also how a default contract's debt is paid down.
+// placed on the contract. Also how a default contract's debt is paid down: in
+// default there is no per-turn cap, any amount up to the debt left.
 function applyPayLateFee(state, op, player) {
   if (!state.m4) return fail('not_m4');
   const cardId = String(op.cardId || (player.timepiece && player.timepiece.contractId) || '');
@@ -16720,11 +16721,17 @@ function applyPayLateFee(state, op, player) {
   if (!late && !meta.default) return fail('not_late');
   const amount = Number(op.amount);
   if (!Number.isInteger(amount) || amount <= 0) return fail('bad_amount');
+  const left = contractDebt(player, cardId) - (meta.paid | 0);
+  if (amount > left) return fail('over_debt', { max: left });
+  // Once in default (the default chit taken), the per-turn late fee cap no
+  // longer applies: the debt can be paid down by any amount on any turn
+  // (owner ruling 2026-11-21). A late contract still pays at most its late fee
+  // per turn.
   const paidNow = player.lateFeePaidThisTurn | 0;
-  if (paidNow + amount > face.lateFee) return fail('over_late_fee', { max: face.lateFee - paidNow });
+  if (!meta.default && paidNow + amount > face.lateFee) return fail('over_late_fee', { max: face.lateFee - paidNow });
   if (amount > (player.aqua | 0)) return fail('insufficient_aqua');
   player.aqua -= amount;
-  player.lateFeePaidThisTurn = paidNow + amount;
+  if (!meta.default) player.lateFeePaidThisTurn = paidNow + amount;
   meta.paid += amount;
   let log = `${player.name} paid ${amount} aqua toward ${face.name} (${meta.paid} of ${contractDebt(player, cardId)} paid).`;
   log += maybeRepayDebt(state, player, cardId);
