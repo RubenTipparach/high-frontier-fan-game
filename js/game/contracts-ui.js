@@ -425,6 +425,14 @@ export function showContractWhere(id) {
 
 let _tab = null;        // 'market' | 'yours'
 // May the viewer start a contract auction now (the end of their Fundraise)?
+// Why a fundraised player may not start the contract auction, or ''.
+function auctionBar(s, p) {
+  if (!s || !p || !D.myTurn() || !p.fundraisedThisTurn || p.contractAuctionDone || s.auction) return '';
+  if (s.anarchy || s.war) return `No contract auctions during ${s.war ? 'War' : 'Anarchy'}.`;
+  if (p.timepiece) return 'Your timepiece is on the Sunspot Cycle.';
+  if (D.handFull && D.handFull(p)) return `Academia hand limit: ${(p.hand || []).length} cards in hand. Discard to 3 to auction.`;
+  return '';
+}
 function canAuctionNow(s, p, myTurn) {
   return !!(s && p && myTurn && p.fundraisedThisTurn && !p.contractAuctionDone && !p.timepiece && !s.auction
     && !s.anarchy && !s.war && !(D.handFull && D.handFull(p)));
@@ -459,7 +467,20 @@ export function canStartContractAuction() { return canAuctionNow(snap(), me(), D
 export function renderContractAuctionStep(host, done) {
   const s = snap(); const p = me();
   host.innerHTML = '';
-  if (!canAuctionNow(s, p, D.myTurn())) return false;
+  if (!canAuctionNow(s, p, D.myTurn())) {
+    // Fundraised, auction not yet held, but barred: say why (4B3a, b) instead
+    // of the step silently not appearing.
+    const why = auctionBar(s, p);
+    if (!why) return false;
+    const wrap = document.createElement('div');
+    wrap.className = 'm4c-fr-step';
+    wrap.innerHTML = `<h4>📜 Contract auction</h4><p class="m4c-bar">${why}</p>
+      <div class="m4c-btns m4c-fr-skip"><button type="button" data-again>Check again</button><button type="button" data-skip>No auction</button></div>`;
+    wrap.querySelector('[data-again]').addEventListener('click', () => renderContractAuctionStep(host, done));
+    wrap.querySelector('[data-skip]').addEventListener('click', done);
+    host.appendChild(wrap);
+    return true;
+  }
   const wrap = document.createElement('div');
   wrap.className = 'm4c-fr-step';
   wrap.innerHTML = `<h4>📜 Contract auction</h4>${decksHtml(s, p, true)}
