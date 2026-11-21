@@ -15111,6 +15111,7 @@ export function liveScoreboard(state) {
   const globalPerSpectral = {};
   for (const f of allFactories) globalPerSpectral[f.spectralType] = (globalPerSpectral[f.spectralType] || 0) + 1;
   const firstIdx = state.firstPlayerIndex || 0;
+  const contractLive = liveContractRows(state);
   const players = state.players.map((p, idx) => {
     const sirenScale = isSirenPlayer(state, p);
     const ownColonies = Object.entries(state.colonies || {})
@@ -15148,7 +15149,8 @@ export function liveScoreboard(state) {
       colonySolar: b.colonySolar, colonyScale: b.colonyScale,
       gloryVp, cubeVp, futuresVp, bernalVp, bernalRows: bernalBd.rows,
       futureStars: liveStars,
-      total: b.total, aqua: p.aqua | 0,
+      contracts: contractLive[p.profileId] || null,
+      total: b.total + ((contractLive[p.profileId] || {}).vp || 0), aqua: p.aqua | 0,
     };
   });
   const ranked = [...players].sort((a, b) => b.total - a.total || b.aqua - a.aqua);
@@ -16838,6 +16840,23 @@ function contractScoring(state) {
     out[state.defaultChit.profileId].chit = state.defaultChit.side === 'gold' ? -6 : -3;
   }
   for (const id of Object.keys(out)) out[id].vp = out[id].fulfilled - out[id].debt + out[id].chit;
+  return out;
+}
+// The live scoreboard's contract line (pure read): fulfilled contract VP, the
+// default chit where it sits now, and -1 per unpaid aqua on a contract still
+// held (what it would cost if the game ended now). Unlike contractScoring it
+// does not hand the chit on, so the live panel shows the chit's real holder.
+function liveContractRows(state) {
+  const out = {};
+  if (!state.m4) return out;
+  for (const p of state.players) {
+    const fulfilledList = (p.fulfilledContracts || []).map((f) => { const face = contractFace(f.id, f.side) || {}; return { name: face.name || f.id, vp: face.vp || 0 }; });
+    const fulfilled = fulfilledList.reduce((sum, f) => sum + f.vp, 0);
+    let debt = 0;
+    for (const id of Object.keys(p.contractMeta || {})) debt += Math.max(0, contractDebt(p, id) - ((p.contractMeta[id].paid) | 0));
+    const chit = (state.defaultChit && state.defaultChit.profileId === p.profileId) ? (state.defaultChit.side === 'gold' ? -6 : -3) : 0;
+    out[p.profileId] = { fulfilled, fulfilledList, debt, chit, chitSide: chit ? (state.defaultChit.side === 'gold' ? 'gold' : 'blue') : null, vp: fulfilled - debt + chit };
+  }
   return out;
 }
 // ===== end Module 4 contracts ===============================================

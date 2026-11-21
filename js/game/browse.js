@@ -34796,12 +34796,22 @@ function paintTransparentScoring(host, sb) {
     ? `<h4>Assembly</h4><ul class="glory-table"><li><span>🏛 Delegate cubes</span><strong>+${cubeVp} VP</strong></li></ul>`
     : '';
 
+  // --- M4 contracts: fulfilled VP, the default chit, unpaid debt ----
+  const con = sel.contracts || null;
+  let contractBlock = '';
+  if (con && (con.fulfilled || con.debt || con.chit)) {
+    const rows = (con.fulfilledList || []).map((f) => `<li><span>📜 ${esc(f.name)}</span><strong>+${f.vp | 0} VP</strong></li>`).join('');
+    const chitRow = con.chit ? `<li><span data-tip="Held now. At game end the chit goes to whoever defaults last.">🏷 Default chit <span class="muted">(${esc(con.chitSide || 'blue')})</span></span><strong>${con.chit} VP</strong></li>` : '';
+    const debtRow = con.debt ? `<li><span data-tip="-1 VP per aqua still owed on a held contract, if unpaid at game end.">💧 Unpaid <span class="muted">(${con.debt} aqua)</span></span><strong>-${con.debt} VP</strong></li>` : '';
+    contractBlock = `<h4>Contracts</h4><ul class="glory-table">${rows}${chitRow}${debtRow}</ul>`;
+  }
+
   // Safety net: every VP in the header total must appear in a line above. Sum
   // the categories we itemise and, if the authoritative total is higher (some
   // award we don't break out, e.g. the winning-ideology bonus at game end),
   // surface the remainder so no VP is ever hidden from the breakdown again.
   const shownVp = (sel.spectralVp | 0) + (sel.tokenVp | 0) + (sel.colonyVp | 0)
-    + (sel.bernalVp | 0) + (sel.futuresVp | 0) + gloryVp + cubeVp;
+    + (sel.bernalVp | 0) + (sel.futuresVp | 0) + gloryVp + cubeVp + ((con && con.vp) | 0);
   const otherVp = (sel.total | 0) - shownVp;
   const otherBlock = otherVp > 0
     ? `<h4>Other awards</h4><ul class="glory-table"><li><span>➕ Other</span><strong>+${otherVp} VP</strong></li></ul>`
@@ -34837,6 +34847,7 @@ function paintTransparentScoring(host, sb) {
       ${delegateBlock}
       ${bernalBlock}
       ${futuresBlock}
+      ${contractBlock}
       ${gloryLine}
       ${otherBlock}
     </section>
