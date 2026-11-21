@@ -18,7 +18,7 @@ import { SITES_BY_ID } from '../../data/sites.js';
 import { lagrangeLabel } from '../../data/lagrange-labels.js';
 import { nodeLabelOf } from '../../data/map-labels.js';
 import { augmentGlyph, AUGMENTS, timepieceDialGlyph } from './contract-glyphs.js';
-import { sunspotDialSvg } from './turn-clock-ui.js';
+import { sunspotDialSvg, setSunspotMarkerSource } from './turn-clock-ui.js';
 import { isM4, isM2 } from './online-mode.js';
 import { COLONISTS_BY_ID } from '../../data/colonists.js';
 import { IDEOLOGY_ORDER, IDEOLOGY_BY_KEY, activeLaws, usesSoloAssembly, voteWinners } from '../../data/assembly.js';
@@ -348,6 +348,8 @@ function timepieceMarkers(s, skipId) {
   }));
 }
 const turnLine = (s) => `Turn ${(s.turn | 0) + 1}`;
+// The Sunspot Cycle window shows every contract timepiece on its dial (M4 only).
+setSunspotMarkerSource(() => { const s = snap(); return s && s.m4 ? timepieceMarkers(s, null) : []; });
 
 
 // ---- the panel --------------------------------------------------------------------
