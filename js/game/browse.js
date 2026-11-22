@@ -20029,6 +20029,32 @@ function contractAbilityListOf(p, key) {
   return out;
 }
 // Closest Planet: -N ISRU prospecting a body (engine contractIsruBonusAt).
+// M4 splat augmentation, side 2: +1 Hydration (4C3) where its holder stands.
+// The chit rides a Crew / Colonist card, so it works at the site that card's
+// stack is at (an older chit on a Colony works at that Colony). Mirrors the
+// server's augmentSideAt + effectiveHydration so the popup and the prospect /
+// refuel gates agree with the engine.
+function augHydrationBonus(site) {
+  const s = _onlineSnapshot;
+  const me = mySnapshotPlayer();
+  const a = s && s.m4 && me && me.augments && me.augments.splat;
+  if (!a || a.side !== 2 || !site) return 0;
+  const slug = String(SITES_BY_ID[site.id2] ? site.id2 : (SITES_BY_ID[site.id] ? site.id : (site.id2 || site.id)));
+  const holder = a.crewId || a.colonistId;
+  if (!holder) return a.colonySite === slug ? 1 : 0;
+  const id = String(holder);
+  const has = (arr) => (arr || []).some((sl) => sl && String(sl.id) === id);
+  const at = (x) => (x && x.siteId != null ? String(x.siteId) : 'leo');
+  let where;
+  if (me.rocket && has(me.rocket.stack)) where = at(me.rocket);
+  else if (has(me.leo)) where = 'leo';
+  else {
+    for (const o of Object.values(me.outposts || {})) if (o && has(o.cards)) { where = at(o); break; }
+    if (where === undefined && me.freighter && has(me.freighter.stack)) where = at(me.freighter);
+    if (where === undefined) for (const bn of (me.bernals || [])) if (bn && has(bn.stack)) { where = at(bn); break; }
+  }
+  return where !== undefined && where === slug ? 1 : 0;
+}
 function contractIsruBonusOf(p, site) {
   const rec = site && (SITES_BY_ID[site.id2] || SITES_BY_ID[site.id] || site);
   const body = String((rec && rec.body) || '');
@@ -21395,7 +21421,7 @@ function pickRefiningSource(site) {
   // Atmospheric Scoop (subsystem 5): an aerostat site you're parked at (refuel
   // is always colocated) counts as hydration 2. Adjacency is server-side only.
   const isAerostat = siteIsAerostat(site);
-  const baseWater = Number.isFinite(site.hydration) ? site.hydration : 0;
+  const baseWater = (Number.isFinite(site.hydration) ? site.hydration : 0) + augHydrationBonus(site);
   const water = (isAerostat && stackHasPower('aerostatHydration2')) ? Math.max(baseWater, 2) : baseWater;
   // SCAVENGING (Femtochemistry): a COLOCATED card doubles refuel FTs - any of
   // my stacks standing here, not just the rocket.
@@ -21438,7 +21464,7 @@ function canRefuelAt(site) {
   // Without this the dry-site gate greyed a scoop-enabled aerostat refuel even
   // though the server allows it (user 2026-06-29: refuel greyed at Titan).
   const isAerostat = siteIsAerostat(site);
-  const baseWater = Number.isFinite(site.hydration) ? site.hydration : 0;
+  const baseWater = (Number.isFinite(site.hydration) ? site.hydration : 0) + augHydrationBonus(site);
   const water = (isAerostat && stackHasPower('aerostatHydration2')) ? Math.max(baseWater, 2) : baseWater;
   const tank  = getTankWater();
   const tmax  = getTankMax();
@@ -21948,7 +21974,7 @@ function buildRefuelBreakdown(site, mode) {
     lines.push({ icon: '🏭', label: 'Factory output', detail: '7 water (flat)' });
   } else {
     const isAerostat = siteIsAerostat(site);
-    const baseWater = Number.isFinite(site.hydration) ? site.hydration : 0;
+    const baseWater = (Number.isFinite(site.hydration) ? site.hydration : 0) + augHydrationBonus(site);
     scoop = isAerostat && stackHasPower('aerostatHydration2') && baseWater < 2;
     const water = scoop ? 2 : baseWater;
     const prosp = getActiveProspectorStats();
@@ -25575,7 +25601,7 @@ function doProspect(site, prosp) {
   const prospIsru = Math.max(0, prosp.isru + colocatedIsruMod({ isAerostat: isAerostatSiteHere }) - contractIsruBonusOf(mySnapshotPlayer(), site));
   const rSite = getRocketSite();
   const colocScoopHere = isAerostatSiteHere && rSite && rSite.id === site.id && stackHasPower('aerostatHydration2');
-  const baseWaterHere = Number.isFinite(site.hydration) ? site.hydration : 0;
+  const baseWaterHere = (Number.isFinite(site.hydration) ? site.hydration : 0) + augHydrationBonus(site);
   const siteWater = colocScoopHere ? Math.max(baseWaterHere, 2) : baseWaterHere;
   if (prospIsru > siteWater) {
     setStatus(
@@ -29989,7 +30015,7 @@ function showSitePopupFor(site) {
   // cooling) and prospectorStatsFor() for the rest.
   if (isProspectableSite && !getDisc(site.id)) {
     const isAerostat = siteIsAerostat(site);
-    const baseWater  = Number.isFinite(site.hydration) ? site.hydration : 0;
+    const baseWater  = (Number.isFinite(site.hydration) ? site.hydration : 0) + augHydrationBonus(site);
     const units = [];
     // Rocket: the persisted active prospector (unchanged behaviour).
     if (prosp) { prosp.stackId = 'rocket'; units.push({ stats: prosp, fromSite: rocketSite?.id, slots: getRocketStack(), label: '' }); }
@@ -31476,7 +31502,7 @@ function showSitePopupFor(site) {
   // an aerostat to 2), so the chip matches the prospect / refuel gate instead of
   // showing the unmodified printed ISRU.
   const popupAero = siteIsAerostat(site);
-  const popupBaseWater = Number.isFinite(site.hydration) ? site.hydration : 0;
+  const popupBaseWater = (Number.isFinite(site.hydration) ? site.hydration : 0) + augHydrationBonus(site);
   const popupWater = (popupAero && stackHasPower('aerostatHydration2')) ? Math.max(popupBaseWater, 2) : popupBaseWater;
   _renderer.setPopupRocketInfo(prosp
     ? { isru: Math.max(0, prosp.isru + colocatedIsruMod({ isAerostat: popupAero }) - contractIsruBonusOf(mySnapshotPlayer(), site)), water: popupWater, kind: prosp.kind }
