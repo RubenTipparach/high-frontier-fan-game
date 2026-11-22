@@ -2094,7 +2094,7 @@ button.m4c-aug:hover { border-color: #60a5fa; background: #232838; }
 .m4p-title { grid-area: title; font-size: 24px; font-weight: 900; letter-spacing: 1px; line-height: 1.05; }
 .m4p-title small { display: block; font-size: 12px; letter-spacing: 1px; margin-top: 4px; }
 .m4p-where { font-size: 12px; font-weight: 400; letter-spacing: 0; margin-top: 8px; color: #cfd3e8; }
-.m4p-ex { grid-area: ex; background: rgba(240, 240, 248, .9); color: #222; border: 3px solid #b9a7e0; border-radius: 14px; padding: 12px; text-align: center; }
+.m4p-ex { grid-area: ex; background: rgba(0, 0, 0, .78); color: #eef; border: 2px solid #6b5a96; border-radius: 14px; padding: 12px; text-align: center; }
 .m4p-ex h5 { font-size: 20px; line-height: 1.05; }
 .m4p-ex .card { margin: 0 auto; zoom: .82; }
 .m4p-ex-count { font-size: 12px; margin-bottom: 4px; }
@@ -2113,15 +2113,15 @@ button.m4c-aug:hover { border-color: #60a5fa; background: #232838; }
 .m4p-tick.on { background: #ffd24a; }
 .m4p-table { grid-area: table; background: rgba(0, 0, 0, .8); border-radius: 12px; padding: 10px 12px; }
 .m4p-fuel { width: 100%; border-collapse: collapse; font-size: 12px; }
-.m4p-fuel th, .m4p-fuel td { border: 1px solid #e8ecf2; padding: 4px 5px; text-align: left; }
+.m4p-fuel th, .m4p-fuel td { border: 1px solid #3a3f52; padding: 4px 5px; text-align: left; }
 .m4p-fuel th.me, .m4p-fuel td.me { background: rgba(255, 210, 74, .15); }
 .m4p-fuel tr.now td { background: rgba(255, 210, 74, .35); color: #fff; font-weight: 700; }
 .m4p-total { margin-top: 6px; font-size: 13px; }
-.m4p-ship { grid-area: ship; background: rgba(230, 230, 238, .92); color: #222; border-radius: 14px; padding: 10px 12px; }
+.m4p-ship { grid-area: ship; background: rgba(0, 0, 0, .78); color: #eef; border-radius: 14px; padding: 10px 12px; }
 .m4p-ship h5 { font-size: 20px; }
 .m4p-req { list-style: none; margin: 0; padding: 0; font-size: 12px; }
 .m4p-req li { display: flex; gap: 6px; align-items: center; padding: 2px 0; opacity: .7; }
 .m4p-req li.on { opacity: 1; font-weight: 700; }
-.m4p-req .m4p-tick { border-color: #b8860b; }
+.m4p-req .m4p-tick { border-color: #ffd24a; }
 .m4p-aboard { margin-top: 6px; font-size: 12px; }
 @media (max-width: 860px) { .m4p { grid-template-columns: 1fr; grid-template-areas: "title" "vaults" "phases" "ex" "table" "ship"; } }
