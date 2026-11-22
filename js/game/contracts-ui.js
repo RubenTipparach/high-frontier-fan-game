@@ -288,6 +288,13 @@ export function refreshContractsUi() {
   announceFulfilled(s);
   renderContractAuction(s.auction && s.auction.kind === 'contract' ? s.auction : null);
   if (_panelOpen) renderPanel();
+  // The open timepiece window redraws with the board (a payment moves its
+  // Repaid line); a contract that is gone (paid off, fulfilled) closes it.
+  const where = document.getElementById('m4-contract-where');
+  if (where) {
+    const p = me(); const id = where.dataset.cid;
+    if (p && id && (p.contractMeta || {})[id]) showContractWhere(id); else where.remove();
+  }
 }
 
 // ---- contract fulfilled (4B4f) ------------------------------------------------------
@@ -411,6 +418,7 @@ export function showContractWhere(id) {
   const ov = document.createElement('div');
   ov.id = 'm4-contract-where';
   ov.className = 'm4c-overlay';
+  ov.dataset.cid = id;
   ov.innerHTML = `<div class="m4c-modal m4c-where" role="dialog" aria-label="Contract">
     <div class="m4c-head"><h3>⏱ ${esc((faceOf(p, id) || {}).name || '')}</h3><button type="button" class="m4c-close" aria-label="Close">✕</button></div>
     <div class="m4c-where-body">${cardThumb(id, meta.side)}<div class="m4c-where-loc">📍 ${esc(locationOf(p, id) || 'In a stack')}</div>
