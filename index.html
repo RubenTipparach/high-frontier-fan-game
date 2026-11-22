@@ -217,16 +217,31 @@
           <!-- In testing: Module 4 Exodus (opened to testers 2026-11-18). -->
           <p class="alpha-banner-text">You can open rooms with <strong>Module 4: Exodus</strong> (contracts). Thank you for scouting ahead.</p>
         </div>
-        <!-- Two-column lobby dashboard. Left (wide) column carries the
-             live global chat, sized to its own box, with Open tables and
-             Live games filling the space beneath it instead of leaving
-             the chat panel stretched with dead space. Right column is the
-             player's own games (active + ended). Collapses to one column
-             on narrow screens with the player's games first (per user
-             feedback). -->
+        <!-- Two-column lobby dashboard. Left (wide) column: Open tables,
+             Live games, then the global chat. Right column: the player's own
+             games, with Ended games at its bottom. On narrow screens it is one
+             column in this order (owner 2026-11-22): Your games, Open tables,
+             Live games, Global chat, Ended games last. -->
         <div class="lobby-dashboard">
           <div class="lobby-col lobby-col-main">
-            <div class="panel global-chat">
+            <div class="panel lobby-p-open">
+              <div class="card-header">
+                <h2>Open tables</h2>
+                <button id="btn-refresh-lobbies" title="Refresh the open-table list">⟳</button>
+              </div>
+              <ul id="lobby-list" class="lobby-list">
+                <li class="empty">Loading…</li>
+              </ul>
+            </div>
+            <div class="panel lobby-p-live">
+              <div class="card-header">
+                <h2>Live games</h2>
+              </div>
+              <ul id="public-games-list" class="lobby-list">
+                <li class="empty">No public games right now.</li>
+              </ul>
+            </div>
+            <div class="panel global-chat lobby-p-chat">
               <h2>Global chat</h2>
               <!-- Server-wide announcement (patches / updates). Populated
                    from GET /announcement; hidden when empty. -->
@@ -240,26 +255,9 @@
                 <button type="submit">Send</button>
               </form>
             </div>
-            <div class="panel">
-              <div class="card-header">
-                <h2>Open tables</h2>
-                <button id="btn-refresh-lobbies" title="Refresh the open-table list">⟳</button>
-              </div>
-              <ul id="lobby-list" class="lobby-list">
-                <li class="empty">Loading…</li>
-              </ul>
-            </div>
-            <div class="panel">
-              <div class="card-header">
-                <h2>Live games</h2>
-              </div>
-              <ul id="public-games-list" class="lobby-list">
-                <li class="empty">No public games right now.</li>
-              </ul>
-            </div>
           </div>
           <div class="lobby-col lobby-col-side">
-            <div class="panel lobby-your-games">
+            <div class="panel lobby-your-games lobby-p-mine">
               <div class="card-header"><h2>Your games</h2></div>
               <h3 class="lobby-subhead">👥 Multiplayer</h3>
               <ul id="mygames-mp" class="lobby-list">
@@ -270,7 +268,7 @@
                 <li class="empty">No solo games in progress.</li>
               </ul>
             </div>
-            <div class="panel">
+            <div class="panel lobby-p-ended">
               <div class="card-header">
                 <h2>Ended games</h2>
                 <button id="btn-public-results"

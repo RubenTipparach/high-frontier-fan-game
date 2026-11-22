@@ -1808,8 +1808,12 @@ export class MapRenderer {
   // at the bottom of the popup.
   setSitePopup(site, actions = []) {
     if (!site) { this.clearSitePopup(); return; }
+    // Only a fresh open (hidden before, or another site) starts the ghost-tap
+    // guard; a refresh of the open popup must not block a real tap.
+    const fresh = !this._popupEl || this._popupEl.classList.contains('hidden') || !this._popupSite || this._popupSite.id !== site.id;
     this._popupSite = site;
     this._buildSitePopup(site, actions);
+    if (fresh) this._popupShownAt = performance.now();
     // Place it at the current frame's screen position immediately
     // so the popup doesn't briefly render at (0, 0) while the
     // first draw cycle is pending.
@@ -2081,6 +2085,15 @@ export class MapRenderer {
     this._popupEl.className = 'map-popup hidden';
     this.host.appendChild(this._popupEl);
     this._popupSite = null;
+    // A tap that opens the popup must not also press a button in it: some
+    // phones fire the tap's click after the popup is already under the finger.
+    // Swallow any press on the popup for a moment after it opens.
+    this._popupShownAt = 0;
+    const ghostGuard = (ev) => {
+      if (performance.now() - this._popupShownAt < 450) { ev.preventDefault(); ev.stopPropagation(); }
+    };
+    this._popupEl.addEventListener('click', ghostGuard, true);
+    this._popupEl.addEventListener('pointerup', ghostGuard, true);
 
     // Tap tooltip for popup action buttons: a transient bubble that pops up at
     // the tap point to explain WHY a marked-invalid action (e.g. a blocked
@@ -3435,11 +3448,10 @@ export class MapRenderer {
     // alpha) so the preview reads as "same route, just queued
     // for a future turn".
     const sortedLater = [...laterByTurn].sort((a, b) => b[0] - a[0]);
-    for (const [turn, segs] of sortedLater) {
-      const alpha = Math.max(0.22, 0.55 - (turn - 2) * 0.08);
-      ctx.lineWidth = 2.5 / eff;
-      ctx.strokeStyle = `rgba(${PAL.later}, ${alpha})`;
-      ctx.setLineDash([6 / eff, 5 / eff]);
+    // The plotted route always reads on top of the board's lines: each stroke
+    // sits on a dark casing, so a leg running along a bold signposted route
+    // (the same yellow) still shows as the route.
+    const pathOf = (segs) => {
       ctx.beginPath();
       for (const seg of segs) {
         const sa = this.data.byId[seg.from];
@@ -3448,6 +3460,17 @@ export class MapRenderer {
         ctx.moveTo(sa.x, sa.y);
         ctx.lineTo(sb.x, sb.y);
       }
+    };
+    for (const [turn, segs] of sortedLater) {
+      const alpha = Math.max(0.5, 0.85 - (turn - 2) * 0.08);
+      pathOf(segs);
+      ctx.setLineDash([]);
+      ctx.lineWidth = 5.5 / eff;
+      ctx.strokeStyle = 'rgba(8, 6, 20, 0.85)';
+      ctx.stroke();
+      ctx.lineWidth = 2.5 / eff;
+      ctx.strokeStyle = `rgba(${PAL.later}, ${alpha})`;
+      ctx.setLineDash([6 / eff, 5 / eff]);
       ctx.stroke();
     }
     ctx.setLineDash([]);
@@ -3456,6 +3479,10 @@ export class MapRenderer {
     // a Navigate-to inspection route, but here it specifically
     // means "you can fly this much this turn."
     if (turn1.length) {
+      pathOf(turn1);
+      ctx.lineWidth = 7 / eff;
+      ctx.strokeStyle = 'rgba(8, 6, 20, 0.85)';
+      ctx.stroke();
       ctx.lineWidth = 4 / eff;
       ctx.shadowBlur = 6 / eff;
       ctx.shadowColor = PAL.glow;
@@ -5845,8 +5872,11 @@ export class MapRenderer {
           }
           return;
         }
-        // Treat a no-drift tap as a click.
+        // Treat a no-drift tap as a click. We act on it here, so cancel the
+        // click the phone would fire next: it would land on whatever this tap
+        // just opened under the finger (a site popup button).
         if (this._gesture && !this._gesture.moved) {
+          if (ev.cancelable) ev.preventDefault();
           const last = this._gesture.touches[0];
           if (last) {
             const pt = this._eventToWorld(last);

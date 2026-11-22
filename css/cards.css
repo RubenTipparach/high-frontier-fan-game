@@ -931,7 +931,7 @@
   opacity: 0;
   transform: translateY(2px);
   transition: opacity 0.14s ease-out, transform 0.14s ease-out;
-  z-index: 9999;
+  z-index: 100001;
   box-shadow: 0 6px 14px rgba(0, 0, 0, 0.45);
   font-family: inherit;
   letter-spacing: 0.2px;
@@ -1942,10 +1942,15 @@
 /* M4 contracts in the hand strip: same box as a patent hand card. A default
    contract lies sideways in the hand (4B4d). */
 .hand-slot .card.m4-contract { height: 350px; max-height: 350px; overflow: hidden; }
-/* Same 0.77 hand scale, turned a quarter left about the top-left corner, then
-   dropped so it lies along the bottom of the 280px slot (270 wide, 169 tall). */
-.hand-slot.is-contract.is-default .card.m4-contract { transform: translate(0, 280px) rotate(-90deg) scale(0.77); }
-.hand-slot.is-contract.is-default { width: 270px; }
+/* Contracts sit at the right end of the hand, apart from the patent cards
+   (owner 2026-11-20), and stand upright. A default contract (4B4d) keeps its
+   upright card with a Default tag, instead of lying sideways across its
+   neighbours. */
+.hand-slot.is-contract.hand-contract-first { margin-left: auto !important; }
+.hand-slot.is-contract.is-default::before { content: 'Default'; position: absolute; top: 6px; left: 8px; z-index: 3;
+  background: #7f1d1d; color: #fecaca; border: 1px solid #ef4444; border-radius: 6px; padding: 1px 8px;
+  font-size: 11px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; pointer-events: none; }
+.hand-slot.is-contract.is-default .card.m4-contract { filter: grayscale(.55); }
 .hand-slot .hand-q.is-blocked { opacity: .4; }
 
 /* Planetary Protection: pick one Ideology for 2 delegates. */
@@ -2047,6 +2052,18 @@ button.m4c-aug:hover { border-color: #60a5fa; background: #232838; }
 .m4c-endturn-item .m4c-ful-ok { justify-self: auto; align-self: stretch; }
 .m4c-endturn-foot { display: flex; justify-content: center; padding: 0 14px 14px; }
 .m4c-endturn-skip { background: none; border: 1px solid #3f4460; color: #cfd6e6; border-radius: 8px; padding: 7px 16px; cursor: pointer; }
+
+.m4c-mybid { margin: 0; font-size: 13px; color: #cfd6e6; }
+
+.m4c-late .m4c-modal { border-color: #ef4444; }
+.m4c-late-text { margin: 0; text-align: center; font-size: 13px; line-height: 1.4; }
+.m4c-late-skip { border-color: #ef4444; color: #fca5a5; }
+
+.card.m4-contract .m4-repaid { text-align: center; font-size: 12px; padding: 3px 6px; background: #2a1414; color: #fecaca; border-top: 1px solid #7f1d1d; }
+.card.m4-contract .m4-repaid b { color: #fff; }
+.card.m4-contract .m4-repaid .m4-pay-btn { margin-left: 8px; font: inherit; font-weight: 700; padding: 1px 8px; border-radius: 6px; border: 1px solid #fbbf24; background: #f59e0b; color: #1a1205; cursor: pointer; }
+.card.m4-contract .m4-repaid .m4-pay-btn:hover { background: #fbbf24; }
+.card.m4-contract .m4-repaid .m4-pay-btn:disabled { opacity: .6; cursor: wait; }
 
 /* M4 colonist marks: bottom of the art, right of the thrust triangle (Humans)
    or near the spectral hex (Robots), as printed on the Spaceborn deck. */

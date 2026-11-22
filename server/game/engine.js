@@ -5626,6 +5626,23 @@ function applyMoveFleet(state, op, player) {
   return { ok: true, state, rolled: anyRolled, log: logs.join(' ') || `${player.name} moved the factory fleet.` };
 }
 
+
+// The Baltimore Gun Club crew slot colocated with a rocket leaving `from`
+// (null = LEO): aboard the rocket, or in any of the player's stacks on that
+// same space. Null when it is nowhere there.
+function gunClubColocated(player, from) {
+  const ID = 'crew_baltimore_gun_club';
+  const pick = (arr) => (arr || []).find((s) => s && s.id === ID) || null;
+  const sameSpace = (siteId) => (siteId == null ? null : siteId) === (from == null ? null : from);
+  let slot = pick(player.rocket && player.rocket.stack);
+  if (slot) return slot;
+  if (from == null && (slot = pick(player.leo))) return slot;
+  for (const o of Object.values(player.outposts || {})) if (o && sameSpace(o.siteId) && (slot = pick(o.cards))) return slot;
+  for (const bn of (player.bernals || [])) if (bn && sameSpace(bn.siteId) && (slot = pick(bn.stack))) return slot;
+  if (player.freighter && sameSpace(player.freighter.siteId) && (slot = pick(player.freighter.stack))) return slot;
+  return null;
+}
+
 function applyMove(state, op, player) {
   // M1: a MOVE tagged for the freighter drives the freighter unit instead of
   // the rocket (a separate mover with its own, simpler movement model).
@@ -5884,9 +5901,12 @@ function applyMove(state, op, player) {
   // lock would leave the card doing nothing from turn one until an anchoring
   // that most games never reach. (Recorded here rather than left implicit -
   // this was reading as an accidental bypass of the whole privilege system.)
-  const baltimoreSlot = state.anarchy
-    ? null
-    : player.rocket.stack.find((s) => s.id === 'crew_baltimore_gun_club');
+  // "Colocated" is the card's word: the crew counts aboard the rocket, or in
+  // any of the player's stacks on the same space the rocket leaves from (the
+  // LEO stack when it leaves LEO, an outpost / Bernal / Freighter parked there).
+  // It used to count only aboard, so a Gun Club waiting in the LEO stack gave
+  // the departing rocket nothing (reported 2026-11-20).
+  const baltimoreSlot = state.anarchy ? null : gunClubColocated(player, from);
   let arcjetCredit = 0;
   if (baltimoreSlot) {
     const atLeo = from == null;
@@ -11855,14 +11875,51 @@ function mayRabbleRouse(state, player) {
   if (!state.anarchy || factionPrivilegesLocked(state, player)) return false;
   return playerOwnsAbility(player, 'RABBLE-ROUSER');
 }
+// Mishap Insurance (4B5a): it pays ONE late fee per late contract, on any late
+// turn (owner 2026-11-20: "once whenever"). With the law in force it is simply
+// used; otherwise it is lobbied (1 aqua, or none under the solitaire Unity law,
+// plus a Centrist delegate). Paid automatically when the law is in force at the
+// flip, which spends the same single use.
+function lobbyMishapInsurance(state, player, asm, laws, solo) {
+  if (!state.m4) return fail('bad_ideology');
+  const tp = player.timepiece;
+  const meta = tp && contractMetaOf(player, tp.contractId);
+  const face = tp && contractFaceOf(player, tp.contractId);
+  if (!tp || !tp.deadbeat || !meta || !face || meta.default) return fail('no_late_contract');
+  if (!player.turnStartedLate) return fail('no_late_fee_due');
+  if (meta.insuranceUsed) return fail('insurance_used');
+  if (meta.insuredTurn || (player.lateFeePaidThisTurn | 0) > 0) return fail('late_fee_already_paid');
+  const inForce = laws.active.has('centrist');
+  let how = 'with the law in force';
+  if (!inForce) {
+    if (placeCount(asm, 'centrist', player.profileId) <= 0) return fail('no_delegate_there');
+    const freeLobby = solo && laws.active.has('unity');
+    if (!freeLobby && (player.aqua | 0) < 1) return fail('insufficient_aqua');
+    if (!freeLobby) player.aqua -= 1;
+    setPlaceCount(asm, 'centrist', player.profileId, placeCount(asm, 'centrist', player.profileId) - 1);
+    player.lobbiedThisTurn = true;
+    how = `lobbied with ${freeLobby ? 'no aqua' : '1 aqua'} and a Centrist delegate`;
+  }
+  meta.paid += face.lateFee;
+  meta.insuredTurn = true;
+  meta.insuranceUsed = true;
+  const tail = maybeRepayDebt(state, player, tp.contractId);
+  return { ok: true, state, log: `${player.name} used Mishap Insurance (${how}): the Pool pays the ${face.lateFee}-aqua late fee on ${face.name}.${tail}` };
+}
 function applyLobby(state, op, player) {
   if (!state.m0) return fail('not_m0');
   const asm = assemblyOf(state);
   const solo = usesSoloAssembly(state);
   const laws = activeLaws(asm, state.activeLawStar, solo, !!state.anarchy);
+  const key = String(op.ideology || '');
+  // Mishap Insurance with the law in force is a use, not a lobby: no lobby slot.
+  if (key === 'centrist' && laws.active.has('centrist')) return lobbyMishapInsurance(state, player, asm, laws, solo);
   if (laws.lobbyingDisabled) return fail('lobbying_disabled');
   if (player.lobbiedThisTurn) return fail('already_lobbied');
-  const key = String(op.ideology || '');
+  // Mishap Insurance (4B5a): "You may lobby this Law." On the first turn a
+  // contract is late, a Centrist delegate (plus the usual aqua) has the Pool
+  // pay that turn's late fee, as if the law were in force when it flipped.
+  if (key === 'centrist') return lobbyMishapInsurance(state, player, asm, laws, solo);
   if (!IDEOLOGY_ORDER.includes(key)) return fail('bad_ideology');
   if (laws.active.has(key)) return fail('law_already_active');
   if (placeCount(asm, key, player.profileId) <= 0) return fail('no_delegate_there');
@@ -15289,6 +15346,7 @@ export function liveScoreboard(state) {
   const globalPerSpectral = {};
   for (const f of allFactories) globalPerSpectral[f.spectralType] = (globalPerSpectral[f.spectralType] || 0) + 1;
   const firstIdx = state.firstPlayerIndex || 0;
+  const contractLive = liveContractRows(state);
   const players = state.players.map((p, idx) => {
     const sirenScale = isSirenPlayer(state, p);
     const ownColonies = Object.entries(state.colonies || {})
@@ -15326,7 +15384,8 @@ export function liveScoreboard(state) {
       colonySolar: b.colonySolar, colonyScale: b.colonyScale,
       gloryVp, cubeVp, futuresVp, bernalVp, bernalRows: bernalBd.rows,
       futureStars: liveStars,
-      total: b.total, aqua: p.aqua | 0,
+      contracts: contractLive[p.profileId] || null,
+      total: b.total + ((contractLive[p.profileId] || {}).vp || 0), aqua: p.aqua | 0,
     };
   });
   const ranked = [...players].sort((a, b) => b.total - a.total || b.aqua - a.aqua);
@@ -16501,6 +16560,8 @@ function contractPairsOpenTo(state, player) {
 // default chit bars manned contracts (4B2d / 4B6c).
 function contractBidBlock(state, player, cardId) {
   if (player.timepiece) return 'timepiece_in_use';
+  // No academia hand limit on contract auctions (owner ruling 2026-11-21): a
+  // full patent hand neither bars starting one nor bidding in one.
   const a = state.auction;
   const face = contractFace(cardId, (a && a.kind === 'contract' && a.cardId === cardId && a.side) || state.contractSide || 'blue');
   if (face && face.manned && state.defaultChit && state.defaultChit.profileId === player.profileId) return 'default_stigma';
@@ -16676,10 +16737,17 @@ function applyContractAuctionStart(state, op, ctx) {
     log += `${player.name} sent ${(CONTRACTS_BY_ID[top] || {}).name || top} to the bottom of the ${CONTRACT_PAIR_NAMES[pair]} contracts. `;
   }
   if (op.abandon) return { ok: true, state, log: `${log}${player.name} looked over the ${CONTRACT_PAIR_NAMES[pair]} contracts and walked away.` };
-  const cardId = deck.shift();
   // Gold side once the Isobank Contract Upheaval has happened (4B1b); an Exodus
   // contract has its own side.
   const side = pair === 'EX' ? 'exodus' : (state.contractSide === 'gold' ? 'gold' : 'blue');
+  // The default-chit holder may not take a manned contract (4B2d / 4B6c), and
+  // opening the auction is the initiator's own 10-year bid, so they may not put
+  // one up either (they may still send it to the bottom with discardTop first).
+  const topFace = contractFace(deck[0], side);
+  if (topFace && topFace.manned && state.defaultChit && state.defaultChit.profileId === player.profileId) {
+    return fail('default_stigma');
+  }
+  const cardId = deck.shift();
   const face = contractFace(cardId, side);
   state.auction = {
     kind: 'contract', pair, cardId, side,
@@ -16881,7 +16949,8 @@ function beehiveProspect(state, player, slug) {
 }
 
 // PAY_LATE_FEE (4B5b): a free action, up to the contract's late fee per turn,
-// placed on the contract. Also how a default contract's debt is paid down.
+// placed on the contract. Also how a default contract's debt is paid down: in
+// default there is no per-turn cap, any amount up to the debt left.
 function applyPayLateFee(state, op, player) {
   if (!state.m4) return fail('not_m4');
   const cardId = String(op.cardId || (player.timepiece && player.timepiece.contractId) || '');
@@ -16892,11 +16961,17 @@ function applyPayLateFee(state, op, player) {
   if (!late && !meta.default) return fail('not_late');
   const amount = Number(op.amount);
   if (!Number.isInteger(amount) || amount <= 0) return fail('bad_amount');
+  const left = contractDebt(player, cardId) - (meta.paid | 0);
+  if (amount > left) return fail('over_debt', { max: left });
+  // Once in default (the default chit taken), the per-turn late fee cap no
+  // longer applies: the debt can be paid down by any amount on any turn
+  // (owner ruling 2026-11-21). A late contract still pays at most its late fee
+  // per turn.
   const paidNow = player.lateFeePaidThisTurn | 0;
-  if (paidNow + amount > face.lateFee) return fail('over_late_fee', { max: face.lateFee - paidNow });
+  if (!meta.default && paidNow + amount > face.lateFee) return fail('over_late_fee', { max: face.lateFee - paidNow });
   if (amount > (player.aqua | 0)) return fail('insufficient_aqua');
   player.aqua -= amount;
-  player.lateFeePaidThisTurn = paidNow + amount;
+  if (!meta.default) player.lateFeePaidThisTurn = paidNow + amount;
   meta.paid += amount;
   let log = `${player.name} paid ${amount} aqua toward ${face.name} (${meta.paid} of ${contractDebt(player, cardId)} paid).`;
   log += maybeRepayDebt(state, player, cardId);
@@ -16960,6 +17035,7 @@ function contractClockTick(state) {
     if (meta && lawInForce(state, 'centrist')) {
       meta.paid += face.lateFee;
       meta.insuredTurn = true;
+      meta.insuranceUsed = true;   // the one Mishap payout this contract gets
       notes.push(`Mishap Insurance pays ${p.name}'s first late fee.`);
     }
   }
@@ -17007,6 +17083,29 @@ function contractScoring(state) {
   for (const id of Object.keys(out)) {
     out[id].exodus = ex[id] || null;
     out[id].vp = out[id].fulfilled - out[id].debt + out[id].chit + ((ex[id] || {}).vp || 0);
+  }
+  return out;
+}
+// The live scoreboard's contract line (pure read): fulfilled contract VP, the
+// default chit where it sits now, and -1 per unpaid aqua on a contract that is
+// late or in default (a contract still on the clock owes nothing yet). Unlike contractScoring it
+// does not hand the chit on, so the live panel shows the chit's real holder.
+function liveContractRows(state) {
+  const out = {};
+  if (!state.m4) return out;
+  for (const p of state.players) {
+    const fulfilledList = (p.fulfilledContracts || []).map((f) => { const face = contractFace(f.id, f.side) || {}; return { name: face.name || f.id, vp: face.vp || 0 }; });
+    const fulfilled = fulfilledList.reduce((sum, f) => sum + f.vp, 0);
+    // Only a contract that is late or in default owes anything yet; one still
+    // on the clock is not unpaid (owner 2026-11-22).
+    let debt = 0;
+    for (const id of Object.keys(p.contractMeta || {})) {
+      const late = p.timepiece && p.timepiece.contractId === id && p.timepiece.deadbeat;
+      if (!late && !p.contractMeta[id].default) continue;
+      debt += Math.max(0, contractDebt(p, id) - ((p.contractMeta[id].paid) | 0));
+    }
+    const chit = (state.defaultChit && state.defaultChit.profileId === p.profileId) ? (state.defaultChit.side === 'gold' ? -6 : -3) : 0;
+    out[p.profileId] = { fulfilled, fulfilledList, debt, chit, chitSide: chit ? (state.defaultChit.side === 'gold' ? 'gold' : 'blue') : null, vp: fulfilled - debt + chit };
   }
   return out;
 }

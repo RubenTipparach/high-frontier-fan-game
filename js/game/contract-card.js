@@ -21,6 +21,11 @@ export function setContractProgressSource(progressOf, nameOf) {
   _nameOf = nameOf || ((slug) => slug);
 }
 
+// Late fees / debt repaid on a contract in play (4B5): { paid, debt } or null,
+// set by contracts-ui.js from the owner's contract record.
+let _debtOf = () => null;
+export function setContractDebtSource(fn) { _debtOf = fn || (() => null); }
+
 // Which of the viewer's contracts can be fulfilled (or a step announced) where
 // they stand right now: set by contracts-ui.js. Returns null or { final }.
 let _readyOf = () => null;
@@ -142,6 +147,7 @@ export function renderContractFace(face) {
         ${face.Manned ? mannedGlyph() : '<span></span>'}
         <span class="m4-pay">${advanceBadge(face.Advance)}<span>Advance</span></span>
       </div>
+      ${face.Debt ? `<div class="m4-repaid" data-tip="Aqua paid toward the advance (late fees). Paid off, the contract is discarded.">💧 Repaid <b>${face.Debt.paid | 0}</b> / ${face.Debt.debt | 0} aqua${face.Debt.pay > 0 ? `<button type="button" class="m4-pay-btn" data-pay="${esc(face.CardId)}">💸 Pay ${face.Debt.pay}</button>` : ''}</div>` : ''}
       <div class="card-footer m4-footer"><span>${SIDE_LABEL[side] || side}</span><code>${esc(face.Code)}</code></div>
     </div></div>`;
   if (face.Ready && face.CardId) {
@@ -161,7 +167,7 @@ export function renderContractCard(cardId, side = 'blue') {
     Advance: f.advance, Cybernetics: f.cybernetics.join(', '), 'Title Icon': f.titleIcon,
     Destination: f.destination, 'Fulfilled Ability': f.fulfilledAbility, 'When Fulfilling': f.whenFulfilling,
     Steps: f.steps, Progress: _progressOf(cardId), Places: destinationPlaces(f.steps),
-    CardId: cardId, Ready: _readyOf(cardId),
+    CardId: cardId, Ready: _readyOf(cardId), Debt: _debtOf(cardId),
   });
   if (el) el.dataset.contractId = cardId;
   return el;

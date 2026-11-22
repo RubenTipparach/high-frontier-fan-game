@@ -110,8 +110,8 @@ export function drawUpgradedBacks({ W, H, panel, emit }) {
 
   // Josephson Implants: a bearded man with a crown of humming implants.
   out('col_siren_cybernautics_inc', `${glow('ji-g', '#9af0ff', 0.6)}`,
-    `<circle cx="150" cy="120" r="120" fill="url(#ji-g)"/>${fig('ji', { body: 'male', skin: '#8a5a3a', hair: '#1e1612', hairStyle: 'bald', beard: 'full', face: 'smile', top: 'longsleeve', topColor: '#2a2a4a', bottomColor: '#1a1a2e', blush: false }, at(150, 560, 86))}
-     ${[-0.9, -0.45, 0, 0.45, 0.9].map((a) => { const x = 150 + Math.sin(a) * 40, y = 82 - Math.cos(a) * 34; return `<path d="M${f1(150 + Math.sin(a) * 30)},${f1(96 - Math.cos(a) * 22)} L${f1(x)},${f1(y)}" stroke="#9af0ff" stroke-width="2.5"/><circle cx="${f1(x)}" cy="${f1(y)}" r="6" fill="#e8fcff" stroke="#3ab8d8" stroke-width="2"/>`; }).join('')}`);
+    `<circle cx="150" cy="132" r="120" fill="url(#ji-g)"/>${fig('ji', { body: 'male', skin: '#8a5a3a', hair: '#1e1612', hairStyle: 'bald', beard: 'full', face: 'smile', top: 'longsleeve', topColor: '#2a2a4a', bottomColor: '#1a1a2e', blush: false }, at(150, 572, 86))}
+     ${[-0.95, -0.48, 0, 0.48, 0.95].map((a) => { const bx = 150 + Math.sin(a) * 38, by = 78 - Math.cos(a) * 42, x = 150 + Math.sin(a) * 56, y = 78 - Math.cos(a) * 60; return `<path d="M${f1(bx)},${f1(by)} L${f1(x)},${f1(y)}" stroke="#9af0ff" stroke-width="2.5" stroke-linecap="round"/><circle cx="${f1(x)}" cy="${f1(y)}" r="6" fill="#e8fcff" stroke="#3ab8d8" stroke-width="2"/>`; }).join('')}`);
 
   // Creeper Neogen: a curious vine creature with leaf-hands and eye-buds.
   out('col_smart_pets', `${linear('cn-v', [['0%', '#b8f08a'], ['100%', '#3a8a3a']], 1, 0)}${glow('cn-g', '#c8ff9a', 0.5)}`,

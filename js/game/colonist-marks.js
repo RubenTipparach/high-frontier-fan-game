@@ -1,15 +1,21 @@
 // Colonist card marks, as printed (both faces, both decks): every Human carries
 // the yellow humans-aboard triangle, a spaceborn Human also the baby-in-a-ball
 // Spaceborn emblem, and every Robot the purple gear.
-// Signed off by the owner 2026-11-20 (tracker A5a / A6).
+// Signed off by the owner 2026-11-20 (tracker A5a / A6); the curled-baby
+// Spaceborn emblem replaced the first draft the same day (owner sign-off).
 import { mannedGlyph } from './contract-glyphs.js';
 
 export const SPACEBORN_EMBLEM = (size = 30) => `<svg class="col-mark-spaceborn" width="${size}" height="${size}" viewBox="0 0 26 26" data-tip="Spaceborn">
   <circle cx="12" cy="14" r="10.5" fill="#fff" stroke="#111" stroke-width="1.6"/>
   <circle cx="20.5" cy="5" r="3.2" fill="#fff" stroke="#111" stroke-width="1.4"/>
-  <circle cx="14.6" cy="9.4" r="2.9" fill="#111"/>
-  <path d="M12.6 12.2c-3.2.2-5.6 2.4-5.6 5.2 0 2.3 1.9 3.6 4.4 3.6h4.8c1.3 0 1.9-1.3 1.1-2.2l-1.9-1.8 1.6-.6c1-.4 1.1-1.6.2-2.1l-2.4-1.5z" fill="#111"/>
-  <path d="M8.6 19.6l-2.4 1.6M15.6 15.2l3 .6" stroke="#111" stroke-width="1.6" stroke-linecap="round"/>
+  <g transform="translate(4.6,5.6) scale(0.165)">
+    <g fill="#111">
+      <circle cx="44" cy="27" r="19.5"/>
+      <path d="M33 38 C 19 50, 17 76, 30 89 C 39 97, 55 98, 64 93 L 66 84 C 60 76, 57 66, 57 56 C 52 48, 42 44, 37 40 Z"/>
+      <ellipse cx="65" cy="71" rx="16" ry="10.5" transform="rotate(-38 65 71)"/>
+      <ellipse cx="70" cy="89" rx="13" ry="6" transform="rotate(12 70 89)"/>
+      <ellipse cx="58" cy="50" rx="6.5" ry="5" transform="rotate(20 58 50)"/></g>
+  </g>
 </svg>`;
 
 function gearPath(cx, cy, r, teeth) {

@@ -4,14 +4,14 @@
 # secret. Bootstrap on a fresh app (run once locally with flyctl):
 #
 #   fly apps create high-frontier-fan-game
-#   fly volumes create hf_data --size 1 --region ams
+#   fly volumes create hf_data --size 1 --region ord
 #
 # No app secrets to configure: the server is passwordless and tokens
 # are stored as plain sha256 hashes. Subsequent deploys are automatic
 # on every push to the repo.
 
 app = "high-frontier-fan-game"
-primary_region = "ams"
+primary_region = "ord"
 
 [build]
 
@@ -26,9 +26,12 @@ primary_region = "ams"
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = "stop"
+  # Always on (owner 2026-11-22): an idle stop / suspend made deploys time out
+  # waiting for the machine and made the first request after idle slow. Still
+  # ONE machine: SQLite is single-writer on one volume, never scale out.
+  auto_stop_machines = "off"
   auto_start_machines = true
-  min_machines_running = 0
+  min_machines_running = 1
   processes = ["app"]
 
   [http_service.concurrency]
@@ -46,4 +49,4 @@ primary_region = "ams"
 [[vm]]
   cpu_kind = "shared"
   cpus = 1
-  memory_mb = 256
+  memory_mb = 512

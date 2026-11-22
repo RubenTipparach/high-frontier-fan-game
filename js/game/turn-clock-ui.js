@@ -239,6 +239,10 @@ function seasonArc(from, to, innerR, outerR) {
 //           timepieces); several on one slot step outwards
 //   pick    { from, to }  slots the viewer may click (data-slot on a hit wedge)
 // The turn tracker calls it with none of these, so it draws exactly as before.
+// Extra markers on the Sunspot Cycle window's dial (M4: every player's contract
+// timepiece). Set by the module that owns them; [] when none.
+let _dialMarkers = () => [];
+export function setSunspotMarkerSource(fn) { _dialMarkers = typeof fn === 'function' ? fn : () => []; }
 export function sunspotDialSvg(opts = {}) {
   return wheelSvg(null, opts);
 }
@@ -595,7 +599,7 @@ export function openTurnClockModal({ rolling = null, animateFrom = null } = {}) 
         <span class="turn-clock-season" style="color:${season.color}">${season.label}</span>
       </p>
       <div class="turn-clock-wheel-host">
-        ${wheelSvg(startSlot)}
+        ${wheelSvg(startSlot, { markers: (() => { try { return _dialMarkers() || []; } catch { return []; } })() })}
         <div class="turn-clock-die-host"></div>
       </div>
       <div class="turn-clock-event-host"></div>
