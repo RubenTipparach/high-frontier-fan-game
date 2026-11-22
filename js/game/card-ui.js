@@ -1707,28 +1707,48 @@ function hideTip() {
 // outside renderCard (the rocket-stack headliner triangle, the
 // modified-thrust hover tooltip) can wire the hover / tap
 // pop-up handlers consistently.
-export function attachTipsTo(root) {
-  const targets = root.querySelectorAll('[data-tip]');
-  for (const el of targets) {
-    let hoverTimer = null;
-    el.addEventListener('pointerenter', (e) => {
-      if (e.pointerType === 'touch') return;
-      clearTimeout(hoverTimer);
-      const text = el.getAttribute('data-tip');
-      if (!text) return;
-      hoverTimer = setTimeout(() => showTip(el, text), TIP_HOVER_DELAY);
-    });
-    el.addEventListener('pointerleave', (e) => {
-      clearTimeout(hoverTimer);
-      if (e.pointerType === 'touch') return;
-      hideTip();
-    });
-    el.addEventListener('click', (e) => {
-      const text = el.getAttribute('data-tip');
-      if (!text) return;
-      showTip(el, text);
-      clearTimeout(_tipHideTimer);
-      _tipHideTimer = setTimeout(hideTip, TIP_HOLD_MS);
-    });
-  }
+export function attachTipsTo(_root) {
+  // Kept for callers; every [data-tip] on the page is handled by the
+  // page-wide listeners below, wherever and whenever it was rendered.
+  ensureTipDelegation();
 }
+
+// One page-wide set of listeners serves every [data-tip], so a tooltip works
+// on anything (contract abilities, glyphs, panel text) without each renderer
+// having to wire it up. Hover shows after a short delay; a tap or click shows
+// it at once and it stays up for TIP_HOLD_MS (or until a tap elsewhere). The
+// tap never blocks the element's own action.
+let _tipDelegated = false;
+let _tipHoverTimer = null;
+function ensureTipDelegation() {
+  if (_tipDelegated || typeof document === 'undefined') return;
+  _tipDelegated = true;
+  const tipOf = (e) => {
+    const t = e.target;
+    const el = t && t.closest ? t.closest('[data-tip]') : null;
+    return el && el.getAttribute('data-tip') ? el : null;
+  };
+  document.addEventListener('pointerover', (e) => {
+    if (e.pointerType === 'touch') return;
+    const el = tipOf(e);
+    if (!el || el === _tipTarget) return;
+    clearTimeout(_tipHoverTimer);
+    _tipHoverTimer = setTimeout(() => { if (el.isConnected) showTip(el, el.getAttribute('data-tip')); }, TIP_HOVER_DELAY);
+  });
+  document.addEventListener('pointerout', (e) => {
+    if (e.pointerType === 'touch') return;
+    const el = tipOf(e);
+    if (!el) return;
+    if (e.relatedTarget && el.contains(e.relatedTarget)) return;
+    clearTimeout(_tipHoverTimer);
+    if (_tipTarget === el) hideTip();
+  });
+  document.addEventListener('click', (e) => {
+    const el = tipOf(e);
+    if (!el) return;
+    clearTimeout(_tipHoverTimer);
+    showTip(el, el.getAttribute('data-tip'));
+    _tipHideTimer = setTimeout(hideTip, TIP_HOLD_MS);
+  }, true);
+}
+ensureTipDelegation();

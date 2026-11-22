@@ -18,7 +18,7 @@ import { SITES_BY_ID } from '../../data/sites.js';
 import { lagrangeLabel } from '../../data/lagrange-labels.js';
 import { nodeLabelOf } from '../../data/map-labels.js';
 import { augmentGlyph, AUGMENTS, timepieceDialGlyph } from './contract-glyphs.js';
-import { sunspotDialSvg } from './turn-clock-ui.js';
+import { sunspotDialSvg, setSunspotMarkerSource } from './turn-clock-ui.js';
 import { isM4, isM2 } from './online-mode.js';
 import { COLONISTS_BY_ID } from '../../data/colonists.js';
 import { IDEOLOGY_ORDER, IDEOLOGY_BY_KEY, activeLaws, usesSoloAssembly, voteWinners } from '../../data/assembly.js';
@@ -110,6 +110,15 @@ const mishapBtn = (id) => (mishapOption(id) || {}).free
 let _ready = new Map();   // cardId -> { final }
 let _readyKey = null;
 setContractReadySource((id) => _ready.get(id) || null);
+// What I can pay on my own late or defaulted contract right now: this turn's
+// late fee still owed, capped by the debt left. 0 when nothing can be paid.
+function payNow(s, q, id, f, left) {
+  const p = me();
+  if (!p || q.profileId !== p.profileId || !D || !D.myTurn() || !contractFeeDue(id)) return 0;
+  // In default the late fee cap is gone: pay off what the aqua covers.
+  if (((p.contractMeta || {})[id] || {}).default) return Math.max(0, Math.min(left, p.aqua | 0));
+  return Math.max(0, Math.min(f.lateFee - (p.lateFeePaidThisTurn | 0), left));
+}
 // The repaid line on a contract card: shown once a contract is late, in
 // default, or has anything paid on it (any player's, the table can see it).
 setContractDebtSource((id) => {
@@ -121,7 +130,9 @@ setContractDebtSource((id) => {
     const late = !!(q.timepiece && q.timepiece.contractId === id && q.timepiece.deadbeat);
     if (!late && !meta.default && !(meta.paid > 0)) return null;
     const f = contractFace(id, meta.side || 'blue');
-    return f ? { paid: meta.paid | 0, debt: (f.advance | 0) * (meta.boosted ? 1 : 2) } : null;
+    if (!f) return null;
+    const debt = (f.advance | 0) * (meta.boosted ? 1 : 2);
+    return { paid: meta.paid | 0, debt, pay: payNow(s, q, id, f, debt - (meta.paid | 0)) };
   }
   return null;
 });
@@ -164,6 +175,15 @@ function decorateReadyCards() {
     if (face) face.insertAdjacentHTML('beforeend', fulfillButtonHtml(el.dataset.contractId, ready));
   }
 }
+document.addEventListener('click', (e) => {
+  const b = e.target.closest && e.target.closest('.m4-pay-btn');
+  if (!b) return;
+  e.preventDefault();
+  e.stopPropagation();
+  b.disabled = true;
+  document.querySelectorAll('.card-modal-overlay .modal-x').forEach((x) => { try { x.click(); } catch { /* ignore */ } });
+  payContractFee(b.dataset.pay).finally(() => { b.disabled = false; });
+}, true);
 document.addEventListener('click', (e) => {
   const b = e.target.closest && e.target.closest('.m4-fulfill-btn');
   if (!b) return;
@@ -268,6 +288,13 @@ export function refreshContractsUi() {
   announceFulfilled(s);
   renderContractAuction(s.auction && s.auction.kind === 'contract' ? s.auction : null);
   if (_panelOpen) renderPanel();
+  // The open timepiece window redraws with the board (a payment moves its
+  // Repaid line); a contract that is gone (paid off, fulfilled) closes it.
+  const where = document.getElementById('m4-contract-where');
+  if (where) {
+    const p = me(); const id = where.dataset.cid;
+    if (p && id && (p.contractMeta || {})[id]) showContractWhere(id); else where.remove();
+  }
 }
 
 // ---- contract fulfilled (4B4f) ------------------------------------------------------
@@ -328,6 +355,8 @@ function timepieceMarkers(s, skipId) {
   }));
 }
 const turnLine = (s) => `Turn ${(s.turn | 0) + 1}`;
+// The Sunspot Cycle window shows every contract timepiece on its dial (M4 only).
+setSunspotMarkerSource(() => { const s = snap(); return s && s.m4 ? timepieceMarkers(s, null) : []; });
 
 
 // ---- the panel --------------------------------------------------------------------
@@ -389,6 +418,7 @@ export function showContractWhere(id) {
   const ov = document.createElement('div');
   ov.id = 'm4-contract-where';
   ov.className = 'm4c-overlay';
+  ov.dataset.cid = id;
   ov.innerHTML = `<div class="m4c-modal m4c-where" role="dialog" aria-label="Contract">
     <div class="m4c-head"><h3>⏱ ${esc((faceOf(p, id) || {}).name || '')}</h3><button type="button" class="m4c-close" aria-label="Close">✕</button></div>
     <div class="m4c-where-body">${cardThumb(id, meta.side)}<div class="m4c-where-loc">📍 ${esc(locationOf(p, id) || 'In a stack')}</div>
@@ -405,9 +435,16 @@ export function showContractWhere(id) {
 
 let _tab = null;        // 'market' | 'yours'
 // May the viewer start a contract auction now (the end of their Fundraise)?
+// Why a fundraised player may not start the contract auction, or ''.
+function auctionBar(s, p) {
+  if (!s || !p || !D.myTurn() || !p.fundraisedThisTurn || p.contractAuctionDone || s.auction) return '';
+  if (s.anarchy || s.war) return `No contract auctions during ${s.war ? 'War' : 'Anarchy'}.`;
+  if (p.timepiece) return 'Your timepiece is on the Sunspot Cycle.';
+  return '';
+}
 function canAuctionNow(s, p, myTurn) {
   return !!(s && p && myTurn && p.fundraisedThisTurn && !p.contractAuctionDone && !p.timepiece && !s.auction
-    && !s.anarchy && !s.war && !(D.handFull && D.handFull(p)));
+    && !s.anarchy && !s.war);
 }
 // The three pair decks, top card up. A deck you may auction carries one
 // Auction button; one you may not is greyed out with none (owner 2026-11-18).
@@ -439,7 +476,20 @@ export function canStartContractAuction() { return canAuctionNow(snap(), me(), D
 export function renderContractAuctionStep(host, done) {
   const s = snap(); const p = me();
   host.innerHTML = '';
-  if (!canAuctionNow(s, p, D.myTurn())) return false;
+  if (!canAuctionNow(s, p, D.myTurn())) {
+    // Fundraised, auction not yet held, but barred: say why (4B3b) instead
+    // of the step silently not appearing.
+    const why = auctionBar(s, p);
+    if (!why) return false;
+    const wrap = document.createElement('div');
+    wrap.className = 'm4c-fr-step';
+    wrap.innerHTML = `<h4>📜 Contract auction</h4><p class="m4c-bar">${why}</p>
+      <div class="m4c-btns m4c-fr-skip"><button type="button" data-again>Check again</button><button type="button" data-skip>No auction</button></div>`;
+    wrap.querySelector('[data-again]').addEventListener('click', () => renderContractAuctionStep(host, done));
+    wrap.querySelector('[data-skip]').addEventListener('click', done);
+    host.appendChild(wrap);
+    return true;
+  }
   const wrap = document.createElement('div');
   wrap.className = 'm4c-fr-step';
   wrap.innerHTML = `<h4>📜 Contract auction</h4>${decksHtml(s, p, true)}
@@ -490,7 +540,7 @@ function renderPanel() {
     return `<div class="m4c-item">${cardThumb(id, meta.side)}
       <div class="m4c-note">${esc(where)}</div>
       <div class="m4c-btns">${myTurn ? `<button type="button" data-act="fulfill" data-id="${id}">Fulfill here</button>` : ''}
-      ${myTurn && late ? `<button type="button" data-act="pay" data-id="${id}" data-max="${f.lateFee}">Pay late fee (${f.lateFee})</button>` : ''}
+      ${myTurn && contractFeeDue(id) ? `<button type="button" data-act="pay" data-id="${id}" data-max="${f.lateFee}">${late ? `Pay late fee (${f.lateFee})` : 'Pay off debt'}</button>` : ''}
       ${mishapLobbyable(id) ? mishapBtn(id) : ''}
       ${myTurn && abandonBlock(s, p, id) === null ? `<button type="button" data-act="abandon" data-id="${id}">Abandon (Anarchy)</button>` : ''}</div></div>`;
   }).join('');
@@ -726,9 +776,20 @@ export async function payContractFee(id) {
   const p = me();
   const f = p && faceOf(p, id);
   if (!f) return;
+  const meta = (p.contractMeta || {})[id] || {};
+  const left = (f.advance | 0) * (meta.boosted ? 1 : 2) - (meta.paid | 0);
+  if (left <= 0) return;
+  // In default: no per-turn cap, pay off as much as the aqua covers.
+  if (meta.default) {
+    const amt = Math.min(left, p.aqua | 0);
+    if (amt <= 0) { D.toast('No aqua to pay with.', 'info'); return; }
+    await D.submitTurnOp({ kind: 'PAY_LATE_FEE', cardId: id, amount: amt });
+    return;
+  }
   const owedTurn = f.lateFee - ((p.lateFeePaidThisTurn) | 0);
   if (owedTurn <= 0) { D.toast('You have paid this turn\'s late fee.', 'info'); return; }
-  await D.submitTurnOp({ kind: 'PAY_LATE_FEE', cardId: id, amount: Math.min(owedTurn, p.aqua | 0) || owedTurn });
+  const cap = Math.max(1, Math.min(owedTurn, left));
+  await D.submitTurnOp({ kind: 'PAY_LATE_FEE', cardId: id, amount: Math.min(cap, p.aqua | 0) || cap });
 }
 export async function abandonContract(id) {
   const p = me();
@@ -779,10 +840,9 @@ export function renderContractAuction(a) {
   const myId = p && p.profileId;
   const iAmAuctioneer = myId === a.auctioneerId;
   // Who may not bid (4B3): a timepiece already out (a contract on the clock),
-  // the default chit on a manned contract, or the academia hand limit.
+  // or the default chit on a manned contract. No hand limit on contracts.
   const barOf = (q) => (!q ? null : q.timepiece ? 'Timepiece out.'
-    : (face.manned && s.defaultChit && s.defaultChit.profileId === q.profileId) ? 'Default chit: no manned bids.'
-      : (D.handFull && D.handFull(q)) ? 'Hand full: 4 cards.' : null);
+    : (face.manned && s.defaultChit && s.defaultChit.profileId === q.profileId) ? 'Default chit: no manned bids.' : null);
   const blocked = iAmAuctioneer ? null : barOf(p);
   // The bidders still owed an answer: the engine's own list when it is there.
   const waitIds = Array.isArray(a.waitingOn) ? a.waitingOn.filter((id) => id !== a.auctioneerId) : null;

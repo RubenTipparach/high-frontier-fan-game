@@ -15111,6 +15111,7 @@ export function liveScoreboard(state) {
   const globalPerSpectral = {};
   for (const f of allFactories) globalPerSpectral[f.spectralType] = (globalPerSpectral[f.spectralType] || 0) + 1;
   const firstIdx = state.firstPlayerIndex || 0;
+  const contractLive = liveContractRows(state);
   const players = state.players.map((p, idx) => {
     const sirenScale = isSirenPlayer(state, p);
     const ownColonies = Object.entries(state.colonies || {})
@@ -15148,7 +15149,8 @@ export function liveScoreboard(state) {
       colonySolar: b.colonySolar, colonyScale: b.colonyScale,
       gloryVp, cubeVp, futuresVp, bernalVp, bernalRows: bernalBd.rows,
       futureStars: liveStars,
-      total: b.total, aqua: p.aqua | 0,
+      contracts: contractLive[p.profileId] || null,
+      total: b.total + ((contractLive[p.profileId] || {}).vp || 0), aqua: p.aqua | 0,
     };
   });
   const ranked = [...players].sort((a, b) => b.total - a.total || b.aqua - a.aqua);
@@ -16319,9 +16321,8 @@ function contractPairsOpenTo(state, player) {
 // default chit bars manned contracts (4B2d / 4B6c).
 function contractBidBlock(state, player, cardId) {
   if (player.timepiece) return 'timepiece_in_use';
-  // Academia hand limit (4B3): four or more Hand cards (contracts don't count,
-  // 4B2a; they sit apart in contractHand) bars bidding, Skunkworks aside.
-  if (biddingBlockedByHand(state, player)) return 'hand_limit';
+  // No academia hand limit on contract auctions (owner ruling 2026-11-21): a
+  // full patent hand neither bars starting one nor bidding in one.
   const a = state.auction;
   const face = contractFace(cardId, (a && a.kind === 'contract' && a.cardId === cardId && a.side) || state.contractSide || 'blue');
   if (face && face.manned && state.defaultChit && state.defaultChit.profileId === player.profileId) return 'default_stigma';
@@ -16481,7 +16482,6 @@ function applyContractAuctionStart(state, op, ctx) {
   if (!player.fundraisedThisTurn) return fail('fundraise_first');
   if (player.contractAuctionDone) return fail('contract_auction_done');
   if (player.timepiece) return fail('timepiece_in_use');
-  if (biddingBlockedByHand(state, player)) return fail('hand_limit');
   if (state.anarchy || state.war) return fail('contract_auction_prohibited');
   const pair = String(op.pair || '');
   if (!CONTRACT_PAIRS[pair]) return fail('bad_deck');
@@ -16709,7 +16709,8 @@ function beehiveProspect(state, player, slug) {
 }
 
 // PAY_LATE_FEE (4B5b): a free action, up to the contract's late fee per turn,
-// placed on the contract. Also how a default contract's debt is paid down.
+// placed on the contract. Also how a default contract's debt is paid down: in
+// default there is no per-turn cap, any amount up to the debt left.
 function applyPayLateFee(state, op, player) {
   if (!state.m4) return fail('not_m4');
   const cardId = String(op.cardId || (player.timepiece && player.timepiece.contractId) || '');
@@ -16720,11 +16721,17 @@ function applyPayLateFee(state, op, player) {
   if (!late && !meta.default) return fail('not_late');
   const amount = Number(op.amount);
   if (!Number.isInteger(amount) || amount <= 0) return fail('bad_amount');
+  const left = contractDebt(player, cardId) - (meta.paid | 0);
+  if (amount > left) return fail('over_debt', { max: left });
+  // Once in default (the default chit taken), the per-turn late fee cap no
+  // longer applies: the debt can be paid down by any amount on any turn
+  // (owner ruling 2026-11-21). A late contract still pays at most its late fee
+  // per turn.
   const paidNow = player.lateFeePaidThisTurn | 0;
-  if (paidNow + amount > face.lateFee) return fail('over_late_fee', { max: face.lateFee - paidNow });
+  if (!meta.default && paidNow + amount > face.lateFee) return fail('over_late_fee', { max: face.lateFee - paidNow });
   if (amount > (player.aqua | 0)) return fail('insufficient_aqua');
   player.aqua -= amount;
-  player.lateFeePaidThisTurn = paidNow + amount;
+  if (!meta.default) player.lateFeePaidThisTurn = paidNow + amount;
   meta.paid += amount;
   let log = `${player.name} paid ${amount} aqua toward ${face.name} (${meta.paid} of ${contractDebt(player, cardId)} paid).`;
   log += maybeRepayDebt(state, player, cardId);
@@ -16833,6 +16840,29 @@ function contractScoring(state) {
     out[state.defaultChit.profileId].chit = state.defaultChit.side === 'gold' ? -6 : -3;
   }
   for (const id of Object.keys(out)) out[id].vp = out[id].fulfilled - out[id].debt + out[id].chit;
+  return out;
+}
+// The live scoreboard's contract line (pure read): fulfilled contract VP, the
+// default chit where it sits now, and -1 per unpaid aqua on a contract that is
+// late or in default (a contract still on the clock owes nothing yet). Unlike contractScoring it
+// does not hand the chit on, so the live panel shows the chit's real holder.
+function liveContractRows(state) {
+  const out = {};
+  if (!state.m4) return out;
+  for (const p of state.players) {
+    const fulfilledList = (p.fulfilledContracts || []).map((f) => { const face = contractFace(f.id, f.side) || {}; return { name: face.name || f.id, vp: face.vp || 0 }; });
+    const fulfilled = fulfilledList.reduce((sum, f) => sum + f.vp, 0);
+    // Only a contract that is late or in default owes anything yet; one still
+    // on the clock is not unpaid (owner 2026-11-22).
+    let debt = 0;
+    for (const id of Object.keys(p.contractMeta || {})) {
+      const late = p.timepiece && p.timepiece.contractId === id && p.timepiece.deadbeat;
+      if (!late && !p.contractMeta[id].default) continue;
+      debt += Math.max(0, contractDebt(p, id) - ((p.contractMeta[id].paid) | 0));
+    }
+    const chit = (state.defaultChit && state.defaultChit.profileId === p.profileId) ? (state.defaultChit.side === 'gold' ? -6 : -3) : 0;
+    out[p.profileId] = { fulfilled, fulfilledList, debt, chit, chitSide: chit ? (state.defaultChit.side === 'gold' ? 'gold' : 'blue') : null, vp: fulfilled - debt + chit };
+  }
   return out;
 }
 // ===== end Module 4 contracts ===============================================

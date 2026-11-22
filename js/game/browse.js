@@ -9176,7 +9176,10 @@ function renderAbilityBadges(p) {
   const beamer = playerPowersatBeamedBy(p);
   // M4: the abilities of this player's fulfilled contracts (4B2f), one chip each.
   const contractAbilities = (_onlineSnapshot && _onlineSnapshot.m4) ? contractAbilityChips(p) : [];
-  if (!own && !borrowed.length && !showPowersat && !beamer && !contractAbilities.length) return null;
+  // M4: the default chit (4B6), on whoever holds it.
+  const chit = _onlineSnapshot && _onlineSnapshot.m4 && _onlineSnapshot.defaultChit;
+  const holdsChit = !!(chit && chit.profileId === p.profileId);
+  if (!own && !borrowed.length && !showPowersat && !beamer && !contractAbilities.length && !holdsChit) return null;
   const players = (_onlineSnapshot && _onlineSnapshot.players) || [];
   const row = document.createElement('div');
   row.className = 'mp-ability-badges';
@@ -9211,11 +9214,19 @@ function renderAbilityBadges(p) {
       + (perm ? ' (permanent, irreversible)' : `, ${g.turnsRemaining} turn(s) left`);
     row.appendChild(b);
   }
+  if (holdsChit) {
+    const vp = chit.side === 'gold' ? 6 : 3;
+    const b = document.createElement('span');
+    b.className = 'mp-ability default-chit';
+    b.textContent = `🏷 Default chit -${vp} VP`;
+    b.setAttribute('data-tip', `Default chit (${chit.side === 'gold' ? 'gold' : 'blue'} side): -${vp} VP at game end; no bids on manned contracts.`);
+    row.appendChild(b);
+  }
   for (const c of contractAbilities) {
     const b = document.createElement('span');
     b.className = 'mp-ability contract';
     b.textContent = '📜 ' + c.label;
-    b.title = `${c.label}: ${c.text} (${c.from})`;
+    b.setAttribute('data-tip', `${c.label}: ${c.text} (${c.from})`);
     row.appendChild(b);
   }
   return row;
@@ -10993,7 +11004,7 @@ function wireHandStrip() {
       if (contractFeeDue(c.id)) {
         const pq = document.createElement('button');
         pq.type = 'button'; pq.className = 'hand-q q-pay'; pq.textContent = '💸';
-        pq.title = c.default ? 'Pay toward the debt (up to the late fee this turn)' : 'Pay this turn\'s late fee';
+        pq.title = c.default ? 'Pay off the debt' : 'Pay this turn\'s late fee';
         pq.addEventListener('click', (ev) => { ev.stopPropagation(); if (isOnlineMyTurn()) payContractFee(c.id); else setStatus('Wait for your turn.'); });
         quick.appendChild(pq);
       }
@@ -20018,6 +20029,32 @@ function contractAbilityListOf(p, key) {
   return out;
 }
 // Closest Planet: -N ISRU prospecting a body (engine contractIsruBonusAt).
+// M4 splat augmentation, side 2: +1 Hydration (4C3) where its holder stands.
+// The chit rides a Crew / Colonist card, so it works at the site that card's
+// stack is at (an older chit on a Colony works at that Colony). Mirrors the
+// server's augmentSideAt + effectiveHydration so the popup and the prospect /
+// refuel gates agree with the engine.
+function augHydrationBonus(site) {
+  const s = _onlineSnapshot;
+  const me = mySnapshotPlayer();
+  const a = s && s.m4 && me && me.augments && me.augments.splat;
+  if (!a || a.side !== 2 || !site) return 0;
+  const slug = String(SITES_BY_ID[site.id2] ? site.id2 : (SITES_BY_ID[site.id] ? site.id : (site.id2 || site.id)));
+  const holder = a.crewId || a.colonistId;
+  if (!holder) return a.colonySite === slug ? 1 : 0;
+  const id = String(holder);
+  const has = (arr) => (arr || []).some((sl) => sl && String(sl.id) === id);
+  const at = (x) => (x && x.siteId != null ? String(x.siteId) : 'leo');
+  let where;
+  if (me.rocket && has(me.rocket.stack)) where = at(me.rocket);
+  else if (has(me.leo)) where = 'leo';
+  else {
+    for (const o of Object.values(me.outposts || {})) if (o && has(o.cards)) { where = at(o); break; }
+    if (where === undefined && me.freighter && has(me.freighter.stack)) where = at(me.freighter);
+    if (where === undefined) for (const bn of (me.bernals || [])) if (bn && has(bn.stack)) { where = at(bn); break; }
+  }
+  return where !== undefined && where === slug ? 1 : 0;
+}
 function contractIsruBonusOf(p, site) {
   const rec = site && (SITES_BY_ID[site.id2] || SITES_BY_ID[site.id] || site);
   const body = String((rec && rec.body) || '');
@@ -21384,7 +21421,7 @@ function pickRefiningSource(site) {
   // Atmospheric Scoop (subsystem 5): an aerostat site you're parked at (refuel
   // is always colocated) counts as hydration 2. Adjacency is server-side only.
   const isAerostat = siteIsAerostat(site);
-  const baseWater = Number.isFinite(site.hydration) ? site.hydration : 0;
+  const baseWater = (Number.isFinite(site.hydration) ? site.hydration : 0) + augHydrationBonus(site);
   const water = (isAerostat && stackHasPower('aerostatHydration2')) ? Math.max(baseWater, 2) : baseWater;
   // SCAVENGING (Femtochemistry): a COLOCATED card doubles refuel FTs - any of
   // my stacks standing here, not just the rocket.
@@ -21427,7 +21464,7 @@ function canRefuelAt(site) {
   // Without this the dry-site gate greyed a scoop-enabled aerostat refuel even
   // though the server allows it (user 2026-06-29: refuel greyed at Titan).
   const isAerostat = siteIsAerostat(site);
-  const baseWater = Number.isFinite(site.hydration) ? site.hydration : 0;
+  const baseWater = (Number.isFinite(site.hydration) ? site.hydration : 0) + augHydrationBonus(site);
   const water = (isAerostat && stackHasPower('aerostatHydration2')) ? Math.max(baseWater, 2) : baseWater;
   const tank  = getTankWater();
   const tmax  = getTankMax();
@@ -21937,7 +21974,7 @@ function buildRefuelBreakdown(site, mode) {
     lines.push({ icon: '🏭', label: 'Factory output', detail: '7 water (flat)' });
   } else {
     const isAerostat = siteIsAerostat(site);
-    const baseWater = Number.isFinite(site.hydration) ? site.hydration : 0;
+    const baseWater = (Number.isFinite(site.hydration) ? site.hydration : 0) + augHydrationBonus(site);
     scoop = isAerostat && stackHasPower('aerostatHydration2') && baseWater < 2;
     const water = scoop ? 2 : baseWater;
     const prosp = getActiveProspectorStats();
@@ -25564,7 +25601,7 @@ function doProspect(site, prosp) {
   const prospIsru = Math.max(0, prosp.isru + colocatedIsruMod({ isAerostat: isAerostatSiteHere }) - contractIsruBonusOf(mySnapshotPlayer(), site));
   const rSite = getRocketSite();
   const colocScoopHere = isAerostatSiteHere && rSite && rSite.id === site.id && stackHasPower('aerostatHydration2');
-  const baseWaterHere = Number.isFinite(site.hydration) ? site.hydration : 0;
+  const baseWaterHere = (Number.isFinite(site.hydration) ? site.hydration : 0) + augHydrationBonus(site);
   const siteWater = colocScoopHere ? Math.max(baseWaterHere, 2) : baseWaterHere;
   if (prospIsru > siteWater) {
     setStatus(
@@ -29978,7 +30015,7 @@ function showSitePopupFor(site) {
   // cooling) and prospectorStatsFor() for the rest.
   if (isProspectableSite && !getDisc(site.id)) {
     const isAerostat = siteIsAerostat(site);
-    const baseWater  = Number.isFinite(site.hydration) ? site.hydration : 0;
+    const baseWater  = (Number.isFinite(site.hydration) ? site.hydration : 0) + augHydrationBonus(site);
     const units = [];
     // Rocket: the persisted active prospector (unchanged behaviour).
     if (prosp) { prosp.stackId = 'rocket'; units.push({ stats: prosp, fromSite: rocketSite?.id, slots: getRocketStack(), label: '' }); }
@@ -31465,7 +31502,7 @@ function showSitePopupFor(site) {
   // an aerostat to 2), so the chip matches the prospect / refuel gate instead of
   // showing the unmodified printed ISRU.
   const popupAero = siteIsAerostat(site);
-  const popupBaseWater = Number.isFinite(site.hydration) ? site.hydration : 0;
+  const popupBaseWater = (Number.isFinite(site.hydration) ? site.hydration : 0) + augHydrationBonus(site);
   const popupWater = (popupAero && stackHasPower('aerostatHydration2')) ? Math.max(popupBaseWater, 2) : popupBaseWater;
   _renderer.setPopupRocketInfo(prosp
     ? { isru: Math.max(0, prosp.isru + colocatedIsruMod({ isAerostat: popupAero }) - contractIsruBonusOf(mySnapshotPlayer(), site)), water: popupWater, kind: prosp.kind }
@@ -34785,12 +34822,22 @@ function paintTransparentScoring(host, sb) {
     ? `<h4>Assembly</h4><ul class="glory-table"><li><span>🏛 Delegate cubes</span><strong>+${cubeVp} VP</strong></li></ul>`
     : '';
 
+  // --- M4 contracts: fulfilled VP, the default chit, unpaid debt ----
+  const con = sel.contracts || null;
+  let contractBlock = '';
+  if (con && (con.fulfilled || con.debt || con.chit)) {
+    const rows = (con.fulfilledList || []).map((f) => `<li><span>📜 ${esc(f.name)}</span><strong>+${f.vp | 0} VP</strong></li>`).join('');
+    const chitRow = con.chit ? `<li><span data-tip="Held now. At game end the chit goes to whoever defaults last.">🏷 Default chit <span class="muted">(${esc(con.chitSide || 'blue')})</span></span><strong>${con.chit} VP</strong></li>` : '';
+    const debtRow = con.debt ? `<li><span data-tip="-1 VP per aqua still owed on a late or defaulted contract.">💧 Unpaid <span class="muted">(${con.debt} aqua)</span></span><strong>-${con.debt} VP</strong></li>` : '';
+    contractBlock = `<h4>Contracts</h4><ul class="glory-table">${rows}${chitRow}${debtRow}</ul>`;
+  }
+
   // Safety net: every VP in the header total must appear in a line above. Sum
   // the categories we itemise and, if the authoritative total is higher (some
   // award we don't break out, e.g. the winning-ideology bonus at game end),
   // surface the remainder so no VP is ever hidden from the breakdown again.
   const shownVp = (sel.spectralVp | 0) + (sel.tokenVp | 0) + (sel.colonyVp | 0)
-    + (sel.bernalVp | 0) + (sel.futuresVp | 0) + gloryVp + cubeVp;
+    + (sel.bernalVp | 0) + (sel.futuresVp | 0) + gloryVp + cubeVp + ((con && con.vp) | 0);
   const otherVp = (sel.total | 0) - shownVp;
   const otherBlock = otherVp > 0
     ? `<h4>Other awards</h4><ul class="glory-table"><li><span>➕ Other</span><strong>+${otherVp} VP</strong></li></ul>`
@@ -34826,6 +34873,7 @@ function paintTransparentScoring(host, sb) {
       ${delegateBlock}
       ${bernalBlock}
       ${futuresBlock}
+      ${contractBlock}
       ${gloryLine}
       ${otherBlock}
     </section>
@@ -36127,8 +36175,6 @@ initContractsUi({
   toast: (msg, level) => { if (_onlineToast) _onlineToast(msg, level); },
   confirm: (opts) => confirmModal(opts),
   setTurnAction: (key, spec) => setMpTurnAction(key, spec),
-  // The academia hand limit, Skunkworks aside (same check as a patent auction).
-  handFull: (p) => auctionHandFull(p),
   nudgeButton: (label, opts, ids, title) => makeAuctionNudgeButton(_onlineSnapshot, label, opts, ids, title),
   // The name a player reads for a map space (a site, a Lagrange point, a hazard).
   spaceName: (slug) => {

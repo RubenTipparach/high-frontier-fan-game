@@ -931,7 +931,7 @@
   opacity: 0;
   transform: translateY(2px);
   transition: opacity 0.14s ease-out, transform 0.14s ease-out;
-  z-index: 9999;
+  z-index: 100001;
   box-shadow: 0 6px 14px rgba(0, 0, 0, 0.45);
   font-family: inherit;
   letter-spacing: 0.2px;
@@ -2061,6 +2061,9 @@ button.m4c-aug:hover { border-color: #60a5fa; background: #232838; }
 
 .card.m4-contract .m4-repaid { text-align: center; font-size: 12px; padding: 3px 6px; background: #2a1414; color: #fecaca; border-top: 1px solid #7f1d1d; }
 .card.m4-contract .m4-repaid b { color: #fff; }
+.card.m4-contract .m4-repaid .m4-pay-btn { margin-left: 8px; font: inherit; font-weight: 700; padding: 1px 8px; border-radius: 6px; border: 1px solid #fbbf24; background: #f59e0b; color: #1a1205; cursor: pointer; }
+.card.m4-contract .m4-repaid .m4-pay-btn:hover { background: #fbbf24; }
+.card.m4-contract .m4-repaid .m4-pay-btn:disabled { opacity: .6; cursor: wait; }
 
 /* M4 colonist marks: bottom of the art, right of the thrust triangle (Humans)
    or near the spectral hex (Robots), as printed on the Spaceborn deck. */
