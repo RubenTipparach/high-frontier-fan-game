@@ -192,35 +192,67 @@ jobs:
             exit 0
           fi
           if ! flyctl status -a high-frontier-fan-game > /dev/null 2>&1; then
-            echo "::notice::Fly app 'high-frontier-fan-game' not found; skipping API deploy. Bootstrap with 'fly apps create high-frontier-fan-game' + 'fly volumes create hf_data --size 1 --region ams'."
+            echo "::notice::Fly app 'high-frontier-fan-game' not found; skipping API deploy. Bootstrap with 'fly apps create high-frontier-fan-game' + 'fly volumes create hf_data --size 1 --region ord'."
             echo "ready=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           echo "ready=true" >> "$GITHUB_OUTPUT"
 
       # Single-writer sqlite needs exactly one machine on one volume.
-      # Ensure a volume in the primary region and reap any extra app
-      # machines before deploy. Both steps are idempotent: no-op if
-      # already in the desired state.
+      # Ensure the hf_data volume is in the primary region and reap any extra
+      # app machines before deploy. Idempotent: a no-op once in the desired
+      # state.
+      #
+      # Region move (owner 2026-11-22: the Amsterdam host stopped pulling
+      # images, so the app moves to Chicago): when there is no hf_data in
+      # $REGION but there is one elsewhere, the existing volume is FORKED into
+      # $REGION (a full copy; the original stays as a backup). An EMPTY volume
+      # is only ever created when no hf_data exists anywhere (a fresh app), so
+      # a deploy can never come up on a blank database. App machines outside
+      # $REGION are destroyed (volumes are never touched).
       - name: Ensure volume + single machine
         if: steps.fly_gate.outputs.ready == 'true'
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           APP: high-frontier-fan-game
-          REGION: ams
+          REGION: ord
         run: |
           set -e
           echo "--- volumes before ---"
           flyctl volumes list -a "$APP"
-          VOL_ANY=$(flyctl volumes list -a "$APP" --json | jq '[.[] | select(.name=="hf_data" and .region=="'"$REGION"'")] | length')
-          if [ "${VOL_ANY:-0}" -lt 1 ]; then
-            echo "Creating volume hf_data in $REGION"
-            flyctl volumes create hf_data --size 1 --region "$REGION" --app "$APP" --yes
-          else
-            echo "Volume hf_data already exists in $REGION"
-          fi
+          flyctl volumes list -a "$APP" --json > /tmp/vols.json
+          HERE=$(jq '[.[] | select(.name=="hf_data" and .region=="'"$REGION"'")] | length' /tmp/vols.json)
+          ANY=$(jq '[.[] | select(.name=="hf_data")] | length' /tmp/vols.json)
           echo "--- machines before ---"
           flyctl machine list -a "$APP"
+          flyctl machine list -a "$APP" --json > /tmp/machines.json
+          # App machines outside the target region go first: one stuck on a
+          # bad host must not hold the old volume or receive the deploy.
+          for M in $(jq -r '.[] | select((.config.metadata.fly_process_group // "app") == "app" and .region != "'"$REGION"'") | .id' /tmp/machines.json); do
+            echo "Destroying app machine $M (outside $REGION)"
+            flyctl machine stop "$M" --app "$APP" || true
+            flyctl machine destroy "$M" --app "$APP" --force || true
+          done
+          if [ "${HERE:-0}" -ge 1 ]; then
+            echo "Volume hf_data already exists in $REGION"
+          elif [ "${ANY:-0}" -ge 1 ]; then
+            # The oldest hf_data is the original game database.
+            SRC=$(jq -r '[.[] | select(.name=="hf_data")] | sort_by(.created_at) | .[0].id' /tmp/vols.json)
+            echo "Forking $SRC into $REGION (the original stays as a backup)"
+            ok=""
+            for attempt in 1 2 3; do
+              if flyctl volumes fork "$SRC" --region "$REGION" --name hf_data --app "$APP"; then ok=1; break; fi
+              echo "::warning::volume fork failed (attempt ${attempt}/3); retrying in $((attempt * 30))s"
+              sleep $((attempt * 30))
+            done
+            if [ -z "$ok" ]; then
+              echo "::error::Could not copy hf_data to $REGION. Not deploying: an empty volume would mean a blank game database."
+              exit 1
+            fi
+          else
+            echo "No hf_data volume anywhere: creating an empty one in $REGION (fresh app)"
+            flyctl volumes create hf_data --size 1 --region "$REGION" --app "$APP" --yes
+          fi
           flyctl machine list -a "$APP" --json > /tmp/machines.json
           APP_IDS=$(jq -r '.[] | select((.config.metadata.fly_process_group // "app") == "app") | .id' /tmp/machines.json)
           FIRST=""
@@ -234,6 +266,8 @@ jobs:
             flyctl machine stop "$M" --app "$APP" || true
             flyctl machine destroy "$M" --app "$APP" --force || true
           done
+          echo "--- volumes after ---"
+          flyctl volumes list -a "$APP"
           echo "--- machines after ---"
           flyctl machine list -a "$APP"
 
