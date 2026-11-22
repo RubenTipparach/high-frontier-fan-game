@@ -721,15 +721,64 @@ function isobankPlacardHtml(s, p, myTurn, tankIso) {
     <div class="m4p-ex"><h5>EXODUS<br>CONTRACTS</h5>${exBox}</div>
     <div class="m4p-vaults"><h5>ISOVAULTS</h5>${hexVaultsSvg(s)}
       <div class="m4c-controls m4p-spec">
-        ${btn('iso-sell', 'Sell 1 (+10)', myTurn && beads > 0)}
-        ${btn('iso-buy', 'Buy 1 (-10)', myTurn && market > 0 && (p.aqua | 0) >= 10 && isos.length > 0, isos.length ? '' : 'Needs an isostandard')}
-        ${atIb && tankIso > 0 ? btn('iso-vault', `Deposit ${tankIso} in your isovault`, myTurn) : ''}
+        ${btn('iso-trade-sell', 'Deposit', myTurn && beads > 0)}
+        ${btn('iso-trade-buy', 'Withdraw', myTurn && market > 0 && (p.aqua | 0) >= 10 && isos.length > 0, isos.length ? '' : 'Needs an isostandard')}
+        ${atIb && tankIso > 0 ? btn('iso-vault', `Store ${tankIso} in your isovault`, myTurn) : ''}
       </div></div>
     <div class="m4p-phases"><h5>EXODUS STARSHIP PHASES</h5>${phases}</div>
     <div class="m4p-table"><h5>EXODUS FUELING TABLE (4E3) <small>${n} Player${n > 1 ? 's' : ''}</small></h5>${table}<div class="m4p-total">Isototal <b>${total}</b> · ${EXODUS_BAND_NAMES[band]}</div></div>
     <div class="m4p-ship"><h5>STARSHIP STACK</h5><ul class="m4p-req">${req}</ul>
       ${aboard.length ? `<div class="m4p-aboard">${aboard.join('<br>')}</div>` : ''}</div>
   </div>`;
+}
+
+// The Speculator's isovault trade (4D1d): Deposit sells gold beads into it,
+// Withdraw buys them out, 10 aqua each. A stepper like the water transfer one,
+// with the Bank aqua before and after. Resolves to the count, or null.
+function pickIsoTrade(action) {
+  const s = snap(), p = me();
+  if (!s || !p) return Promise.resolve(null);
+  const aqua = p.aqua | 0, beads = Math.max(0, p.isotopes | 0), market = Math.max(0, s.earthMarket | 0);
+  const sell = action === 'sell';
+  const max = sell ? beads : Math.min(market, Math.floor(aqua / 10));
+  if (max < 1) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const ov = document.createElement('div');
+    ov.className = 'card-modal-overlay confirm-modal-overlay m4-iso-trade';
+    let n = 1;
+    const close = (v) => { ov.remove(); document.removeEventListener('keydown', onKey); resolve(v); };
+    const onKey = (e) => { if (e.key === 'Escape') close(null); else if (e.key === 'Enter') close(n); };
+    document.addEventListener('keydown', onKey);
+    const step = (d) => `<button type="button" class="popup-btn popup-btn-secondary fa-step" data-step="${d}">${d > 0 ? '+' : '−'}${Math.abs(d)}</button>`;
+    ov.innerHTML = `<div class="turn-confirm-panel">
+      <h3>${sell ? '🟡 Deposit in the Speculator\'s isovault' : '🟡 Withdraw from the Speculator\'s isovault'}</h3>
+      <div class="dump-stepper">${step(-10)}${step(-5)}${step(-1)}
+        <input type="number" class="fa-amount" min="1" max="${max}" value="1" inputmode="numeric" aria-label="Isotopes" />
+        ${step(1)}${step(5)}${step(10)}
+        <button type="button" class="popup-btn fa-all">Max (${max})</button></div>
+      <div class="m4-iso-ledger"></div>
+      <div class="turn-confirm-actions">
+        <button type="button" class="popup-btn primary" data-act="yes"></button>
+        <button type="button" class="popup-btn" data-act="no">Cancel</button></div></div>`;
+    const input = ov.querySelector('.fa-amount'), ledger = ov.querySelector('.m4-iso-ledger'), yes = ov.querySelector('[data-act="yes"]');
+    const set = (v) => {
+      n = Math.max(1, Math.min(max, Math.round(Number(v)) || 1));
+      input.value = String(n);
+      const dA = sell ? n * 10 : -n * 10;
+      ledger.innerHTML = `<div><span>💧 Bank aqua</span><b>${aqua} -&gt; ${aqua + dA}</b><em class="${dA > 0 ? 'up' : 'down'}">${dA > 0 ? '+' : ''}${dA}</em></div>`
+        + `<div><span>🟡 Gold beads</span><b>${beads} -&gt; ${beads + (sell ? -n : n)}</b></div>`
+        + `<div><span>Speculator's isovault</span><b>${market} -&gt; ${market + (sell ? n : -n)}</b></div>`;
+      yes.textContent = sell ? `Deposit ${n} (+${n * 10} aqua)` : `Withdraw ${n} (−${n * 10} aqua)`;
+    };
+    ov.querySelectorAll('.fa-step').forEach((b) => b.addEventListener('click', () => set(n + Number(b.dataset.step))));
+    ov.querySelector('.fa-all').addEventListener('click', () => set(max));
+    input.addEventListener('input', () => set(input.value));
+    yes.addEventListener('click', () => close(n));
+    ov.querySelector('[data-act="no"]').addEventListener('click', () => close(null));
+    ov.addEventListener('click', (e) => { if (e.target === ov) close(null); });
+    set(1);
+    document.body.appendChild(ov);
+  });
 }
 
 function bankHtml(s, p, myTurn) {
@@ -860,8 +909,11 @@ async function onAct(b) {
   }
   else if (act === 'augment') { openAugmentWizard(b.dataset.shape); return; }
   else if (act === 'chit-view') { openChitSides(b.dataset.shape); return; }
-  else if (act === 'iso-sell') await D.submitTurnOp({ kind: 'ISOTOPE_EXCHANGE', action: 'sell', amount: 1 });
-  else if (act === 'iso-buy') await D.submitTurnOp({ kind: 'ISOTOPE_EXCHANGE', action: 'buy', amount: 1 });
+  else if (act === 'iso-trade-sell' || act === 'iso-trade-buy') {
+    const action = act === 'iso-trade-sell' ? 'sell' : 'buy';
+    const amount = await pickIsoTrade(action);
+    if (amount) await D.submitTurnOp({ kind: 'ISOTOPE_EXCHANGE', action, amount });
+  }
   else if (act === 'iso-tank') await D.submitTurnOp({ kind: 'ISOTOPE_EXCHANGE', action: 'deposit' });
   else if (act === 'iso-withdraw') await D.submitTurnOp({ kind: 'ISOTOPE_EXCHANGE', action: 'withdraw', amount: 1 });
   else if (act === 'iso-vault') await D.submitTurnOp({ kind: 'ISOTOPE_EXCHANGE', action: 'vault' });
