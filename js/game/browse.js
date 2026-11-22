@@ -121,7 +121,8 @@ import { futureGoalForCard, checkFutureGoal, CENTAUR_SITE_IDS, GREEK_CAMP_IDS, T
 // M2 Colonist powers (FINAO halved etc.) - the same flags the engine reads.
 import { colonistPower } from '../../data/colonist-abilities.js';
 import { openBernalStackModal, openBernalFuelTank } from './bernal-modal.js';
-import { initContractsUi, closeContractsPanel, contractSpaceName, contractsBeforeEndTurn, setContractAuctionMinimized, refreshContractsUi, abandonBlock, contractFeeDue, payContractFee, abandonContract, timepieceBadge, renderContractAuctionStep, openCompletedContracts } from './contracts-ui.js';
+import { initContractsUi, closeContractsPanel, contractSpaceName, contractsBeforeEndTurn, setContractAuctionMinimized, refreshContractsUi, abandonBlock, contractFeeDue, payContractFee, abandonContract, timepieceBadge, renderContractAuctionStep, openCompletedContracts, openBankTab } from './contracts-ui.js';
+import { starshipHexSvg } from './starship-chit.js';
 import { getBernalSprite } from './bernal-sprite.js';
 import { fuelTankCylinderMarkup, fuelTransferSectionMarkup } from './fuel-tank-view.js';
 // One client card-lookup: patents PLUS the M2 Bernal cards (which live in
@@ -18036,6 +18037,7 @@ async function mountMapFor() {
     _renderer.onMpRocketClick = (profileId) => openPlayerRocketModalById(profileId);
     _renderer.onFreighterClick = (profileId) => openPlayerFreighterModalById(profileId);
     _renderer.onBernalClick = (profileId, index) => openPlayerBernalModalById(profileId, index);
+    _renderer.onStarshipClick = () => openBankTab();
     _renderer.onSiteNotes = (siteId, siteName) => openSiteNotesModal(siteId, siteName);
     // Belts my Tourism Cycler waives read as safe on my planned route.
     if (typeof _renderer.setBeltWaiverTest === 'function') {
@@ -26426,7 +26428,18 @@ function computeBernalLayout(snapshot) {
   }
   return { local, opponents };
 }
+// M4: the starship chit stands at the isobank once it is founded (4D2),
+// showing every isovault. Only in an M4 game.
+function syncStarshipChit(snapshot) {
+  if (!_renderer || typeof _renderer.setStarshipChit !== 'function') return;
+  const ib = _online && snapshot && snapshot.m4 && snapshot.isobank;
+  const pos = ib ? mpRocketCoords(ib.siteId) : null;
+  if (!pos) { _renderer.setStarshipChit(null); return; }
+  const players = (snapshot.players || []).map((p) => ({ color: p.color, isovault: p.isovault }));
+  _renderer.setStarshipChit({ x: pos.x, y: pos.y, svg: starshipHexSvg(players, snapshot.earthMarket) });
+}
 function syncBernalUnits(snapshot) {
+  syncStarshipChit(snapshot);
   if (!_renderer || typeof _renderer.setBernalUnits !== 'function') return;
   if (!_online || !snapshot || !Array.isArray(snapshot.players) || !_onlineMe) {
     _renderer.setBernalUnits(null);

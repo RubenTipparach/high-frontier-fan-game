@@ -27,6 +27,7 @@ import { augmentSideSvg } from './augment-sides.js';
 import { BERNALS_BY_ID } from '../../data/bernals.js';
 import { NODE_TAGS } from '../../data/node-tags.js';
 import { PATENTS_BY_ID } from '../../data/patents.js';
+import { starshipArtSvg } from './starship-chit.js';
 import { EXODUS_BANDS, EXODUS_RANK_VP } from '../../data/exodus.js';
 import { exodusBand, exodusThresholds, EXODUS_BAND_NAMES } from '../../data/exodus.js';
 
@@ -628,7 +629,7 @@ function hexVaultsSvg(s) {
     const q = players[i];
     const col = q ? (q.color || '#9aa4b8') : null;
     const A = v(a), B = v(b);
-    tris += `<polygon points="${pt(C)} ${pt(A)} ${pt(B)}" fill="${col || '#2a2e3a'}" fill-opacity="${col ? 0.42 : 0.6}" stroke="${col || '#4a5060'}" stroke-width="5" stroke-linejoin="round"/>`;
+    tris += `<polygon points="${pt(C)} ${pt(A)} ${pt(B)}" fill="${col || '#2a2e3a'}" fill-opacity="${col ? 0.34 : 0.3}" stroke="${col || '#4a5060'}" stroke-width="5" stroke-linejoin="round"/>`;
     if (q) {
       const m = [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2];
       const at = [C[0] + 0.7 * (m[0] - C[0]), C[1] + 0.7 * (m[1] - C[1])];
@@ -641,8 +642,9 @@ function hexVaultsSvg(s) {
   const market = Math.max(0, s.earthMarket | 0);
   return `<svg class="m4p-hex" viewBox="0 0 300 264" role="img" aria-label="Isovaults">
     <defs><radialGradient id="ib-bead" cx="35%" cy="30%" r="70%"><stop offset="0%" stop-color="#fff4c0"/><stop offset="60%" stop-color="#ffd24a"/><stop offset="100%" stop-color="#b8860b"/></radialGradient></defs>
+    <g opacity=".6" transform="translate(150 134) scale(2.75) translate(-50 -50)">${starshipArtSvg()}</g>
     ${tris}
-    <polygon points="${inner}" fill="#15171e" stroke="#2c303a" stroke-width="3"/>
+    <polygon points="${inner}" fill="#15171e" fill-opacity=".72" stroke="#2c303a" stroke-width="3"/>
     <text x="150" y="118" text-anchor="middle" font-size="9.5" font-weight="800" fill="#fff" letter-spacing=".5">SPECULATOR'S</text>
     <text x="150" y="130" text-anchor="middle" font-size="9.5" font-weight="800" fill="#fff" letter-spacing=".5">ISOVAULT</text>
     <circle cx="150" cy="150" r="12" fill="url(#ib-bead)"/><text x="150" y="155" text-anchor="middle" font-size="13" font-weight="800" fill="#3a2600">${market}</text>
