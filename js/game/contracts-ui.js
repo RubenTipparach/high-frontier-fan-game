@@ -470,12 +470,10 @@ function decksHtml(s, p, auctionOpen) {
     const noManned = stigma ? 'disabled title="Default chit: no manned contracts."' : '';
     let btn = '';
     if (auctionOpen && open && discarded) {
-      btn = `<div class="m4c-btns"><button type="button" data-act="auction" data-pair="${pair}" data-discard="1" ${noManned}>Auction</button>
-        <button type="button" data-act="abandon" data-pair="${pair}">Abandon</button>
-        <button type="button" data-act="keep" data-pair="${pair}">Keep top</button></div>`;
+      btn = `<div class="m4c-btns"><button type="button" data-act="auction" data-pair="${pair}" data-discard="1" ${noManned}>Auction</button></div>`;
     } else if (auctionOpen && open && !_discardPair) {
       btn = `<div class="m4c-btns"><button type="button" data-act="auction" data-pair="${pair}" ${noManned}>Auction</button>
-        ${deck.length > 1 ? `<button type="button" data-act="discard" data-pair="${pair}" data-tip="Send the top card to the bottom of the deck, then auction the next one or abandon.">Discard top</button>` : ''}</div>`;
+        ${deck.length > 1 ? `<button type="button" data-act="cycle" data-pair="${pair}">Cycle</button>` : ''}</div>`;
     }
     return `<div class="m4c-deck ${open ? 'open' : 'closed'}" ${open ? '' : 'aria-disabled="true"'}>
       <div class="m4c-deck-head"><b>${CONTRACT_PAIR_NAMES[pair]}</b>
@@ -516,21 +514,18 @@ export function renderContractAuctionStep(host, done) {
     done();
     await D.submitTurnOp({ kind: 'AUCTION_CONTRACT_START', pair: b.dataset.pair, ...(discardTop ? { discardTop: true } : {}) });
   }));
-  // Proposal Review (4B3d): set the top card aside, look at the next one.
-  wrap.querySelectorAll('button[data-act="discard"]').forEach((b) => b.addEventListener('click', () => {
+  // Proposal Review (4B3d): cycle the top card to the bottom (once) and look at
+  // the next one. Leaving without an auction still sends the cycled card down.
+  wrap.querySelectorAll('button[data-act="cycle"]').forEach((b) => b.addEventListener('click', () => {
     _discardPair = b.dataset.pair;
     renderContractAuctionStep(host, done);
   }));
-  wrap.querySelectorAll('button[data-act="keep"]').forEach((b) => b.addEventListener('click', () => {
-    _discardPair = null;
-    renderContractAuctionStep(host, done);
-  }));
-  wrap.querySelectorAll('button[data-act="abandon"]').forEach((b) => b.addEventListener('click', async () => {
+  wrap.querySelector('[data-skip]').addEventListener('click', async () => {
+    const pair = _discardPair;
     _discardPair = null;
     done();
-    await D.submitTurnOp({ kind: 'AUCTION_CONTRACT_START', pair: b.dataset.pair, discardTop: true, abandon: true });
-  }));
-  wrap.querySelector('[data-skip]').addEventListener('click', () => { _discardPair = null; done(); });
+    if (pair) await D.submitTurnOp({ kind: 'AUCTION_CONTRACT_START', pair, discardTop: true, abandon: true });
+  });
   host.appendChild(wrap);
   return true;
 }
