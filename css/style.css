@@ -1098,7 +1098,15 @@ body.in-lobby .main-menu-fab { display: none; }
   #view-lobby-list .lobby-dashboard {
     grid-template-columns: 1fr;
   }
-  #view-lobby-list .lobby-dashboard .lobby-col-side { order: -1; }
+  /* One column, panel by panel (owner 2026-11-22): your games, open tables,
+     live games, chat, and ended games at the very bottom. */
+  #view-lobby-list .lobby-dashboard { display: flex; flex-direction: column; align-items: stretch; }
+  #view-lobby-list .lobby-dashboard .lobby-col { display: contents; }
+  #view-lobby-list .lobby-dashboard .lobby-p-mine { order: 1; }
+  #view-lobby-list .lobby-dashboard .lobby-p-open { order: 2; }
+  #view-lobby-list .lobby-dashboard .lobby-p-live { order: 3; }
+  #view-lobby-list .lobby-dashboard .lobby-p-chat { order: 4; }
+  #view-lobby-list .lobby-dashboard .lobby-p-ended { order: 5; }
   /* Two stacked lists now (Multiplayer + Solo), so give each a taller scroll
      box - doubled from the old single-list cap so a few games show without
      scrolling. On mobile let the scroll CHAIN to the page: once a list hits its
