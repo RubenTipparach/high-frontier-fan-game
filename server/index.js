@@ -729,8 +729,11 @@ app.post('/admin/leaderboard/channel', requireAdmin, (req, res) => {
   const id = String((req.body && req.body.id) || '').trim();
   if (!isChannelId(id)) return res.status(400).json({ error: 'bad_channel' });
   const label = String((req.body && req.body.label) || '').slice(0, 120);
-  setLeaderboardSetting('leaderboard_channel_id', id);
-  setLeaderboardSetting('leaderboard_channel_label', label);
+  // which: 'stack' saves the channel stack shares post to; otherwise the
+  // leaderboard's.
+  const key = (req.body && req.body.which === 'stack') ? 'stack_post_channel' : 'leaderboard_channel';
+  setLeaderboardSetting(`${key}_id`, id);
+  setLeaderboardSetting(`${key}_label`, label);
   res.json({ ok: true, id, label });
 });
 
@@ -3607,7 +3610,9 @@ app.post('/games/:id/stack-post', requireProfile, express.raw({ type: 'image/png
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
   if (!isGamePlayer(id, req.profile.id)) return res.status(403).json({ error: 'not_a_player' });
   if (!discordEnabled()) return res.status(409).json({ error: 'discord_disabled' });
-  const channelId = leaderboardSetting('leaderboard_channel_id');
+  // Its own channel when one is picked on /admin, else the leaderboard's.
+  const own = leaderboardSetting('stack_post_channel_id');
+  const channelId = isChannelId(own) ? own : leaderboardSetting('leaderboard_channel_id');
   if (!isChannelId(channelId)) return res.status(409).json({ error: 'no_channel' });
   const buf = Buffer.isBuffer(req.body) ? req.body : null;
   // A PNG starts with its 8-byte signature.
@@ -6164,6 +6169,8 @@ app.get('/admin', (req, res) => {
     const chanId = leaderboardSetting('leaderboard_channel_id');
     const chanLabel = leaderboardSetting('leaderboard_channel_label');
     const chanNow = isChannelId(chanId) ? (chanLabel || 'channel ' + chanId) : '';
+    const spId = leaderboardSetting('stack_post_channel_id');
+    const spNow = isChannelId(spId) ? (leaderboardSetting('stack_post_channel_label') || 'channel ' + spId) : '';
     const opts = Array.from({ length: 24 }, (_, h) => `<option value="${h}"${h === hour ? ' selected' : ''}>${String(h).padStart(2, '0')}:00 UTC</option>`).join('');
     const boardHtml = boards.length ? boards.map((b) => `
       <div style="border:1px solid #2a2740;border-radius:8px;padding:8px 10px;min-width:220px;flex:1">
@@ -6181,6 +6188,11 @@ app.get('/admin', (req, res) => {
     <button type="button" onclick="loadLeaderboardChannels()" id="lb-chans">Load channels</button>
     <button type="button" onclick="saveLeaderboardChannel()" id="lb-chan-save" disabled>Save channel</button>
     <span id="lb-chan-status" class="muted"></span>
+  </div>
+  <div style="margin:6px 0">
+    Stack shares channel: <select id="sp-chan"><option value="">${esc(spNow || (chanNow ? 'Same as the leaderboard (' + chanNow + ')' : 'Load the channels to pick one'))}</option></select>
+    <button type="button" onclick="saveStackChannel()" id="sp-chan-save" disabled>Save channel</button>
+    <span id="sp-chan-status" class="muted">Where the 📤 Share - Post to Discord pictures go (once an hour per player).</span>
   </div>` : ''}
   <div style="margin:6px 0">
     <label><input type="checkbox" id="lb-daily"${sched.on ? ' checked' : ''}> Post the leaderboard to Discord once a week, on</label>
@@ -6234,11 +6246,32 @@ app.get('/admin', (req, res) => {
             return o.outerHTML;
           }).join('') : '<option value="">The bot sees no text channels: add it to your server first</option>';
           document.getElementById('lb-chan-save').disabled = !list.length;
+          var sp = document.getElementById('sp-chan');
+          if (sp) {
+            var spCur = ${JSON.stringify(isChannelId(leaderboardSetting('stack_post_channel_id')) ? leaderboardSetting('stack_post_channel_id') : '')};
+            sp.innerHTML = list.map(function (c) {
+              var label = c.server + ' # ' + c.name;
+              var o = document.createElement('option'); o.value = c.id; o.textContent = label;
+              if (c.id === spCur) o.selected = true;
+              return o.outerHTML;
+            }).join('');
+            document.getElementById('sp-chan-save').disabled = !list.length;
+          }
         })
         .catch(function (e) {
           clearTimeout(timer); done();
           out.textContent = (e && e.name === 'AbortError') ? 'Discord took too long to answer. Try again in a moment.' : 'Failed.';
         });
+    }
+    function saveStackChannel() {
+      var sel = document.getElementById('sp-chan'), out = document.getElementById('sp-chan-status');
+      var opt = sel.options[sel.selectedIndex];
+      out.textContent = 'Saving…';
+      fetch('/admin/leaderboard/channel', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: sel.value, label: opt ? opt.textContent : '', which: 'stack' }) })
+        .then(function (r) { return r.json(); })
+        .then(function (j) { out.textContent = j.ok ? 'Saved: stack shares go to ' + (j.label || j.id) + '.' : 'Failed: ' + (j.error || 'unknown'); })
+        .catch(function () { out.textContent = 'Failed.'; });
     }
     function saveLeaderboardChannel() {
       var sel = document.getElementById('lb-chan'), out = document.getElementById('lb-chan-status');
