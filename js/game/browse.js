@@ -17166,7 +17166,7 @@ function ensureMapShell(host) {
       // is a hard barrier - prospect and hazard rolls can't be taken back -
       // and auctions never sit on the undo stack, so this matches the rule
       // that boost / factory / ET-produce undo but prospect / auction do not.
-      // Shown only when there's something to undo, so the toolbar stays clean.
+      // Always shown in a server game; greyed out when there is nothing to undo.
       let canUndo = false;
       let anyAction = false;
       let undoTip = 'Nothing to undo yet.';
@@ -17190,7 +17190,10 @@ function ensureMapShell(host) {
       // undoable - a genuine dice roll (prospect / hazard) or a hidden-info
       // reveal (exomigration) shows it disabled with the reason, rather than
       // hiding it and leaving the player wondering where undo went.
-      undoTag.hidden = !anyAction;
+      // Owner 2026-11-22: the undo button never disappears in a server game.
+      // With nothing to take back (or off your turn) it stays, greyed out.
+      void anyAction;
+      undoTag.hidden = !_online;
       undoTag.disabled = !canUndo;
       undoTag.title = undoTip;
     }
@@ -29319,6 +29322,7 @@ async function undoRocketMove() {
 function describeTurnAction(a) {
   if (!a || !a.kind) return 'last action';
   return ({
+    EVENT_CHOICE: 'event choice',
     MOVE: 'move',
     MOVE_FACTORY: 'mobile factory move',
     MOVE_FLEET: 'mobile factory fleet move',

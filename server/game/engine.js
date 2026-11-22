@@ -13804,6 +13804,7 @@ function applyPiggybackReplay(state, op) {
 
 function pickPayload(op) {
   switch (op.kind) {
+    case 'EVENT_CHOICE': return { cardId: op.cardId, ...(op.lobby ? { lobby: true } : {}), ...(op.choice ? { choice: op.choice } : {}) };
     case 'MOVE': return { toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, ...(Array.isArray(op.hazardChoices) ? { hazardChoices: op.hazardChoices.slice() } : {}), segments: op.segments, pickupChit: op.pickupChit !== false, ...(op.acetyleneLiftoff ? { acetyleneLiftoff: true } : {}), ...(op.unit ? { unit: op.unit } : {}), ...(op.asFreighter ? { asFreighter: true } : {}), ...(op.wsbCoast ? { wsbCoast: true } : {}) };
     case 'MOVE_FACTORY': return { fromSiteId: op.fromSiteId, toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, segments: op.segments, ...(op.cubeId != null ? { cubeId: op.cubeId } : {}), ...(op.acetyleneLiftoff ? { acetyleneLiftoff: true } : {}) };
     case 'MOVE_FLEET': return { moves: op.moves };
@@ -13935,6 +13936,7 @@ function describeAction(a) {
     const s = siteById(a.payload.siteId);
     return `prospect ${s ? s.name : a.payload.siteId}`;
   }
+  if (a.kind === 'EVENT_CHOICE') return 'event choice';
   return a.kind;
 }
 
@@ -13959,7 +13961,7 @@ function rebuildFromBase(baseState, actions, report = null) {
   s.turnRedo = [];
   for (let i = 0; i < actions.length; i++) {
     const a = actions[i];
-    const handler = FUNCTIONAL[a.kind];
+    const handler = FUNCTIONAL[a.kind] || REPLAY_ONLY[a.kind];
     if (!handler) {
       return note({ at: i, of: actions.length, kind: a.kind, error: 'no_replay_handler' });
     }
@@ -13987,6 +13989,14 @@ function rebuildFromBase(baseState, actions, report = null) {
   }
   return s;
 }
+
+// Actions that ride the turn's undo stack but are not dispatched as ordinary
+// functional ops. A Sunspot event answer the active player gives on their own
+// turn is one: it goes on the stack like any other action, so UNDO replays it
+// (the event stays answered) and can also take the answer itself back.
+const REPLAY_ONLY = {
+  EVENT_CHOICE: (s, op, player) => applyEventChoice(s, op, { profileId: player.profileId }),
+};
 
 // ----- meta ops -----
 
@@ -18325,12 +18335,28 @@ export function applyOperation(prevState, op, ctx) {
   // they must settle the event before doing anything else (END_TURN
   // included, so the debt can't be dodged). A debt whose options
   // vanished (hand emptied, tied card already gone) clears itself.
-  if (op.kind === 'EVENT_CHOICE') return noted(applyEventChoice(clonePrev(), op, ctx));
+  if (op.kind === 'EVENT_CHOICE') {
+    // Answered by the active player on their own turn, it goes on the turn's
+    // undo stack like any other action: an UNDO then replays it instead of
+    // rebuilding a board where the event is still owed, and can take the
+    // answer itself back (owner report 2026-11-22, room wyk9hp). An early,
+    // off-turn answer stays off the stack (it is not that player's turn).
+    const st0 = clonePrev();
+    const cursorBefore = st0.rng.cursor;
+    const r = applyEventChoice(st0, op, ctx);
+    if (r && r.ok && !op.debug && isPlayersTurn(prevState, ctx.profileId)) {
+      r.state.turnActions = [...(r.state.turnActions || []),
+        { kind: 'EVENT_CHOICE', payload: pickPayload(op), rolled: r.state.rng.cursor !== cursorBefore }];
+      r.state.turnRedo = [];
+    }
+    return noted(r);
+  }
   // Trades are a consensual side-channel (below) that never freeze the table,
   // so an unsettled event debt does not block them either - a player owing a
   // Budget Cuts discard can still deal cards while their dialog sits minimized.
   // Every OTHER op on their turn still waits on the choice.
-  if (prevState.pendingEvent && !op.debug && !TRADE[op.kind]
+  // UNDO / REDO pass too: taking back this turn's moves never dodges the debt.
+  if (prevState.pendingEvent && !op.debug && !TRADE[op.kind] && op.kind !== 'UNDO' && op.kind !== 'REDO'
       && isPlayersTurn(prevState, ctx.profileId)
       && eventDebtFor(prevState, ctx.profileId)) {
     const st0 = clonePrev();
