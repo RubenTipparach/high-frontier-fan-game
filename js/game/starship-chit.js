@@ -55,7 +55,7 @@ export function starshipChitSvg(players, market) {
 
 // The map form: the isovault hexagon alone, flat-top, the same size as a site
 // hexagon, with the starship behind it. Corners touch the 100 x 100 box edge.
-export function starshipHexSvg(players, market) {
+export function starshipHexSvg(players, market, rim = '#c9a227') {
   const C = 50, R = 49, r = 18;
   const v = (k, rad = R) => [C + rad * Math.cos(Math.PI / 3 * k), C + rad * Math.sin(Math.PI / 3 * k)];
   const pt = (q) => `${q[0].toFixed(2)},${q[1].toFixed(2)}`;
@@ -78,6 +78,7 @@ export function starshipHexSvg(players, market) {
     + `<defs><clipPath id="ss-hexclip"><polygon points="${outer}"/></clipPath></defs>`
     + `<polygon points="${outer}" fill="url(#ss-bg)"/><g clip-path="url(#ss-hexclip)">${ART}</g>`
     + `${cells}<polygon points="${inner}" fill="#0f1120" fill-opacity="0.5" stroke="#c9a227" stroke-width="2"/>`
-    + `<polygon points="${outer}" fill="none" stroke="#c9a227" stroke-width="3" stroke-linejoin="round"/>`
+    + `<polygon points="${outer}" fill="none" stroke="#0b0d1f" stroke-width="6" stroke-linejoin="round"/>`
+    + `<polygon points="${outer}" fill="none" stroke="${rim}" stroke-width="3.6" stroke-linejoin="round"/>`
     + `<text x="50" y="56" ${NUM} font-size="16" fill="#ffd24a" stroke-width="3">${Math.max(0, market | 0)}</text></svg>`;
 }

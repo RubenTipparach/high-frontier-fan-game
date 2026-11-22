@@ -1360,16 +1360,16 @@ export class MapRenderer {
       const img = new Image();
       img.onload = () => this._scheduleDraw();
       img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(chit.svg);
-      this._starship = { x: chit.x, y: chit.y, svg: chit.svg, img };
-    } else { this._starship.x = chit.x; this._starship.y = chit.y; }
+      this._starship = { x: chit.x, y: chit.y, svg: chit.svg, img, rim: chit.rim || null };
+    } else { this._starship.x = chit.x; this._starship.y = chit.y; this._starship.rim = chit.rim || null; }
     this._scheduleDraw();
   }
   // The isobank hexagon covers its site hexagon at the same size. A small
   // gold hex beside it peeks: hover (or tap, on a phone) to hide the isobank
   // and see the site underneath.
-  _drawStarshipScreen(ctx) {
+  _drawStarshipScreen(ctx, { over = false } = {}) {
     const c = this._starship;
-    this._starshipBox = null; this._starshipPeekBox = null;
+    if (!over) { this._starshipBox = null; this._starshipPeekBox = null; }
     if (!c || !c.img.complete || !c.img.naturalWidth) return;
     const eff = this.zoom * this.fitScale;
     const R = HEX_R * this._hexScale();
@@ -1380,6 +1380,7 @@ export class MapRenderer {
     if (!(this._starshipPeek || this._starshipHidden)) {
       const d = (2 * R * 100) / 98;
       ctx.save();
+      if (over) ctx.globalAlpha = 0.82;
       ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 6; ctx.shadowOffsetY = 2;
       ctx.drawImage(c.img, cx - d / 2, cy - d / 2, d, d);
       ctx.restore();
@@ -1389,9 +1390,9 @@ export class MapRenderer {
     ctx.beginPath();
     for (let k = 0; k < 6; k += 1) { const a = (Math.PI / 3) * k; const x = bx + pr * Math.cos(a), y = by + pr * Math.sin(a); if (k) ctx.lineTo(x, y); else ctx.moveTo(x, y); }
     ctx.closePath();
-    ctx.fillStyle = this._starshipHidden ? '#c9a227' : '#0f1120';
+    ctx.fillStyle = this._starshipHidden ? (c.rim || '#c9a227') : '#0f1120';
     ctx.fill();
-    ctx.lineWidth = 2; ctx.strokeStyle = '#c9a227'; ctx.stroke();
+    ctx.lineWidth = 2; ctx.strokeStyle = c.rim || '#c9a227'; ctx.stroke();
     ctx.restore();
   }
 
@@ -2930,6 +2931,8 @@ export class MapRenderer {
       this._drawPlayerShipScreen(ctx);
       // Reset the per-frame ship hit-boxes; each ship draw routine repopulates
       // them so a tap can map a screen point back to the ship under it.
+      // The isobank sits on its site under every piece (pieces always on top).
+      if (this._starship) this._drawStarshipScreen(ctx); else { this._starshipBox = null; this._starshipPeekBox = null; }
       this._mpRocketBoxes = [];
       this._freighterBoxes = [];
       this._bernalBoxes = [];
@@ -2944,7 +2947,9 @@ export class MapRenderer {
       // which is the whole complaint the offset was meant to fix. A small chit
       // layered over a sprite stays both readable AND next to its own node.
       this._drawOutpostsScreen(ctx);
-      if (this._starship) this._drawStarshipScreen(ctx); else this._starshipBox = null;
+      // Hovering the isobank lifts it over the pieces standing on it, so they
+      // read as faded behind it.
+      if (this._starship && this._starshipHover && this._starshipBox) this._drawStarshipScreen(ctx, { over: true });
       if (this._explosion)     this._drawExplosionScreen(ctx);
       if (this._beltWaivers)   this._drawBeltWaiversScreen(ctx);
       // Selection ring drawn LAST so nothing - labels, ships, hexes
@@ -6307,6 +6312,9 @@ export class MapRenderer {
       const pk = this._starshipPeekBox;
       const peek = !!(pk && Math.hypot(scx - pk.x, scy - pk.y) <= pk.r + 3);
       if (peek !== !!this._starshipPeek) { this._starshipPeek = peek; this._scheduleDraw(); }
+      const sbx = this._starshipBox;
+      const over = !peek && !!(sbx && Math.hypot(scx - sbx.x, scy - sbx.y) <= sbx.r * 0.92);
+      if (over !== !!this._starshipHover) { this._starshipHover = over; this._scheduleDraw(); }
       const badge = this._prospectorBadgeBox;
       if (badge) {
         const dx = scx - badge.x;

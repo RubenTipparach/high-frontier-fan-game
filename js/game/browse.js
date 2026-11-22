@@ -26436,7 +26436,10 @@ function syncStarshipChit(snapshot) {
   const pos = ib ? mpRocketCoords(ib.siteId) : null;
   if (!pos) { _renderer.setStarshipChit(null); return; }
   const players = (snapshot.players || []).map((p) => ({ color: p.color, isovault: p.isovault }));
-  _renderer.setStarshipChit({ x: pos.x, y: pos.y, svg: starshipHexSvg(players, snapshot.earthMarket) });
+  // The rim is the isobanker's seat colour.
+  const banker = (snapshot.players || []).find((p) => p.profileId === ib.ownerId);
+  const rim = (banker && banker.color) || '#c9a227';
+  _renderer.setStarshipChit({ x: pos.x, y: pos.y, rim, svg: starshipHexSvg(players, snapshot.earthMarket, rim) });
 }
 function syncBernalUnits(snapshot) {
   syncStarshipChit(snapshot);
