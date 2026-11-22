@@ -35,7 +35,9 @@ const DIFF_PREFIX = /^\{"_base":(\d+),/;
 
 // The ops that start a turn: their board is the undo base (games.committed_seq
 // moves to them), so it is always stored whole, and every diff written live
-// points at the latest one. index.js decides commitsTurn with this same test.
+// points at the latest one. index.js decides commitsTurn with this same test
+// (plus EVENT_CHOICE, which commits too but stays off this list so older
+// games' stored event answers keep reading as ordinary rows).
 export function isCommitKind(kind) {
   const k = String(kind || '');
   return k === 'START' || k === 'END_TURN' || k === 'PICK_CREW' || k === 'SET_FIRST_PLAYER'

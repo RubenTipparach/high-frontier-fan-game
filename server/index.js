@@ -3405,7 +3405,13 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
   // silently discarded every drafted card.
   // (The list lives in server/history.js#isCommitKind: the history store keeps
   // exactly these boards whole, because this is the undo base.)
-  const commitsTurn = isCommitKind(kind);
+  // A Sunspot event answer (EVENT_CHOICE) also commits: the event happens once,
+  // so an UNDO must never rebuild from a board where it is still owed - that
+  // brought Budget Cuts back on every undo and the owed choice then blocked the
+  // next one (owner report 2026-11-22, room wyk9hp). It is not in isCommitKind:
+  // the history compactor reads that list to find bases, and older games stored
+  // their event answers as diffs.
+  const commitsTurn = isCommitKind(kind) || kind === 'EVENT_CHOICE';
   // When the floor moves up to THIS op, every action the active player took
   // earlier this turn is now below it and can no longer be undone. Clear the
   // per-turn undo stack in the SAME snapshot we persist, so a later UNDO
