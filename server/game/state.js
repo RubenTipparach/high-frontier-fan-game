@@ -332,10 +332,11 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
   // alongside Sirens; that is refused at room creation (sirens_excludes_m0).
   if (sirens && Array.isArray(players) && players.length === 1) ceoSolo = true;
   // Module 4 (Exodus) REQUIRES Module 0 (4A1a): contracts are auctioned off the
-  // Fundraise and their decks follow the Active Law's ideology. Admin-only
-  // preview (docs/module-m4-plan.md). CEO Solitaire's own M4 rules (4G) are not
-  // wired, so a CEO or variant game never carries it.
-  m4 = !!m4 && !ceoSolo && !sirens && !hermes && !altruism;
+  // Fundraise and their decks follow the Active Law's ideology. Preview for
+  // admins and testers (docs/module-m4-plan.md). It plays with CEO Solitaire
+  // (its 4G rules are in) and Altruism (owner 2026-11-22), never with Hermes
+  // Fall or The Sirens (a solo Sirens game also runs ceoSolo, hence the check).
+  m4 = !!m4 && !sirens && !hermes;
   if (m4) m0 = true;
   // CEO Solitaire (V6) runs the Solitaire Sol Political Assembly, so M0 is
   // mandatory whenever the variant is on (mirrors the M2-forces-M0 rule above).

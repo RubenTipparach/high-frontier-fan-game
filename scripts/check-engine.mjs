@@ -10486,20 +10486,25 @@ check('a strong rocket takes a safe factory-assist liftoff to skip the first-spa
 });
 
 // Module 4 (Exodus) preview gate (docs/module-m4-plan.md): M4 requires M0
-// (4A1a), so it turns the Assembly on; it does not combine with a variant yet
-// (CEO Solitaire's own M4 rules are not wired), so a variant game drops it; and
-// a room without it carries m4 false.
-check('M4 turns on M0 and stays out of variant games', () => {
-  const mk = (opts) => createInitialState({ players: [{ profileId: 1, name: 'A', seat: 1 }, { profileId: 2, name: 'B', seat: 2 }], seed: 7, ...opts });
+// (4A1a), so it turns the Assembly on; it plays with CEO Solitaire and Altruism
+// (owner 2026-11-22) but not with Hermes Fall, The Sirens or the tutorial; and a
+// room without it carries m4 false.
+check('M4 turns on M0; plays with CEO Solitaire and Altruism, not Hermes / Sirens / tutorial', () => {
+  const two = [{ profileId: 1, name: 'A', seat: 1 }, { profileId: 2, name: 'B', seat: 2 }];
+  const mk = (opts, players = two) => createInitialState({ players, seed: 7, ...opts });
   const on = mk({ m4: true });
   assert(on.m4 === true && on.m0 === true && on.assembly, `M4 game: m4=${on.m4} m0=${on.m0}`);
   const off = mk({});
   assert(off.m4 === false, `plain game m4=${off.m4}`);
-  for (const v of ['ceoSolo', 'hermes', 'altruism', 'tutorial']) {
+  const ceo = mk({ m4: true, ceoSolo: true }, [two[0]]);
+  assert(ceo.m4 === true && ceo.ceoSolo && ceo.m0 && ceo.contractDecks, `CEO Solitaire dropped m4: m4=${ceo.m4}`);
+  const alt = mk({ m4: true, altruism: true });
+  assert(alt.m4 === true && alt.altruism && alt.contractDecks, `Altruism dropped m4: m4=${alt.m4}`);
+  for (const v of ['hermes', 'sirens', 'tutorial']) {
     const g = mk({ m4: true, [v]: true });
     assert(g.m4 === false, `${v} game kept m4`);
   }
-  return 'M4 forces M0; plain game m4 false; CEO / Hermes / Altruism / Tutorial drop it';
+  return 'M4 forces M0; CEO Solitaire + Altruism keep it; Hermes / Sirens / tutorial drop it';
 });
 
 // ---- Module 4 Stage 1: contracts (4B) ----------------------------------------

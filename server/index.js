@@ -258,6 +258,8 @@ app.get('/healthz', (_req, res) => {
 // counts as one - it is a scripted scenario in every way that matters here.
 // Keep in step with docs/variants-tracker.md when a new variant lands.
 const VARIANT_KEYS = ['ceoSolo', 'tutorial', 'sirens', 'hermes', 'altruism'];
+// The variants Module 4 combines with (owner 2026-11-22).
+const M4_VARIANTS_OK = new Set(['ceoSolo', 'altruism']);
 
 function profileIsAdmin(profile, req) {
   if (profile && isRatAdmin(profile.name)) return true;
@@ -1092,13 +1094,15 @@ app.post('/lobbies', requireProfile, (req, res) => {
   const m2 = body.m2 ? 1 : 0;
   // Opt-in Module 4 (Exodus). A PREVIEW for admins and playtesters (user
   // 2026-11-15 admin-only; opened to testers 2026-11-18, docs/module-m4-plan.md):
-  // anyone else's request is forced to 0 regardless of what the client sends. M4 requires M0 (4A1a), so it turns M0 on. It does not
-  // combine with a variant yet (CEO Solitaire's own M4 rules are not wired), so
-  // that combination is refused rather than quietly narrowed.
+  // anyone else's request is forced to 0 regardless of what the client sends. M4 requires M0 (4A1a), so it turns M0 on. It
+  // combines with CEO Solitaire and Altruism, but not with Hermes Fall, The
+  // Sirens or the tutorial: those are refused rather than quietly narrowed.
   const m4 = (body.m4 && m4Allowed(req)) ? 1 : 0;
   if (m4) {
-    const withVariant = VARIANT_KEYS.filter((k) => body[k]);
-    if (withVariant.length || body.ceoSolo || body.tutorial) {
+    // CEO Solitaire (V6, whose 4G rules are in) and V4 Altruism play with M4
+    // (owner 2026-11-22); Hermes Fall, The Sirens and the tutorial do not.
+    const withVariant = VARIANT_KEYS.filter((k) => body[k] && !M4_VARIANTS_OK.has(k));
+    if (withVariant.length) {
       return res.status(400).json({ error: 'm4_no_variants', detail: withVariant });
     }
     // M4 with M2 is refused again until isotope monetization is finished (owner
@@ -1751,9 +1755,10 @@ app.post('/lobbies/:id/settings', requireProfile, (req, res) => {
   const m4After = (body.m4 !== undefined && m4Allowed(req)) ? !!body.m4 : !!lobby.m4;
   const m2After = body.m2 !== undefined ? !!body.m2 : !!lobby.m2;
   if (m4After && m2After) return res.status(400).json({ error: 'm4_no_m2' });
-  // M4 does not combine with a variant (V9 Sirens included, owner 2026-11-18):
-  // the same refusal the create route gives.
-  if (m4After && (lobby.sirens || lobby.hermes || lobby.altruism || lobby.ceo_solo || lobby.tutorial)) {
+  // M4 does not combine with Hermes Fall, The Sirens (owner 2026-11-18) or the
+  // tutorial; CEO Solitaire and Altruism are fine (owner 2026-11-22). The same
+  // refusal the create route gives.
+  if (m4After && (lobby.sirens || lobby.hermes || lobby.tutorial)) {
     return res.status(400).json({ error: 'm4_no_variants' });
   }
   if (body.m2 !== undefined) { sets.push('m2 = ?'); args.push(body.m2 ? 1 : 0); }
