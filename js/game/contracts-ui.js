@@ -448,25 +448,41 @@ function canAuctionNow(s, p, myTurn) {
 }
 // The three pair decks, top card up. A deck you may auction carries one
 // Auction button; one you may not is greyed out with none (owner 2026-11-18).
+// Proposal Review (4B3d): the deck whose top card the player has set aside (to
+// the bottom) before choosing to auction the next one or abandon. Local until
+// the choice is sent; null when nothing is set aside.
+let _discardPair = null;
 function decksHtml(s, p, auctionOpen) {
   const laws = lawKeys(s, p);
+  const side = s.contractSide === 'gold' ? 'gold' : 'blue';
   return `<div class="m4c-decks">${Object.keys(CONTRACT_PAIRS).map((pair) => {
     const deck = (s.contractDecks || {})[pair] || [];
     const byLaw = CONTRACT_PAIRS[pair].some((k) => laws.has(k));
     const byConnections = !byLaw && hasContractAbility(p, 'connections')
       && CONTRACT_PAIRS[pair].some((k) => delegateIn(s, k, p.profileId));
-    const top = deck[0];
+    const discarded = auctionOpen && _discardPair === pair && deck.length > 1;
+    // With the top card set aside, the next card is the one on offer.
+    const top = discarded ? deck[1] : deck[0];
     const open = (byLaw || byConnections) && !!top;
     // The default-chit holder may not put a manned contract up (4B2d).
-    const topFace = top ? contractFace(top, s.contractSide === 'gold' ? 'gold' : 'blue') : null;
+    const topFace = top ? contractFace(top, side) : null;
     const stigma = !!(topFace && topFace.manned && s.defaultChit && s.defaultChit.profileId === p.profileId);
-    const btn = auctionOpen && open
-      ? `<div class="m4c-btns"><button type="button" data-act="auction" data-pair="${pair}" ${stigma ? 'disabled title="Default chit: no manned contracts."' : ''}>Auction</button></div>` : '';
+    const noManned = stigma ? 'disabled title="Default chit: no manned contracts."' : '';
+    let btn = '';
+    if (auctionOpen && open && discarded) {
+      btn = `<div class="m4c-btns"><button type="button" data-act="auction" data-pair="${pair}" data-discard="1" ${noManned}>Auction</button>
+        <button type="button" data-act="abandon" data-pair="${pair}">Abandon</button>
+        <button type="button" data-act="keep" data-pair="${pair}">Keep top</button></div>`;
+    } else if (auctionOpen && open && !_discardPair) {
+      btn = `<div class="m4c-btns"><button type="button" data-act="auction" data-pair="${pair}" ${noManned}>Auction</button>
+        ${deck.length > 1 ? `<button type="button" data-act="discard" data-pair="${pair}" data-tip="Send the top card to the bottom of the deck, then auction the next one or abandon.">Discard top</button>` : ''}</div>`;
+    }
     return `<div class="m4c-deck ${open ? 'open' : 'closed'}" ${open ? '' : 'aria-disabled="true"'}>
       <div class="m4c-deck-head"><b>${CONTRACT_PAIR_NAMES[pair]}</b>
         <span>${deck.length} left</span>
         <span class="m4c-law">${byLaw ? 'Active Law' : byConnections ? 'Connections' : ''}</span></div>
-      ${top ? cardThumb(top, s.contractSide === 'gold' ? 'gold' : 'blue') : '<div class="muted">empty</div>'}${btn}</div>`;
+      ${discarded ? `<div class="m4c-note">${esc((contractFace(deck[0], side) || {}).name || '')} to the bottom</div>` : ''}
+      ${top ? cardThumb(top, side) : '<div class="muted">empty</div>'}${btn}</div>`;
   }).join('')}</div>`;
 }
 // The contract auction step of a Fundraise (owner 2026-11-18: the auction is
@@ -495,10 +511,26 @@ export function renderContractAuctionStep(host, done) {
   wrap.innerHTML = `<h4>📜 Contract auction</h4>${decksHtml(s, p, true)}
     <div class="m4c-btns m4c-fr-skip"><button type="button" data-skip>No auction</button></div>`;
   wrap.querySelectorAll('button[data-act="auction"]').forEach((b) => b.addEventListener('click', async () => {
+    const discardTop = !!b.dataset.discard;
+    _discardPair = null;
     done();
-    await D.submitTurnOp({ kind: 'AUCTION_CONTRACT_START', pair: b.dataset.pair });
+    await D.submitTurnOp({ kind: 'AUCTION_CONTRACT_START', pair: b.dataset.pair, ...(discardTop ? { discardTop: true } : {}) });
   }));
-  wrap.querySelector('[data-skip]').addEventListener('click', done);
+  // Proposal Review (4B3d): set the top card aside, look at the next one.
+  wrap.querySelectorAll('button[data-act="discard"]').forEach((b) => b.addEventListener('click', () => {
+    _discardPair = b.dataset.pair;
+    renderContractAuctionStep(host, done);
+  }));
+  wrap.querySelectorAll('button[data-act="keep"]').forEach((b) => b.addEventListener('click', () => {
+    _discardPair = null;
+    renderContractAuctionStep(host, done);
+  }));
+  wrap.querySelectorAll('button[data-act="abandon"]').forEach((b) => b.addEventListener('click', async () => {
+    _discardPair = null;
+    done();
+    await D.submitTurnOp({ kind: 'AUCTION_CONTRACT_START', pair: b.dataset.pair, discardTop: true, abandon: true });
+  }));
+  wrap.querySelector('[data-skip]').addEventListener('click', () => { _discardPair = null; done(); });
   host.appendChild(wrap);
   return true;
 }

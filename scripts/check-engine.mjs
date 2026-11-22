@@ -11388,6 +11388,35 @@ check('When fulfilling: Planetary Protection busts the site and seats 2 delegate
   return `Ceres busted + 2 Equality delegates; Beehive at Eureka struck ${struck} / dry ${dry} (re-roll offered)`;
 });
 
+check('Proposal Review (4B3d): discard the top contract, then auction the next or abandon', () => {
+  const setup = () => {
+    const st = m4Game();
+    const c = stackDeck(st, 'M4N228F');
+    const ini = currentPlayerOf(st);
+    const r = fundraise(st, ini.profileId);
+    assert(r.ok, `FUNDRAISE: ${r.error}`);
+    r.state.activeLawStar = CONTRACT_PAIRS[c.pair][0];
+    return { st: r.state, c, ini, deck: () => r.state.contractDecks[c.pair] };
+  };
+  // Discard, then abandon: the top goes to the bottom, nothing is auctioned.
+  let t = setup();
+  const second = t.deck()[1];
+  let r = op(t.st, 'AUCTION_CONTRACT_START', t.ini.profileId, { pair: t.c.pair, discardTop: true, abandon: true });
+  assert(r.ok, `discard + abandon: ${r.error}`);
+  let d = r.state.contractDecks[t.c.pair];
+  assert(d[d.length - 1] === t.c.id && d[0] === second, `deck after discard: top ${d[0]}, bottom ${d[d.length - 1]}`);
+  assert(!r.state.auction && pl(r.state, t.ini.profileId).contractAuctionDone, 'an auction opened, or the step stayed open');
+  // Discard, then auction: the NEXT card goes up.
+  t = setup();
+  const next = t.deck()[1];
+  r = op(t.st, 'AUCTION_CONTRACT_START', t.ini.profileId, { pair: t.c.pair, discardTop: true });
+  assert(r.ok, `discard + auction: ${r.error}`);
+  assert(r.state.auction && r.state.auction.kind === 'contract' && r.state.auction.cardId === next, `lot: ${JSON.stringify(r.state.auction && r.state.auction.cardId)} want ${next}`);
+  d = r.state.contractDecks[t.c.pair];
+  assert(d[d.length - 1] === t.c.id, 'the discarded contract is not at the bottom');
+  return 'discard+abandon sends the top to the bottom; discard+auction puts the next card up';
+});
+
 check('contract auctions ignore the academia hand limit (owner 2026-11-21)', () => {
   const st = m4Game();
   for (const q of st.players) q.hand = st.decks.thruster.splice(0, 6);
