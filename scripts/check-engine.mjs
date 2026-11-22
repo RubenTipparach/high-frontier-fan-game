@@ -10486,10 +10486,10 @@ check('a strong rocket takes a safe factory-assist liftoff to skip the first-spa
 });
 
 // Module 4 (Exodus) preview gate (docs/module-m4-plan.md): M4 requires M0
-// (4A1a), so it turns the Assembly on; it plays with CEO Solitaire and Altruism
-// (owner 2026-11-22) but not with Hermes Fall, The Sirens or the tutorial; and a
+// (4A1a), so it turns the Assembly on; it plays with CEO Solitaire, Altruism and
+// Hermes Fall (owner 2026-11-22) but not with The Sirens or the tutorial; and a
 // room without it carries m4 false.
-check('M4 turns on M0; plays with CEO Solitaire and Altruism, not Hermes / Sirens / tutorial', () => {
+check('M4 turns on M0; plays with CEO Solitaire, Altruism and Hermes, not Sirens / tutorial', () => {
   const two = [{ profileId: 1, name: 'A', seat: 1 }, { profileId: 2, name: 'B', seat: 2 }];
   const mk = (opts, players = two) => createInitialState({ players, seed: 7, ...opts });
   const on = mk({ m4: true });
@@ -10500,11 +10500,13 @@ check('M4 turns on M0; plays with CEO Solitaire and Altruism, not Hermes / Siren
   assert(ceo.m4 === true && ceo.ceoSolo && ceo.m0 && ceo.contractDecks, `CEO Solitaire dropped m4: m4=${ceo.m4}`);
   const alt = mk({ m4: true, altruism: true });
   assert(alt.m4 === true && alt.altruism && alt.contractDecks, `Altruism dropped m4: m4=${alt.m4}`);
-  for (const v of ['hermes', 'sirens', 'tutorial']) {
+  const her = mk({ m4: true, hermes: true });
+  assert(her.m4 === true && her.hermes && her.contractDecks, `Hermes dropped m4: m4=${her.m4}`);
+  for (const v of ['sirens', 'tutorial']) {
     const g = mk({ m4: true, [v]: true });
     assert(g.m4 === false, `${v} game kept m4`);
   }
-  return 'M4 forces M0; CEO Solitaire + Altruism keep it; Hermes / Sirens / tutorial drop it';
+  return 'M4 forces M0; CEO Solitaire, Altruism, Hermes keep it; Sirens / tutorial drop it';
 });
 
 // ---- Module 4 Stage 1: contracts (4B) ----------------------------------------

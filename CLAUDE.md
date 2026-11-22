@@ -244,7 +244,7 @@ per room and carried into the game state as a boolean (`state.m0`,
   counts are unavailable (owner 2026-11-18). M4 REQUIRES M0 (4A1a) and forces it on: ticking M4 ticks and LOCKS the M0
   box (create form, solo setup, room settings; `lobby.js#lockM0ForM4`), and room
   settings cannot clear M0 while the room keeps M4. It combines with CEO
-  Solitaire (V6) and V4 Altruism (owner 2026-11-22), but not with V5 Hermes Fall, V9 The Sirens
+  Solitaire (V6), V4 Altruism and V5 Hermes Fall (owner 2026-11-22), but not with V9 The Sirens
   (owner 2026-11-18) or the tutorial (`m4_no_variants`, on create AND room settings;
   `createInitialState` drops it the same way). The 4G solitaire rules are DONE: CEO
   Solitaire (V6) implements them, including the 4G3 Solitaire Assembly (owner 2026-11-17). M4 does NOT combine with M2 for new rooms until isotope monetization is

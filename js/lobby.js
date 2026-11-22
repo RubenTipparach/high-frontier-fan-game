@@ -1845,7 +1845,7 @@ function humanizeError(code) {
     // silently corrected, so the host is told instead of quietly handed a
     // different game - which needs them to say something readable now that the
     // scenario is open to everyone.
-    m4_no_variants: 'Module 4 (Exodus) does not play with Hermes Fall, The Sirens or the tutorial. Pick another scenario, or turn Module 4 off.',
+    m4_no_variants: 'Module 4 (Exodus) does not play with The Sirens or the tutorial. Pick another scenario, or turn Module 4 off.',
     m4_no_m2: 'Module 4 (Exodus) is not played with Module 2 yet. Turn one of them off.',
     sirens_excludes_m0: 'The Sirens can\'t run with Module 0 - the Sol Political Assembly is Earth\'s. Uncheck Module 0, or pick a different scenario.',
     hermes_fixes_opening: 'Hermes Fall deals its own opening - half decks with the Mass Driver near the top of the thrusters - so it can\'t also run a draft start.',

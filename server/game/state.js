@@ -334,9 +334,9 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
   // Module 4 (Exodus) REQUIRES Module 0 (4A1a): contracts are auctioned off the
   // Fundraise and their decks follow the Active Law's ideology. Preview for
   // admins and testers (docs/module-m4-plan.md). It plays with CEO Solitaire
-  // (its 4G rules are in) and Altruism (owner 2026-11-22), never with Hermes
-  // Fall or The Sirens (a solo Sirens game also runs ceoSolo, hence the check).
-  m4 = !!m4 && !sirens && !hermes;
+  // (its 4G rules are in), Altruism and Hermes Fall (owner 2026-11-22), never
+  // with The Sirens (a solo Sirens game also runs ceoSolo, hence the check).
+  m4 = !!m4 && !sirens;
   if (m4) m0 = true;
   // CEO Solitaire (V6) runs the Solitaire Sol Political Assembly, so M0 is
   // mandatory whenever the variant is on (mirrors the M2-forces-M0 rule above).

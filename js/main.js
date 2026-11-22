@@ -781,9 +781,9 @@ function initNewGameModal() {
     // scenario clears and locks it.
     {
       const m4cb = document.getElementById('solo-m4');
-      // M4 plays with CEO Solitaire and Altruism (owner 2026-11-22), not with
-      // Hermes Fall, The Sirens or the tutorial.
-      const m4Off = hermes || sirens || tutorial;
+      // M4 plays with CEO Solitaire, Altruism and Hermes Fall (owner
+      // 2026-11-22), not with The Sirens or the tutorial.
+      const m4Off = sirens || tutorial;
       if (m4cb) { if (m4Off) m4cb.checked = false; m4cb.disabled = m4Off; }
       // M4 ticked: M0 stays ticked and locked.
       if (m4cb && m4cb.checked) lockM0ForM4(document.getElementById('solo-m0'), true);
@@ -862,8 +862,8 @@ function initNewGameModal() {
     // still runs without M2 (the server forces it off).
     const m1 = !!document.getElementById('solo-m1')?.checked;
     const m2 = !!document.getElementById('solo-m2')?.checked;
-    // M4 (preview, admins and playtesters) also plays with CEO Solitaire and Altruism; it needs M0.
-    const m4 = !hermes && !sirens && !!document.getElementById('solo-m4')?.checked;
+    // M4 (preview, admins and playtesters) plays with every solo type but The Sirens; it needs M0.
+    const m4 = !sirens && !!document.getElementById('solo-m4')?.checked;
     const name = document.getElementById('solo-name')?.value || '';
     soloCreate.disabled = true;
     const prev = soloCreate.textContent;
