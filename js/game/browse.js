@@ -34802,7 +34802,7 @@ function paintTransparentScoring(host, sb) {
   if (con && (con.fulfilled || con.debt || con.chit)) {
     const rows = (con.fulfilledList || []).map((f) => `<li><span>📜 ${esc(f.name)}</span><strong>+${f.vp | 0} VP</strong></li>`).join('');
     const chitRow = con.chit ? `<li><span data-tip="Held now. At game end the chit goes to whoever defaults last.">🏷 Default chit <span class="muted">(${esc(con.chitSide || 'blue')})</span></span><strong>${con.chit} VP</strong></li>` : '';
-    const debtRow = con.debt ? `<li><span data-tip="-1 VP per aqua still owed on a held contract, if unpaid at game end.">💧 Unpaid <span class="muted">(${con.debt} aqua)</span></span><strong>-${con.debt} VP</strong></li>` : '';
+    const debtRow = con.debt ? `<li><span data-tip="-1 VP per aqua still owed on a late or defaulted contract.">💧 Unpaid <span class="muted">(${con.debt} aqua)</span></span><strong>-${con.debt} VP</strong></li>` : '';
     contractBlock = `<h4>Contracts</h4><ul class="glory-table">${rows}${chitRow}${debtRow}</ul>`;
   }
 
