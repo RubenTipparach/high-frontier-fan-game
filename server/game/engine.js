@@ -15111,7 +15111,14 @@ export function liveScoreboard(state) {
   const globalPerSpectral = {};
   for (const f of allFactories) globalPerSpectral[f.spectralType] = (globalPerSpectral[f.spectralType] || 0) + 1;
   const firstIdx = state.firstPlayerIndex || 0;
-  const contractLive = liveContractRows(state);
+  // A finished game is scored as the final tally scored it: the winning
+  // ideology's award, every unfulfilled contract's debt, and each Future at the
+  // VP it scored at the end (that pass can clear the board, so it is read back,
+  // not recomputed). The live scoring tab and the game-over standings both read
+  // these rows, so they can never disagree.
+  const final = state.status === 'finished';
+  const winnerKey = final && m0 && state.finalVote ? state.finalVote.winner : null;
+  const contractLive = liveContractRows(state, { final });
   const players = state.players.map((p, idx) => {
     const sirenScale = isSirenPlayer(state, p);
     const ownColonies = Object.entries(state.colonies || {})
@@ -15128,8 +15135,9 @@ export function liveScoreboard(state) {
     // Each accomplished Future scores its OWN current value (the same re-check +
     // dynamic endgameVp bonus the endgame tally runs), so the live scoring tab
     // shows what a Future is worth NOW instead of a bare "endgame" placeholder.
-    const futureCtx = m2 ? buildFutureCtx(state, p) : null;
+    const futureCtx = (m2 && !final) ? buildFutureCtx(state, p) : null;
     const liveStars = m2 ? (p.futureStars || []).map((s) => {
+      if (final) return { key: s.key, vp: s.vp | 0, endgame: !!s.endgame, scoredVp: s.scoredVp != null ? (s.scoredVp | 0) : (s.vp | 0), dynamic: false, endgameVpLabel: null };
       const sc = futureStarScore(state, p, s, futureCtx);
       return { key: s.key, vp: s.vp | 0, endgame: !!s.endgame, scoredVp: sc.vp, dynamic: sc.dynamic, endgameVpLabel: sc.label };
     }) : [];
@@ -15137,11 +15145,12 @@ export function liveScoreboard(state) {
     const b = scorePlayer({
       ownerId: p.profileId, factories: allFactories, ownColonies, sirenDomes: sirenScale,
       claims, outposts, rocket, firstPlayer, glory: gloryVp,
-      cubeVp, awardVp: 0, futuresVp, bernalVp,
+      cubeVp, awardVp: winnerKey ? ideologyAwardVp(state, p, winnerKey) : 0, futuresVp, bernalVp,
       mobileFactories: mobileFactoryTokenCount(state, p),
       bernals: m2 ? (p.bernals || []).length : 0,
     });
     return {
+      ...b,
       profileId: p.profileId, name: p.name, color: p.color || null,
       spectralRows: b.spectralRows, spectralVp: b.spectralVp,
       tokenBreakdown: b.tokenBreakdown, tokenVp: b.tokenVp,
@@ -16846,7 +16855,7 @@ function contractScoring(state) {
 // default chit where it sits now, and -1 per unpaid aqua on a contract that is
 // late or in default (a contract still on the clock owes nothing yet). Unlike contractScoring it
 // does not hand the chit on, so the live panel shows the chit's real holder.
-function liveContractRows(state) {
+function liveContractRows(state, { final = false } = {}) {
   const out = {};
   if (!state.m4) return out;
   for (const p of state.players) {
@@ -16856,8 +16865,9 @@ function liveContractRows(state) {
     // on the clock is not unpaid (owner 2026-11-22).
     let debt = 0;
     for (const id of Object.keys(p.contractMeta || {})) {
+      // At game end every unfulfilled contract owes its unpaid aqua (4E2c).
       const late = p.timepiece && p.timepiece.contractId === id && p.timepiece.deadbeat;
-      if (!late && !p.contractMeta[id].default) continue;
+      if (!final && !late && !p.contractMeta[id].default) continue;
       debt += Math.max(0, contractDebt(p, id) - ((p.contractMeta[id].paid) | 0));
     }
     const chit = (state.defaultChit && state.defaultChit.profileId === p.profileId) ? (state.defaultChit.side === 'gold' ? -6 : -3) : 0;

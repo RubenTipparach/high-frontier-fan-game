@@ -4990,6 +4990,26 @@ async function submitEventChoice(cardId, lobby = false, choice = null) {
   return true;
 }
 
+// A player's M4 contract score at game end: { list, fulfilled, debt, chit, vp }.
+// Reads the final tally's row when there is one (sv.contracts), else scores the
+// snapshot as 4E2 does: fulfilled VP, -1 per unpaid aqua on any contract still
+// held (twice the advance if never boosted), and the default chit.
+function gameOverContracts(snapshot, p, sv) {
+  const list = (p.fulfilledContracts || []).map((f) => { const face = contractFace(f.id, f.side) || {}; return { name: face.name || f.id, vp: face.vp | 0 }; });
+  const row = sv && sv.contracts;
+  if (row) return { list, fulfilled: row.fulfilled | 0, debt: row.debt | 0, chit: row.chit | 0, vp: row.vp | 0 };
+  const fulfilled = list.reduce((n, f) => n + f.vp, 0);
+  let debt = 0;
+  for (const [id, meta] of Object.entries(p.contractMeta || {})) {
+    const face = contractFace(id, (meta && meta.side) || 'blue');
+    if (!face) continue;
+    debt += Math.max(0, (face.advance | 0) * (meta && meta.boosted ? 1 : 2) - ((meta && meta.paid) | 0));
+  }
+  const dc = snapshot.defaultChit;
+  const chit = (dc && dc.profileId === p.profileId) ? (dc.side === 'gold' ? -6 : -3) : 0;
+  return { list, fulfilled, debt, chit, vp: fulfilled - debt + chit };
+}
+
 function renderGameOver(snapshot) {
   const existing = document.getElementById('mp-game-over-overlay');
   const finished = !!(snapshot && snapshot.status === 'finished') && _online && gameViewVisible();
@@ -5034,8 +5054,19 @@ function renderGameOver(snapshot) {
     serverById[sv.profileId] = sv;
   }
   const m0 = !!snapshot.m0;
+  // The standings read the SAME rows as the scoring tab (snapshot.scoreboard:
+  // the engine's scorer, in final mode once the game is over), only drawn
+  // differently. Re-deriving here is a fallback for a snapshot without them.
+  const sbById = {};
+  for (const r of ((snapshot.scoreboard && snapshot.scoreboard.players) || [])) sbById[r.profileId] = r;
   const rows = players
     .map((p) => {
+      const sb = sbById[p.profileId];
+      if (sb) {
+        const c = sb.contracts;
+        const contracts = c ? { list: c.fulfilledList || [], fulfilled: c.fulfilled | 0, debt: c.debt | 0, chit: c.chit | 0, vp: c.vp | 0 } : null;
+        return { p, s: { ...sb, contracts, aqua: (p.aqua | 0), stars: sb.futureStars || [] } };
+      }
       const sv = serverById[p.profileId] || {};
       const cubeVp = m0 ? ((p.cubeVp != null ? p.cubeVp : sv.cubeVp) | 0) : 0;
       const awardVp = m0 ? ((p.awardVp != null ? p.awardVp : sv.awardVp) | 0) : 0;
@@ -5048,7 +5079,13 @@ function renderGameOver(snapshot) {
         cubeVp, awardVp,
         futuresVp: stars.length ? null : (sv.futuresVp != null ? (sv.futuresVp | 0) : null),
       });
-      return { p, s: { ...s, aqua: (p.aqua | 0), stars } };
+      // M4 contracts (4E2b-d): fulfilled VP, -1 per unpaid aqua on a contract
+      // still held, and the default chit. The final tally's own row is the
+      // source (it also hands the chit on for unpaid contracts); a snapshot
+      // without one is scored the same way here.
+      const con = snapshot.m4 ? gameOverContracts(snapshot, p, sv) : null;
+      const total = s.total + ((con && con.vp) | 0);
+      return { p, s: { ...s, total, contracts: con, aqua: (p.aqua | 0), stars } };
     })
     .sort((a, b) => b.s.total - a.s.total || (b.s.aqua || 0) - (a.s.aqua || 0));
 
@@ -5120,7 +5157,8 @@ function renderGameOver(snapshot) {
     : '';
   const note = 'Final score: factory market value (Exploitation Track 8 / 5 / 4 per spectral) + 1 per token (each factory, colony dome, claim disc, and the first-player token) + colony site bonuses + glory'
     + (m0 ? ' + delegate cubes + the winning ideology award' : '')
-    + (snapshot.m2 ? ' + future stars' : '') + '.';
+    + (snapshot.m2 ? ' + future stars' : '')
+    + (snapshot.m4 ? ' + fulfilled contracts - unpaid advances - the default chit' : '') + '.';
   overlay.innerHTML = `
     <div class="mp-game-over-modal" role="dialog" aria-label="Final standings">
       <button type="button" class="modal-x" aria-label="Close" title="Close">&times;</button>
@@ -5320,6 +5358,18 @@ function renderGameOver(snapshot) {
         tok.chips.appendChild(chip);
       }
       detail.appendChild(tok.block);
+    }
+
+    // M4 contracts: each fulfilled contract, unpaid advances, the default chit.
+    const con = s.contracts;
+    if (con && (con.fulfilled || con.debt || con.chit || (con.list && con.list.length))) {
+      const cb = cat('📜', 'Contracts', con.vp | 0);
+      const add = (t) => { const chip = document.createElement('span'); chip.className = 'mp-go-chip'; chip.textContent = t; cb.chips.appendChild(chip); };
+      for (const f of (con.list || [])) add(`${f.name} +${f.vp}`);
+      if (!(con.list && con.list.length) && con.fulfilled) add(`fulfilled +${con.fulfilled}`);
+      if (con.debt) add(`unpaid -${con.debt}`);
+      if (con.chit) add(`default chit ${con.chit}`);
+      detail.appendChild(cb.block);
     }
 
     li.appendChild(detail);
@@ -34818,8 +34868,10 @@ function paintTransparentScoring(host, sb) {
   // Delegate cubes score +1 each (M0). They were in the total but had no line,
   // so the breakdown read short of the header - now itemised.
   const cubeVp = sel.cubeVp | 0;
-  const delegateBlock = cubeVp
-    ? `<h4>Assembly</h4><ul class="glory-table"><li><span>🏛 Delegate cubes</span><strong>+${cubeVp} VP</strong></li></ul>`
+  const awardVp = sel.awardVp | 0;
+  const awardName = (_onlineSnapshot && _onlineSnapshot.finalVote && _onlineSnapshot.finalVote.winnerName) || 'Winning ideology';
+  const delegateBlock = (cubeVp || awardVp)
+    ? `<h4>Assembly</h4><ul class="glory-table">${cubeVp ? `<li><span>🏛 Delegate cubes</span><strong>+${cubeVp} VP</strong></li>` : ''}${awardVp ? `<li><span>🏛 ${esc(awardName)} award</span><strong>+${awardVp} VP</strong></li>` : ''}</ul>`
     : '';
 
   // --- M4 contracts: fulfilled VP, the default chit, unpaid debt ----
@@ -34837,7 +34889,7 @@ function paintTransparentScoring(host, sb) {
   // award we don't break out, e.g. the winning-ideology bonus at game end),
   // surface the remainder so no VP is ever hidden from the breakdown again.
   const shownVp = (sel.spectralVp | 0) + (sel.tokenVp | 0) + (sel.colonyVp | 0)
-    + (sel.bernalVp | 0) + (sel.futuresVp | 0) + gloryVp + cubeVp + ((con && con.vp) | 0);
+    + (sel.bernalVp | 0) + (sel.futuresVp | 0) + gloryVp + cubeVp + awardVp + ((con && con.vp) | 0);
   const otherVp = (sel.total | 0) - shownVp;
   const otherBlock = otherVp > 0
     ? `<h4>Other awards</h4><ul class="glory-table"><li><span>➕ Other</span><strong>+${otherVp} VP</strong></li></ul>`
