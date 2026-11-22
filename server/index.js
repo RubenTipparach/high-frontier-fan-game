@@ -75,7 +75,7 @@ import {
   sendWebhook, webhookEnabled, isWebhookUrl, defaultWebhookUrl,
   oauthEnabled, oauthClientId, buildAuthorizeUrl, completeOauth,
   oauthIdentifyEnabled, buildIdentifyAuthorizeUrl, identifyOauth,
-  botChannels, sendChannelMessage, isChannelId,
+  botChannels, sendChannelMessage, sendChannelFile, isChannelId,
 } from './discord.js';
 import { ensureLeaderboardTables, recordGame, recordCancel, clearCancel, startBackfill, leaderboards, summaryMessages } from './leaderboard.js';
 
@@ -3597,6 +3597,39 @@ app.post('/games/:id/clone', requireProfile, (req, res) => {
 // target per REMIND_COOLDOWN_MS window (auctions included). Not a game op
 // (no board mutation, no seq bump) - just a DM + a cooldown row the gameView
 // surfaces so every client can show who was nudged and when.
+// Share a stack: a player posts a picture of one of the stack windows to the
+// Discord channel the bot posts the leaderboard in. The browser draws the PNG
+// and sends it raw (image/png). Once an hour per player (owner 2026-11-22), and
+// only for players in that game.
+const STACK_POST_COOLDOWN_MS = 60 * 60 * 1000;
+app.post('/games/:id/stack-post', requireProfile, express.raw({ type: 'image/png', limit: '8mb' }), async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
+  if (!isGamePlayer(id, req.profile.id)) return res.status(403).json({ error: 'not_a_player' });
+  if (!discordEnabled()) return res.status(409).json({ error: 'discord_disabled' });
+  const channelId = leaderboardSetting('leaderboard_channel_id');
+  if (!isChannelId(channelId)) return res.status(409).json({ error: 'no_channel' });
+  const buf = Buffer.isBuffer(req.body) ? req.body : null;
+  // A PNG starts with its 8-byte signature.
+  if (!buf || buf.length < 64 || buf.readUInt32BE(0) !== 0x89504e47) return res.status(400).json({ error: 'bad_image' });
+  const key = `stack_post_at:${req.profile.id}`;
+  const last = Number(leaderboardSetting(key, '0')) || 0;
+  const wait = last + STACK_POST_COOLDOWN_MS - nowMs();
+  if (wait > 0) return res.status(429).json({ error: 'stack_post_cooldown', retryInMs: wait });
+  const title = String(req.query.title || 'Stack').replace(/[\r\n*_`~|<>@]/g, '').slice(0, 60) || 'Stack';
+  const room = gameDisplayName(id);
+  const url = gameRoomUrl(id);
+  const payload = { content: `📷 **${req.profile.name}**'s ${title}${room ? ` · ${room}` : ''}` };
+  if (url) payload.components = [{ type: 1, components: [{ type: 2, style: 5, label: 'Open the game', emoji: { name: '🚀' }, url }] }];
+  const r = await sendChannelFile(channelId, payload, 'stack.png', buf);
+  if (!r.ok) {
+    console.warn(`[stack-post] game ${id} by ${req.profile.name}: ${r.error}`);
+    return res.status(502).json({ error: 'discord_failed' });
+  }
+  setLeaderboardSetting(key, nowMs());
+  res.json({ ok: true });
+});
+
 app.post('/games/:id/remind', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });

@@ -143,7 +143,7 @@ import { NODE_LABELS, MAP_LABELS } from '../../data/map-labels.js';
 import { routeFlewAerobrake } from '../../data/lander-burn.js';
 import { nodeSeason, seasonEntryBlocked } from '../../data/season-gate.js';
 import { serverTagLabels, tagInfo } from '../../data/node-labels.js';
-import { apiAvailable, getSiteAnnotations, postSiteAnnotation, removeSiteTag, deleteSiteAnnotation } from '../api.js';
+import { apiAvailable, apiBaseUrl, getSiteAnnotations, postSiteAnnotation, removeSiteTag, deleteSiteAnnotation } from '../api.js';
 import { activeProfile } from '../auth.js';
 import {
   activeLaws as assemblyActiveLaws, ASSEMBLY_PLACES, IDEOLOGY_ORDER as ASSEMBLY_IDEOLOGY_ORDER,
@@ -9638,6 +9638,133 @@ function mpRocketHeaderHtml(ctx) {
     </div>`;
 }
 
+// ---- Save a whole stack as an image --------------------------------------------
+// The stack window exactly as it reads (stats, fuel strip, status, every card),
+// at full height: a copy of the window is laid out off-screen with its scroll
+// areas opened up, so the picture holds the WHOLE stack, not just the part the
+// window shows. html-to-image (draws the DOM into a canvas) loads on first use.
+const HTML_TO_IMAGE_URL = 'https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/+esm';
+let _htmlToImage = null;
+async function stackImageDataUrl(panel) {
+  if (!_htmlToImage) _htmlToImage = await import(/* @vite-ignore */ HTML_TO_IMAGE_URL);
+  const clone = panel.cloneNode(true);
+  // Open every scroll area in the copy so nothing is clipped.
+  const src = [panel, ...panel.querySelectorAll('*')];
+  const dst = [clone, ...clone.querySelectorAll('*')];
+  for (let i = 0; i < src.length && i < dst.length; i++) {
+    const cs = getComputedStyle(src[i]);
+    if (/(auto|scroll|hidden)/.test(cs.overflowY) || cs.maxHeight !== 'none') {
+      dst[i].style.overflow = 'visible';
+      dst[i].style.maxHeight = 'none';
+      if (/(auto|scroll)/.test(cs.overflowY)) dst[i].style.height = 'auto';
+    }
+  }
+  // The share / close buttons and the map shortcuts are not part of the stack.
+  for (const el of clone.querySelectorAll('.stack-shot-btns, .modal-x, .rocket-stack-locate')) el.remove();
+  const host = document.createElement('div');
+  host.className = 'stack-shot';
+  host.style.width = `${panel.getBoundingClientRect().width}px`;
+  clone.style.width = '100%';
+  clone.style.maxWidth = 'none';
+  clone.style.position = 'static';
+  clone.style.transform = 'none';
+  host.appendChild(clone);
+  document.body.appendChild(host);
+  try {
+    await Promise.all([...host.querySelectorAll('img')].map((im) => (im.complete ? null : new Promise((r) => { im.onload = im.onerror = r; }))));
+    if (document.fonts && document.fonts.ready) await document.fonts.ready;
+    return await _htmlToImage.toPng(host, {
+      pixelRatio: 2, backgroundColor: '#0b0d18', cacheBust: false,
+      width: host.offsetWidth, height: host.offsetHeight,
+      // The copy is drawn in place, not off-screen where it sits.
+      style: { position: 'static', left: '0', top: '0', zIndex: 'auto' },
+    });
+  } finally {
+    host.remove();
+  }
+}
+const stackShotName = (title) => `${String(title).replace(/[^\w-]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'stack'}.png`;
+async function saveStackImage(panel, title) {
+  setStatus('Saving the stack image…');
+  try {
+    const url = await stackImageDataUrl(panel);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = stackShotName(title);
+    document.body.appendChild(a); a.click(); a.remove();
+    setStatus('Stack image saved.');
+  } catch (e) {
+    setStatus('Could not save the stack image.');
+  }
+}
+// Post the stack image to the game's Discord channel (the bot posts it; once an
+// hour per player).
+async function postStackImage(panel, title) {
+  if (!_online || !_onlineMe || _onlineGameId == null) { setStatus('Posting a stack needs an online game.'); return; }
+  setStatus('Posting the stack to Discord…');
+  try {
+    const url = await stackImageDataUrl(panel);
+    const blob = await (await fetch(url)).blob();
+    const r = await fetch(`${apiBaseUrl()}/games/${_onlineGameId}/stack-post?title=${encodeURIComponent(title)}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${_onlineMe.token}`, 'Content-Type': 'image/png' },
+      body: blob,
+    });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok && j.ok) { setStatus('Stack posted to Discord.'); return; }
+    if (j.error === 'stack_post_cooldown') {
+      const min = Math.max(1, Math.ceil((j.retryInMs | 0) / 60000));
+      setStatus(`You can post a stack again in ${min} minute${min === 1 ? '' : 's'}.`);
+    } else if (j.error === 'no_channel' || j.error === 'discord_disabled') {
+      setStatus('Discord posting is not set up on this server.');
+    } else setStatus('Could not post the stack to Discord.');
+  } catch (e) {
+    setStatus('Could not post the stack to Discord.');
+  }
+}
+// The system share sheet (phones): the stack image as a file.
+async function shareStackImage(panel, title) {
+  try {
+    const url = await stackImageDataUrl(panel);
+    const file = new File([await (await fetch(url)).blob()], stackShotName(title), { type: 'image/png' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title });
+    } else {
+      await saveStackImage(panel, title);
+    }
+  } catch (e) {
+    if (!(e && e.name === 'AbortError')) setStatus('Could not share the stack image.');
+  }
+}
+// The Share button every stack window carries: save the image, post it to
+// Discord, or hand it to the phone's share sheet.
+function stackShotButtons(getPanel, getTitle) {
+  const wrap = document.createElement('span');
+  wrap.className = 'stack-shot-btns';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'stack-shot-btn';
+  btn.textContent = '📤 Share';
+  btn.setAttribute('aria-haspopup', 'menu');
+  const menu = document.createElement('div');
+  menu.className = 'stack-shot-menu';
+  menu.hidden = true;
+  const item = (txt, fn) => {
+    const it = document.createElement('button');
+    it.type = 'button';
+    it.textContent = txt;
+    it.addEventListener('click', (e) => { e.stopPropagation(); menu.hidden = true; fn(getPanel(), getTitle()); });
+    menu.appendChild(it);
+  };
+  item('📷 Save image', saveStackImage);
+  if (_online) item('💬 Post to Discord', postStackImage);
+  if (navigator.share) item('📱 Share…', shareStackImage);
+  btn.addEventListener('click', (e) => { e.stopPropagation(); menu.hidden = !menu.hidden; });
+  document.addEventListener('pointerdown', (e) => { if (!wrap.contains(e.target)) menu.hidden = true; });
+  wrap.append(btn, menu);
+  return wrap;
+}
+
 // Read-only modal listing the cards in a stack (opponent inspection).
 // Renders each slot via the shared renderCard so it looks like every
 // other card surface. No actions - pure inspection.
@@ -9664,7 +9791,7 @@ function openMpStackModal(title, slots, { rocketCtx, glitched, glitchNote } = {}
   x.textContent = '×';
   x.title = 'Close (Esc)';
   x.addEventListener('click', close);
-  head.append(h, x);
+  head.append(h, stackShotButtons(() => dialog, () => title), x);
   dialog.appendChild(head);
 
   // Glitch: a red disc landed on this stack (Sunspot Glitch event, or an
@@ -14816,6 +14943,7 @@ function openUnifiedStackInspector(stackId) {
     }
 
     dialog.querySelector('.stack-inspector-close').addEventListener('click', close);
+    dialog.querySelector('.stack-inspector-close').before(stackShotButtons(() => dialog, () => stackLabel(stackId).name || stackId));
     // When the rocket is docked at LEO, a shortcut into its water
     // tank (the aqua <-> tank transfer UI lives there). Close the
     // LEO inspector first so the two modals don't stack / fight
@@ -18672,6 +18800,7 @@ function openRocketStackModal() {
   titleEl.className = 'modal-title';
   titleEl.textContent = '🚀 Rocket Stack';
   header.appendChild(titleEl);
+  header.appendChild(stackShotButtons(() => panel, () => 'Rocket Stack'));
   header.appendChild(xBtn);
   panel.appendChild(header);
 

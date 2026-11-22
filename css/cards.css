@@ -2070,3 +2070,35 @@ button.m4c-aug:hover { border-color: #60a5fa; background: #232838; }
 .colonist-marks { position: absolute; bottom: 6px; left: 46%; z-index: 3; display: flex; gap: 3px; align-items: flex-end; pointer-events: auto; filter: drop-shadow(0 1px 2px rgba(0,0,0,.55)); }
 .colonist-marks.robot { left: 34%; }
 .colonist-marks.beside-thrust { left: 58%; }
+
+/* ---- Save a stack as an image (browse.js#saveStackImage) ----
+   Built off-screen at a fixed width so the picture holds every card in the
+   stack, then drawn into a PNG. */
+.stack-shot {
+  position: fixed; left: -20000px; top: 0; z-index: -1;
+  padding: 0;
+  background: #0b0d18; color: #e5e7eb; font-family: inherit;
+}
+.stack-shot-head { display: flex; align-items: baseline; gap: 12px; margin: 0 0 14px; }
+.stack-shot-head h3 { margin: 0; font-size: 20px; color: #f8fafc; }
+.stack-shot-head span { color: #94a3b8; font-size: 14px; }
+.stack-shot-grid { display: grid; grid-template-columns: repeat(var(--shot-cols, 4), auto); gap: 14px; align-items: start; }
+.stack-shot-card .card { margin: 0; }
+.stack-shot-btns { position: relative; margin-left: auto; margin-right: 8px; display: inline-flex; }
+.stack-shot-btn {
+  background: transparent; border: 1px solid rgba(148, 163, 184, 0.35); color: inherit;
+  border-radius: 8px; padding: 3px 10px; font-size: 13px; line-height: 1.4; cursor: pointer; white-space: nowrap;
+}
+.stack-shot-btn:hover { background: rgba(148, 163, 184, 0.15); }
+.stack-shot-menu {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 50; min-width: 170px;
+  display: flex; flex-direction: column; padding: 4px; border-radius: 8px;
+  background: #141826; border: 1px solid rgba(148, 163, 184, 0.35); box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
+}
+.stack-shot-menu[hidden] { display: none; }
+.stack-shot-menu button {
+  background: transparent; border: 0; color: #e5e7eb; text-align: left; padding: 7px 10px;
+  border-radius: 6px; font-size: 13px; cursor: pointer;
+}
+.stack-shot-menu button:hover { background: rgba(148, 163, 184, 0.15); }
+.stack-shot .card-flip, .stack-shot .m4-fulfill-btn, .stack-shot .m4-pay-btn { display: none !important; }
