@@ -702,8 +702,7 @@ function isobankPlacardHtml(s, p, myTurn, tankIso) {
     if (i === 0) return `${t[0]} - ${t[1] - 1}`;
     return `0 - ${t[0] - 1}`;
   };
-  const table = `<table class="m4p-fuel"><thead><tr>${[1, 2, 3, 4, 5, 6].map((k) => `<th class="${k === n ? 'me' : ''}">${k} Player${k > 1 ? 's' : ''}</th>`).join('')}<th>VP (1st/2nd/3rd)</th></tr></thead>
-    <tbody>${rows.map(([b, i]) => `<tr class="${b === band ? 'now' : ''}">${[1, 2, 3, 4, 5, 6].map((k) => `<td class="${k === n ? 'me' : ''}">${cell(k, i)}</td>`).join('')}<td>${b === 'none' ? '0 VP (no launch)' : `${EXODUS_RANK_VP[b].join('/')} VP`}</td></tr>`).join('')}</tbody></table>`;
+  const table = `<table class="m4p-fuel"><tbody>${rows.map(([b, i]) => `<tr class="${b === band ? 'now' : ''}"><th>${EXODUS_BAND_NAMES[b]}</th><td>${cell(n, i)}</td><td>${b === 'none' ? '-' : `${EXODUS_RANK_VP[b].join(' / ')} VP`}</td></tr>`).join('')}</tbody></table>`;
   // Starship stack.
   const { tws, cols } = atIsobank(s);
   const req = [
@@ -727,7 +726,7 @@ function isobankPlacardHtml(s, p, myTurn, tankIso) {
         ${atIb && tankIso > 0 ? btn('iso-vault', `Deposit ${tankIso} in your isovault`, myTurn) : ''}
       </div></div>
     <div class="m4p-phases"><h5>EXODUS STARSHIP PHASES</h5>${phases}</div>
-    <div class="m4p-table"><h5>EXODUS FUELING TABLE (4E3)</h5>${table}<div class="m4p-total">Isototal <b>${total}</b> · ${EXODUS_BAND_NAMES[band]}</div></div>
+    <div class="m4p-table"><h5>EXODUS FUELING TABLE (4E3) <small>${n} Player${n > 1 ? 's' : ''}</small></h5>${table}<div class="m4p-total">Isototal <b>${total}</b> · ${EXODUS_BAND_NAMES[band]}</div></div>
     <div class="m4p-ship"><h5>STARSHIP STACK</h5><ul class="m4p-req">${req}</ul>
       ${aboard.length ? `<div class="m4p-aboard">${aboard.join('<br>')}</div>` : ''}</div>
   </div>`;
