@@ -16,7 +16,7 @@
 // Run locally: node scripts/check-engine.mjs
 
 import { createInitialState, seasonForSlot } from '../server/game/state.js';
-import { auctionWaitingOn, finaoPerFor } from '../server/game/engine.js';
+import { auctionWaitingOn, finaoPerFor, finaoFunds, payFinao, exodusScoring } from '../server/game/engine.js';
 import { hotSeatWaitingOn, resolveHotSeatActor } from '../data/hot-seat.js';
 import { applyOperation, slotMass, autoFixGlitches, liveScoreboard, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, repairSpeciesDeckSplit, cycleMarketDecks, rocketSolarZone, activeNetThrust, outpostWater, buildFutureCtx, resolveSunspotEvent, computeFinalScores } from '../server/game/engine.js';
 import { BERNALS } from '../data/bernals.js';
@@ -12168,6 +12168,7 @@ check('M4 isotope monetization: a can at LEO banks as gold beads, sells and buys
   const st = startedGame({ m4: true, m1: true, m2: true });
   const P = currentPlayerOf(st);
   P.aqua = 5;
+  P.isostandards = ['S'];
   P.leo = [...(P.leo || []), { id: 'fuel-iso-1', kind: 'fuel', grade: 'isotope', spectral: 'S', amount: 3, face: 'primary' }];
   let r = op(st, 'ISOTOPE_EXCHANGE', P.profileId, { action: 'deposit', cardId: 'fuel-iso-1', holder: 'leo' });
   assert(r.ok, `deposit: ${r.error}`);
@@ -12217,6 +12218,7 @@ check('M4: the first gold bead refined monetizes isotope and flips the contract 
   assert(r.state.isotopeMonetized && r.state.contractSide === 'gold', 'not monetized / not gold');
   assert(/Upheaval/.test(r.log), `log: ${r.log}`);
   for (const [pair, d] of Object.entries(r.state.contractDecks)) {
+    if (pair === 'EX') continue;   // the isobank (4D2) may open the Exodus deck on the same refuel
     const want = before[pair].slice().reverse();
     assert(d.length && d.every((id, i) => want.indexOf(id) >= 0) && want.indexOf(d[0]) <= want.indexOf(d[d.length - 1]), `${pair} not flipped`);
     assert(d[0] === want.find((id) => d.includes(id)), `${pair}: the old bottom card is not on top`);
@@ -12302,6 +12304,85 @@ check('M4 + M2 Parenthood (4C5): heart side 1 on an earthborn, the child comes o
   const bad = op(sb.st, 'IMPLANT', sb.P.profileId, { bernal: 0, implants: [{ colonistId: 'col_lava_lamp_evangelists', shape: 'heart', side: 1 }] });
   assert(!bad.ok && bad.error === 'parenthood_earthborn_only', `spaceborn parenthood: ${bad.error || 'accepted'}`);
   return `child chit placed; END_TURN held; ${COLONISTS_BY_ID[pick].name} replaced Biomechs with heart (side 2) and jar; spaceborn refused`;
+});
+
+check('M4 4D1: beads pay like aqua, withdraw as isostandard fuel, and debase without an isostandard', () => {
+  const st = startedGame({ m4: true, m1: true, m2: true });
+  const P = currentPlayerOf(st);
+  st.isotopeMonetized = true; st.earthMarket = 0;
+  P.aqua = 3; P.isotopes = 2; P.isostandards = ['S'];
+  assert(finaoFunds(st, P) === 23, `funds ${finaoFunds(st, P)}`);
+  payFinao(st, P, 8);
+  assert(P.aqua === 5 && P.isotopes === 1 && st.earthMarket === 1, `FINAO 8 paid with a bead: aqua ${P.aqua} beads ${P.isotopes} market ${st.earthMarket}`);
+  let r = op(st, 'ISOTOPE_EXCHANGE', P.profileId, { action: 'withdraw', amount: 1 });
+  assert(r.ok, `withdraw: ${r.error}`);
+  const Q = pl(r.state, P.profileId);
+  const can = (Q.leo || []).find((x) => x.kind === 'fuel' && x.grade === 'isotope');
+  assert(Q.isotopes === 0 && can && can.spectral === 'S' && can.amount === 1, `withdrawn can ${JSON.stringify(can)}`);
+  // No isostandard: no buying, no withdrawing, and beads reaching the Bank turn to aqua.
+  const st2 = startedGame({ m4: true, m1: true, m2: true });
+  const N = currentPlayerOf(st2);
+  st2.earthMarket = 2; N.aqua = 30; N.isotopes = 0; N.isostandards = [];
+  const buy = op(st2, 'ISOTOPE_EXCHANGE', N.profileId, { action: 'buy', amount: 1 });
+  assert(!buy.ok && buy.error === 'no_isostandard', `buy without isostandard: ${buy.error}`);
+  N.leo = [...(N.leo || []), { id: 'fuel-iso-9', kind: 'fuel', grade: 'isotope', spectral: 'C', amount: 2, face: 'primary' }];
+  r = op(st2, 'ISOTOPE_EXCHANGE', N.profileId, { action: 'deposit', cardId: 'fuel-iso-9', holder: 'leo' });
+  const N2 = pl(r.state, N.profileId);
+  assert(r.ok && N2.isotopes === 0 && N2.aqua === 50 && r.state.earthMarket === 4, `debased: ${r.error} beads ${N2.isotopes} aqua ${N2.aqua}`);
+  return 'FINAO 8 = 3 aqua + 1 bead (2 change); a bead withdrawn as spectral-S fuel; without an isostandard 2 beads debase to 20 aqua';
+});
+
+check('M4 + M2 isobank (4D2): founded at a BEO Bernal on an isostandard Dirtside, opens the Exodus deck, isovaults, and the starshot scores', () => {
+  const SITE = 'luna-shackleton-polar-rim', SPACE = 'lag-qofv5';
+  const st = startedGame({ m0: true, m1: true, m2: true, m4: true, seats: 2, maxRounds: 7 });
+  const me = st.players[st.activeIndex];
+  const rival = st.players.find((p) => p.profileId !== me.profileId);
+  st.factories = { [SITE]: { ownerId: me.profileId, spectralType: 'S' } };
+  me.bernals = [{ cardId: 'ber_l4_antimatter_factory', figure: 'stanford', face: 'secondary', promoted: true,
+    siteId: SPACE, anchored: true, tank: 0, wiring: {}, route: [], stack: [] }];
+  me.rocket.siteId = SPACE; me.rocket.turnStartSiteId = SPACE;
+  me.rocket.stack = [{ id: 'gw-_amat_catalyzed_fission_fusion', kind: 'patent', face: 'secondary' }];
+  me.rocket.activeThrusterId = 'gw-_amat_catalyzed_fission_fusion';
+  me.rocket.tank = 0; me.rocket.tankGrade = 'isotope'; me.rocket.tankSpectral = 'S';
+  me.isostandards = ['S']; me.opsRemaining = 1; me.refueledSites = []; st.turnActions = [];
+  // Before qualifying: no isobank, and vaulting is refused.
+  const early = op(st, 'ISOTOPE_EXCHANGE', me.profileId, { action: 'vault', amount: 1 });
+  assert(!early.ok && early.error === 'no_isobank', `vault before the isobank: ${early.error}`);
+  // The isotope refuel happens on my turn with everything in place: the isobank is founded.
+  let r = op(st, 'SITE_REFUEL', me.profileId, { siteId: SITE, mode: 'isotope' });
+  assert(r.ok, `isotope refuel: ${r.error}`);
+  assert(r.state.isobank && r.state.isobank.ownerId === me.profileId && r.state.isobank.siteId === SPACE, `isobank: ${r.error} ${JSON.stringify(r.state.isobank)}`);
+  assert(/ISOBANK/.test(r.log) && Array.isArray(r.state.contractDecks.EX) && r.state.contractDecks.EX.length > 0, `Exodus deck: ${r.log}`);
+  const st2 = r.state;
+  // Back on my turn: deposit into the isovault, and the isobank never unanchors.
+  st2.activeIndex = st2.players.findIndex((p) => p.profileId === me.profileId);
+  const M = pl(st2, me.profileId);
+  M.rocket.tank = 3;
+  r = op(st2, 'ISOTOPE_EXCHANGE', me.profileId, { action: 'vault', amount: 3 });
+  assert(r.ok && pl(r.state, me.profileId).isovault === 3, `vault: ${r.error}`);
+  const un = op(r.state, 'UNANCHOR_BERNAL', me.profileId, { cardId: 'ber_l4_antimatter_factory' });
+  assert(!un.ok && un.error === 'isobank_cannot_unanchor', `unanchor: ${un.error}`);
+  // Endgame: 2 players, isototal 12 is Reckless (11+), a TW thruster sits at the isobank.
+  const S = r.state;
+  pl(S, me.profileId).isovault = 8; pl(S, rival.profileId).isovault = 4;
+  const ex = exodusScoring(S);
+  const a = ex[me.profileId], b = ex[rival.profileId];
+  assert(a.starshot && a.band === 'reckless', `band ${a.band} starshot ${a.starshot}`);
+  assert(a.isobanker === 4 && a.rank === 6 && a.command === 4 && a.propulsion === 4, `me ${JSON.stringify(a)}`);
+  assert(b.rank === 3 && b.vp === 3, `rival ${JSON.stringify(b)}`);
+  // Zero bleed-through: an M2 game without M4 never founds an isobank.
+  const m2 = startedGame({ m0: true, m1: true, m2: true, seats: 2, maxRounds: 7 });
+  const z = m2.players[m2.activeIndex];
+  m2.factories = { [SITE]: { ownerId: z.profileId, spectralType: 'S' } };
+  z.bernals = [{ cardId: 'ber_l4_antimatter_factory', figure: 'stanford', face: 'secondary', promoted: true, siteId: SPACE, anchored: true, tank: 0, wiring: {}, route: [], stack: [] }];
+  z.isostandards = ['S'];
+  z.rocket.siteId = SPACE; z.rocket.turnStartSiteId = SPACE;
+  z.rocket.stack = [{ id: 'gw-_amat_catalyzed_fission_fusion', kind: 'patent', face: 'secondary' }];
+  z.rocket.activeThrusterId = 'gw-_amat_catalyzed_fission_fusion';
+  z.rocket.tank = 0; z.rocket.tankGrade = 'isotope'; z.rocket.tankSpectral = 'S'; z.opsRemaining = 1; z.refueledSites = []; m2.turnActions = [];
+  const r2 = op(m2, 'SITE_REFUEL', z.profileId, { siteId: SITE, mode: 'isotope' });
+  assert(r2.ok && !r2.state.isobank, `isobank founded outside M4 (${r2.error})`);
+  return `isobank at ${SPACE}, Exodus deck ${r.state.contractDecks.EX.length} cards; isovault 3; Reckless starshot: me ${a.vp} VP (isobanker 4, rank 6, command 4, propulsion 4), rival ${b.vp}`;
 });
 
 check('M4 + M2 promotion counts (4C7e): a Bernal needs 3 different augmentations aboard and a Dirtside anchor', () => {

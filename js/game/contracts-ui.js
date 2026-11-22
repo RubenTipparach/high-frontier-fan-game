@@ -24,6 +24,9 @@ import { COLONISTS_BY_ID } from '../../data/colonists.js';
 import { IDEOLOGY_ORDER, IDEOLOGY_BY_KEY, activeLaws, usesSoloAssembly, voteWinners } from '../../data/assembly.js';
 import { CREW_BY_ID } from '../../data/crew.js';
 import { augmentSideSvg } from './augment-sides.js';
+import { BERNALS_BY_ID } from '../../data/bernals.js';
+import { NODE_TAGS } from '../../data/node-tags.js';
+import { exodusBand, exodusThresholds, EXODUS_BAND_NAMES } from '../../data/exodus.js';
 
 let D = null;               // deps from browse.js (snapshot readers + submitters)
 let _panelOpen = false;
@@ -324,9 +327,12 @@ function canAuctionNow(s, p, myTurn) {
 // Auction button; one you may not is greyed out with none (owner 2026-11-18).
 function decksHtml(s, p, auctionOpen) {
   const laws = lawKeys(s, p);
-  return `<div class="m4c-decks">${Object.keys(CONTRACT_PAIRS).map((pair) => {
+  // The Exodus deck joins once the isobank is founded (4D2c), open to everyone.
+  const pairs = [...Object.keys(CONTRACT_PAIRS), ...(s.isobank && (s.contractDecks || {}).EX ? ['EX'] : [])];
+  return `<div class="m4c-decks">${pairs.map((pair) => {
     const deck = (s.contractDecks || {})[pair] || [];
-    const byLaw = CONTRACT_PAIRS[pair].some((k) => laws.has(k));
+    const exodus = pair === 'EX';
+    const byLaw = exodus || CONTRACT_PAIRS[pair].some((k) => laws.has(k));
     const byConnections = !byLaw && hasContractAbility(p, 'connections')
       && CONTRACT_PAIRS[pair].some((k) => delegateIn(s, k, p.profileId));
     const top = deck[0];
@@ -336,8 +342,8 @@ function decksHtml(s, p, auctionOpen) {
     return `<div class="m4c-deck ${open ? 'open' : 'closed'}" ${open ? '' : 'aria-disabled="true"'}>
       <div class="m4c-deck-head"><b>${CONTRACT_PAIR_NAMES[pair]}</b>
         <span>${deck.length} left</span>
-        <span class="m4c-law">${byLaw ? 'Active Law' : byConnections ? 'Connections' : ''}</span></div>
-      ${top ? cardThumb(top, s.contractSide === 'gold' ? 'gold' : 'blue') : '<div class="muted">empty</div>'}${btn}</div>`;
+        <span class="m4c-law">${exodus ? '' : byLaw ? 'Active Law' : byConnections ? 'Connections' : ''}</span></div>
+      ${top ? cardThumb(top, exodus ? 'exodus' : (s.contractSide === 'gold' ? 'gold' : 'blue')) : '<div class="muted">empty</div>'}${btn}</div>`;
   }).join('')}</div>`;
 }
 // The contract auction step of a Fundraise (owner 2026-11-18: the auction is
@@ -386,7 +392,6 @@ function renderPanel() {
   const auctionOpen = false;   // the auction starts only in the Fundraise window
   if (s.defaultChit) market.push(`<p class="muted">🏷 Default chit: ${esc(nameOf(s.defaultChit.profileId))} (${s.defaultChit.side === 'gold' ? -6 : -3} VP)</p>`);
   market.push(decksHtml(s, p, auctionOpen));
-  market.push(isotopesHtml(s, p, myTurn));
 
   // Contracts in hand live in the Hand area (4B3h: a won contract is a Hand
   // Card), so the panel only points there; boosted and fulfilled ones are here.
@@ -428,34 +433,86 @@ function renderPanel() {
       <div class="m4c-tabs" role="tablist">
         <button type="button" role="tab" data-tab="market" class="${tab === 'market' ? 'sel' : ''}">Market contracts</button>
         <button type="button" role="tab" data-tab="yours" class="${tab === 'yours' ? 'sel' : ''}">Completed contracts</button>
+        <button type="button" role="tab" data-tab="bank" class="${tab === 'bank' ? 'sel' : ''}">Bank</button>
       </div>
       <button type="button" class="m4c-close" aria-label="Close">✕</button></div>
-    <div class="m4c-body">${(tab === 'market' ? market : parts).join('')}</div></div>`;
+    <div class="m4c-body">${(tab === 'market' ? market : tab === 'bank' ? [bankHtml(s, p, myTurn)] : parts).join('')}</div></div>`;
   el.querySelector('.m4c-close').addEventListener('click', closePanel);
   el.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { _tab = b.dataset.tab; renderPanel(); }));
   el.querySelectorAll('button[data-act]').forEach((b) => b.addEventListener('click', () => onAct(b)));
 }
 
-// ---- isotope monetization (3B5, 4D1) ------------------------------------------------
-// Gold beads at your Bank are worth 10 aqua each. Blue/Gold Exchange: sell one to
-// the Earth market for 10 aqua, or buy one from it for 10 aqua (free actions).
-function isotopesHtml(s, p, myTurn) {
-  const bank = Math.max(0, p.isotopes | 0);
+// ---- the Bank, isotopes and the isobank (3B5, 4D1, 4D2, 4E3) ------------------------
+// Your Bank: where your aqua and gold beads are (LEO, or your Home Bernal). Beads
+// are worth 10 aqua and pay like aqua once isotope is monetized. The isobank (a
+// BEO Bernal) holds every player's isovault; the isototal sets the starshot band.
+export function openBankTab() { _tab = 'bank'; _panelOpen = true; renderPanel(); }
+// Your Bank is at your Home Bernal once one is anchored, else LEO (4A7a). Mirrors
+// the game's Home Bernal test (the GEO Elevator at GEO, or a home-orbit space; a
+// Sirens game records the answer on the unit).
+function isHomeUnit(bn) {
+  if (!bn || !bn.anchored) return false;
+  if (typeof bn.home === 'boolean') return bn.home;
+  if (bn.cardId === 'ber_geo_elevator_bernal' && bn.siteId === 'burn-geo') return true;
+  return !!(bn.siteId && NODE_TAGS[String(bn.siteId)] && NODE_TAGS[String(bn.siteId)].homeBernal);
+}
+// Is the rocket at the Bank (LEO, or docked at the Home Bernal)?
+function atBank(p) {
+  const r = p.rocket || {};
+  if (r.siteId == null) return true;
+  const home = (p.bernals || []).find(isHomeUnit);
+  return !!(home && home.siteId === r.siteId);
+}
+function bankWhere(p) {
+  const home = (p.bernals || []).find(isHomeUnit);
+  return home ? `${(BERNALS_BY_ID[home.cardId] || {}).name || 'Home Bernal'}` : 'LEO';
+}
+function bankHtml(s, p, myTurn) {
+  const beads = Math.max(0, p.isotopes | 0);
   const market = Math.max(0, s.earthMarket | 0);
   const r = p.rocket || {};
   const tankIso = (r.tankGrade === 'isotope') ? Math.floor(Number(r.tank) || 0) : 0;
-  const status = s.isotopeMonetized
-    ? 'Isotope is monetized: FINAO costs are doubled.'
-    : 'Isotope is not monetized yet: the first gold bead refined monetizes it.';
-  const btn = (act, label, ok, tip) => `<button type="button" data-act="${act}"${ok ? '' : ' disabled'} data-tip="${esc(tip)}">${label}</button>`;
-  return `<h4>Isotopes</h4>
-    <p class="muted">${status}</p>
-    <p>🟡 At your Bank: <b>${bank}</b> (worth ${bank * 10} aqua) · Earth market: <b>${market}</b></p>
-    <div class="m4c-controls">
-      ${btn('iso-sell', 'Sell 1 for 10 aqua', myTurn && bank > 0, 'Sell a gold bead to the Earth market for 10 aqua. Free action.')}
-      ${btn('iso-buy', 'Buy 1 for 10 aqua', myTurn && market > 0 && (p.aqua | 0) >= 10, 'Buy a gold bead from the Earth market into your Bank. Free action.')}
-      ${tankIso > 0 ? btn('iso-tank', `Bring ${tankIso} from the tank to the Bank`, myTurn, 'Unload the whole isotope units in your rocket tank into your Bank. Your rocket must be at your Bank (LEO or your Home Bernal).') : ''}
-    </div>`;
+  const isos = p.isostandards || [];
+  const btn = (act, label, ok, tip) => `<button type="button" data-act="${act}"${ok ? '' : ' disabled'}${tip ? ` data-tip="${esc(tip)}"` : ''}>${label}</button>`;
+  const ib = s.isobank;
+  const out = [];
+  out.push(`<div class="m4b-grid">
+    <div class="m4b-stat"><span>🏦 Bank</span><b>${esc(bankWhere(p))}</b></div>
+    <div class="m4b-stat"><span>💧 Aqua</span><b>${p.aqua | 0}</b></div>
+    <div class="m4b-stat"><span>🟡 Gold beads</span><b>${beads}</b><small>${beads * 10} aqua</small></div>
+    <div class="m4b-stat"><span>Isostandard</span><b>${isos.length ? isos.map((x) => esc(x)).join(' ') : 'none'}</b></div>
+    <div class="m4b-stat"><span>🌍 Earth market</span><b>${market}</b></div>
+    <div class="m4b-stat"><span>FINAO</span><b>${s.isotopeMonetized ? '×2' : '×1'}</b><small>${s.isotopeMonetized ? 'monetized' : 'not monetized'}</small></div>
+  </div>
+  <div class="m4c-controls">
+    ${btn('iso-sell', 'Sell 1 (+10)', myTurn && beads > 0)}
+    ${btn('iso-buy', 'Buy 1 (-10)', myTurn && market > 0 && (p.aqua | 0) >= 10 && isos.length > 0, isos.length ? '' : 'Needs an isostandard')}
+    ${btn('iso-withdraw', 'Withdraw 1 as fuel', myTurn && beads > 0 && isos.length > 0, isos.length ? '' : 'Needs an isostandard')}
+    ${tankIso > 0 && atBank(p) ? btn('iso-tank', `Tank to Bank (${tankIso})`, myTurn) : ''}
+  </div>`);
+  // The isobank and Project Exodus.
+  if (!ib) {
+    out.push(`<h4>Isobank</h4><p class="muted">Not founded.</p>`);
+  } else {
+    const banker = playerById(ib.ownerId) || {};
+    const n = (s.players || []).length;
+    const total = (s.players || []).reduce((t, q) => t + Math.max(0, q.isovault | 0), 0);
+    const band = exodusBand(total, n);
+    const th = exodusThresholds(n);
+    const atIb = r.siteId && r.siteId === ib.siteId;
+    const vaults = (s.players || []).map((q) => `<div class="m4b-vault"><span class="player-name" style="--player-color:${esc(q.color || 'currentColor')}">@${esc(q.name)}</span><b>${Math.max(0, q.isovault | 0)}</b></div>`).join('');
+    const pct = (v) => Math.min(100, Math.round((v / th[2]) * 100));
+    out.push(`<h4>Isobank</h4>
+      <p>${esc((BERNALS_BY_ID[ib.bernalId] || {}).name || 'Bernal')} · ${esc(spaceName(ib.siteId))} · isobanker <span class="player-name" style="--player-color:${esc(banker.color || 'currentColor')}">@${esc(banker.name || '?')}</span></p>
+      <div class="m4b-vaults">${vaults}</div>
+      <div class="m4b-band" aria-label="Isototal">
+        <div class="m4b-track"><div class="m4b-fill" style="width:${pct(total)}%"></div>
+          ${th.map((v, i) => `<i style="left:${pct(v)}%" title="${['Reckless', 'Crisis', 'Max'][i]} ${v}"></i>`).join('')}</div>
+        <div class="m4b-band-label">Isototal <b>${total}</b> · ${EXODUS_BAND_NAMES[band]} <span class="muted">(${th.join(' / ')})</span></div>
+      </div>
+      <div class="m4c-controls">${atIb && tankIso > 0 ? btn('iso-vault', `Deposit ${tankIso} in isovault`, myTurn) : ''}</div>`);
+  }
+  return out.join('');
 }
 
 // ---- augmentations (4C) ------------------------------------------------------------
@@ -565,6 +622,8 @@ async function onAct(b) {
   else if (act === 'iso-sell') await D.submitTurnOp({ kind: 'ISOTOPE_EXCHANGE', action: 'sell', amount: 1 });
   else if (act === 'iso-buy') await D.submitTurnOp({ kind: 'ISOTOPE_EXCHANGE', action: 'buy', amount: 1 });
   else if (act === 'iso-tank') await D.submitTurnOp({ kind: 'ISOTOPE_EXCHANGE', action: 'deposit' });
+  else if (act === 'iso-withdraw') await D.submitTurnOp({ kind: 'ISOTOPE_EXCHANGE', action: 'withdraw', amount: 1 });
+  else if (act === 'iso-vault') await D.submitTurnOp({ kind: 'ISOTOPE_EXCHANGE', action: 'vault' });
   else if (act === 'pay') await payContractFee(id);
   else if (act === 'abandon') await abandonContract(id);
   if (act === 'auction') closePanel();

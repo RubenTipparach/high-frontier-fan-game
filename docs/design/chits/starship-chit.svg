@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <defs>
+    <radialGradient id="ss-bg" cx="45%" cy="40%" r="70%"><stop offset="0%" stop-color="#2a2f5c"/><stop offset="100%" stop-color="#0b0d1f"/></radialGradient>
+    <linearGradient id="ss-hull" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#9aa4b8"/><stop offset="50%" stop-color="#f2f5fa"/><stop offset="100%" stop-color="#8a94a8"/></linearGradient>
+    <radialGradient id="ss-bead" cx="35%" cy="30%" r="70%"><stop offset="0%" stop-color="#fff4c0"/><stop offset="60%" stop-color="#ffd24a"/><stop offset="100%" stop-color="#a87a10"/></radialGradient>
+    <radialGradient id="ss-flame" cx="50%" cy="0%" r="100%"><stop offset="0%" stop-color="#ffffff"/><stop offset="40%" stop-color="#9af0ff"/><stop offset="100%" stop-color="#3a7aff" stop-opacity="0"/></radialGradient>
+  </defs>
+  <!-- the chit: a gold-rimmed disc -->
+  <circle cx="50" cy="50" r="48" fill="#c9a227"/>
+  <circle cx="50" cy="50" r="44.5" fill="url(#ss-bg)"/>
+  <g fill="#fff">
+    <circle cx="22" cy="28" r="0.9"/><circle cx="74" cy="22" r="0.7"/><circle cx="80" cy="64" r="0.9"/><circle cx="18" cy="66" r="0.7"/><circle cx="30" cy="80" r="0.6"/><circle cx="70" cy="82" r="0.6"/><circle cx="62" cy="14" r="0.6"/>
+  </g>
+  <!-- the starship, nose up: drive plume, pusher plate, a spine with a ring of gold isofuel beads, a crew module -->
+  <path d="M41,80 Q50,98 59,80 Z" fill="url(#ss-flame)"/>
+  <ellipse cx="50" cy="77" rx="14" ry="3.2" fill="#6a7488"/>
+  <ellipse cx="50" cy="76" rx="14" ry="2.6" fill="url(#ss-hull)"/>
+  <rect x="47.6" y="24" width="4.8" height="52" rx="2" fill="url(#ss-hull)"/>
+  <g>
+    <circle cx="41.5" cy="58" r="4.2" fill="url(#ss-bead)"/><circle cx="58.5" cy="58" r="4.2" fill="url(#ss-bead)"/>
+    <circle cx="41.5" cy="48" r="4.2" fill="url(#ss-bead)"/><circle cx="58.5" cy="48" r="4.2" fill="url(#ss-bead)"/>
+    <circle cx="50" cy="53" r="4.6" fill="url(#ss-bead)"/>
+  </g>
+  <path d="M38,38 L62,38 L58,34 L42,34 Z" fill="#3a4250"/>
+  <path d="M43.5,34 L56.5,34 L54,22 Q50,14 46,22 Z" fill="url(#ss-hull)"/>
+  <circle cx="50" cy="26" r="2" fill="#5ad0ff"/>
+</svg>

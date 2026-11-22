@@ -237,9 +237,34 @@ m4 + m2 and iso monetization"):
   three non-Exodus decks (bottom on top) and sets `state.contractSide = 'gold'`;
   auctions deal that side. Gold faces the engine cannot check are dealt out.
 
-STILL TO DO in Stage 3: paying with beads directly (auction bids, FINAO) instead
-of selling first; withdrawing a bead from the Bank as your isostandard (4D1e)
-and debasement (4D1b); the other 4D1a triggers (Lofstrom Loop / GEO Elevator
-Home Bernal, ET Home Bernal); the isobank and isobanker (4D2), Exodus contracts,
-the starship. Open question for the owner: should FINAO doubling also apply to
-M1 games without M4 (3B5a is an M1 rule)?
+BUILT 2026-11-22 (Stage 3, isotope monetization + the isobank):
+- **Beads pay like aqua (4D1b).** Once monetized (M4), a payment the aqua cannot
+  cover exchanges just enough Bank beads at 10 aqua each (to the Earth market):
+  FINAO (`finaoFunds` / `chargeFinao`) and research auction bids and payment
+  (`bankFunds` / `coverFromBeads`).
+- **Isostandard (1Cb).** An isotope refuel for your GW/TW thruster adds its
+  spectral (as does ET-producing one). **Debasement (4D1d):** without one, beads
+  reaching your Bank turn into aqua and you cannot buy beads. **Withdraw
+  (4D1e):** `ISOTOPE_EXCHANGE withdraw` takes beads out of the Bank as isotope
+  fuel of your isostandard in the Bank's stack.
+- **4D1a triggers:** anchoring the Lofstrom Loop, or the GEO Elevator at GEO, as a
+  Home Bernal monetizes isotope. (The ET Home Bernal trigger is Module 3.)
+- **The isobank (4D2), M4 + M2:** founded automatically on your turn (refuel,
+  anchor, End turn) with an isostandard and an anchored BEO Bernal with a
+  matching Dirtside. It opens the Exodus contract deck (`contractDecks.EX`, any
+  law), never unanchors, gives the isobanker +1 isotope on refuels there or at
+  its Dirtsides, and holds every player's isovault (`ISOTOPE_EXCHANGE vault`,
+  carried there, never withdrawn).
+- **Endgame (4E2e/f, 4E3, 4E4):** isobanker medal 4 VP; with a Reckless+ isototal
+  and a TW thruster at the isobank, the starshot scores rank VP by isovault, the
+  command and propulsion medals, and 1 VP per augmentation on each player's most
+  augmented Colonist. Tables in `data/exodus.js`.
+- **UI:** a Bank tab in the Contracts panel (Bank, beads, isostandard, Earth
+  market, FINAO, exchange buttons, the isobank, every isovault and the isototal
+  band). The Exodus deck shows in the market once open.
+
+STILL TO DO in Stage 3: the desperation starshot (4D3: commander, launch,
+flight, mutiny), Ad Astra Futures adding 4 isotopes, trading isofuel between
+isovaults, beads in contract payments other than FINAO and research auctions,
+the starship chit art (drawn, awaiting sign-off: `docs/design/chits/`), and the
+R8 question (FINAO doubling in M1 games without M4).

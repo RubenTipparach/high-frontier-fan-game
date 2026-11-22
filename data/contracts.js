@@ -31,7 +31,7 @@ export const CONTRACT_PAIRS = {
   EA: ['equality', 'authority'],
 };
 export const CONTRACT_PAIR_NAMES = {
-  IF: 'Individuality / Freedom', HU: 'Honor / Unity', EA: 'Equality / Authority',
+  IF: 'Individuality / Freedom', HU: 'Honor / Unity', EA: 'Equality / Authority', EX: 'Exodus',
 };
 // Heliocentric zones, Sun outward, for "beyond <zone>" (farther from the Sun).
 export const ZONE_ORDER = ['Mercury', 'Venus', 'Earth', 'Mars', 'Ceres', 'Jupiter', 'Saturn', 'Uranus', 'Neptune'];
