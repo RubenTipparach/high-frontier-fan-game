@@ -4,14 +4,14 @@
 # secret. Bootstrap on a fresh app (run once locally with flyctl):
 #
 #   fly apps create high-frontier-fan-game
-#   fly volumes create hf_data --size 1 --region ams
+#   fly volumes create hf_data --size 1 --region ord
 #
 # No app secrets to configure: the server is passwordless and tokens
 # are stored as plain sha256 hashes. Subsequent deploys are automatic
 # on every push to the repo.
 
 app = "high-frontier-fan-game"
-primary_region = "ams"
+primary_region = "ord"
 
 [build]
 
