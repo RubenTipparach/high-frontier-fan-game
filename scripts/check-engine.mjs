@@ -10486,20 +10486,27 @@ check('a strong rocket takes a safe factory-assist liftoff to skip the first-spa
 });
 
 // Module 4 (Exodus) preview gate (docs/module-m4-plan.md): M4 requires M0
-// (4A1a), so it turns the Assembly on; it does not combine with a variant yet
-// (CEO Solitaire's own M4 rules are not wired), so a variant game drops it; and
-// a room without it carries m4 false.
-check('M4 turns on M0 and stays out of variant games', () => {
-  const mk = (opts) => createInitialState({ players: [{ profileId: 1, name: 'A', seat: 1 }, { profileId: 2, name: 'B', seat: 2 }], seed: 7, ...opts });
+// (4A1a), so it turns the Assembly on; it plays with CEO Solitaire, Altruism and
+// Hermes Fall (owner 2026-11-22) but not with The Sirens or the tutorial; and a
+// room without it carries m4 false.
+check('M4 turns on M0; plays with CEO Solitaire, Altruism and Hermes, not Sirens / tutorial', () => {
+  const two = [{ profileId: 1, name: 'A', seat: 1 }, { profileId: 2, name: 'B', seat: 2 }];
+  const mk = (opts, players = two) => createInitialState({ players, seed: 7, ...opts });
   const on = mk({ m4: true });
   assert(on.m4 === true && on.m0 === true && on.assembly, `M4 game: m4=${on.m4} m0=${on.m0}`);
   const off = mk({});
   assert(off.m4 === false, `plain game m4=${off.m4}`);
-  for (const v of ['ceoSolo', 'hermes', 'altruism', 'tutorial']) {
+  const ceo = mk({ m4: true, ceoSolo: true }, [two[0]]);
+  assert(ceo.m4 === true && ceo.ceoSolo && ceo.m0 && ceo.contractDecks, `CEO Solitaire dropped m4: m4=${ceo.m4}`);
+  const alt = mk({ m4: true, altruism: true });
+  assert(alt.m4 === true && alt.altruism && alt.contractDecks, `Altruism dropped m4: m4=${alt.m4}`);
+  const her = mk({ m4: true, hermes: true });
+  assert(her.m4 === true && her.hermes && her.contractDecks, `Hermes dropped m4: m4=${her.m4}`);
+  for (const v of ['sirens', 'tutorial']) {
     const g = mk({ m4: true, [v]: true });
     assert(g.m4 === false, `${v} game kept m4`);
   }
-  return 'M4 forces M0; plain game m4 false; CEO / Hermes / Altruism / Tutorial drop it';
+  return 'M4 forces M0; CEO Solitaire, Altruism, Hermes keep it; Sirens / tutorial drop it';
 });
 
 // ---- Module 4 Stage 1: contracts (4B) ----------------------------------------
@@ -11386,6 +11393,35 @@ check('When fulfilling: Planetary Protection busts the site and seats 2 delegate
   }
   assert(struck && dry, `Beehive outcomes: ${struck} struck, ${dry} dry`);
   return `Ceres busted + 2 Equality delegates; Beehive at Eureka struck ${struck} / dry ${dry} (re-roll offered)`;
+});
+
+check('Proposal Review (4B3d): discard the top contract, then auction the next or abandon', () => {
+  const setup = () => {
+    const st = m4Game();
+    const c = stackDeck(st, 'M4N228F');
+    const ini = currentPlayerOf(st);
+    const r = fundraise(st, ini.profileId);
+    assert(r.ok, `FUNDRAISE: ${r.error}`);
+    r.state.activeLawStar = CONTRACT_PAIRS[c.pair][0];
+    return { st: r.state, c, ini, deck: () => r.state.contractDecks[c.pair] };
+  };
+  // Discard, then abandon: the top goes to the bottom, nothing is auctioned.
+  let t = setup();
+  const second = t.deck()[1];
+  let r = op(t.st, 'AUCTION_CONTRACT_START', t.ini.profileId, { pair: t.c.pair, discardTop: true, abandon: true });
+  assert(r.ok, `discard + abandon: ${r.error}`);
+  let d = r.state.contractDecks[t.c.pair];
+  assert(d[d.length - 1] === t.c.id && d[0] === second, `deck after discard: top ${d[0]}, bottom ${d[d.length - 1]}`);
+  assert(!r.state.auction && pl(r.state, t.ini.profileId).contractAuctionDone, 'an auction opened, or the step stayed open');
+  // Discard, then auction: the NEXT card goes up.
+  t = setup();
+  const next = t.deck()[1];
+  r = op(t.st, 'AUCTION_CONTRACT_START', t.ini.profileId, { pair: t.c.pair, discardTop: true });
+  assert(r.ok, `discard + auction: ${r.error}`);
+  assert(r.state.auction && r.state.auction.kind === 'contract' && r.state.auction.cardId === next, `lot: ${JSON.stringify(r.state.auction && r.state.auction.cardId)} want ${next}`);
+  d = r.state.contractDecks[t.c.pair];
+  assert(d[d.length - 1] === t.c.id, 'the discarded contract is not at the bottom');
+  return 'discard+abandon sends the top to the bottom; discard+auction puts the next card up';
 });
 
 check('contract auctions ignore the academia hand limit (owner 2026-11-21)', () => {

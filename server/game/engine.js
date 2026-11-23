@@ -13804,6 +13804,7 @@ function applyPiggybackReplay(state, op) {
 
 function pickPayload(op) {
   switch (op.kind) {
+    case 'EVENT_CHOICE': return { cardId: op.cardId, ...(op.lobby ? { lobby: true } : {}), ...(op.choice ? { choice: op.choice } : {}) };
     case 'MOVE': return { toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, ...(Array.isArray(op.hazardChoices) ? { hazardChoices: op.hazardChoices.slice() } : {}), segments: op.segments, pickupChit: op.pickupChit !== false, ...(op.acetyleneLiftoff ? { acetyleneLiftoff: true } : {}), ...(op.unit ? { unit: op.unit } : {}), ...(op.asFreighter ? { asFreighter: true } : {}), ...(op.wsbCoast ? { wsbCoast: true } : {}) };
     case 'MOVE_FACTORY': return { fromSiteId: op.fromSiteId, toSiteId: op.toSiteId, hazardPay: !!op.hazardPay, segments: op.segments, ...(op.cubeId != null ? { cubeId: op.cubeId } : {}), ...(op.acetyleneLiftoff ? { acetyleneLiftoff: true } : {}) };
     case 'MOVE_FLEET': return { moves: op.moves };
@@ -13935,6 +13936,7 @@ function describeAction(a) {
     const s = siteById(a.payload.siteId);
     return `prospect ${s ? s.name : a.payload.siteId}`;
   }
+  if (a.kind === 'EVENT_CHOICE') return 'event choice';
   return a.kind;
 }
 
@@ -13959,7 +13961,7 @@ function rebuildFromBase(baseState, actions, report = null) {
   s.turnRedo = [];
   for (let i = 0; i < actions.length; i++) {
     const a = actions[i];
-    const handler = FUNCTIONAL[a.kind];
+    const handler = FUNCTIONAL[a.kind] || REPLAY_ONLY[a.kind];
     if (!handler) {
       return note({ at: i, of: actions.length, kind: a.kind, error: 'no_replay_handler' });
     }
@@ -13987,6 +13989,42 @@ function rebuildFromBase(baseState, actions, report = null) {
   }
   return s;
 }
+
+// Repair for a game a short-lived build left stuck (owner 2026-11-22/23, room
+// wyk9hp): that build made a Sunspot event answer COMMIT the turn, which locked
+// the moves taken before it and emptied the undo stack. Given the board at the
+// previous real turn base and the ops logged since, rebuild the turn's undo
+// stack - functional ops in order, UNDO / REDO applied to them, and the last
+// event answer given after the final undo - and return it ONLY if replaying it
+// reproduces `current` exactly (undo history aside). Anything else: null, and
+// the game is left as it is.
+export function reconstructTurnActions(baseState, ops, current) {
+  const stack = [];
+  let redo = [];
+  let events = [];
+  for (const o of ops) {
+    const payloadOp = { kind: o.kind, ...(o.payload || {}) };
+    if (o.kind === 'UNDO') { if (stack.length) redo.unshift(stack.pop()); events = []; continue; }
+    if (o.kind === 'REDO') { if (redo.length) stack.push(redo.shift()); events = []; continue; }
+    if (o.kind === 'EVENT_CHOICE') { events.push({ kind: 'EVENT_CHOICE', payload: pickPayload(payloadOp) }); continue; }
+    if (FUNCTIONAL[o.kind]) { stack.push({ kind: o.kind, payload: pickPayload(payloadOp) }); redo = []; }
+  }
+  const actions = [...stack, ...events.slice(-1)];
+  if (!actions.length) return null;
+  const rebuilt = rebuildFromBase(baseState, actions);
+  if (!rebuilt) return null;
+  const norm = (st) => JSON.stringify({ ...st, turnActions: undefined, turnRedo: undefined, __opNotes: undefined });
+  if (norm(rebuilt) !== norm(current)) return null;
+  return rebuilt.turnActions;
+}
+
+// Actions that ride the turn's undo stack but are not dispatched as ordinary
+// functional ops. A Sunspot event answer the active player gives on their own
+// turn is one: it goes on the stack like any other action, so UNDO replays it
+// (the event stays answered) and can also take the answer itself back.
+const REPLAY_ONLY = {
+  EVENT_CHOICE: (s, op, player) => applyEventChoice(s, op, { profileId: player.profileId }),
+};
 
 // ----- meta ops -----
 
@@ -15111,7 +15149,14 @@ export function liveScoreboard(state) {
   const globalPerSpectral = {};
   for (const f of allFactories) globalPerSpectral[f.spectralType] = (globalPerSpectral[f.spectralType] || 0) + 1;
   const firstIdx = state.firstPlayerIndex || 0;
-  const contractLive = liveContractRows(state);
+  // A finished game is scored as the final tally scored it: the winning
+  // ideology's award, every unfulfilled contract's debt, and each Future at the
+  // VP it scored at the end (that pass can clear the board, so it is read back,
+  // not recomputed). The live scoring tab and the game-over standings both read
+  // these rows, so they can never disagree.
+  const final = state.status === 'finished';
+  const winnerKey = final && m0 && state.finalVote ? state.finalVote.winner : null;
+  const contractLive = liveContractRows(state, { final });
   const players = state.players.map((p, idx) => {
     const sirenScale = isSirenPlayer(state, p);
     const ownColonies = Object.entries(state.colonies || {})
@@ -15128,8 +15173,9 @@ export function liveScoreboard(state) {
     // Each accomplished Future scores its OWN current value (the same re-check +
     // dynamic endgameVp bonus the endgame tally runs), so the live scoring tab
     // shows what a Future is worth NOW instead of a bare "endgame" placeholder.
-    const futureCtx = m2 ? buildFutureCtx(state, p) : null;
+    const futureCtx = (m2 && !final) ? buildFutureCtx(state, p) : null;
     const liveStars = m2 ? (p.futureStars || []).map((s) => {
+      if (final) return { key: s.key, vp: s.vp | 0, endgame: !!s.endgame, scoredVp: s.scoredVp != null ? (s.scoredVp | 0) : (s.vp | 0), dynamic: false, endgameVpLabel: null };
       const sc = futureStarScore(state, p, s, futureCtx);
       return { key: s.key, vp: s.vp | 0, endgame: !!s.endgame, scoredVp: sc.vp, dynamic: sc.dynamic, endgameVpLabel: sc.label };
     }) : [];
@@ -15137,11 +15183,12 @@ export function liveScoreboard(state) {
     const b = scorePlayer({
       ownerId: p.profileId, factories: allFactories, ownColonies, sirenDomes: sirenScale,
       claims, outposts, rocket, firstPlayer, glory: gloryVp,
-      cubeVp, awardVp: 0, futuresVp, bernalVp,
+      cubeVp, awardVp: winnerKey ? ideologyAwardVp(state, p, winnerKey) : 0, futuresVp, bernalVp,
       mobileFactories: mobileFactoryTokenCount(state, p),
       bernals: m2 ? (p.bernals || []).length : 0,
     });
     return {
+      ...b,
       profileId: p.profileId, name: p.name, color: p.color || null,
       spectralRows: b.spectralRows, spectralVp: b.spectralVp,
       tokenBreakdown: b.tokenBreakdown, tokenVp: b.tokenVp,
@@ -16846,7 +16893,7 @@ function contractScoring(state) {
 // default chit where it sits now, and -1 per unpaid aqua on a contract that is
 // late or in default (a contract still on the clock owes nothing yet). Unlike contractScoring it
 // does not hand the chit on, so the live panel shows the chit's real holder.
-function liveContractRows(state) {
+function liveContractRows(state, { final = false } = {}) {
   const out = {};
   if (!state.m4) return out;
   for (const p of state.players) {
@@ -16856,8 +16903,9 @@ function liveContractRows(state) {
     // on the clock is not unpaid (owner 2026-11-22).
     let debt = 0;
     for (const id of Object.keys(p.contractMeta || {})) {
+      // At game end every unfulfilled contract owes its unpaid aqua (4E2c).
       const late = p.timepiece && p.timepiece.contractId === id && p.timepiece.deadbeat;
-      if (!late && !p.contractMeta[id].default) continue;
+      if (!final && !late && !p.contractMeta[id].default) continue;
       debt += Math.max(0, contractDebt(p, id) - ((p.contractMeta[id].paid) | 0));
     }
     const chit = (state.defaultChit && state.defaultChit.profileId === p.profileId) ? (state.defaultChit.side === 'gold' ? -6 : -3) : 0;
@@ -18315,12 +18363,28 @@ export function applyOperation(prevState, op, ctx) {
   // they must settle the event before doing anything else (END_TURN
   // included, so the debt can't be dodged). A debt whose options
   // vanished (hand emptied, tied card already gone) clears itself.
-  if (op.kind === 'EVENT_CHOICE') return noted(applyEventChoice(clonePrev(), op, ctx));
+  if (op.kind === 'EVENT_CHOICE') {
+    // Answered by the active player on their own turn, it goes on the turn's
+    // undo stack like any other action: an UNDO then replays it instead of
+    // rebuilding a board where the event is still owed, and can take the
+    // answer itself back (owner report 2026-11-22, room wyk9hp). An early,
+    // off-turn answer stays off the stack (it is not that player's turn).
+    const st0 = clonePrev();
+    const cursorBefore = st0.rng.cursor;
+    const r = applyEventChoice(st0, op, ctx);
+    if (r && r.ok && !op.debug && isPlayersTurn(prevState, ctx.profileId)) {
+      r.state.turnActions = [...(r.state.turnActions || []),
+        { kind: 'EVENT_CHOICE', payload: pickPayload(op), rolled: r.state.rng.cursor !== cursorBefore }];
+      r.state.turnRedo = [];
+    }
+    return noted(r);
+  }
   // Trades are a consensual side-channel (below) that never freeze the table,
   // so an unsettled event debt does not block them either - a player owing a
   // Budget Cuts discard can still deal cards while their dialog sits minimized.
   // Every OTHER op on their turn still waits on the choice.
-  if (prevState.pendingEvent && !op.debug && !TRADE[op.kind]
+  // UNDO / REDO pass too: taking back this turn's moves never dodges the debt.
+  if (prevState.pendingEvent && !op.debug && !TRADE[op.kind] && op.kind !== 'UNDO' && op.kind !== 'REDO'
       && isPlayersTurn(prevState, ctx.profileId)
       && eventDebtFor(prevState, ctx.profileId)) {
     const st0 = clonePrev();
