@@ -2026,6 +2026,35 @@ function redactRoutes(rawState, viewerId) {
   return clone;
 }
 
+// A short-lived build (2026-11-22) made a Sunspot event answer COMMIT the turn,
+// locking the moves taken before it and emptying the undo stack (room wyk9hp).
+// When a game's undo base is such an answer and nothing is left to undo,
+// rebuild the turn's undo stack from the op log since the previous real base,
+// kept only if replaying it reproduces the current board exactly. Returns
+// { actions, base, baseSeq } or null. Cached per game + seq: the game view asks
+// on every poll (so the Undo button lights up), the op route when it is pressed.
+const _undoRepairCache = new Map();
+function stuckUndoRepair(gameId, committedSeq, state) {
+  if (!state || ((state.turnActions || []).length)) return null;
+  const baseOp = db.prepare('SELECT kind FROM game_operations WHERE game_id = ? AND seq = ?').get(gameId, committedSeq);
+  if (!baseOp || baseOp.kind !== 'EVENT_CHOICE') return null;
+  const key = `${gameId}:${committedSeq}:${state.turn}:${state.round}:${JSON.stringify(state.pendingEvent || null)}`;
+  if (_undoRepairCache.has(key)) return _undoRepairCache.get(key);
+  let out = null;
+  const prior = db.prepare('SELECT seq, kind FROM game_operations WHERE game_id = ? AND seq < ? ORDER BY seq DESC LIMIT 400')
+    .all(gameId, committedSeq).find((r) => isCommitKind(r.kind));
+  const base = prior ? stateAtSeq(gameId, prior.seq) : null;
+  if (base) {
+    const since = db.prepare('SELECT kind, payload FROM game_operations WHERE game_id = ? AND seq > ? ORDER BY seq')
+      .all(gameId, prior.seq).map((r) => { let p = {}; try { p = JSON.parse(r.payload || '{}'); } catch { /* none */ } return { kind: r.kind, payload: p }; });
+    const actions = reconstructTurnActions(base, since, state);
+    if (actions) out = { actions, base, baseSeq: prior.seq };
+  }
+  if (_undoRepairCache.size > 200) _undoRepairCache.clear();
+  _undoRepairCache.set(key, out);
+  return out;
+}
+
 function gameView(gameId, viewerId = null) {
   const g = db
     .prepare('SELECT id, lobby_id, status, seed, committed_seq, created_at, finished_at FROM games WHERE id = ?')
@@ -2034,6 +2063,12 @@ function gameView(gameId, viewerId = null) {
   const st = db.prepare('SELECT state, seq, updated_at FROM game_states WHERE game_id = ?').get(gameId);
   const rawState = st ? JSON.parse(st.state) : null;
   const viewState = redactRoutes(rawState, viewerId);
+  // A turn the event-commit build locked shows its rebuilt undo stack, so the
+  // Undo button lights up (pressing it runs the same repair in the op route).
+  if (viewState && g.status === 'active') {
+    const fix = stuckUndoRepair(gameId, g.committed_seq, rawState);
+    if (fix) viewState.turnActions = fix.actions;
+  }
   // Display-only: bind any ownerless (in-progress) glory chit to its rocket crew
   // so the client draws the chit ON that crew card right away, before the next op
   // persists the binding. Bind only here (no scoring) - the op path commits.
@@ -3360,27 +3395,14 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
     ctx.turnBaseState = stateAtSeq(id, meta.committed_seq);
     if (!ctx.turnBaseState) return res.status(409).json({ error: 'no_turn_base' });
     // A short-lived build (2026-11-22) committed the turn on a Sunspot event
-    // answer, locking the moves before it (room wyk9hp). When the undo base is
-    // such an answer and nothing is left to undo, rebuild the turn's undo stack
-    // from the op log since the previous real base - only if it replays to
-    // exactly this board - and move the base back there.
-    const baseOp = db.prepare('SELECT kind FROM game_operations WHERE game_id = ? AND seq = ?').get(id, meta.committed_seq);
-    if (baseOp && baseOp.kind === 'EVENT_CHOICE' && !((prevState.turnActions || []).length)) {
-      const rows = db.prepare('SELECT seq, kind, payload FROM game_operations WHERE game_id = ? AND seq < ? ORDER BY seq DESC LIMIT 400')
-        .all(id, meta.committed_seq);
-      const prior = rows.find((r) => isCommitKind(r.kind));
-      const realBase = prior ? stateAtSeq(id, prior.seq) : null;
-      if (realBase) {
-        const since = db.prepare('SELECT kind, payload FROM game_operations WHERE game_id = ? AND seq > ? ORDER BY seq')
-          .all(id, prior.seq).map((r) => { let p = {}; try { p = JSON.parse(r.payload || '{}'); } catch { /* none */ } return { kind: r.kind, payload: p }; });
-        const actions = reconstructTurnActions(realBase, since, prevState);
-        if (actions) {
-          opState = { ...prevState, turnActions: actions, turnRedo: [] };
-          ctx.turnBaseState = realBase;
-          repairBaseSeq = prior.seq;
-          console.log(`[undo-repair] game ${id}: rebuilt ${actions.length} undoable action(s) back to op ${prior.seq}`);
-        }
-      }
+    // answer, locking the moves before it (room wyk9hp): rebuild the undo stack
+    // and move the base back (see stuckUndoRepair).
+    const fix = stuckUndoRepair(id, meta.committed_seq, prevState);
+    if (fix) {
+      opState = { ...prevState, turnActions: fix.actions, turnRedo: [] };
+      ctx.turnBaseState = fix.base;
+      repairBaseSeq = fix.baseSeq;
+      console.log(`[undo-repair] game ${id}: rebuilt ${fix.actions.length} undoable action(s) back to op ${fix.baseSeq}`);
     }
   }
   const result = applyOperation(opState, op, ctx);
