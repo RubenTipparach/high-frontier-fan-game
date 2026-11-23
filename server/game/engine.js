@@ -1693,8 +1693,14 @@ function fixPhantomFuelInHand(state) {
 // Future grants one extra colonist on top.
 function colonistAllowance(player) {
   let n = 0;
+  // Life Support Reconfig Team (Exodus): "Your Bernals add to Colonist limit even
+  // when unanchored." Fulfilled contracts only exist in an M4 game.
+  const unanchoredToo = (player.fulfilledContracts || []).some((f) => {
+    const face = contractFace(f.id, f.side);
+    return !!(face && face.abilities && face.abilities.bernalLimitUnanchored);
+  });
   for (const bn of (player.bernals || [])) {
-    if (bn && bn.anchored) n += (bn.promoted || bn.face === 'secondary') ? 2 : 1;
+    if (bn && (bn.anchored || unanchoredToo)) n += (bn.promoted || bn.face === 'secondary') ? 2 : 1;
   }
   if (n > 0 && hasFutureEffect(player, 'extraColonist')) n += 1;
   return n;
@@ -1776,6 +1782,8 @@ function contractIsruBonusAt(state, player, site) {
   return contractAbilityList(state, player, 'isruBody')
     .reduce((n, x) => n + ((x && x.body === body) ? (x.n | 0) : 0), 0);
 }
+// Radiation Shield Prototype (Exodus): "Your Stacks are immune to Belt/CME Rolls."
+const contractBeltImmune = (state, player) => contractAbilityCount(state, player, 'beltCmeImmune') > 0;
 // Shielded (4B2f): -2 to Belt & CME Rolls to your Stacks, per copy.
 const contractShield = (state, player) => 2 * contractAbilityCount(state, player, 'shielded');
 
@@ -2940,10 +2948,11 @@ function rocketShelteredByBernal(player) {
   if (s == null) return false;
   return (player.bernals || []).some((bn) => bn && bn.anchored && bn.siteId === s);
 }
-function applyFlareToPlayer(state, p, flare, notesArr) {
+export function applyFlareToPlayer(state, p, flare, notesArr) {
   let touched = 0;
   // Golden Apples Future: the completing player ignores solar flares entirely.
   if (hasFutureEffect(p, 'ignoreSolarFlares')) return 0;
+  if (contractBeltImmune(state, p)) return 0;   // Radiation Shield Prototype: immune to CME rolls
   const sweep = (slots, slug, where) => {
     const zone = zoneOfSlug(slug) || 'Earth';
     const info = SOLAR_ZONE_INFO[zone];
@@ -3603,10 +3612,12 @@ function describeHazardRolls(rolls) {
   const tourTail = toured
     ? ` Tourism Cycler: ${toured} radiation belt${toured === 1 ? '' : 's'} crossed with no roll.`
     : '';
+  const immune = (rolls || []).filter((r) => r && r.beltImmune).length;
+  const immuneTail = immune ? ` Radiation shield: ${immune} radiation belt${immune === 1 ? '' : 's'} crossed with no roll.` : '';
   // Shielded contracts (4B2f) took 2 off every belt roll per copy.
   const sh = (rolls || []).find((r) => r && r.kind === 'rad' && r.d6 != null && r.shielded);
   const shieldTail = sh ? ` Shielded: -${sh.shielded} on each belt roll.` : '';
-  return (parts.length ? ` [${parts.join('; ')}]` : '') + tourTail + shieldTail;
+  return (parts.length ? ` [${parts.join('; ')}]` : '') + tourTail + immuneTail + shieldTail;
 }
 
 // Does a (normalized) face carry the solar capability badge? Mirror of
@@ -4685,7 +4696,7 @@ function applyMoveFreighter(state, op, player) {
   const radWaived = [];
   for (const slug of arrivals) {
     const k = hazardKind(slug);
-    if (k === 'rad') { if (tourismWaivesBelt(state, player, slug)) radWaived.push(slug); else rad.push(slug); }
+    if (k === 'rad') { if (contractBeltImmune(state, player) || tourismWaivesBelt(state, player, slug)) radWaived.push(slug); else rad.push(slug); }
     else if (k === 'skull' || k === 'aero') generic.push(slug);
   }
   const rollItems = [];
@@ -4747,7 +4758,7 @@ function applyMoveFreighter(state, op, player) {
 
   const gen = makeRng(state.seed, state.rng.cursor);
   const rolls = [];
-  for (const slug of radWaived) rolls.push({ slug, kind: 'rad', bypassed: true, tourismCycler: true });
+  for (const slug of radWaived) rolls.push({ slug, kind: 'rad', bypassed: true, ...(contractBeltImmune(state, player) ? { beltImmune: true } : { tourismCycler: true }) });
   for (const slug of frCrashIgnored) rolls.push({ slug, kind: hazardKind(slug), safe: true });
   for (const slug of frColonyWaived) rolls.push({ slug, kind: hazardKind(slug), safe: true });
   let destroyed = false;
@@ -5053,7 +5064,7 @@ function applyMoveBernal(state, op, player) {
   const radWaived = [];
   for (const slug of arrivals) {
     const k = hazardKind(slug);
-    if (k === 'rad') { if (tourismWaivesBelt(state, player, slug)) radWaived.push(slug); else rad.push(slug); }
+    if (k === 'rad') { if (contractBeltImmune(state, player) || tourismWaivesBelt(state, player, slug)) radWaived.push(slug); else rad.push(slug); }
     else if (k === 'skull' || k === 'aero') generic.push(slug);
   }
   // Same order and waivers as the rocket and the Freighter: the liftoff assist
@@ -5086,7 +5097,7 @@ function applyMoveBernal(state, op, player) {
 
   const gen = makeRng(state.seed, state.rng.cursor);
   const rolls = [];
-  for (const slug of radWaived) rolls.push({ slug, kind: 'rad', bypassed: true, tourismCycler: true });
+  for (const slug of radWaived) rolls.push({ slug, kind: 'rad', bypassed: true, ...(contractBeltImmune(state, player) ? { beltImmune: true } : { tourismCycler: true }) });
   for (const slug of bnCrashIgnored) rolls.push({ slug, kind: hazardKind(slug), safe: true });
   for (const slug of bnColonyWaived) rolls.push({ slug, kind: hazardKind(slug), safe: true });
   let destroyed = false, haltSlug = dest;
@@ -5474,7 +5485,7 @@ function applyMoveFactory(state, op, player) {
   const radWaived = [];
   for (const slug of arrivals) {
     const k = hazardKind(slug);
-    if (k === 'rad') { if (tourismWaivesBelt(state, player, slug)) radWaived.push(slug); else rad.push(slug); }
+    if (k === 'rad') { if (contractBeltImmune(state, player) || tourismWaivesBelt(state, player, slug)) radWaived.push(slug); else rad.push(slug); }
     else if (k === 'skull' || k === 'aero') generic.push(slug);
   }
   const rollItems = [];
@@ -5522,7 +5533,7 @@ function applyMoveFactory(state, op, player) {
 
   const gen = makeRng(state.seed, state.rng.cursor);
   const rolls = [];
-  for (const slug of radWaived) rolls.push({ slug, kind: 'rad', bypassed: true, tourismCycler: true });
+  for (const slug of radWaived) rolls.push({ slug, kind: 'rad', bypassed: true, ...(contractBeltImmune(state, player) ? { beltImmune: true } : { tourismCycler: true }) });
   let destroyed = false, haltSlug = dest;
   const wasGlitched = lifting ? !!fac.glitched : !!cube.glitched;
   let glitched = wasGlitched;
@@ -5996,7 +6007,7 @@ function applyMove(state, op, player) {
       // still says Earth and a non-Sirens game must read exactly as before.
       // Scoped to a SIREN player: this sits with the Sirenian Bernal rules, so
       // an Earthling sharing a Sirens table does not get free passage.
-      if (tourismWaivesBelt(state, player, slug)) radWaived.push(slug);
+      if (contractBeltImmune(state, player) || tourismWaivesBelt(state, player, slug)) radWaived.push(slug);
       else rad.push(slug);
     } else if (k === 'skull' || k === 'aero') generic.push(slug);
   }
@@ -6187,7 +6198,7 @@ function applyMove(state, op, player) {
   }
   for (const slug of colonyWaivedSlugs) rolls.push({ slug, kind: hazardKind(slug), safe: true });
   for (const slug of crashIgnoredSlugs) rolls.push({ slug, kind: hazardKind(slug), safe: true });
-  for (const slug of radWaived) rolls.push({ slug, kind: 'rad', bypassed: true, tourismCycler: true });
+  for (const slug of radWaived) rolls.push({ slug, kind: 'rad', bypassed: true, ...(contractBeltImmune(state, player) ? { beltImmune: true } : { tourismCycler: true }) });
 
   // Hazards resolve in TRAVEL order: "if your Spacecraft enters one,
   // immediately roll" (H7), and a Belt Roll is made on entering each belt
@@ -6483,6 +6494,7 @@ function applyMove(state, op, player) {
   // so stamp it - it cannot be transferred to another vehicle and moved again
   // until this player's next turn.
   stampStackMoved(player.rocket.stack);
+  const aeroIsoNote = exodusAeroIsotope(state, player, player.rocket, dest);
   // Advance the stored route past this turn. A turn-tagged route drops its
   // turn-1 legs and shifts the rest down (T2 -> T1, ...); a legacy untagged
   // route pops everything up to the node we reached. A ship that lost its
@@ -6589,6 +6601,7 @@ function applyMove(state, op, player) {
       + ` the hazard on the first space out was ignored.`;
   }
   log += describeHazardRolls(rolls);
+  log += aeroIsoNote;
   if (decommissioned.length) log += ` Radiation decommissioned ${countedCards(decommissioned)}.`;
   if (degradedRadiators.length) log += ` Radiation degraded ${countedCards(degradedRadiators, 'radiator')} to the light side.`;
   if (sailDecommissioned.length) log += ` Aerobraking burned off ${sailDecommissioned.join(', ')} (decommissioned to hand).`;
@@ -9028,7 +9041,18 @@ function exomigrateOne(state, player, opts = {}) {
   const gone = discardEarthborns(state, player);
   return { ...res, log: `${res.log} Joined the Spacer Union${gone.length ? `: ${gone.join(', ')} discarded` : ''}.` };
 }
+// Deep Freeze (Exodus): "Before exomigrating, you may Discard the top card from
+// the queue you are drawing from." It goes to the bottom of that queue, then
+// the draw runs as usual.
 function exomigrateDraw(state, player, opts = {}) {
+  const queue = colonistQueueFor(state, player, opts.which);
+  if (!(opts.discardTop && queue.length > 1 && contractAbilityCount(state, player, 'exomigrateDiscard')
+    && countColonists(player) < colonistAllowance(player))) return exomigrateDrawTop(state, player, opts);
+  queue.push(queue.shift());
+  const res = exomigrateDrawTop(state, player, opts);
+  return res.ok ? { ...res, log: `Deep Freeze sends the top colonist to the bottom of the queue. ${res.log}` } : res;
+}
+function exomigrateDrawTop(state, player, opts = {}) {
   // Under a Sirens species split each species migrates from its OWN half of the
   // queue; one shared queue in every other game.
   const queue = colonistQueueFor(state, player, opts.which);
@@ -9281,6 +9305,7 @@ function applyExomigrate(state, op, player) {
     placeDelegate: op.placeDelegate !== false,
     specialty: op.specialty,
     queue: op.queue,
+    discardTop: !!op.discardTop,
     // Player-invoked exomigration CAN pause for a tie pick (unlike the automatic
     // mid-op exomigrations, which resolve ties quietly): a tied vote after the
     // arriving delegate seats leaves the active-law star for the player to set
@@ -12132,7 +12157,10 @@ function applySiteRefuel(state, op, player) {
     if (!outpost || outpost.siteId !== siteId) return fail('no_outpost');
     const fac = state.factories[siteId];
     if (!canUseFactoryNonVictory(state, player, fac)) return fail('no_factory');
-    const facSpectral = site.spectralType || 'C';
+    // Iso-Exchange (Exodus): your isostandard can be produced at any Factory.
+    const isoStd = contractAbilityCount(state, player, 'isostandardAnyFactory')
+      ? (player.isostandards || []).find((x) => playerOwnsGwOfSpectral(player, x)) : null;
+    const facSpectral = isoStd || site.spectralType || 'C';
     if (!playerOwnsGwOfSpectral(player, facSpectral)) return fail('no_matching_gw', { spectral: facSpectral });
     const gate = siteRefuelGate(state, player, siteId);
     if (!gate.ok) return fail('already_refueled');
@@ -12240,7 +12268,11 @@ function applySiteRefuel(state, op, player) {
     // it matches the GW thruster's spectral type.
     const thrSpectral = tcard.spectralType || 'C';
     const facSpectral = site.spectralType || 'C';
-    if (thrSpectral !== facSpectral) return fail('spectral_mismatch', { need: thrSpectral, have: facSpectral });
+    // Iso-Exchange (Exodus): "Produce your isostandard during a site refuel op
+    // at any Factory." Your isostandard refines whatever the Factory's spectral.
+    const isoAnyFactory = contractAbilityCount(state, player, 'isostandardAnyFactory')
+      && (player.isostandards || []).includes(thrSpectral);
+    if (thrSpectral !== facSpectral && !isoAnyFactory) return fail('spectral_mismatch', { need: thrSpectral, have: facSpectral });
     const gateI = siteRefuelGate(state, player, siteId);
     if (!gateI.ok) return fail('already_refueled');
     if (!gateI.freeRepeat && player.opsRemaining <= 0) return fail('no_ops_left');
@@ -16636,6 +16668,7 @@ function contractCtx(state, player = null, where = {}) {
     elevator: (id) => isSpaceElevatorSite(id),
     synodic: (id) => SYNODIC_SITE_IDS.includes(id),
     nodeZone: (n) => zoneOfSlug(n),
+    ownBeoBernal: (n) => !!(player && (player.bernals || []).some((bn) => bn && bn.anchored && !isHomeBernal(bn) && String(bn.siteId) === String(n))),
   };
 }
 // The map places a contract's destination names, for the "show on the map"
@@ -16894,10 +16927,61 @@ function applyFulfillContract(state, op, player) {
     when += planetaryProtection(state, player, destSlug, op);
   } else if (fx.beehive) {
     when += beehiveProspect(state, player, destSlug);   // its die is an undo barrier (rng cursor)
+  } else if (fx.isoBank || fx.isoSite) {
+    when += exodusIsotopes(state, player, fx, loc, destSlug);
+    if (fx.bernalSwap && op.swapBernals) when += swapBernalCards(state, player);
   } else if (face.whenFulfilling) {
     when += ` When fulfilling (not yet automated): ${face.whenFulfilling}`;
   }
   return { ok: true, state, log: `${player.name} fulfilled ${face.name}${late ? ' (late)' : ''} (+${face.vp} VP).${when}` };
+}
+
+// Exodus contracts (When Fulfilling): "Gain 3 Isotopes at your Bank" lands as
+// gold beads at the Bank (debased to aqua without an isostandard, 4D1b); "at
+// this Site" puts an isotope can in the stack that fulfilled it, of the site's
+// spectral type (your isostandard when the space has none).
+function exodusIsotopes(state, player, fx, loc, slug) {
+  if (fx.isoBank) {
+    const n = fx.isoBank;
+    if (!hasIsostandard(player)) {
+      debase(state, player, n);
+      return ` When fulfilling: ${n} isotopes reach the Bank and convert to ${n * ISOTOPE_AQUA} aqua (no isostandard).`;
+    }
+    player.isotopes = Math.max(0, player.isotopes | 0) + n;
+    return ` When fulfilling: gained ${n} isotopes at the Bank (${player.isotopes} there).`;
+  }
+  const n = fx.isoSite;
+  const site = slug ? siteById(slug) : null;
+  const spectral = String((site && site.spectralType) || (player.isostandards || [])[0] || 'C').toUpperCase().slice(0, 1);
+  const arr = loc.arr;
+  const can = arr.find((x) => isFuelCardSlot(x) && x.grade === 'isotope' && (x.spectral || 'C') === spectral);
+  if (can) can.amount = (Number(can.amount) || 0) + n;
+  else arr.push({ id: nextFuelCardId(state), kind: 'fuel', grade: 'isotope', spectral, amount: n, face: 'primary' });
+  return ` When fulfilling: gained ${n} spectral-${spectral} isotopes${site ? ` at ${site.name}` : ''}.`;
+}
+// Atmospheric Iso-Refinery (Exodus): "If your GW/TW thruster ends its move on an
+// Aerobrake Hazard, that Stack gains 1 Isotope." The rocket's active thruster is
+// a GW thruster (its Promoted side is the TW thruster).
+function exodusAeroIsotope(state, player, rocket, dest) {
+  if (!contractAbilityCount(state, player, 'aeroIsotope') || hazardKind(dest) !== 'aero') return '';
+  const slot = rocket.activeThrusterId && (rocket.stack || []).find((x) => x.id === rocket.activeThrusterId);
+  const card = slot && PATENTS_BY_ID[slot.id];
+  if (!card || card.type !== 'gw-thruster') return '';
+  const spectral = String((player.isostandards || [])[0] || 'C').toUpperCase();
+  const can = rocket.stack.find((x) => isFuelCardSlot(x) && x.grade === 'isotope' && (x.spectral || 'C') === spectral);
+  if (can) can.amount = (Number(can.amount) || 0) + 1;
+  else rocket.stack.push({ id: nextFuelCardId(state), kind: 'fuel', grade: 'isotope', spectral, amount: 1, face: 'primary' });
+  return ' Atmospheric Iso-Refinery: the stack gains 1 isotope on the aerobrake.';
+}
+// Life Support Reconfig Team (When Fulfilling, optional): swap your two Bernal
+// cards, each moving to the other Bernal stack.
+function swapBernalCards(state, player) {
+  const bs = (player.bernals || []).filter(Boolean);
+  if (bs.length < 2) return '';
+  const [a, b] = bs;
+  const ca = a.cardId; a.cardId = b.cardId; b.cardId = ca;
+  const na = (BERNALS_BY_ID[a.cardId] || {}).name || a.cardId, nb = (BERNALS_BY_ID[b.cardId] || {}).name || b.cardId;
+  return ` The Bernal cards swap: ${na} and ${nb} trade stacks.`;
 }
 
 // Planetary Protection (When Fulfilling): "Bust the destination Site & place up

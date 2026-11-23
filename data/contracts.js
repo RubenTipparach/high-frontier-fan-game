@@ -17,6 +17,8 @@
 //   enter:<node>                    the stack entered that space this turn
 //   flybys:N [beyond=Zone]          the stack entered N different flyby spaces this turn
 //   liftoff                         the stack has left the previous step's site
+//   belt [beyond=Zone]              the stack entered a Radiation Belt space this turn
+//                                   (a different one from earlier belt steps)
 //   return                          the contract is back at LEO / your Bank
 //   manual:<why>                    not engine-checkable yet (refused until it is)
 // Site filters: unexplored, size>=N, atmospheric, submarine, astrobiology,
@@ -72,6 +74,7 @@ export function parseSteps(text) {
     if (head === 'space') return { verb: 'space', filters, raw };
     if (head === 'return') return { verb: 'return', raw };
     if (head === 'liftoff') return { verb: 'liftoff', raw };
+    if (head === 'belt') return { verb: 'belt', filters, raw };
     return { verb: 'manual', why: `unreadable step "${raw}"`, raw };
   });
 }
@@ -125,6 +128,13 @@ export function parseFulfilledAbility(text) {
   const belt = t.match(/^\+1 flyby bonus from Radiation Belt \((once|twice)/i);
   if (belt) ab.beltFlyby = belt[1].toLowerCase() === 'twice' ? 2 : 1;
   if (/allowed Murder\/Suicide/i.test(t)) ab.murderSuicide = true;
+  // Exodus contract abilities.
+  if (/^If your GW\/TW thruster ends its move on an Aerobrake Hazard, that Stack gains 1 Isotope/i.test(t)) ab.aeroIsotope = true;
+  if (/^Produce your isostandard during a site refuel op at any Factory/i.test(t)) ab.isostandardAnyFactory = true;
+  if (/^Your GW\/TW thruster receives a Bonus Pivot/i.test(t)) ab.twBonusPivot = true;
+  if (/^Your Bernals add to Colonist limit even when unanchored/i.test(t)) ab.bernalLimitUnanchored = true;
+  if (/^Your Stacks are immune to Belt\/CME Rolls/i.test(t)) ab.beltCmeImmune = true;
+  if (/^Before exomigrating, you may Discard the top card from the queue/i.test(t)) ab.exomigrateDiscard = true;
   if (/^Acetylene rocketplane liftoff is possible from all your Factories/i.test(t)) ab.acetyleneFactories = true;
   if (/factory-assist landings\/liftoffs at Elevator Sites treat lander burns as normal Burn Spaces/i.test(t)) ab.elevatorLanderBurns = true;
   return ab;
@@ -140,6 +150,14 @@ export function parseWhenFulfilling(text) {
   //   beehive : true           (remove the Busted disk, prospect at ISRU 0 w/reroll)
   if (/^Bust the destination Site & place up to 2 delegates in any 1 Ideology/i.test(t)) fx.bustAndDelegates = true;
   if (/^Remove Busted disk; prospect here at ISRU 0 w\/reroll/i.test(t)) fx.beehive = true;
+  //   isoBank : N   ("Gain N Isotopes at your Bank")
+  //   isoSite : N   ("Gain N Isotopes at this Site": isotope fuel in the stack there)
+  //   bernalSwap : true (Life Support Reconfig: "you may swap your Bernal cards")
+  const ib = t.match(/^Gain (\d+) Isotopes? at your Bank/i);
+  if (ib) fx.isoBank = Number(ib[1]);
+  const is = t.match(/^Gain (\d+) Isotopes? at this Site/i);
+  if (is) fx.isoSite = Number(is[1]);
+  if (/swap your Bernal cards/i.test(t)) fx.bernalSwap = true;
   return fx;
 }
 
@@ -324,12 +342,14 @@ export function stepLabel(step, nameOf = (s) => s) {
       return `Reach ${article(noun)} ${noun}${place.length ? ' ' + place.join(', ') : ''}${fallback}${withTail}${rolled}${same}`;
     }
     case 'space': {
+      if (f.beo) return `Reach ${f.different ? 'another' : 'one'} of your Anchored non-Home Bernals`;
       const kind = f.aero ? 'an aerobrake space' : f.hazard ? 'a hazard space' : 'a space';
       return `Reach ${kind}${f.beyond ? ` beyond the ${f.beyond} zone` : ''}${same}`;
     }
     case 'enter': return `Pass through ${nameOf(step.node)}${same}`;
     case 'flybys': return `${step.count} flyby${step.count === 1 ? '' : 's'}${f.beyond ? ` beyond the ${f.beyond} zone` : ''} in one turn`;
     case 'liftoff': return 'Lift off from there';
+    case 'belt': return `Enter a Radiation Belt${f.beyond ? ` beyond the ${f.beyond} zone` : ''}`;
     case 'return': return 'Return to LEO';
     default: return step.why || step.raw;
   }
@@ -376,7 +396,19 @@ export function stepSatisfied(step, where, progress, ctx, prev = null) {
       if (f.aero && kind !== 'aero') return { ok: false, why: 'destination_conditions' };
       if (f.hazard && kind !== 'skull') return { ok: false, why: 'destination_conditions' };
       if (f.beyond && !(zoneIdx(ctx.nodeZone(id)) > zoneIdx(f.beyond))) return { ok: false, why: 'destination_conditions' };
+      // Your Anchored non-Home Bernal (a BEO Bernal, 4A7d) stands here.
+      if (f.beo && !(ctx.ownBeoBernal && ctx.ownBeoBernal(id))) return { ok: false, why: 'destination_conditions' };
+      if (f.different && used.includes(id)) return { ok: false, why: 'destination_conditions' };
       return { ok: true, siteId: id };
+    }
+    // A Radiation Belt space entered this turn (or where the stack stands),
+    // one an earlier step has not already counted.
+    case 'belt': {
+      const f = step.filters || {};
+      const seen = [...(where.entered || []), ...(where.siteId && !where.atLeo ? [where.siteId] : [])];
+      const hit = seen.find((n) => ctx.nodeHazard && ctx.nodeHazard(n) === 'rad' && !used.includes(n)
+        && (!f.beyond || zoneIdx(ctx.nodeZone(n)) > zoneIdx(f.beyond)));
+      return hit ? { ok: true, siteId: hit } : { ok: false, why: 'no_radiation_belt' };
     }
     case 'enter':
       return (where.entered || []).includes(step.node) ? { ok: true } : { ok: false, why: 'not_entered_this_turn' };

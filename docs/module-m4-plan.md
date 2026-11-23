@@ -263,8 +263,27 @@ BUILT 2026-11-22 (Stage 3, isotope monetization + the isobank):
   market, FINAO, exchange buttons, the isobank, every isovault and the isototal
   band). The Exodus deck shows in the market once open.
 
+- **The six Exodus contracts (front faces), 2026-11-22.** Every destination is
+  engine-checked (sheet `Destination Steps`; new `belt` verb and `space beo`
+  filter), every When Fulfilling runs (`isoBank` / `isoSite` isotopes, debased
+  without an isostandard; Life Support's optional Bernal card swap,
+  `swapBernals`), and every Fulfilled Ability works: Atmospheric Iso-Refinery
+  (`aeroIsotope`, rocket moves), Iso-Exchange (`isostandardAnyFactory`), TW Stress
+  Test (`twBonusPivot`, client planner), Life Support Reconfig Team
+  (`bernalLimitUnanchored`), Radiation Shield Prototype (`beltCmeImmune`, every
+  belt roll path and the solar flare), Deep Freeze (`exomigrateDiscard`, a
+  checkbox in the exomigrate dialog). Checks: "Exodus:" in check-engine.
+  The Exodus deck plays the FRONT face; the backs (Isotope Fueling Station,
+  Rival Isobank, TW Evaluation Committee, Life Support Test Protocol, Warden
+  Proving Ground, Decanting Network) are not reachable yet.
+- **Map:** the isobank draws over its space as a site-size hexagon (the starship
+  behind the isovault cells, rim in the isobanker's colour), under the pieces;
+  hovering fades the pieces, a small hex beside it peeks at the site, a tap opens
+  the Bank tab.
+
 STILL TO DO in Stage 3: the desperation starshot (4D3: commander, launch,
 flight, mutiny), Ad Astra Futures adding 4 isotopes, trading isofuel between
 isovaults, beads in contract payments other than FINAO and research auctions,
-the starship chit art (drawn, awaiting sign-off: `docs/design/chits/`), and the
-R8 question (FINAO doubling in M1 games without M4).
+the Exodus back faces, the Atmospheric Iso-Refinery isotope for Freighter /
+Bernal GW moves (rocket only today), and the R8 question (FINAO doubling in M1
+games without M4).

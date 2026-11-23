@@ -5391,7 +5391,7 @@ export const CARD_DATA = {
         "Fulfilled Ability": "Your GW/TW thruster receives a Bonus Pivot.",
         "When Fulfilling": "Gain 3 Isotopes at your Bank.",
         "Transcription Notes": "Duplicate scan (B_blue_14.png) matches; no differences found.",
-        "Destination Steps": "manual:Solar Oberth then Uranus synodic (Stage 3)"
+        "Destination Steps": "enter:burn-utoma ; site zone=Uranus synodic ; return"
       },
       "tier2": {
         "Name": "TW Evaluation Committee",
@@ -5428,7 +5428,7 @@ export const CARD_DATA = {
         "Fulfilled Ability": "Your Bernals add to Colonist limit even when unanchored.",
         "When Fulfilling": "Gain 3 Isotopes at your Bank; you may swap your Bernal cards (move each to the other Bernal Stack).",
         "Transcription Notes": "Late Fee alarm-clock icon sits in a black box on this card (cosmetic). Duplicate scan (B_blue_15.png) matches; no differences found.",
-        "Destination Steps": "manual:2 anchored non-Home Bernals (M2)"
+        "Destination Steps": "space beo ; space beo different ; return"
       },
       "tier2": {
         "Name": "Life Support Test Protocol",
@@ -5465,7 +5465,7 @@ export const CARD_DATA = {
         "Fulfilled Ability": "Your Stacks are immune to Belt/CME Rolls.",
         "When Fulfilling": "Gain 3 Isotopes at your Bank.",
         "Transcription Notes": "Late Fee alarm-clock icon sits in a black box on this card (cosmetic). Duplicate scan (B_blue_16.png) matches; no differences found.",
-        "Destination Steps": "manual:Mercury then 2 radiation belts beyond Saturn (Stage 3)"
+        "Destination Steps": "site zone=Mercury ; belt beyond=Jupiter ; belt beyond=Jupiter ; return"
       },
       "tier2": {
         "Name": "Warden Proving Ground",

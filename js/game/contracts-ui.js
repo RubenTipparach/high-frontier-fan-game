@@ -959,10 +959,39 @@ async function fulfillContract(id) {
     await D.submitTurnOp({ kind: 'FULFILL_CONTRACT', cardId: id, ...(ideology ? { ideology, delegates: 2 } : {}) });
     return;
   }
+  // Life Support Reconfig Team: you may swap your two Bernal cards.
+  if (f && last && f.onFulfill && f.onFulfill.bernalSwap && (p.bernals || []).filter(Boolean).length >= 2) {
+    const names = (p.bernals || []).filter(Boolean).slice(0, 2).map((b) => (BERNALS_BY_ID[b.cardId] || {}).name || 'Bernal');
+    const swap = await askSwapBernals(f.name, names);
+    if (swap === undefined) return;
+    await D.submitTurnOp({ kind: 'FULFILL_CONTRACT', cardId: id, ...(swap ? { swapBernals: true } : {}) });
+    return;
+  }
   await D.submitTurnOp({ kind: 'FULFILL_CONTRACT', cardId: id });
 }
 // One Ideology for 2 delegates, or none. Resolves the key, null (none) or
 // undefined (cancelled).
+// Life Support Reconfig Team: swap the two Bernal cards? true / false, or
+// undefined when cancelled.
+function askSwapBernals(title, names) {
+  return new Promise((resolve) => {
+    const ov = document.createElement('div');
+    ov.className = 'card-modal-overlay confirm-modal-overlay';
+    ov.innerHTML = `<div class="turn-confirm-panel" role="dialog" aria-label="${esc(title)}">
+      <h3>${esc(title)}</h3><p>Swap ${esc(names[0])} and ${esc(names[1])}?</p>
+      <div class="turn-confirm-actions"><button type="button" class="popup-btn primary" data-v="1">Swap</button><button type="button" class="popup-btn" data-v="0">Keep</button><button type="button" class="popup-btn" data-cancel>Cancel</button></div>
+    </div>`;
+    const done = (v) => { ov.remove(); resolve(v); };
+    ov.addEventListener('click', (e) => {
+      if (e.target === ov) return done(undefined);
+      const b = e.target.closest('button');
+      if (!b) return;
+      if (b.hasAttribute('data-cancel')) return done(undefined);
+      done(b.dataset.v === '1');
+    });
+    document.body.appendChild(ov);
+  });
+}
 function pickIdeology(title) {
   return new Promise((resolve) => {
     const ov = document.createElement('div');

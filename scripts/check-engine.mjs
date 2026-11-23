@@ -16,7 +16,8 @@
 // Run locally: node scripts/check-engine.mjs
 
 import { createInitialState, seasonForSlot } from '../server/game/state.js';
-import { auctionWaitingOn, finaoPerFor, finaoFunds, payFinao, exodusScoring } from '../server/game/engine.js';
+import { auctionWaitingOn, finaoPerFor, finaoFunds, payFinao, exodusScoring, applyFlareToPlayer } from '../server/game/engine.js';
+import { SITES_BY_ID as SITES_BY_ID_X } from '../data/sites.js';
 import { hotSeatWaitingOn, resolveHotSeatActor } from '../data/hot-seat.js';
 import { applyOperation, slotMass, autoFixGlitches, liveScoreboard, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, repairSpeciesDeckSplit, cycleMarketDecks, rocketSolarZone, activeNetThrust, outpostWater, buildFutureCtx, resolveSunspotEvent, computeFinalScores } from '../server/game/engine.js';
 import { BERNALS } from '../data/bernals.js';
@@ -12402,6 +12403,203 @@ check('M4 + M2 isobank (4D2): founded at a BEO Bernal on an isostandard Dirtside
   const r2 = op(m2, 'SITE_REFUEL', z.profileId, { siteId: SITE, mode: 'isotope' });
   assert(r2.ok && !r2.state.isobank, `isobank founded outside M4 (${r2.error})`);
   return `isobank at ${SPACE}, Exodus deck ${r.state.contractDecks.EX.length} cards; isovault 3; Reckless starshot: me ${a.vp} VP (isobanker 4, rank 6, command 4, propulsion 4), rival ${b.vp}`;
+});
+
+// The six Exodus contracts (Project Exodus deck, front faces): each destination
+// is announced and fulfilled where it should be, the When Fulfilling isotopes
+// land, and each Fulfilled Ability works.
+function exodusSetup(name) {
+  const st = startedGame({ m0: true, m1: true, m2: true, m4: true, seats: 2, maxRounds: 7 });
+  const P = st.players[st.activeIndex];
+  const c = CONTRACTS.find((x) => x.exodus && x.faces.primary.name === name);
+  P.contractMeta = { [c.id]: { side: 'exodus', paid: 0, boosted: true, default: false, progress: { sites: [], done: 0 } } };
+  P.rocket.stack.push({ id: c.id, kind: 'contract', face: 'primary' });
+  P.isostandards = ['S']; P.isotopes = 0;
+  const fulfil = (s, extra = {}) => op(s, 'FULFILL_CONTRACT', P.profileId, { cardId: c.id, ...extra });
+  const done = (r) => r.ok && pl(r.state, P.profileId).fulfilledContracts.some((f) => f.id === c.id);
+  const grant = (s) => { const Q = pl(s, P.profileId); Q.fulfilledContracts = [{ id: c.id, side: 'exodus', round: 1 }]; return Q; };
+  return { st, P, c, fulfil, done, grant };
+}
+check('Exodus: every front face reads as engine abilities and isotope rewards', () => {
+  const ex = CONTRACTS.filter((x) => x.exodus);
+  assert(ex.length === 6, `six Exodus contracts (${ex.length})`);
+  for (const x of ex) {
+    const f = x.faces.primary;
+    assert(!f.steps.some((st) => st.verb === 'manual'), `${f.name}: a manual destination step`);
+    assert(Object.keys(f.abilities).length === 1, `${f.name}: ability ${JSON.stringify(f.abilities)}`);
+    assert(f.onFulfill.isoBank === 3 || f.onFulfill.isoSite === 3, `${f.name}: reward ${JSON.stringify(f.onFulfill)}`);
+  }
+  return ex.map((x) => `${x.faces.primary.name}: ${Object.keys(x.faces.primary.abilities)[0]}`).join('; ');
+});
+check('Exodus: Atmospheric Iso-Refinery fulfils at the Uranus aerostat, 3 isotopes at the Bank (aqua without an isostandard)', () => {
+  const { st, P, fulfil, done } = exodusSetup('Atmospheric Iso-Refinery');
+  P.rocket.siteId = 'mars-north-pole';
+  let r = fulfil(st);
+  assert(!r.ok && r.error === 'not_at_destination', `away: ${r.error}`);
+  P.rocket.siteId = 'uranus-aerostat';
+  r = fulfil(st);
+  assert(done(r) && pl(r.state, P.profileId).isotopes === 3, `fulfil: ${r.error} isotopes ${r.ok && pl(r.state, P.profileId).isotopes}`);
+  P.isostandards = [];
+  const aqua = P.aqua | 0, mk = st.earthMarket | 0;
+  const r2 = fulfil(st);
+  const Q = pl(r2.state, P.profileId);
+  assert(done(r2) && Q.isotopes === 0 && Q.aqua === aqua + 30 && r2.state.earthMarket === mk + 3, `debased: aqua ${Q.aqua} market ${r2.state.earthMarket}`);
+  return r.log;
+});
+check('Exodus: Atmospheric Iso-Refinery ability, a GW stack ending its move on an aerobrake gains 1 isotope', () => {
+  const { st, P, grant } = exodusSetup('Atmospheric Iso-Refinery');
+  const aero = mapNodes().find((n) => hazardKind(n) === 'aero');
+  const from = neighborSlugs(aero).find((n) => !hazardKind(n));
+  assert(aero && from, 'an aerobrake next to a plain space');
+  const Q = grant(st);
+  Q.rocket.stack = [{ id: 'gw-_amat_catalyzed_fission_fusion', kind: 'patent', face: 'primary' }];
+  Q.rocket.activeThrusterId = 'gw-_amat_catalyzed_fission_fusion';
+  Q.rocket.siteId = from; Q.rocket.turnStartSiteId = from;
+  Q.rocket.tank = 9; Q.rocket.tankGrade = 'isotope'; Q.rocket.tankSpectral = 'S';
+  const r = op(st, 'MOVE', P.profileId, { segments: [{ from, to: aero, burns: 0, turn: 1 }], payFinao: true });
+  assert(r.ok, `move: ${r.error} ${JSON.stringify(r.detail || '')}`);
+  const R = pl(r.state, P.profileId);
+  if (R.rocket.siteId === aero) {
+    const can = R.rocket.stack.find((x) => x.kind === 'fuel' && x.grade === 'isotope');
+    assert(can && can.amount === 1 && /Iso-Refinery/.test(r.log), `isotope: ${JSON.stringify(can)} ${r.log}`);
+  }
+  // Without the contract, no isotope.
+  Q.fulfilledContracts = [];
+  const r2 = op(st, 'MOVE', P.profileId, { segments: [{ from, to: aero, burns: 0, turn: 1 }], payFinao: true });
+  assert(r2.ok && !pl(r2.state, P.profileId).rocket.stack.some((x) => x.kind === 'fuel'), 'no isotope without the contract');
+  return r.log;
+});
+check('Exodus: Iso-Exchange fulfils at the Saturn aerostat and back; then refines its isostandard at any Factory', () => {
+  const { st, P, fulfil, done, grant } = exodusSetup('Iso-Exchange');
+  P.rocket.siteId = 'saturn-aerostat';
+  let r = fulfil(st);
+  assert(r.ok && /step 1 of 2/.test(r.log), `step 1: ${r.error || r.log}`);
+  const s2 = r.state; pl(s2, P.profileId).rocket.siteId = null;
+  r = fulfil(s2);
+  assert(done(r) && pl(r.state, P.profileId).isotopes === 3, `return: ${r.error}`);
+  // Ability: an S isostandard GW refines at a C-type Factory.
+  const SITE = 'ceres';
+  const st3 = exodusSetup('Iso-Exchange').st;
+  const Q = st3.players[st3.activeIndex];
+  st3.factories = { [SITE]: { ownerId: Q.profileId } };
+  Q.isostandards = ['S'];
+  Q.rocket.stack = [{ id: 'gw-_amat_catalyzed_fission_fusion', kind: 'patent', face: 'primary' }];
+  Q.rocket.activeThrusterId = 'gw-_amat_catalyzed_fission_fusion';
+  Q.rocket.siteId = SITE; Q.rocket.tank = 0; Q.rocket.tankGrade = 'isotope'; Q.opsRemaining = 1; Q.refueledSites = [];
+  const thr = PATENTS_BY_ID['gw-_amat_catalyzed_fission_fusion'].spectralType || 'C';
+  const fac = (SITES_BY_ID_X[SITE] || {}).spectralType || 'C';
+  assert(thr === 'S' && fac !== 'S', `test premise: thruster ${thr}, factory ${fac}`);
+  r = op(st3, 'SITE_REFUEL', Q.profileId, { siteId: SITE, mode: 'isotope' });
+  assert(!r.ok && r.error === 'spectral_mismatch', `without the contract: ${r.error}`);
+  Q.fulfilledContracts = [{ id: exodusSetup('Iso-Exchange').c.id, side: 'exodus', round: 1 }];
+  r = op(st3, 'SITE_REFUEL', Q.profileId, { siteId: SITE, mode: 'isotope' });
+  assert(r.ok && pl(r.state, Q.profileId).rocket.tank > 0, `with Iso-Exchange: ${r.error}`);
+  return r.log;
+});
+check('Exodus: TW Stress Test needs the Solar Oberth, then a Uranus synodic site, then home', () => {
+  const { st, P, fulfil, done } = exodusSetup('TW Stress Test');
+  P.rocket.siteId = 'pholus'; P.rocket.enteredThisTurn = [];
+  let r = fulfil(st);
+  assert(!r.ok && r.error === 'not_entered_this_turn', `no oberth: ${r.error}`);
+  P.rocket.siteId = 'lag-skyvt'; P.rocket.enteredThisTurn = ['burn-utoma', 'lag-skyvt'];
+  r = fulfil(st);
+  assert(r.ok && /step 1 of 3/.test(r.log), `oberth: ${r.error || r.log}`);
+  let s2 = r.state; const R = pl(s2, P.profileId); R.rocket.enteredThisTurn = [];
+  R.rocket.siteId = 'mars-north-pole';
+  r = fulfil(s2);
+  assert(!r.ok && r.error === 'destination_conditions', `not Uranus: ${r.error}`);
+  R.rocket.siteId = 'pholus';
+  r = fulfil(s2);
+  assert(r.ok && /step 2 of 3/.test(r.log), `pholus: ${r.error || r.log}`);
+  s2 = r.state; pl(s2, P.profileId).rocket.siteId = null;
+  r = fulfil(s2);
+  assert(done(r), `home: ${r.error}`);
+  return 'Solar Oberth, Pholus, LEO';
+});
+check('Exodus: Life Support Reconfig Team visits both BEO Bernals; Bernals count unanchored; optional card swap', () => {
+  const { st, P, c, fulfil, done } = exodusSetup('Life Support Reconfig Team');
+  P.bernals = [
+    { cardId: 'ber_l4_antimatter_factory', siteId: 'lag-qofv5', anchored: true, stack: [], route: [], wiring: {} },
+    { cardId: 'ber_l2_collimator_bernal', siteId: 'lag-iq24g', anchored: true, stack: [], route: [], wiring: {} },
+  ];
+  P.rocket.siteId = 'lag-qofv5';
+  let r = fulfil(st);
+  assert(r.ok && /step 1 of 3/.test(r.log), `first Bernal: ${r.error || r.log}`);
+  let s2 = r.state;
+  r = fulfil(s2);
+  assert(!r.ok, 'the same Bernal twice does not count');
+  pl(s2, P.profileId).rocket.siteId = 'lag-iq24g';
+  r = fulfil(s2);
+  assert(r.ok && /step 2 of 3/.test(r.log), `second Bernal: ${r.error || r.log}`);
+  s2 = r.state; pl(s2, P.profileId).rocket.siteId = null;
+  r = fulfil(s2, { swapBernals: true });
+  const F = pl(r.state, P.profileId);
+  assert(done(r) && F.bernals[0].cardId === 'ber_l2_collimator_bernal' && /swap/.test(r.log), `fulfil + swap: ${r.error} ${r.log}`);
+  // Away from a Bernal of mine: refused.
+  const t = exodusSetup('Life Support Reconfig Team');
+  t.P.bernals = []; t.P.rocket.siteId = 'lag-qofv5';
+  assert(!t.fulfil(t.st).ok, 'no Bernal there: refused');
+  // Ability: unanchored Bernals still raise the colonist allowance.
+  const g = exodusSetup('Life Support Reconfig Team');
+  g.P.bernals = [{ cardId: 'ber_l4_antimatter_factory', siteId: 'lag-qofv5', anchored: false, stack: [], route: [], wiring: {} }];
+  g.P.leo = []; g.P.opsRemaining = 1;
+  let e = op(g.st, 'EXOMIGRATE', g.P.profileId, {});
+  assert(!e.ok && e.error === 'no_colonist_slot', `unanchored, no contract: ${e.error}`);
+  g.grant(g.st);
+  e = op(g.st, 'EXOMIGRATE', g.P.profileId, { to: 'leo' });
+  assert(e.ok, `unanchored with the contract: ${e.error}`);
+  return r.log;
+});
+check('Exodus: Radiation Shield Prototype (Mercury, 2 belts Saturn-zone+, home); then belts and CME never roll', () => {
+  const { st, P, fulfil, done, grant } = exodusSetup('Radiation Shield Prototype');
+  P.rocket.siteId = 'mercury-north-pole';
+  let r = fulfil(st);
+  assert(r.ok && /step 1 of 4/.test(r.log), `Mercury: ${r.error || r.log}`);
+  let s2 = r.state; let R = pl(s2, P.profileId);
+  R.rocket.siteId = 'lag-x28s9'; R.rocket.enteredThisTurn = ['rad-hqw2g'];
+  r = fulfil(s2);
+  assert(!r.ok && r.error === 'no_radiation_belt', `inner belt: ${r.error}`);
+  R.rocket.enteredThisTurn = ['rad-yhhqh', 'rad-smz4v'];
+  r = fulfil(s2);
+  assert(r.ok && /step 3 of 4/.test(r.log), `two outer belts in one turn: ${r.error || r.log}`);
+  s2 = r.state; pl(s2, P.profileId).rocket.siteId = null; pl(s2, P.profileId).rocket.enteredThisTurn = [];
+  r = fulfil(s2);
+  assert(done(r) && pl(r.state, P.profileId).isotopes === 3, `home: ${r.error}`);
+  // Ability: a solar flare leaves this player alone.
+  const g = exodusSetup('Radiation Shield Prototype');
+  const Q = grant(g.st);
+  assert(applyFlareToPlayer(g.st, Q, 6, []) === 0, 'immune to the CME');
+  // ...and a move into a radiation belt rolls nothing.
+  const belt = mapNodes().find((n) => hazardKind(n) === 'rad' && neighborSlugs(n).some((m) => !hazardKind(m)));
+  const from = neighborSlugs(belt).find((m) => !hazardKind(m));
+  Q.rocket.stack = [{ id: 'gw-_amat_catalyzed_fission_fusion', kind: 'patent', face: 'primary' }];
+  Q.rocket.activeThrusterId = 'gw-_amat_catalyzed_fission_fusion';
+  Q.rocket.siteId = from; Q.rocket.turnStartSiteId = from; Q.rocket.tank = 9; Q.rocket.tankGrade = 'isotope'; Q.rocket.tankSpectral = 'S';
+  const mv = op(g.st, 'MOVE', Q.profileId, { segments: [{ from, to: belt, burns: 0, turn: 1 }] });
+  assert(mv.ok && /Radiation shield: 1 radiation belt/.test(mv.log) && !/rad d6/.test(mv.log), `belt move: ${mv.error} ${mv.log}`);
+  return `Mercury, two outer belts, LEO; immune (${mv.log})`;
+});
+check('Exodus: Deep Freeze fulfils at Arrokoth with 3 isotopes there; then may send the queue top to the bottom', () => {
+  const { st, P, fulfil, done, grant } = exodusSetup('Deep Freeze');
+  P.rocket.siteId = 'ultima-thule';
+  let r = fulfil(st);
+  const R = r.ok && pl(r.state, P.profileId);
+  const can = R && R.rocket.stack.find((x) => x.kind === 'fuel' && x.grade === 'isotope');
+  assert(done(r) && can && can.amount === 3 && R.isotopes === 0, `Arrokoth: ${r.error} ${JSON.stringify(can)}`);
+  // Ability.
+  const g = exodusSetup('Deep Freeze');
+  g.P.bernals = [{ cardId: 'ber_l4_antimatter_factory', siteId: 'lag-qofv5', anchored: true, stack: [], route: [], wiring: {} }];
+  g.P.leo = [];
+  grant(g.st);
+  const q = g.st.colonistQueue;
+  assert(q && q.length > 2, 'a colonist queue');
+  const top = q[0], second = q[1];
+  const e = op(g.st, 'EXOMIGRATE', g.P.profileId, { to: 'leo', discardTop: true });
+  assert(e.ok && /Deep Freeze/.test(e.log), `exomigrate: ${e.error}`);
+  const E = e.state.colonistQueue;
+  const gotId = (x) => (typeof x === 'string' ? x : x && x.id);
+  assert(gotId(E[E.length - 1]) === gotId(top) && pl(e.state, g.P.profileId).leo.some((x) => x.id === gotId(second)), 'top to the bottom, the second boards');
+  return e.log;
 });
 
 check('M4 + M2 promotion counts (4C7e): a Bernal needs 3 different augmentations aboard and a Dirtside anchor', () => {

@@ -6649,6 +6649,17 @@ function openExomigrateModal(me) {
     modal.appendChild(row);
   }
 
+  // Deep Freeze (Exodus contract): may discard the queue's top card first.
+  let freezeCb = null;
+  if (myContractAbility('exomigrateDiscard')) {
+    const row = document.createElement('label');
+    row.style.cssText = 'display:flex;gap:6px;align-items:center;margin:0 0 10px';
+    freezeCb = document.createElement('input');
+    freezeCb.type = 'checkbox'; freezeCb.className = 'exo-deep-freeze';
+    row.append(freezeCb, document.createTextNode('❄ Deep Freeze: discard the top card first'));
+    modal.appendChild(row);
+  }
+
   const btns = document.createElement('div');
   btns.className = 'mp-trade-btns';
   const go = document.createElement('button');
@@ -6664,6 +6675,7 @@ function openExomigrateModal(me) {
     if (delegateRow && !delegateRow._cb.checked) op.placeDelegate = false;
     if (specialtySel && specialtySel.value) op.specialty = specialtySel.value;
     if (queueSel) op.queue = queueSel.value;
+    if (freezeCb && freezeCb.checked) op.discardTop = true;
     const ok = await submitOnlineOp(op);
     if (ok) {
       const after = mySnapshotPlayer();
@@ -15961,7 +15973,18 @@ function activeThrusterBonusPivots() {
   let n = stats ? (Number(stats.bonusPivots) || 0) : 0;
   const pushed = !!(stats && Array.isArray(stats.modifiers) && stats.modifiers.some((m) => m.from === 'Powersat'));
   if (pushed) n += myCollimatorBonusPivot();
+  // TW Stress Test (Exodus): "Your GW/TW thruster receives a Bonus Pivot."
+  if (stats && stats.isGw && myContractAbility('twBonusPivot')) n += 1;
   return n;
+}
+// Does one of my fulfilled contracts carry this ability (M4)?
+function myContractAbility(key) {
+  if (!_online || !_onlineSnapshot || !_onlineSnapshot.m4) return false;
+  const me = (_onlineSnapshot.players || []).find((p) => p.profileId === mySeatId());
+  return !!(me && (me.fulfilledContracts || []).some((f) => {
+    const face = contractFace(f.id, f.side);
+    return !!(face && face.abilities && face.abilities[key]);
+  }));
 }
 // C3b Synodic Comets: "Exceptionally, a Rocket with an activated TW thruster
 // can enter or exit a Synodic Comet during any season." True only when the
