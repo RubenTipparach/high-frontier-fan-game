@@ -12754,6 +12754,90 @@ function exodusSetup(name) {
   const grant = (s) => { const Q = pl(s, P.profileId); Q.fulfilledContracts = [{ id: c.id, side: 'exodus', round: 1 }]; return Q; };
   return { st, P, c, fulfil, done, grant };
 }
+// The six Exodus BACK faces (played as side 'exodusBack'; which face is
+// auctioned is open question R9, so they are not dealt yet).
+function exodusBack(name) {
+  const st = startedGame({ m0: true, m1: true, m2: true, m4: true, seats: 2, maxRounds: 7 });
+  const P = st.players[st.activeIndex];
+  const c = CONTRACTS.find((x) => x.exodus && x.faces.secondary.name === name);
+  P.contractMeta = { [c.id]: { side: 'exodusBack', paid: 0, boosted: true, default: false, progress: { sites: [], done: 0 } } };
+  P.rocket.stack.push({ id: c.id, kind: 'contract', face: 'secondary' });
+  P.isostandards = ['S']; P.isotopes = 0;
+  const fulfil = (s2 = st, extra = {}) => op(s2, 'FULFILL_CONTRACT', P.profileId, { cardId: c.id, ...extra });
+  const done = (r) => r.ok && pl(r.state, P.profileId).fulfilledContracts.some((f) => f.id === c.id);
+  const grant = (s2) => { const Q = pl(s2, P.profileId); Q.fulfilledContracts = [{ id: c.id, side: 'exodusBack', round: 1 }]; return Q; };
+  return { st, P, c, fulfil, done, grant };
+}
+check('Exodus backs: every back face reads as engine abilities and rewards', () => {
+  for (const x of CONTRACTS.filter((y) => y.exodus)) {
+    const f = x.faces.secondary;
+    assert(!f.steps.some((st2) => st2.verb === 'manual'), `${f.name}: manual step`);
+    assert(Object.keys(f.abilities).length === 1, `${f.name}: ${JSON.stringify(f.abilities)}`);
+  }
+  return CONTRACTS.filter((y) => y.exodus).map((y) => y.faces.secondary.name).join(', ');
+});
+check('Exodus backs: Isotope Fueling Station, Rival Isobank, Decanting Network', () => {
+  // Isotope Fueling Station: your Factory of your isostandard in the Neptune zone.
+  let t = exodusBack('Isotope Fueling Station');
+  const nep = Object.values(SITES_BY_ID_X).find((x) => x.solarZone === 'Neptune' && String(x.spectralType || '').toUpperCase() === 'C');
+  const slug = allSiteSlugs().find((sl) => (siteBySlug(sl) || {}).id === nep.id) || nep.id;
+  t.st.factories = { [slug]: { ownerId: t.P.profileId } };
+  t.P.rocket.siteId = slug;
+  assert(!t.fulfil().ok, 'isostandard S does not match a C site');
+  t.P.isostandards = ['C'];
+  let r = t.fulfil();
+  assert(t.done(r), `Isotope Fueling Station at ${slug}: ${r.error}`);
+  // Its ability: a factory refuel adds an isotope can.
+  const s2 = r.state; const Q = pl(s2, t.P.profileId);
+  Q.opsRemaining = 1; Q.refueledSites = []; Q.rocket.stack = Q.rocket.stack.filter((x) => x.kind !== 'fuel'); Q.rocket.tank = 0; s2.turnActions = [];
+  r = op(s2, 'SITE_REFUEL', Q.profileId, { siteId: slug, mode: 'factory' });
+  assert(r.ok && /Isotope Fueling Station/.test(r.log) && pl(r.state, Q.profileId).rocket.stack.some((x) => x.kind === 'fuel' && x.grade === 'isotope'), `factory refuel: ${r.error} ${r.log}`);
+  // Rival Isobank: 1 isotope at your BEO Bernal for 6 aqua, once a turn.
+  t = exodusBack('Rival Isobank');
+  t.grant(t.st);
+  t.P.bernals = [{ cardId: 'ber_l4_antimatter_factory', siteId: 'lag-qofv5', anchored: true, route: [], wiring: {},
+    stack: [{ id: 'fuel_iso', kind: 'fuel', grade: 'isotope', spectral: 'S', amount: 2 }] }];
+  const a = t.P.aqua | 0;
+  r = op(t.st, 'ISOTOPE_EXCHANGE', t.P.profileId, { action: 'rival' });
+  assert(r.ok && pl(r.state, t.P.profileId).aqua === a + 6, `rival: ${r.error}`);
+  r = op(r.state, 'ISOTOPE_EXCHANGE', t.P.profileId, { action: 'rival' });
+  assert(!r.ok && r.error === 'once_per_turn', `twice: ${r.error}`);
+  // Decanting Network: 1 extra Colonist.
+  t = exodusBack('Decanting Network');
+  t.P.rocket.siteId = '2002tx';
+  r = t.fulfil();
+  assert(t.done(r), `Decanting at 2002 TX: ${r.error}`);
+  return 'Fueling Station + factory isotope; Rival Isobank 6 aqua once a turn; Decanting fulfilled';
+});
+check('Exodus backs: TW Evaluation Committee delegates; Life Support Test Protocol discard; Warden promotes the Freighter', () => {
+  let t = exodusBack('TW Evaluation Committee');
+  t.P.rocket.siteId = 'larissa';
+  let r = t.fulfil(t.st, { ideology: 'freedom' });
+  const asm = r.ok && r.state.assembly;
+  assert(t.done(r) && /2 delegates join/.test(r.log), `TW Eval: ${r.error} ${r.log}`);
+  // Life Support Test Protocol: Quaoar with a Promoted Bernal (M2).
+  t = exodusBack('Life Support Test Protocol');
+  const q = allSiteSlugs().find((sl) => /quaoar/.test(sl));
+  t.P.rocket.siteId = q;
+  assert(!t.fulfil().ok, 'no Bernal at Quaoar');
+  t.P.rocket.stack.push({ id: 'col_cobots', kind: 'colonist', face: 'primary' });
+  // Warden Proving Ground: promote the Freighter.
+  t = exodusBack('Warden Proving Ground');
+  t.P.freighter = { cardId: 'fre_z_pinch_d_t_6li_fusion', siteId: null, face: 'primary', stack: [] };
+  t.P.rocket.siteId = 'teharoniawako';
+  r = t.fulfil(t.st, { promoteFreighter: true });
+  assert(t.done(r) && pl(r.state, t.P.profileId).freighter.face === 'secondary' && pl(r.state, t.P.profileId).isotopes === 3, `Warden: ${r.error} ${r.log}`);
+  return 'delegates placed; Quaoar needs a Promoted Bernal; Freighter promoted';
+});
+check('Isovault: storing with no amount stores everything carried', () => {
+  const { st, me, SITE } = starshotGame();
+  me.rocket.tank = 4; me.rocket.tankGrade = 'isotope'; me.rocket.tankSpectral = 'S';
+  const before = me.isovault | 0;
+  const r = op(st, 'ISOTOPE_EXCHANGE', me.profileId, { action: 'vault' });
+  assert(r.ok && pl(r.state, me.profileId).isovault === before + 4, `vault: ${r.error}`);
+  return `isovault ${before} -> ${before + 4} at ${SITE}`;
+});
+
 check('Exodus: every front face reads as engine abilities and isotope rewards', () => {
   const ex = CONTRACTS.filter((x) => x.exodus);
   assert(ex.length === 6, `six Exodus contracts (${ex.length})`);

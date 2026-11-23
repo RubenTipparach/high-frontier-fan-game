@@ -5334,7 +5334,7 @@ export const CARD_DATA = {
         "Fulfilled Ability": "After you do a factory refuel op, gain 1 Isotope at that Factory.",
         "When Fulfilling": "Gain 3 Isotopes at this Site.",
         "Transcription Notes": "Duplicate scan (B_gold_12.png) matches; no differences found.",
-        "Destination Steps": "manual:isostandard Factory (Stage 3)"
+        "Destination Steps": "site ownfactory zone=Neptune isostandard"
       }
     },
     {
@@ -5371,7 +5371,7 @@ export const CARD_DATA = {
         "Fulfilled Ability": "You may exchange 1 Isotope per Turn at your Anchored non-Home Bernal for 6 Aquas.",
         "When Fulfilling": "Gain 3 Isotopes at this Site.",
         "Transcription Notes": "Duplicate scan (B_gold_13.png) matches; no differences found.",
-        "Destination Steps": "manual:Pluto or Charon Factory (Stage 3)"
+        "Destination Steps": "site factory body=Pluto"
       }
     },
     {
@@ -5445,7 +5445,7 @@ export const CARD_DATA = {
         "Fulfilled Ability": "Implant is a free action.",
         "When Fulfilling": "Gain 3 Isotopes at this Site; you may Discard a Colonist (this is not a Felony).",
         "Transcription Notes": "Duplicate scan (B_gold_15.png) matches; no differences found.",
-        "Destination Steps": "manual:Quaoar with promoted Bernal (M2)"
+        "Destination Steps": "colony body=Quaoar promoted"
       }
     },
     {

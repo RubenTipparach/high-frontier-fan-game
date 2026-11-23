@@ -1705,6 +1705,8 @@ function colonistAllowance(player) {
     if (bn && (bn.anchored || unanchoredToo)) n += (bn.promoted || bn.face === 'secondary') ? 2 : 1;
   }
   if (n > 0 && hasFutureEffect(player, 'extraColonist')) n += 1;
+  // Decanting Network (Exodus back): "Allowed 1 extra Colonist."
+  if (n > 0 && (player.fulfilledContracts || []).some((f) => ((contractFace(f.id, f.side) || {}).abilities || {}).extraColonist)) n += 1;
   return n;
 }
 
@@ -8042,7 +8044,9 @@ function applyIsotopeExchange(state, op, player) {
     player.isotopes += n;
     return { ok: true, state, log: `${player.name} brought ${n} isotope${n === 1 ? '' : 's'} from the rocket's tank to their Bank (${player.isotopes} at the Bank, worth ${player.isotopes * isoAqua(state)} aqua).` };
   }
-  if (want == null) return fail('bad_amount');
+  // Storing in your isovault takes all you carry unless an amount is named;
+  // the Rival Isobank exchange is always 1.
+  if (want == null && action !== 'vault' && action !== 'rival') return fail('bad_amount');
   if (action === 'sell') {
     if (player.isotopes < want) return fail('no_isotope');
     player.isotopes -= want;
@@ -8074,6 +8078,24 @@ function applyIsotopeExchange(state, op, player) {
     if (can) can.amount = (Number(can.amount) || 0) + want;
     else arr.push({ id: nextFuelCardId(state), kind: 'fuel', grade: 'isotope', spectral, amount: want, face: 'primary' });
     return { ok: true, state, log: `${player.name} took ${want} gold bead${want === 1 ? '' : 's'} out of the Bank as spectral-${spectral} isotope fuel in ${stackLabel(holderId)} (${player.isotopes} left at the Bank).` };
+  }
+  if (action === 'rival') {
+    // Rival Isobank (Exodus back): 1 Isotope per Turn at your Anchored
+    // non-Home Bernal for 6 Aquas. The isotope comes from a can in that
+    // Bernal's stack, or from the rocket's isotope tank docked there.
+    if (!contractAbilityCount(state, player, 'rivalIsobank')) return fail('no_rival_isobank');
+    const stamp = `${state.round}:${state.turn}`;
+    if (player.rivalIsobankTurn === stamp) return fail('once_per_turn');
+    const bn = (player.bernals || []).find((b) => b && b.anchored && !isHomeBernal(b)
+      && ((b.stack || []).some((x) => isFuelCardSlot(x) && x.grade === 'isotope' && (Number(x.amount) || 0) >= 1)
+        || (player.rocket && player.rocket.siteId === b.siteId && tankGradeOf(player.rocket) === 'isotope' && (Number(player.rocket.tank) || 0) >= 1)));
+    if (!bn) return fail('no_isotope_at_beo_bernal');
+    const can = (bn.stack || []).find((x) => isFuelCardSlot(x) && x.grade === 'isotope' && (Number(x.amount) || 0) >= 1);
+    if (can) { can.amount = (Number(can.amount) || 0) - 1; if (can.amount <= 0) bn.stack.splice(bn.stack.indexOf(can), 1); }
+    else { player.rocket.tank = round6((Number(player.rocket.tank) || 0) - 1); recallIfEmpty(player); }
+    player.aqua = (player.aqua | 0) + 6;
+    player.rivalIsobankTurn = stamp;
+    return { ok: true, state, log: `${player.name} exchanged 1 isotope at the ${cardNameOf(bn.cardId)} for 6 aqua (Rival Isobank).` };
   }
   if (action === 'vault') {
     // 4D2f: isotopes carried TO the isobank go into your isovault for good.
@@ -9538,7 +9560,7 @@ function placeExomigrant(state, player, cardId, card, dest, baseLog, opts) {
   if (opts.placeDelegate === false) return { ok: true, log: `${log}.` };
   if (state.m0 && card && card.ideology) {
     const ideo = ideologyForColorName(card.ideology);
-    if (ideo && cubesInPlay(state, player.profileId) < FACTORY_CUBES) {
+    if (ideo && cubesInPlay(state, player.profileId) < delegateCap(state, player)) {
       const asm = assemblyOf(state);
       setPlaceCount(asm, ideo, player.profileId, placeCount(asm, ideo, player.profileId) + 1);
       const ideoName = (IDEOLOGY_BY_KEY[ideo] || {}).name || ideo;
@@ -11098,7 +11120,9 @@ function applyProspect(state, op, player) {
   // rocket, or the freighter / bernal / outpost the prospect fires from).
   const colocatedPowers = unit.stack.map(powerOfSlot);
   const isruMod = sumColocatedIsruMod(colocatedPowers, { isAerostat: isAerostatSite(site) })
-    - contractIsruBonusAt(state, player, site);   // Closest Planet: -1 ISRU at Mercury
+    - contractIsruBonusAt(state, player, site)   // Closest Planet: -1 ISRU at Mercury
+    // Warden Proving Ground (Exodus back): your robonauts are -1 ISRU.
+    - (((PATENTS_BY_ID[provSlot && provSlot.id] || {}).type === 'robonaut') ? contractAbilityCount(state, player, 'robonautIsru') : 0);
   const effIsru = Math.max(0, prospectorIsru(provSlot) + isruMod);   // isruMod <= 0 (easier), floored at 0
   // V5 Hermes Fall: prospecting the binary auto-succeeds with a robonaut of ANY
   // ISRU - but SOLO ONLY (user 2026-08-07). Both halves are hydration 0, so the
@@ -11924,8 +11948,14 @@ function setPlaceCount(asm, place, profileId, count) {
 // limit (silently a no-op once the supply is exhausted, same as the
 // exomigration delegate below). Shared by any M0 rule that grants a
 // delegate outside the Fundraise operation - Colony Build's G3c delegate.
+// TW Evaluation Committee (Exodus back): "You may use Claim disks as
+// delegates" - each unused claim disc is one more delegate.
+function delegateCap(state, player) {
+  if (!contractAbilityCount(state, player, 'claimDelegates')) return FACTORY_CUBES;
+  return FACTORY_CUBES + Math.max(0, CLAIM_DISCS - ownedClaimCount(state.discs, player.profileId));
+}
 function grantDelegate(state, player, ideo) {
-  if (!ideo || cubesInPlay(state, player.profileId) >= FACTORY_CUBES) return false;
+  if (!ideo || cubesInPlay(state, player.profileId) >= delegateCap(state, player)) return false;
   const asm = assemblyOf(state);
   setPlaceCount(asm, ideo, player.profileId, placeCount(asm, ideo, player.profileId) + 1);
   return true;
@@ -12080,7 +12110,7 @@ function applyFundraise(state, op, player) {
   // (op.freeDelegate = the place to pull it from), the same escape hatch the
   // factory build offers. Without it a full pool is a hard cap. (User 2026-07-07.)
   let freedPlace = null;
-  if (place && cubesInPlay(state, pid) >= FACTORY_CUBES) {
+  if (place && cubesInPlay(state, pid) >= delegateCap(state, player)) {
     const free = op.freeDelegate ? String(op.freeDelegate) : null;
     if (free && ASSEMBLY_PLACES.includes(free) && placeCount(asm, free, pid) > 0) {
       setPlaceCount(asm, free, pid, placeCount(asm, free, pid) - 1);
@@ -12745,9 +12775,20 @@ function applySiteRefuel(state, op, player) {
   // Triangle augmentation, side 2: "Site refuel yields +2 Aqua" (4C3).
   const tri = augmentSideAt(player, 'triangle', 2, siteId) ? 2 : 0;
   if (tri) player.aqua = (player.aqua | 0) + tri;
+  // Isotope Fueling Station (Exodus back): a factory refuel gains 1 Isotope
+  // at that Factory (a can in the refuelling stack).
+  let ifs = '';
+  if (op.mode === 'factory' && contractAbilityCount(state, player, 'factoryRefuelIsotope')) {
+    const arr = bernalDest ? (bernalDest.stack = bernalDest.stack || []) : player.rocket.stack;
+    const spectral = String(site.spectralType || 'C').toUpperCase();
+    const can = arr.find((x) => isFuelCardSlot(x) && x.grade === 'isotope' && (x.spectral || 'C') === spectral);
+    if (can) can.amount = (Number(can.amount) || 0) + 1;
+    else arr.push({ id: nextFuelCardId(state), kind: 'fuel', grade: 'isotope', spectral, amount: 1, face: 'primary' });
+    ifs = ', +1 isotope (Isotope Fueling Station)';
+  }
   return {
     ok: true, state,
-    log: `${player.name}: ${label} at ${site.name} (+${round6(gain)} water${destNote}; tank ${round6(destTank)})${tri ? `, +${tri} aqua (Triangle)` : ''}.`,
+    log: `${player.name}: ${label} at ${site.name} (+${round6(gain)} water${destNote}; tank ${round6(destTank)})${tri ? `, +${tri} aqua (Triangle)` : ''}${ifs}.`,
   };
 }
 
@@ -17067,6 +17108,8 @@ function contractCtx(state, player = null, where = {}) {
     elevator: (id) => isSpaceElevatorSite(id),
     synodic: (id) => SYNODIC_SITE_IDS.includes(id),
     nodeZone: (n) => zoneOfSlug(n),
+    isostandardSite: (site) => !!(player && (player.isostandards || []).includes(String((site && site.spectralType) || '').toUpperCase())),
+    anyFactory: (n) => !!state.factories[n],
     ownBeoBernal: (n) => !!(player && (player.bernals || []).some((bn) => bn && bn.anchored && !isHomeBernal(bn) && String(bn.siteId) === String(n))),
     // Contract Colonies (owner 2026-11-23): without Module 2 a colony dome on a
     // site; with Module 2 only an anchored Bernal (BEO = not a Home Bernal),
@@ -17107,13 +17150,13 @@ function contractColonies(state, player) {
       for (const bn of (q.bernals || [])) {
         if (!bn || !bn.anchored || bn.siteId == null) continue;
         out.push({ place: String(bn.siteId), own: !!player && q.profileId === player.profileId,
-          beo: !isHomeBernal(bn), sites: bernalDirtsides(state, bn, q) });
+          beo: !isHomeBernal(bn), promoted: !!(bn.promoted || bn.face === 'secondary'), sites: bernalDirtsides(state, bn, q) });
       }
     }
   } else {
     for (const [slug, col] of Object.entries(state.colonies || {})) {
       if (!col) continue;
-      out.push({ place: String(slug), own: !!player && col.ownerId === player.profileId, beo: true, sites: [String(slug)] });
+      out.push({ place: String(slug), own: !!player && col.ownerId === player.profileId, beo: true, promoted: true, sites: [String(slug)] });
     }
   }
   return out;
@@ -17377,6 +17420,12 @@ function applyFulfillContract(state, op, player) {
   } else if (fx.isoBank || fx.isoSite) {
     when += exodusIsotopes(state, player, fx, loc, destSlug);
     if (fx.bernalSwap && op.swapBernals) when += swapBernalCards(state, player);
+    if (fx.delegates2) when += planetaryDelegates(state, player, op);
+    if (fx.discardColonist && op.discardColonistId) when += discardColonistFree(state, player, String(op.discardColonistId));
+    if (fx.wardenFreighter && op.promoteFreighter && player.freighter && !(player.freighter.promoted || player.freighter.face === 'secondary')) {
+      player.freighter.face = 'secondary'; player.freighter.promoted = true;
+      when += ' The Freighter is Promoted.';
+    }
   } else if (face.whenFulfilling) {
     when += ` When fulfilling (not yet automated): ${face.whenFulfilling}`;
   }
@@ -17419,6 +17468,27 @@ function exodusAeroIsotope(state, player, rocket, dest) {
   if (can) can.amount = (Number(can.amount) || 0) + 1;
   else rocket.stack.push({ id: nextFuelCardId(state), kind: 'fuel', grade: 'isotope', spectral, amount: 1, face: 'primary' });
   return ' Atmospheric Iso-Refinery: the stack gains 1 isotope on the aerobrake.';
+}
+// TW Evaluation Committee: "place 2 delegates on any 1 ideology" (M0).
+function planetaryDelegates(state, player, op) {
+  const ideo = String(op.ideology || '');
+  if (!state.m0 || !IDEOLOGY_BY_KEY[ideo]) return '';
+  let placed = 0;
+  for (let i = 0; i < 2; i++) if (grantDelegate(state, player, ideo)) placed++;
+  if (!placed) return '';
+  const moved = quietVoteTally(state, player);
+  return ` ${placed} delegate${placed === 1 ? '' : 's'} join${placed === 1 ? 's' : ''} ${IDEOLOGY_BY_KEY[ideo].name}${moved ? `; the active-law star moves to ${moved}` : ''}.`;
+}
+// Life Support Test Protocol: "you may Discard a Colonist (this is not a Felony)".
+function discardColonistFree(state, player, id) {
+  for (const st of playerStacks(player)) {
+    const i = st.slots.findIndex((sl) => sl && String(sl.id) === id && isColonistSlot(sl));
+    if (i < 0) continue;
+    st.slots.splice(i, 1);
+    retireColonistId(state, player, id);
+    return ` ${cardNameOf(id)} is discarded.`;
+  }
+  return '';
 }
 // Life Support Reconfig Team (When Fulfilling, optional): swap your two Bernal
 // cards, each moving to the other Bernal stack.
@@ -17760,7 +17830,9 @@ function applyImplant(state, op, player) {
   // Dirtside to it).
   const goo = player.freeImplantSite != null && (String(bn.siteId) === String(player.freeImplantSite)
     || bernalDirtsides(state, bn, player).includes(String(player.freeImplantSite)));
-  const free = (industrialist && !player.implantFreeUsed) || goo;
+  // Life Support Test Protocol (Exodus back): Implant is a free action.
+  const lstp = contractAbilityCount(state, player, 'freeImplant') > 0;
+  const free = (industrialist && !player.implantFreeUsed) || goo || lstp;
   if (!free && player.opsRemaining <= 0) return fail('no_ops_left');
   player.augments = player.augments || {};
   const removes = Array.isArray(op.remove) ? op.remove.map(String) : [];
@@ -17801,6 +17873,7 @@ function applyImplant(state, op, player) {
     }
   }
   if (goo) delete player.freeImplantSite;
+  else if (lstp) { /* always free */ }
   else if (free) player.implantFreeUsed = true;
   else player.opsRemaining -= 1;
   syncCrewAugmentMarks(state);

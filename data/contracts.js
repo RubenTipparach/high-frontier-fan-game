@@ -146,6 +146,14 @@ export function parseFulfilledAbility(text) {
   if (/^Your Bernals add to Colonist limit even when unanchored/i.test(t)) ab.bernalLimitUnanchored = true;
   if (/^Your Stacks are immune to Belt\/CME Rolls/i.test(t)) ab.beltCmeImmune = true;
   if (/^Before exomigrating, you may Discard the top card from the queue/i.test(t)) ab.exomigrateDiscard = true;
+  // Exodus back faces.
+  if (/^After you do a factory refuel op, gain 1 Isotope at that Factory/i.test(t)) ab.factoryRefuelIsotope = true;
+  if (/^You may exchange 1 Isotope per Turn at your Anchored non-Home Bernal for 6 Aquas/i.test(t)) ab.rivalIsobank = true;
+  if (/^You may use Claim disks as delegates/i.test(t)) ab.claimDelegates = true;
+  if (/^Implant is a free action/i.test(t)) ab.freeImplant = true;
+  const rob = t.match(/^Your robonauts are -(\d+) ISRU/i);
+  if (rob) ab.robonautIsru = Number(rob[1]);
+  if (/^Allowed (\d+|1) extra Colonist/i.test(t)) ab.extraColonist = true;
   if (/^Acetylene rocketplane liftoff is possible from all your Factories/i.test(t)) ab.acetyleneFactories = true;
   if (/factory-assist landings\/liftoffs at Elevator Sites treat lander burns as normal Burn Spaces/i.test(t)) ab.elevatorLanderBurns = true;
   return ab;
@@ -169,6 +177,12 @@ export function parseWhenFulfilling(text) {
   const is = t.match(/^Gain (\d+) Isotopes? at this Site/i);
   if (is) fx.isoSite = Number(is[1]);
   if (/swap your Bernal cards/i.test(t)) fx.bernalSwap = true;
+  //   delegates2 : place 2 delegates on any 1 ideology (TW Evaluation Committee)
+  //   discardColonist : you may Discard a Colonist, not a Felony (Life Support Test Protocol)
+  //   wardenFreighter : Promote your freighter or gain a Mobile Factory (Warden Proving Ground)
+  if (/place 2 delegates on any 1 ideology/i.test(t)) fx.delegates2 = true;
+  if (/you may Discard a Colonist/i.test(t)) fx.discardColonist = true;
+  if (/Promote your freighter/i.test(t)) fx.wardenFreighter = true;
   return fx;
 }
 
@@ -226,7 +240,9 @@ export const CONTRACTS = [...build('Contracts', false), ...build('Exodus Contrac
 export const CONTRACTS_BY_ID = Object.fromEntries(CONTRACTS.map((c) => [c.id, c]));
 export const isContractId = (id) => !!CONTRACTS_BY_ID[id];
 // The face a contract is on: 'blue' / 'exodus' -> primary, 'gold' -> secondary.
-export const sideFace = (side) => (side === 'gold' ? 'secondary' : 'primary');
+// 'exodusBack' is an Exodus contract played on its back (rear) face; which face
+// an Exodus contract is auctioned on is open question R9.
+export const sideFace = (side) => (side === 'gold' || side === 'exodusBack' ? 'secondary' : 'primary');
 export function contractFace(cardId, side = 'blue') {
   const c = CONTRACTS_BY_ID[cardId];
   return c ? c.faces[sideFace(side)] : null;
@@ -299,6 +315,9 @@ export function siteMatches(site, filters, ctx, usedSites = [], slug = null) {
   if (f.glory === 'unclaimed' && !ctx.gloryUnclaimed(site.solarZone)) return false;
   if (f.different && usedSites.includes(id)) return false;
   if (f.augmented && !(ctx.augmentedAt && ctx.augmentedAt(id, !!f.own))) return false;
+  // A site of your isostandard spectral type; any player's Factory there.
+  if (f.isostandard && !(ctx.isostandardSite && ctx.isostandardSite(site))) return false;
+  if (f.factory && !(ctx.anyFactory && ctx.anyFactory(id))) return false;
   return true;
 }
 
@@ -445,6 +464,7 @@ export function stepSatisfied(step, where, progress, ctx, prev = null) {
       const ok = list.some((c) => {
         if (f.own && !c.own) return false;
         if (f.beo && !c.beo) return false;
+        if (f.promoted && !c.promoted) return false;
         const z = ctx.nodeZone(here);
         if (f.zone && z !== f.zone) return false;
         if (f.notzone && String(f.notzone).split('|').includes(z)) return false;
