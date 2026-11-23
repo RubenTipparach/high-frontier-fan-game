@@ -7190,31 +7190,42 @@ function renderColonists() {
     ?? (queueIds ? queueIds.length : 0))) || queueCards.length;
   const decksHost = document.createElement('div');
   decksHost.className = 'cart-decks';
-  if (queueCards.length) {
+  const addQueue = (type, label, cards, remaining) => {
+    if (!cards.length && !remaining) return;
     const section = document.createElement('section');
     section.className = 'cart-deck';
-    section.dataset.type = 'earthborne';
+    section.dataset.type = type;
     const title = document.createElement('h4');
     title.className = 'cart-deck-title';
-    title.innerHTML = `Earthborne <em>(${queueRemaining} in the queue)</em>`;
+    title.innerHTML = `${label} <em>(${remaining} in the queue)</em>`;
     section.appendChild(title);
     const body = document.createElement('div');
     body.className = 'cart-deck-body';
     const deckArt = document.createElement('div');
     deckArt.className = 'cart-deck-art';
-    deckArt.appendChild(renderDeckThicknessSvg(Math.max(1, queueRemaining)));
+    deckArt.appendChild(renderDeckThicknessSvg(Math.max(1, remaining)));
     body.appendChild(deckArt);
-    const cardSlot = document.createElement('div');
-    cardSlot.className = 'cart-deck-topcard';
-    const top = queueCards[0];
-    const ce = renderCard(top, { face: 'primary' });
-    ce.classList.add('cart-deck-topcard-click', 'is-colonist-tile');
-    // Tap the top card to inspect it + flip through the rest of the queue.
-    makeCardViewable(ce, top, 'patent', 'primary', { siblings: queueCards, index: 0 });
-    cardSlot.appendChild(ce);
-    body.appendChild(cardSlot);
+    if (cards.length) {
+      const cardSlot = document.createElement('div');
+      cardSlot.className = 'cart-deck-topcard';
+      const top = cards[0];
+      const ce = renderCard(top, { face: 'primary' });
+      ce.classList.add('cart-deck-topcard-click', 'is-colonist-tile');
+      // Tap the top card to inspect it + flip through the rest of the queue.
+      makeCardViewable(ce, top, 'patent', 'primary', { siblings: cards, index: 0 });
+      cardSlot.appendChild(ce);
+      body.appendChild(cardSlot);
+    }
     section.appendChild(body);
     decksHost.appendChild(section);
+  };
+  addQueue('earthborne', 'Earthborne', queueCards, queueRemaining);
+  // M4 + M2 (4C2): the spaceborn queue sits beside the earthborn one.
+  const snap = _onlineSnapshot;
+  if (snap && snap.m4 && snap.m2 && Array.isArray(snap.spacebornQueue)) {
+    const spaceCards = snap.spacebornQueue.map((id) => cardById(id)).filter(Boolean);
+    const spaceRemaining = Number(snap.spacebornQueueCount ?? snap.spacebornQueue.length) || 0;
+    addQueue('spaceborne', 'Spaceborne', spaceCards, spaceRemaining);
   }
   host.appendChild(decksHost);
   // Missions (Futures) sit at the BOTTOM of the pane, below all the colonist
