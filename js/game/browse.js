@@ -15981,6 +15981,12 @@ function activeThrusterBonusPivots() {
   if (stats && stats.isGw && myContractAbility('twBonusPivot')) n += 1;
   return n;
 }
+// Has a completed Future given me this standing effect? (LIC SCAN: 1 isotope of
+// a refuel goes to the Bank.)
+function myFutureEffect(key) {
+  const me = _online && _onlineSnapshot && (_onlineSnapshot.players || []).find((p) => p.profileId === mySeatId());
+  return !!(me && Array.isArray(me.futureEffects) && me.futureEffects.includes(key));
+}
 // Does one of my fulfilled contracts carry this ability (M4)?
 function myContractAbility(key) {
   if (!_online || !_onlineSnapshot || !_onlineSnapshot.m4) return false;
@@ -16043,7 +16049,10 @@ function myFreighterOriginThrustBonus() {
   return bonus;
 }
 function myFreighterThrust() {
-  return freighterNetThrust(playerHasPowersat(mySnapshotPlayer()) || !!playerPowersatBeamedBy(mySnapshotPlayer())) + myFreighterOriginThrustBonus();
+  const me = mySnapshotPlayer();
+  // WARDEN STARSHOT FUTURE (Shipbrain): Freighter / Mobile Factories +1 thrust.
+  const shipbrain = (me && Array.isArray(me.futureEffects) && me.futureEffects.includes('freighterThrustPlus1')) ? 1 : 0;
+  return freighterNetThrust(playerHasPowersat(me) || !!playerPowersatBeamedBy(me)) + myFreighterOriginThrustBonus() + shipbrain;
 }
 // Enter the manual route plotter. opts.unit selects the mover:
 //   'rocket'    (default) - budget = active thruster thrust, pivots = thruster
@@ -30472,7 +30481,7 @@ function showSitePopupFor(site) {
             if (!ok) return;
             const sid = toServerId(_onlineMaps, site.id);
             if (!sid) { _onlineToast('That site is not on the map.', 'error'); return; }
-            submitOnlineOp({ kind: 'SITE_REFUEL', siteId: sid, mode: 'isotope' });
+            submitOnlineOp({ kind: 'SITE_REFUEL', siteId: sid, mode: 'isotope', ...(myFutureEffect('isotopeToBank') ? { licToBank: true } : {}) });
             _renderer.clearSitePopup();
           },
         });
@@ -30503,7 +30512,7 @@ function showSitePopupFor(site) {
         onClick: () => {
           if (!ok) return;
           if (!serverSiteId) { _onlineToast('That site is not on the map.', 'error'); return; }
-          submitOnlineOp({ kind: 'SITE_REFUEL', siteId: serverSiteId, mode: 'isotope', outpost: letter });
+          submitOnlineOp({ kind: 'SITE_REFUEL', siteId: serverSiteId, mode: 'isotope', outpost: letter, ...(myFutureEffect('isotopeToBank') ? { licToBank: true } : {}) });
           _renderer.clearSitePopup();
         },
       });

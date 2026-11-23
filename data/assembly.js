@@ -227,11 +227,14 @@ export function delegatesRemaining(assembly, profileId) {
 // vote); starring it means no ideology law is in force, only the always-on
 // Centrist passive. Empty when no space has a delegate. The fundraiser moves the
 // active-law star onto the winner; on a tie they pick which tied space gets it.
-export function voteWinners(assembly) {
+export function voteWinners(assembly, weights = null) {
   const totals = {};
   let max = 0;
   for (const key of ASSEMBLY_PLACES) {
-    const n = delegatesInPlace(assembly, key);
+    // weights[profileId] = votes per delegate (TW COMMANDER FUTURE: 2).
+    const n = weights
+      ? Object.entries((assembly && assembly.delegates && assembly.delegates[key]) || {}).reduce((t, [pid, c]) => t + (c | 0) * (weights[pid] || 1), 0)
+      : delegatesInPlace(assembly, key);
     totals[key] = n;
     if (n > max) max = n;
   }

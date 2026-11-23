@@ -724,7 +724,7 @@ function isobankPlacardHtml(s, p, myTurn, tankIso) {
     <div class="m4p-vaults"><h5>ISOVAULTS</h5>${hexVaultsSvg(s)}
       <div class="m4c-controls m4p-spec">
         ${btn('iso-trade-sell', 'Deposit', myTurn && beads > 0)}
-        ${btn('iso-trade-buy', 'Withdraw', myTurn && market > 0 && (p.aqua | 0) >= 10 && isos.length > 0, isos.length ? '' : 'Needs an isostandard')}
+        ${btn('iso-trade-buy', 'Withdraw', myTurn && market > 0 && (p.aqua | 0) >= ((s.isotopeRate | 0) || 10) && isos.length > 0, isos.length ? '' : 'Needs an isostandard')}
         ${atIb && tankIso > 0 ? btn('iso-vault', `Store ${tankIso} in your isovault`, myTurn) : ''}
       </div></div>
     <div class="m4p-phases"><h5>EXODUS STARSHIP PHASES</h5>${phases}</div>
@@ -742,7 +742,8 @@ function pickIsoTrade(action) {
   if (!s || !p) return Promise.resolve(null);
   const aqua = p.aqua | 0, beads = Math.max(0, p.isotopes | 0), market = Math.max(0, s.earthMarket | 0);
   const sell = action === 'sell';
-  const max = sell ? beads : Math.min(market, Math.floor(aqua / 10));
+  const rate = (s.isotopeRate | 0) || 10;   // Isotope Cartel: 12
+  const max = sell ? beads : Math.min(market, Math.floor(aqua / rate));
   if (max < 1) return Promise.resolve(null);
   return new Promise((resolve) => {
     const ov = document.createElement('div');
@@ -766,11 +767,11 @@ function pickIsoTrade(action) {
     const set = (v) => {
       n = Math.max(1, Math.min(max, Math.round(Number(v)) || 1));
       input.value = String(n);
-      const dA = sell ? n * 10 : -n * 10;
+      const dA = sell ? n * rate : -n * rate;
       ledger.innerHTML = `<div><span>💧 Bank aqua</span><b>${aqua} -&gt; ${aqua + dA}</b><em class="${dA > 0 ? 'up' : 'down'}">${dA > 0 ? '+' : ''}${dA}</em></div>`
         + `<div><span>🟡 Gold beads</span><b>${beads} -&gt; ${beads + (sell ? -n : n)}</b></div>`
         + `<div><span>Speculator's isovault</span><b>${market} -&gt; ${market + (sell ? n : -n)}</b></div>`;
-      yes.textContent = sell ? `Deposit ${n} (+${n * 10} aqua)` : `Withdraw ${n} (−${n * 10} aqua)`;
+      yes.textContent = sell ? `Deposit ${n} (+${n * rate} aqua)` : `Withdraw ${n} (−${n * rate} aqua)`;
     };
     ov.querySelectorAll('.fa-step').forEach((b) => b.addEventListener('click', () => set(n + Number(b.dataset.step))));
     ov.querySelector('.fa-all').addEventListener('click', () => set(max));
@@ -795,7 +796,7 @@ function bankHtml(s, p, myTurn) {
   out.push(`<div class="m4b-grid">
     <div class="m4b-stat"><span>🏦 Bank</span><b>${esc(bankWhere(p))}</b></div>
     <div class="m4b-stat"><span>💧 Aqua</span><b>${p.aqua | 0}</b></div>
-    <div class="m4b-stat"><span>🟡 Gold beads</span><b>${beads}</b><small>${beads * 10} aqua</small></div>
+    <div class="m4b-stat"><span>🟡 Gold beads</span><b>${beads}</b><small>${beads * ((s.isotopeRate | 0) || 10)} aqua</small></div>
     <div class="m4b-stat"><span>Isostandard</span><b>${isos.length ? isos.map((x) => esc(x)).join(' ') : 'none'}</b></div>
     <div class="m4b-stat"><span>FINAO</span><b>${s.isotopeMonetized ? '×2' : '×1'}</b><small>${s.isotopeMonetized ? 'monetized' : 'not monetized'}</small></div>
   </div>

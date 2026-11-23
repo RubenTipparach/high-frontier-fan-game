@@ -42,7 +42,7 @@ import { NODE_LABELS } from '../data/map-labels.js';
 import { isAtmosphericSite } from '../data/site-categories.js';
 
 import { SIREN_BUSTED_SITES, splitDeckForSoloSpecies, SIREN_SOLO_SPECTRALS } from '../data/sirens.js';
-import { usesSoloAssembly, lawForIdeology, SOLO_LAWS, IDEOLOGY_ORDER, adjacentPlaces } from '../data/assembly.js';
+import { usesSoloAssembly, lawForIdeology, SOLO_LAWS, IDEOLOGY_ORDER, adjacentPlaces, voteWinners } from '../data/assembly.js';
 import { turnsToImpact, TURNS_PER_CYCLE, HERMES_ROUNDS, hermesSitesIndustrialized,
   hermesTargetSites, hermesProspectWaived, isHermesTargetSite, HERMES_MAX_PLAYERS, NEUJMIN_SITE } from '../data/hermes.js';
 import { truncateBottomHalf, isLegalAltruismRounds, altruismTarget, altruismVerdict,
@@ -2791,6 +2791,127 @@ check('deployed Bernal figures score their own token VP', () => {
 // Effects = may lobby without removing the delegate used; every Seniority Disk
 // migrates to Authority; 10 VP at the endgame. Drives the whole power through
 // the real ops.
+// ---- M4 spaceborn colonist Futures (Module 4) ----
+// Each Future is attempted through the real EPIC_HAZARD op (FINAO paid, so no
+// die): refused before its requirement holds, completed after, and its effect
+// checked through the op or rule it changes.
+const plOf = (st, id) => st.players.find((p) => p.profileId === id);
+function sbFuture(cardId, place = null) {
+  const st = startedGame({ m0: true, m1: true, m2: true, m4: true, seats: 2, maxRounds: 7 });
+  st.activeIndex = 0;
+  const me = st.players[0], rival = st.players[1];
+  me.aqua = 80; me.opsRemaining = 4;
+  const slot = { id: cardId, kind: 'colonist', face: 'secondary' };
+  const crew = { id: me.faction.cardId, kind: 'crew', face: 'primary' };
+  if (place == null) me.leo = [...(me.leo || []), slot, crew];
+  else { me.rocket.siteId = place; me.rocket.stack = [slot, crew]; }
+  const attempt = (s = st, extra = {}) => applyOperation(s, { kind: 'EPIC_HAZARD', cardId, hazardPay: true, ...extra }, { profileId: me.profileId });
+  const star = (r) => r.ok && (plOf(r.state, me.profileId).futureStars || []).some((x) => x.cardId === cardId);
+  return { st, me, rival, attempt, star };
+}
+check('M4 Futures: all 16 spaceborn colonists carry an engine goal', () => {
+  const ids = ['col_cobots', 'col_beowulf_internet', 'col_self_designing_heuristics', 'col_combat_quadrupeds', 'col_sensor_web_sail',
+    'col_nano_3d_printers', 'col_lava_lamp_evangelists', 'col_gabonese_mining_consortium', 'col_prehensilists', 'col_exoskeletalists',
+    'col_teleoperators', 'col_boston_hexapods', 'col_neural_pilots', 'col_vr_simulcasters', 'col_transhuman_activists', 'col_clone_entrepreneurs'];
+  const missing = ids.filter((id) => !futureGoalForCard(id));
+  assert(!missing.length, `no goal: ${missing.join(', ')}`);
+  return ids.map((id) => futureGoalForCard(id).name.replace(/ FUTURE$/, '')).join(', ');
+});
+check('M4 Futures: Space Surveillance (Freedom), TW Commander (isototal) and its double votes', () => {
+  let t = sbFuture('col_self_designing_heuristics');
+  t.st.activeLawStar = 'honor';
+  assert(!t.star(t.attempt()), 'Space Surveillance outside Freedom');
+  t.st.activeLawStar = 'freedom';
+  let r = t.attempt();
+  assert(t.star(r) && /Space Republic/.test(r.log), `Space Surveillance: ${r.error} ${r.log}`);
+  t = sbFuture('col_vr_simulcasters');
+  t.me.isovault = 8; t.rival.isovault = 8;
+  assert(!t.star(t.attempt()), 'a tie is not "more than any opponent"');
+  t.rival.isovault = 3;
+  r = t.attempt();
+  assert(t.star(r), `TW Commander: ${r.error}`);
+  const asm = { delegates: { freedom: { [t.me.profileId]: 1 }, honor: { [t.rival.profileId]: 2 } } };
+  assert(voteWinners(asm).join() === 'honor', 'plain tally');
+  assert(voteWinners(asm, { [t.me.profileId]: 2 }).join() === 'freedom,honor', 'doubled votes tie');
+  return 'Freedom gate, isototal lead, delegates count 2';
+});
+check('M4 Futures: Vinge at a Promoted Bernal with an Exodus contract emancipates the Robots', () => {
+  const t = sbFuture('col_cobots', 'lag-qofv5');
+  t.rival.bernals = [{ cardId: 'ber_l4_antimatter_factory', siteId: 'lag-qofv5', anchored: true, promoted: true, face: 'secondary', stack: [], route: [], wiring: {} }];
+  assert(!t.star(t.attempt()), 'no Exodus contract yet');
+  t.me.fulfilledContracts = [{ id: 'con_deep_freeze', side: 'exodus', round: 1 }];
+  const r = t.attempt();
+  assert(t.star(r) && r.state.robotsEmancipated && /Space Empire/.test(r.log), `Vinge: ${r.error} ${r.log}`);
+  return r.log;
+});
+check('M4 Futures: Isotope Cartel (15 isotopes at your Promoted Bernal) sets the rate to 12 aqua', () => {
+  const t = sbFuture('col_exoskeletalists');
+  t.me.leo = t.me.leo.filter((x) => x.id !== 'col_exoskeletalists');
+  t.me.bernals = [{ cardId: 'ber_l4_antimatter_factory', siteId: 'lag-qofv5', anchored: true, promoted: true, face: 'secondary', route: [], wiring: {},
+    stack: [{ id: 'col_exoskeletalists', kind: 'colonist', face: 'secondary' }, { id: 'fuel_iso', kind: 'fuel', grade: 'isotope', spectral: 'S', amount: 14 }] }];
+  assert(!t.star(t.attempt()), '14 isotopes is short');
+  t.me.bernals[0].stack[1].amount = 15;
+  const r = t.attempt();
+  assert(t.star(r) && r.state.isotopeRate === 12, `Cartel: ${r.error}`);
+  const s2 = r.state; s2.isotopeMonetized = true;
+  const P = plOf(s2, t.me.profileId); P.isotopes = 1; P.isostandards = ['S'];
+  const a = P.aqua;
+  const sell = applyOperation(s2, { kind: 'ISOTOPE_EXCHANGE', action: 'sell', amount: 1 }, { profileId: t.me.profileId });
+  assert(sell.ok && plOf(sell.state, t.me.profileId).aqua === a + 12, `sold for ${plOf(sell.state, t.me.profileId).aqua - a}`);
+  return 'star + sold 1 isotope for 12 aqua';
+});
+check('M4 Futures: Quantum Entanglement at Haumea with an X reactor; Interstellar Exploration grants a card', () => {
+  let t = sbFuture('col_gabonese_mining_consortium', 'haumea');
+  assert(!t.star(t.attempt()), 'no X reactor');
+  t.me.rocket.stack.push({ id: 'rea_lyman_alpha_trap', kind: 'patent', face: 'primary' });
+  let r = t.attempt();
+  assert(t.star(r) && plOf(r.state, t.me.profileId).futureEffects.includes('crashReroll'), `Quantum: ${r.error}`);
+  t = sbFuture('col_prehensilists', 'lag-morz3');
+  assert(!t.star(t.attempt()), 'no augmented colonist');
+  t.me.augments = { jar: { side: 0, colonistId: 'col_prehensilists' } };
+  const hand = t.me.hand.length;
+  r = t.attempt();
+  assert(t.star(r) && plOf(r.state, t.me.profileId).hand.length === hand + 1 && /Research grant/.test(r.log), `Interstellar: ${r.error} ${r.log}`);
+  return r.log;
+});
+check('M4 Futures: Von Neumann decommissions the card and a refinery', () => {
+  const t = sbFuture('col_nano_3d_printers', 'phaethon');
+  t.st.factories = { phaethon: { ownerId: t.me.profileId } };
+  assert(!t.star(t.attempt()), 'no refinery');
+  const ref = PATENTS.find((c) => c.type === 'refinery').id;
+  t.me.rocket.stack.push({ id: ref, kind: 'patent', face: 'primary' });
+  const r = t.attempt();
+  const P = r.ok && plOf(r.state, t.me.profileId);
+  assert(t.star(r) && !P.rocket.stack.some((x) => x.id === ref || x.id === 'col_nano_3d_printers') && P.hand.includes(ref), `Von Neumann: ${r.error} ${r.log}`);
+  return r.log;
+});
+check('M4 Futures: Vats needs a life-support wunderkind; Avatar holders are immune to claim jumps', () => {
+  const t = sbFuture('col_clone_entrepreneurs');
+  assert(!t.star(t.attempt()), 'no wunderkind');
+  t.me.lifeSupportWunderkind = true;
+  assert(t.star(t.attempt()), 'Vats');
+  // Felony immunity: a jump against an Avatar holder's claim is refused.
+  const st = startedGame({ m0: true, m1: true, m2: true, m4: true, seats: 2 });
+  st.activeIndex = 0; st.anarchy = true;
+  const [A, B] = st.players;
+  st.discs.ceres = { outcome: 'success', ownerId: B.profileId };
+  A.rocket.siteId = 'ceres'; A.rocket.stack = [{ id: A.faction.cardId, kind: 'crew', face: 'primary' }];
+  B.futureEffects = ['felonyImmune'];
+  const r = applyOperation(st, { kind: 'CLAIM_JUMP', siteId: 'ceres' }, { profileId: A.profileId });
+  assert(!r.ok && r.error === 'target_immune', `jump: ${r.error}`);
+  return 'Vats; claim jump refused (target_immune)';
+});
+check('M4 Futures: Exonet needs Colonies in 4 zones and opens every contract deck', () => {
+  const t = sbFuture('col_beowulf_internet', 'ceres');
+  t.st.colonies = { ceres: { ownerId: t.me.profileId }, 'mars-north-pole': { ownerId: t.me.profileId }, 'uranus-aerostat': { ownerId: t.me.profileId } };
+  t.me.augments = { jar: { side: 0, colonistId: 'col_beowulf_internet' } };
+  assert(!t.star(t.attempt()), '3 zones');
+  t.st.colonies['mercury-north-pole'] = { ownerId: t.me.profileId };
+  const r = t.attempt();
+  assert(t.star(r) && plOf(r.state, t.me.profileId).futureEffects.includes('anyContractDeck'), `Exonet: ${r.error}`);
+  return 'four zones; anyContractDeck';
+});
+
 check('Supreme Cult: lobby keeps the delegate, Seniority migrates to Authority, 10 VP', () => {
   const st = startedGame({ m0: true, m1: true, m2: true, seats: 2, maxRounds: 7 });
   assert(st.futures, 'the fixture is not a Futures game');
