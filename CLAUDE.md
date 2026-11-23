@@ -243,12 +243,13 @@ per room and carried into the game state as a boolean (`state.m0`,
   banner names M4. Without M2, Parenthood (heart side 1) and the Promotion
   counts are unavailable (owner 2026-11-18). M4 REQUIRES M0 (4A1a) and forces it on: ticking M4 ticks and LOCKS the M0
   box (create form, solo setup, room settings; `lobby.js#lockM0ForM4`), and room
-  settings cannot clear M0 while the room keeps M4. It does not combine with a
+  settings cannot clear M0 while the room keeps M4. It plays in CEO Solitaire (V6, whose 4G rules
+  incl. the 4G3 Solitaire Assembly are built; owner 2026-11-23) but in no other
   variant (`m4_no_variants`, on create AND room settings); V9 Sirens in
-  particular is not compatible with M4 (owner 2026-11-18). The 4G solitaire rules are DONE: CEO
-  Solitaire (V6) implements them, including the 4G3 Solitaire Assembly (owner
-  2026-11-17); only the gate refusing M4 in a CEO Solitaire room remains. M4 does NOT combine with M2 for new rooms until isotope monetization is
-  finished (owner 2026-11-20; `m4_no_m2` is back on create AND room settings). The
+  particular is not compatible with M4 (owner 2026-11-18). M4 combines with M1
+  and with M2: M1 + M4 and M1 + M2 + M4 are open to the M4 previewers (owner
+  2026-11-23, isotope monetization finished; `m4_no_m2` is gone). The 4E5c
+  combined game (Interstellar) is out of scope. The
   M4 + M2 rules stay in the engine (with M2 a chit rides a Colonist and its marks
   go on that Colonist's slot), and the Spacer colonists show in the card library
   for M4 previewers. Contracts whose destination needs a piece the game lacks (freighters, GW

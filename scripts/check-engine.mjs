@@ -10646,17 +10646,19 @@ check('a strong rocket takes a safe factory-assist liftoff to skip the first-spa
 // (4A1a), so it turns the Assembly on; it does not combine with a variant yet
 // (CEO Solitaire's own M4 rules are not wired), so a variant game drops it; and
 // a room without it carries m4 false.
-check('M4 turns on M0 and stays out of variant games', () => {
+check('M4 turns on M0, plays in CEO Solitaire, and stays out of the other variants', () => {
   const mk = (opts) => createInitialState({ players: [{ profileId: 1, name: 'A', seat: 1 }, { profileId: 2, name: 'B', seat: 2 }], seed: 7, ...opts });
   const on = mk({ m4: true });
   assert(on.m4 === true && on.m0 === true && on.assembly, `M4 game: m4=${on.m4} m0=${on.m0}`);
   const off = mk({});
   assert(off.m4 === false, `plain game m4=${off.m4}`);
-  for (const v of ['ceoSolo', 'hermes', 'altruism', 'tutorial']) {
+  for (const v of ['hermes', 'altruism', 'tutorial']) {
     const g = mk({ m4: true, [v]: true });
     assert(g.m4 === false, `${v} game kept m4`);
   }
-  return 'M4 forces M0; plain game m4 false; CEO / Hermes / Altruism / Tutorial drop it';
+  const ceo = mk({ m4: true, ceoSolo: true });
+  assert(ceo.m4 === true, 'CEO Solitaire keeps m4');
+  return 'M4 forces M0; plain game m4 false; CEO keeps it; Hermes / Altruism / Tutorial drop it';
 });
 
 // ---- Module 4 Stage 1: contracts (4B) ----------------------------------------
@@ -13119,8 +13121,28 @@ check('M4 + M2 promotion counts (4C7e): a Bernal needs 3 different augmentations
 
 // The smoke verdict above runs before the checks added below it; this one
 // covers every check in the file.
+check('CEO Solitaire carries M4: contract decks, and a contract auction is won unopposed', () => {
+  const st = startedGame({ seats: 1, ceoSolo: true, m1: true, m2: true, m4: true });
+  assert(st.ceoSolo && st.m4 && st.m0, `flags ceoSolo ${st.ceoSolo} m4 ${st.m4} m0 ${st.m0}`);
+  const decks = Object.keys(st.contractDecks || {});
+  assert(decks.length === 3, `three contract decks: ${decks}`);
+  const me = st.players[0];
+  me.fundraisedThisTurn = true; me.contractAuctionDone = false; me.timepiece = null;
+  st.activeLawStar = 'freedom';   // the Fundraise tally put the star on Freedom
+  let won = null;
+  for (const pair of decks) {
+    const r = op(st, 'AUCTION_CONTRACT_START', me.profileId, { pair });
+    if (r.ok) { won = r; break; }
+  }
+  assert(won, 'a contract auction opens in CEO Solitaire');
+  const P = pl(won.state, me.profileId);
+  assert(!won.state.auction && P.timepiece, `won unopposed with a timepiece: ${JSON.stringify(won.state.auction)}`);
+  return `${decks.join('/')} decks; ${won.log.slice(0, 90)}`;
+});
+
 if (failures) {
   console.error(`\nengine checks FAILED (${failures})`);
   process.exit(1);
 }
 console.log('\nall engine checks passed');
+

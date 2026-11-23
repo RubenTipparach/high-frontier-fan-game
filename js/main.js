@@ -776,14 +776,14 @@ function initNewGameModal() {
         : '<strong>Module 0: Politics</strong> - adds the Sol Political Assembly';
     }
     // One short note per scenario, so a host reading the picker knows what the
-    // mission IS before they start it. Module 4 (Exodus) is an admin preview
-    // (setAdminModuleRows reveals it) and runs in the plain sandbox only, so a
-    // scenario clears and locks it.
+    // mission IS before they start it. Module 4 (Exodus) is a tester preview
+    // (setAdminModuleRows reveals it); it runs in the sandbox and CEO Solitaire,
+    // so the other scenarios clear and lock it.
     {
       const m4cb = document.getElementById('solo-m4');
-      if (m4cb) { if (ceo || scenario || tutorial) m4cb.checked = false; m4cb.disabled = ceo || scenario || tutorial; }
-      // M4 ticked (sandbox only): M0 stays ticked and locked.
-      if (m4cb && m4cb.checked && !ceo && !sirens) lockM0ForM4(document.getElementById('solo-m0'), true);
+      if (m4cb) { if (scenario || tutorial) m4cb.checked = false; m4cb.disabled = scenario || tutorial; }
+      // M4 ticked (sandbox or CEO Solitaire): M0 stays ticked and locked.
+      if (m4cb && m4cb.checked && !sirens) lockM0ForM4(document.getElementById('solo-m0'), true);
     }
     document.getElementById('solo-ceo-note')?.classList.toggle('hidden', !ceo);
     document.getElementById('solo-hermes-note')?.classList.toggle('hidden', !hermes);
@@ -860,7 +860,7 @@ function initNewGameModal() {
     const m1 = !!document.getElementById('solo-m1')?.checked;
     const m2 = !!document.getElementById('solo-m2')?.checked;
     // M4 (preview, admins and playtesters) runs in the plain sandbox only; it needs M0.
-    const m4 = !ceoSolo && !hermes && !sirens && !altruism && !!document.getElementById('solo-m4')?.checked;
+    const m4 = !hermes && !sirens && !altruism && !!document.getElementById('solo-m4')?.checked;
     const name = document.getElementById('solo-name')?.value || '';
     soloCreate.disabled = true;
     const prev = soloCreate.textContent;
