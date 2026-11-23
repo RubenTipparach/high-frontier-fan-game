@@ -13990,6 +13990,34 @@ function rebuildFromBase(baseState, actions, report = null) {
   return s;
 }
 
+// Repair for a game a short-lived build left stuck (owner 2026-11-22/23, room
+// wyk9hp): that build made a Sunspot event answer COMMIT the turn, which locked
+// the moves taken before it and emptied the undo stack. Given the board at the
+// previous real turn base and the ops logged since, rebuild the turn's undo
+// stack - functional ops in order, UNDO / REDO applied to them, and the last
+// event answer given after the final undo - and return it ONLY if replaying it
+// reproduces `current` exactly (undo history aside). Anything else: null, and
+// the game is left as it is.
+export function reconstructTurnActions(baseState, ops, current) {
+  const stack = [];
+  let redo = [];
+  let events = [];
+  for (const o of ops) {
+    const payloadOp = { kind: o.kind, ...(o.payload || {}) };
+    if (o.kind === 'UNDO') { if (stack.length) redo.unshift(stack.pop()); events = []; continue; }
+    if (o.kind === 'REDO') { if (redo.length) stack.push(redo.shift()); events = []; continue; }
+    if (o.kind === 'EVENT_CHOICE') { events.push({ kind: 'EVENT_CHOICE', payload: pickPayload(payloadOp) }); continue; }
+    if (FUNCTIONAL[o.kind]) { stack.push({ kind: o.kind, payload: pickPayload(payloadOp) }); redo = []; }
+  }
+  const actions = [...stack, ...events.slice(-1)];
+  if (!actions.length) return null;
+  const rebuilt = rebuildFromBase(baseState, actions);
+  if (!rebuilt) return null;
+  const norm = (st) => JSON.stringify({ ...st, turnActions: undefined, turnRedo: undefined, __opNotes: undefined });
+  if (norm(rebuilt) !== norm(current)) return null;
+  return rebuilt.turnActions;
+}
+
 // Actions that ride the turn's undo stack but are not dispatched as ordinary
 // functional ops. A Sunspot event answer the active player gives on their own
 // turn is one: it goes on the stack like any other action, so UNDO replays it

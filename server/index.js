@@ -19,7 +19,7 @@ import { WebSocketServer } from 'ws';
 import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
 import { CONTRACTS_BY_ID } from '../data/contracts.js';
-import { contractStepPlaces, applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, liveScoreboard, rocketSolarZone, auctionWaitingOn, inSpacerUnion, driveTutorialBots, migrateGloryCrewBindings, elevatorConnectedFactorySet, pinnedFactorySlugs, playerHasColonistPower, playerCrewReactorKinds, decksFor, repairSpeciesDeckSplit, repairSirensAssembly, autoFixGlitches, canLooseOutpostWater, outpostWater } from './game/engine.js';
+import { contractStepPlaces, applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, reconstructTurnActions, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, liveScoreboard, rocketSolarZone, auctionWaitingOn, inSpacerUnion, driveTutorialBots, migrateGloryCrewBindings, elevatorConnectedFactorySet, pinnedFactorySlugs, playerHasColonistPower, playerCrewReactorKinds, decksFor, repairSpeciesDeckSplit, repairSirensAssembly, autoFixGlitches, canLooseOutpostWater, outpostWater } from './game/engine.js';
 import { randomSeed, makeRng, shuffle } from './game/rng.js';
 import { COLONISTS } from '../data/colonists.js';
 import { siteBySlug, nodeBySlug, resolveNodeRef, leoSlug } from './game/planner-graph.js';
@@ -3354,11 +3354,36 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
   // start of the active player's turn, i.e. the committed_seq op's
   // snapshot (the END_TURN that handed them the turn, or the seq-0
   // START for the opening turn).
+  let opState = prevState;
+  let repairBaseSeq = null;
   if (NEEDS_TURN_BASE.has(kind)) {
     ctx.turnBaseState = stateAtSeq(id, meta.committed_seq);
     if (!ctx.turnBaseState) return res.status(409).json({ error: 'no_turn_base' });
+    // A short-lived build (2026-11-22) committed the turn on a Sunspot event
+    // answer, locking the moves before it (room wyk9hp). When the undo base is
+    // such an answer and nothing is left to undo, rebuild the turn's undo stack
+    // from the op log since the previous real base - only if it replays to
+    // exactly this board - and move the base back there.
+    const baseOp = db.prepare('SELECT kind FROM game_operations WHERE game_id = ? AND seq = ?').get(id, meta.committed_seq);
+    if (baseOp && baseOp.kind === 'EVENT_CHOICE' && !((prevState.turnActions || []).length)) {
+      const rows = db.prepare('SELECT seq, kind, payload FROM game_operations WHERE game_id = ? AND seq < ? ORDER BY seq DESC LIMIT 400')
+        .all(id, meta.committed_seq);
+      const prior = rows.find((r) => isCommitKind(r.kind));
+      const realBase = prior ? stateAtSeq(id, prior.seq) : null;
+      if (realBase) {
+        const since = db.prepare('SELECT kind, payload FROM game_operations WHERE game_id = ? AND seq > ? ORDER BY seq')
+          .all(id, prior.seq).map((r) => { let p = {}; try { p = JSON.parse(r.payload || '{}'); } catch { /* none */ } return { kind: r.kind, payload: p }; });
+        const actions = reconstructTurnActions(realBase, since, prevState);
+        if (actions) {
+          opState = { ...prevState, turnActions: actions, turnRedo: [] };
+          ctx.turnBaseState = realBase;
+          repairBaseSeq = prior.seq;
+          console.log(`[undo-repair] game ${id}: rebuilt ${actions.length} undoable action(s) back to op ${prior.seq}`);
+        }
+      }
+    }
   }
-  const result = applyOperation(prevState, op, ctx);
+  const result = applyOperation(opState, op, ctx);
   // Debug dry-run: with debug:true the client previews what an op WOULD do
   // (the human-readable log carries the fuel-step cost + origin/dest, plus
   // the actor's tank before/after) WITHOUT persisting or broadcasting it.
@@ -3441,6 +3466,8 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
       commitsTurn ? stateJson : encodeForStorage(id, meta.committed_seq, stateJson), now);
     if (commitsTurn) {
       db.prepare('UPDATE games SET committed_seq = ? WHERE id = ?').run(nextSeq, id);
+    } else if (repairBaseSeq != null) {
+      db.prepare('UPDATE games SET committed_seq = ? WHERE id = ?').run(repairBaseSeq, id);
     }
     if (result.state.status === 'finished') {
       db.prepare("UPDATE games SET status = 'finished', finished_at = ? WHERE id = ?").run(now, id);
