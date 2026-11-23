@@ -671,6 +671,51 @@ function atIsobank(s) {
   }
   return { tws, cols };
 }
+// 4D3b, mirror of the engine's starshipCommanderOf: among players with a
+// completed Exodus contract, the most isofuel (the isobanker breaks ties).
+function starshipCommander(s) {
+  const ok = (s.players || []).filter((q) => (q.fulfilledContracts || []).some((f) => f && (f.side === 'exodus' || (CONTRACTS_BY_ID[f.id] || {}).exodus)));
+  if (!ok.length) return null;
+  const max = Math.max(...ok.map((q) => q.isovault | 0));
+  const top = ok.filter((q) => (q.isovault | 0) === max);
+  return top.find((q) => s.isobank && q.profileId === s.isobank.ownerId) || top[0];
+}
+// My augmented Colonists standing at a place.
+function myAugmentedColonistsAt(p, place) {
+  const aug = new Set(Object.values(p.augments || {}).map((a) => a && a.colonistId).filter(Boolean).map(String));
+  const out = [];
+  const scan = (slots, at) => { if (at != null && String(at) === String(place)) for (const sl of (slots || [])) if (sl && aug.has(String(sl.id))) out.push(sl.id); };
+  scan(p.rocket && p.rocket.stack, p.rocket && p.rocket.siteId);
+  for (const o of Object.values(p.outposts || {})) if (o) scan(o.cards, o.siteId);
+  if (p.freighter) scan(p.freighter.stack, p.freighter.siteId);
+  for (const bn of (p.bernals || [])) if (bn) scan(bn.stack, bn.siteId);
+  return out;
+}
+function starshipBoxHtml(s, p, myTurn, { req, aboard, band }) {
+  const sh = s.starship;
+  const btn = (act, label, ok, extra = '') => `<button type="button" data-act="${act}"${extra}${ok ? '' : ' disabled'}>${label}</button>`;
+  if (!sh) {
+    const cmd = starshipCommander(s);
+    const mine = cmd && cmd.profileId === p.profileId;
+    const crew = s.isobank ? myAugmentedColonistsAt(p, s.isobank.siteId) : [];
+    const who = cmd ? `<div class="m4p-aboard">Commander: <span class="player-name" style="--player-color:${esc(cmd.color || 'currentColor')}">@${esc(cmd.name)}</span></div>` : '';
+    return `<ul class="m4p-req">${req}</ul>${aboard.length ? `<div class="m4p-aboard">${aboard.join('<br>')}</div>` : ''}${who}
+      ${mine ? `<div class="m4c-controls">${btn('ship-launch', '🚀 Launch', myTurn && crew.length > 0 && band !== 'none', ` data-colonist="${esc(crew[0] || '')}"`)}</div>` : ''}`;
+  }
+  const cmdP = (s.players || []).find((q) => q.profileId === sh.commanderId) || {};
+  const state = sh.destroyed ? 'Destroyed' : sh.exited ? 'Left the map' : sh.jsjTurns != null ? `Solar oberth (${sh.jsjTurns})` : esc(spaceName(sh.siteId));
+  const cards = (sh.cards || []).map((c) => esc((PATENTS_BY_ID[c.slot.id] || COLONISTS_BY_ID[c.slot.id] || {}).name || c.slot.id));
+  const flying = !sh.exited && !sh.destroyed;
+  const imCmd = sh.commanderId === p.profileId;
+  const crew = flying ? myAugmentedColonistsAt(p, sh.siteId) : [];
+  const canBoard = flying && !(sh.passengers || {})[p.profileId] && crew.length > 0;
+  return `<div class="m4p-aboard"><b>${state}</b> · <span class="player-name" style="--player-color:${esc(cmdP.color || 'currentColor')}">@${esc(cmdP.name || '?')}</span></div>
+    <div class="m4p-aboard">${cards.join(', ')}</div>
+    <div class="m4c-controls">
+      ${imCmd && flying && sh.jsjTurns == null ? btn('ship-fly', '🚀 Fly', myTurn) : ''}
+      ${canBoard ? btn('ship-board', 'Board', myTurn, ` data-colonist="${esc(crew[0])}"`) : ''}
+    </div>`;
+}
 function isobankPlacardHtml(s, p, myTurn, tankIso) {
   const ib = s.isobank;
   const n = Math.max(1, Math.min(6, (s.players || []).length));
@@ -688,7 +733,7 @@ function isobankPlacardHtml(s, p, myTurn, tankIso) {
     [beo, 'Anchored Bernal &amp; BEO Colony', 'May implant; may join spacer union.'],
     [!!s.isotopeMonetized, '1st Isotope produced', 'Isotope monetization; gold-side contracts.'],
     [!!ib, '1st Anchored Bernal with isostandard Dirtside', 'Must found isobank &amp; activate <i>Exodus</i> contracts.'],
-    [!!s.starshipLaunched, '<i>Exodus</i> contract fulfilled &amp; most Isotope at isobank', 'Starship launch (4D3); remove all but 1 Seniority Disk.'],
+    [!!s.starship, '<i>Exodus</i> contract fulfilled &amp; most Isotope at isobank', 'Starship launch (4D3); remove all but 1 Seniority Disk.'],
   ].map(([on, a, b]) => `<div class="m4p-phase ${on ? 'on' : ''}">${tick(on)}<b>${a}</b><span>${b}</span></div>`).join('');
   // Exodus contracts slot.
   const ex = (s.contractDecks || {}).EX;
@@ -729,8 +774,7 @@ function isobankPlacardHtml(s, p, myTurn, tankIso) {
       </div></div>
     <div class="m4p-phases"><h5>EXODUS STARSHIP PHASES</h5>${phases}</div>
     <div class="m4p-table"><h5>EXODUS FUELING TABLE (4E3) <small>${n} Player${n > 1 ? 's' : ''}</small></h5>${table}<div class="m4p-total">Isototal <b>${total}</b> · ${EXODUS_BAND_NAMES[band]}</div></div>
-    <div class="m4p-ship"><h5>STARSHIP STACK</h5><ul class="m4p-req">${req}</ul>
-      ${aboard.length ? `<div class="m4p-aboard">${aboard.join('<br>')}</div>` : ''}</div>
+    <div class="m4p-ship"><h5>STARSHIP STACK</h5>${starshipBoxHtml(s, p, myTurn, { req, aboard, band, tws, cols })}</div>
   </div>`;
 }
 
@@ -920,6 +964,9 @@ async function onAct(b) {
   else if (act === 'iso-tank') await D.submitTurnOp({ kind: 'ISOTOPE_EXCHANGE', action: 'deposit' });
   else if (act === 'iso-withdraw') await D.submitTurnOp({ kind: 'ISOTOPE_EXCHANGE', action: 'withdraw', amount: 1 });
   else if (act === 'iso-vault') await D.submitTurnOp({ kind: 'ISOTOPE_EXCHANGE', action: 'vault' });
+  else if (act === 'ship-launch') await D.submitTurnOp({ kind: 'STARSHIP_LAUNCH', colonists: [b.dataset.colonist] });
+  else if (act === 'ship-board') await D.submitTurnOp({ kind: 'STARSHIP_BOARD', colonistId: b.dataset.colonist });
+  else if (act === 'ship-fly') { closePanel(); if (D.planStarship) D.planStarship(); }
   else if (act === 'pay') await payContractFee(id);
   else if (act === 'mishap') await D.submitTurnOp({ kind: 'LOBBY', ideology: 'centrist' });
   else if (act === 'abandon') await abandonContract(id);

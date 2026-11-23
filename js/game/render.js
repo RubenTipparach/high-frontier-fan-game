@@ -1367,6 +1367,31 @@ export class MapRenderer {
   // The isobank hexagon covers its site hexagon at the same size. A small
   // gold hex beside it peeks: hover (or tap, on a phone) to hide the isobank
   // and see the site underneath.
+  // The flying desperation starship (4D3): a round token at its space, on top
+  // of the pieces. token = { x, y, svg } or null.
+  setStarshipToken(token) {
+    if (!token || !Number.isFinite(token.x) || !Number.isFinite(token.y) || !token.svg) { this._shipToken = null; this._scheduleDraw(); return; }
+    if (!this._shipToken || this._shipToken.svg !== token.svg) {
+      const img = new Image();
+      img.onload = () => this._scheduleDraw();
+      img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(token.svg);
+      this._shipToken = { x: token.x, y: token.y, svg: token.svg, img };
+    } else { this._shipToken.x = token.x; this._shipToken.y = token.y; }
+    this._scheduleDraw();
+  }
+  _drawShipTokenScreen(ctx) {
+    const t = this._shipToken;
+    this._shipTokenBox = null;
+    if (!t || !t.img.complete || !t.img.naturalWidth) return;
+    const eff = this.zoom * this.fitScale;
+    const d = 40;
+    const cx = this.pan.x + t.x * eff, cy = this.pan.y + t.y * eff - 14;
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 6; ctx.shadowOffsetY = 2;
+    ctx.drawImage(t.img, cx - d / 2, cy - d / 2, d, d);
+    ctx.restore();
+    this._shipTokenBox = { x: cx, y: cy, r: d / 2 };
+  }
   _drawStarshipScreen(ctx, { over = false } = {}) {
     const c = this._starship;
     if (!over) { this._starshipBox = null; this._starshipPeekBox = null; }
@@ -2950,6 +2975,7 @@ export class MapRenderer {
       // Hovering the isobank lifts it over the pieces standing on it, so they
       // read as faded behind it.
       if (this._starship && this._starshipHover && this._starshipBox) this._drawStarshipScreen(ctx, { over: true });
+      if (this._shipToken) this._drawShipTokenScreen(ctx); else this._shipTokenBox = null;
       if (this._explosion)     this._drawExplosionScreen(ctx);
       if (this._beltWaivers)   this._drawBeltWaiversScreen(ctx);
       // Selection ring drawn LAST so nothing - labels, ships, hexes
@@ -5439,6 +5465,11 @@ export class MapRenderer {
   // The isobank hexagon sits ON its site, so it is picked before the node: a
   // tap on it opens the isobank; a tap on the peek button hides / shows it.
   _starshipTap(sx, sy) {
+    const tb = this._shipTokenBox;
+    if (tb && Math.hypot(sx - tb.x, sy - tb.y) <= tb.r) {
+      if (this.onStarshipClick) this.onStarshipClick();
+      return true;
+    }
     const pk = this._starshipPeekBox;
     if (pk && Math.hypot(sx - pk.x, sy - pk.y) <= pk.r + 3) {
       this._starshipHidden = !this._starshipHidden;

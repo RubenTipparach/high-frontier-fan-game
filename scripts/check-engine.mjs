@@ -18,6 +18,7 @@
 import { createInitialState, seasonForSlot } from '../server/game/state.js';
 import { auctionWaitingOn, finaoPerFor, finaoFunds, payFinao, exodusScoring, applyFlareToPlayer } from '../server/game/engine.js';
 import { SITES_BY_ID as SITES_BY_ID_X } from '../data/sites.js';
+import { NODE_TAGS as NODE_TAGS_X } from '../data/node-tags.js';
 import { hotSeatWaitingOn, resolveHotSeatActor } from '../data/hot-seat.js';
 import { applyOperation, slotMass, autoFixGlitches, liveScoreboard, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, repairSpeciesDeckSplit, cycleMarketDecks, rocketSolarZone, activeNetThrust, outpostWater, buildFutureCtx, resolveSunspotEvent, computeFinalScores } from '../server/game/engine.js';
 import { BERNALS } from '../data/bernals.js';
@@ -2867,6 +2868,9 @@ check('M4 Futures: Quantum Entanglement at Haumea with an X reactor; Interstella
   let r = t.attempt();
   assert(t.star(r) && plOf(r.state, t.me.profileId).futureEffects.includes('crashReroll'), `Quantum: ${r.error}`);
   t = sbFuture('col_prehensilists', 'lag-morz3');
+  t.me.augments = { jar: { side: 0, colonistId: 'col_prehensilists' } };
+  assert(!t.star(t.attempt()), 'the Neutrino Sunlens is not the EM Sunlens');
+  t = sbFuture('col_prehensilists', 'lag-mnakl');
   assert(!t.star(t.attempt()), 'no augmented colonist');
   t.me.augments = { jar: { side: 0, colonistId: 'col_prehensilists' } };
   const hand = t.me.hand.length;
@@ -12680,6 +12684,62 @@ check('Colony contracts with M2: only anchored Bernals (BEO = non-Home); isobank
   const dealt = Object.values(contractDeckIds(mods)).flat();
   assert(dealt.includes(conByCode('M4N249F').id), 'Junket dealt with M2');
   return 'domes refused, BEO Bernals accepted, Home Bernal refused, Junket, Refugees at the isobank';
+});
+
+// 4D3 Desperation Starshot: launch by the commander from the isobank, fly it
+// out through an Ad Astra exit, and score it (4E4); a starship still in flight
+// at the end is a mutiny.
+function starshotGame() {
+  const st = startedGame({ m0: true, m1: true, m2: true, m4: true, seats: 2, maxRounds: 7 });
+  const me = st.players[st.activeIndex];
+  const rival = st.players.find((p) => p.profileId !== me.profileId);
+  const SITE = 'lag-qofv5';
+  st.isobank = { ownerId: me.profileId, bernalId: 'ber_l4_antimatter_factory', siteId: SITE };
+  st.isotopeMonetized = true;
+  me.bernals = [{ cardId: 'ber_l4_antimatter_factory', siteId: SITE, anchored: true, promoted: true, face: 'secondary', stack: [], route: [], wiring: {} }];
+  me.isovault = 9; rival.isovault = 3;   // isototal 12: Reckless for 2 players
+  me.fulfilledContracts = [{ id: 'con_deep_freeze', side: 'exodus', round: 1 }];
+  me.rocket.siteId = SITE;
+  me.rocket.stack = [{ id: 'gw-_amat_catalyzed_fission_fusion', kind: 'patent', face: 'secondary' },
+    { id: 'gen_flywheel_compulsator', kind: 'patent', face: 'primary' }, { id: 'rad_dielectric_x_ray_window', kind: 'patent', face: 'primary' },
+    { id: 'col_cobots', kind: 'colonist', face: 'primary' }];
+  me.augments = { jar: { side: 0, colonistId: 'col_cobots' } };
+  return { st, me, rival, SITE };
+}
+check('4D3 desperation starshot: launch, fly out an Ad Astra exit, Exodus scoring; mutiny if it never leaves', () => {
+  let { st, me, rival } = starshotGame();
+  // Only the commander (most isofuel among Exodus contract holders) may launch.
+  let r = applyOperation(st, { kind: 'STARSHIP_LAUNCH', colonists: ['col_cobots'] }, { profileId: rival.profileId });
+  assert(!r.ok, `rival launched: ${r.error}`);
+  const thin = JSON.parse(JSON.stringify(st)); thin.players.forEach((p) => { p.isovault = 2; });
+  r = applyOperation(thin, { kind: 'STARSHIP_LAUNCH', colonists: ['col_cobots'] }, { profileId: me.profileId });
+  assert(!r.ok && r.error === 'isototal_too_low', `isototal: ${r.error}`);
+  // Without its supports the TW is not operational.
+  const bare = JSON.parse(JSON.stringify(st));
+  bare.players.find((p) => p.profileId === me.profileId).rocket.stack.splice(1, 2);
+  r = applyOperation(bare, { kind: 'STARSHIP_LAUNCH', colonists: ['col_cobots'] }, { profileId: me.profileId });
+  assert(!r.ok && r.error === 'tw_not_operational', `bare TW: ${r.error}`);
+  r = applyOperation(st, { kind: 'STARSHIP_LAUNCH', colonists: ['col_cobots'] }, { profileId: me.profileId });
+  assert(r.ok && r.state.starship && r.state.anarchy && r.state.maxRounds === r.state.round, `launch: ${r.error} ${r.log}`);
+  const s2 = r.state;
+  const M = s2.players.find((p) => p.profileId === me.profileId);
+  assert(!M.rocket.stack.some((x) => x.id === 'gw-_amat_catalyzed_fission_fusion' || x.id === 'col_cobots' || x.id === 'gen_flywheel_compulsator'), 'cargo moved aboard');
+  // Fly: one burn per turn; two with afterburn (1 isotope).
+  r = applyOperation(s2, { kind: 'STARSHIP_MOVE', segments: [{ from: 'lag-qofv5', to: 'lag-iq24g', burns: 2 }] }, { profileId: me.profileId });
+  assert(!r.ok && r.error === 'not_enough_thrust', `2 burns on thrust 1: ${r.error}`);
+  // Mutiny if the game ends now.
+  const mut = exodusScoring(s2);
+  assert(mut[me.profileId].mutiny === -3 && !mut[me.profileId].starshot, `mutiny ${JSON.stringify(mut[me.profileId])}`);
+  // Put it on a (non Jupiter-Sol-Jupiter) exit and score.
+  const exit = AD_ASTRA_EXIT_SLUGS.find((x) => !/jupiter-sol-jupiter/i.test(String((NODE_TAGS_X[x] || {}).label || '')));
+  const prev = neighborSlugs(exit).find((n) => !hazardKind(n)) || neighborSlugs(exit)[0];
+  s2.starship.siteId = prev;
+  r = applyOperation(s2, { kind: 'STARSHIP_MOVE', segments: [{ from: prev, to: exit, burns: 1 }], payFinao: true }, { profileId: me.profileId });
+  assert(r.ok && r.state.starship.exited && !r.state.anarchy, `exit: ${r.error} ${r.log}`);
+  const sc = exodusScoring(r.state);
+  const mine = sc[me.profileId];
+  assert(mine.desperation && mine.command === 4 && mine.propulsion === 4 && mine.augmented === 1 && !mine.mutiny, `score ${JSON.stringify(mine)}`);
+  return `launched, refused 2 burns, mutiny -3 if stuck, exited at ${exit}: ${mine.vp} VP`;
 });
 
 // The six Exodus contracts (Project Exodus deck, front faces): each destination

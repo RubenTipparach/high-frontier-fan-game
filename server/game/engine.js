@@ -104,6 +104,7 @@ import { SIGNPOSTED_SITES } from '../../data/signpost-routes.js';
 import { GREEK_TAGS } from '../../data/fleet-tags.js';
 import { isBuggyRoamBody, isBuggyRoadPair } from '../../data/buggy-roam.js';
 import { isAdAstraExit } from '../../data/ad-astra.js';
+import { NODE_TAGS } from '../../data/node-tags.js';
 import { isSungrazerSite, closePassFires, SUNGRAZER_SITE_IDS } from '../../data/sungrazer.js';
 import {
   railsBlock as tutorialRailsBlock, tutorialD6, advanceTutorial,
@@ -1264,7 +1265,7 @@ function advanceClock(state) {
   if (closePassFires(seasonBefore, seasonForSlot(state.turn))) sungrazerClosePass(state);
 
   // Anarchy lapses the moment the cube exits season blue.
-  if (state.anarchy && seasonForSlot(state.turn) !== 'blue') {
+  if (state.anarchy && seasonForSlot(state.turn) !== 'blue' && !starshipInFlight(state)) {
     state.anarchy = false;
     state.anarchyLifted = true; // one-shot note for the END_TURN log
   }
@@ -7668,8 +7669,28 @@ export function exodusScoring(state) {
   if (bn && bn.anchored && out[state.isobank.ownerId]) out[state.isobank.ownerId].isobanker = 4;
   const total = isototalOf(state);
   const band = exodusBand(total, state.players.length);
-  const tws = twThrustersAtIsobank(state);
-  const starshot = !!bn && band !== 'none' && tws.length > 0;
+  const sh = state.starship;
+  // 4E4 (1): a desperation starship that exited with its TW thruster and an
+  // augmented Colonist aboard. (2): the endgame starshot at the isobank, which a
+  // launched starship has taken the TW thruster away from.
+  const aboard = (sh && sh.cards) || [];
+  const desperation = !!(sh && sh.exited && aboard.some((c) => c.slot && c.slot.id === sh.twCardId)
+    && aboard.some((c) => isColonistSlot(c.slot)) && band !== 'none');
+  const tws = (sh && !sh.destroyed) ? [] : twThrustersAtIsobank(state);
+  const starshot = desperation || (!!bn && band !== 'none' && tws.length > 0);
+  // 4D3h Endgame Mutiny: the starship never left. The commander takes the
+  // default chit (-3 VP) and surrenders the isobanker medal to the passenger
+  // with the next most isofuel.
+  if (sh && !sh.exited && !sh.destroyed && out[sh.commanderId]) {
+    out[sh.commanderId].mutiny = -3;
+    if (state.isobank && state.isobank.ownerId === sh.commanderId && out[sh.commanderId].isobanker) {
+      out[sh.commanderId].isobanker = 0;
+      const next = Object.keys(sh.passengers || {}).filter((pid) => String(pid) !== String(sh.commanderId))
+        .map((pid) => state.players.find((p) => String(p.profileId) === String(pid))).filter(Boolean)
+        .sort((a, b) => (b.isovault | 0) - (a.isovault | 0))[0];
+      if (next) out[next.profileId].isobanker = 4;
+    }
+  }
   if (starshot) {
     const vps = EXODUS_RANK_VP[band];
     const ranked = state.players.map((p) => ({ id: p.profileId, n: Math.max(0, p.isovault | 0) }))
@@ -7682,27 +7703,285 @@ export function exodusScoring(state) {
       for (const r of tie) out[r.id].rank = Math.floor(pool / tie.length);
       pos += tie.length;
     }
-    // Command medal: most isotopes in the isovaults (the isobanker breaks ties).
-    if (ranked.length) {
+    // Command medal: most isotopes in the isovaults (the isobanker breaks ties);
+    // for a desperation starship, its commander.
+    if (desperation && out[sh.commanderId]) out[sh.commanderId].command = 4;
+    else if (ranked.length) {
       const top = ranked.filter((r) => r.n === ranked[0].n);
       const cmd = top.find((r) => r.id === state.isobank.ownerId) || top[0];
       out[cmd.id].command = 4;
     }
     // Propulsion medal: the owner of the highest base thrust TW thruster there.
     const best = [...tws].sort((a, b) => b.thrust - a.thrust)[0];
-    if (best && out[best.ownerId]) out[best.ownerId].propulsion = 4;
+    if (desperation && out[sh.twOwnerId]) out[sh.twOwnerId].propulsion = 4;
+    else if (best && out[best.ownerId]) out[best.ownerId].propulsion = 4;
     for (const p of state.players) {
       const perColonist = {};
       for (const a of Object.values(p.augments || {})) if (a && a.colonistId) perColonist[a.colonistId] = (perColonist[a.colonistId] || 0) + 1;
-      out[p.profileId].augmented = Math.max(0, ...Object.values(perColonist));
+      // A desperation starship counts only the Colonist aboard (4E4d).
+      if (desperation) {
+        const mine = (sh.passengers || {})[p.profileId];
+        out[p.profileId].augmented = mine ? (perColonist[mine] || 0) : 0;
+      } else {
+        out[p.profileId].augmented = Math.max(0, ...Object.values(perColonist));
+      }
     }
   }
   for (const id of Object.keys(out)) {
     const r = out[id];
-    r.vp = r.isobanker + r.rank + r.command + r.propulsion + r.augmented;
-    r.isototal = total; r.band = band; r.starshot = starshot;
+    r.vp = r.isobanker + r.rank + r.command + r.propulsion + r.augmented + (r.mutiny || 0);
+    r.isototal = total; r.band = band; r.starshot = starshot; r.desperation = desperation;
   }
   return out;
+}
+
+// ===== 4D3 Desperation Starshot ================================================
+// state.starship = { siteId, commanderId, commanderColonistId, twCardId,
+//   twOwnerId, cards: [{ ownerId, slot }], passengers: { profileId: colonistId },
+//   launchedRound, exited, destroyed, jsjTurns, movedTurn, stranded }.
+// The commander launches it from the isobank (a free action), then flies the
+// starship token on their turns: net thrust 1, 2 with afterburn (1 isotope off
+// the commander's isovault), 3 Bonus Pivots in the planner, double FINAO, no
+// fuel tracked. Taking an Ad Astra exit freezes it; the endgame scores it (4E4).
+export function starshipInFlight(state) {
+  const sh = state && state.starship;
+  return !!(sh && !sh.exited && !sh.destroyed);
+}
+// 4D3b: among the players with a completed Exodus contract, the most Isofuel in
+// the isovault commands (the isobanker breaks ties).
+export function starshipCommanderOf(state) {
+  const ok = (state.players || []).filter((p) => (p.fulfilledContracts || []).some((f) => f && (f.side === 'exodus' || (CONTRACTS_BY_ID[f.id] || {}).exodus)));
+  if (!ok.length) return null;
+  const max = Math.max(...ok.map((p) => p.isovault | 0));
+  const top = ok.filter((p) => (p.isovault | 0) === max);
+  return top.find((p) => state.isobank && p.profileId === state.isobank.ownerId) || top[0];
+}
+const isTwSlotE = (sl) => !!(sl && (PATENTS_BY_ID[sl.id] || {}).type === 'gw-thruster' && (sl.face === 'secondary' || sl.promoted));
+// Every TW thruster in any stack at `site`, with its owner, stack and base thrust.
+function twThrustersAt(state, site) {
+  const out = [];
+  for (const q of state.players || []) {
+    for (const st of playerStacks(q)) {
+      if (st.siteId == null || String(st.siteId) !== String(site)) continue;
+      for (const sl of st.slots) {
+        if (!isTwSlotE(sl)) continue;
+        const f = (PATENTS_BY_ID[sl.id].faces || {}).secondary || {};
+        out.push({ owner: q, stack: st, slot: sl, thrust: Number(f.thrust) || 0 });
+      }
+    }
+  }
+  return out;
+}
+// The TW thruster's support chain in its stack: operational (no afterburn) and
+// the support card ids that ride with it.
+function twChain(tw, owner) {
+  const pseudo = { stack: tw.stack.slots, activeThrusterId: tw.slot.id, wiring: {} };
+  const cards = chainCardsFromRocket(pseudo, playerCrewReactorKinds(owner));
+  const chain = resolveSupportChain({ cards, activeId: tw.slot.id, wiring: {} });
+  const missing = unmetRequirements({ cards, order: chain.order, edges: chain.edges });
+  return { operational: missing.length === 0, supportIds: chain.order.filter((id) => id !== tw.slot.id) };
+}
+// STARSHIP_LAUNCH (free action, the commander). op = { colonists: [cardId...]
+// (augmented Colonists at the isobank, one per player; the first is the
+// commander's own and commands) }.
+function applyStarshipLaunch(state, op, player) {
+  if (!state.m4) return fail('not_m4');
+  if (!state.isobank) return fail('no_isobank');
+  if (state.starship) return fail('starship_launched');
+  const cmd = starshipCommanderOf(state);
+  if (!cmd || cmd.profileId !== player.profileId) return fail('not_commander');
+  const site = String(state.isobank.siteId);
+  const total = isototalOf(state);
+  if (exodusBand(total, state.players.length) === 'none') return fail('isototal_too_low', { isototal: total });
+  // The TW thruster present with the highest base thrust, operational without afterburn.
+  const tws = twThrustersAt(state, site).sort((a, b) => b.thrust - a.thrust);
+  if (!tws.length) return fail('no_tw_thruster');
+  const tw = tws[0];
+  const chain = twChain(tw, tw.owner);
+  if (!chain.operational) return fail('tw_not_operational');
+  // Crew: augmented Colonists at the isobank, one per player.
+  const want = (Array.isArray(op.colonists) ? op.colonists : []).map(String);
+  const crew = [];
+  for (const id of want) {
+    for (const q of state.players) {
+      const aug = Object.values(q.augments || {}).some((a) => a && String(a.colonistId) === id);
+      if (!aug) continue;
+      for (const st of playerStacks(q)) {
+        if (st.siteId == null || String(st.siteId) !== site) continue;
+        const sl = st.slots.find((x) => x && String(x.id) === id && isColonistSlot(x));
+        if (sl) crew.push({ owner: q, stack: st, slot: sl });
+      }
+    }
+  }
+  if (!crew.length || !crew.some((c) => c.owner.profileId === player.profileId)) return fail('needs_augmented_commander');
+  const owners = new Set(crew.map((c) => c.owner.profileId));
+  if (owners.size !== crew.length) return fail('one_colonist_per_player');
+  // Cargo transfer everything aboard the starship stack.
+  const cards = [];
+  const take = (stack, id, owner) => {
+    const i = stack.slots.findIndex((x) => x && String(x.id) === String(id));
+    if (i >= 0) { const [sl] = stack.slots.splice(i, 1); cards.push({ ownerId: owner.profileId, slot: sl }); }
+  };
+  take(tw.stack, tw.slot.id, tw.owner);
+  for (const id of chain.supportIds) take(tw.stack, id, tw.owner);
+  for (const c of crew) take(c.stack, c.slot.id, c.owner);
+  const passengers = {};
+  for (const c of crew) passengers[c.owner.profileId] = String(c.slot.id);
+  const twCard = PATENTS_BY_ID[tw.slot.id];
+  const spectral = (twCard && twCard.spectralType) || 'C';
+  state.starship = {
+    siteId: site, commanderId: player.profileId, commanderColonistId: passengers[player.profileId],
+    twCardId: tw.slot.id, twOwnerId: tw.owner.profileId, spectral, cards, passengers,
+    launchedRound: state.round | 0, exited: false, destroyed: false, jsjTurns: null, movedTurn: null,
+  };
+  // Exodus Endgame: all Seniority Disks but one come off (the game ends at the
+  // next threshold). Exodus Anarchy until the starship exits.
+  const before = state.maxRounds | 0;
+  if (state.maxRounds) state.maxRounds = Math.min(state.maxRounds, state.round | 0);
+  state.anarchy = true;
+  const names = cards.map((c) => cardNameOf(c.slot.id));
+  return { ok: true, state, noUndo: true,
+    log: `${player.name} launches the desperation starship from the isobank, commanding ${cardNameOf(passengers[player.profileId])}: ${names.join(', ')} aboard, isototal ${total} (spectral-${spectral} isofuel). Anarchy until it leaves the map; the game ends this Solar Cycle${before && before !== state.maxRounds ? '' : ''}.` };
+}
+// STARSHIP_BOARD (free action): an augmented Colonist of yours at the
+// starship's space boards it (one per player), or isotopes carried there join
+// your isovault. op = { colonistId } | { isotopes: true }.
+function applyStarshipBoard(state, op, player) {
+  if (!starshipInFlight(state)) return fail('no_starship');
+  const sh = state.starship;
+  if (op.colonistId) {
+    if (sh.passengers[player.profileId]) return fail('one_colonist_per_player');
+    const id = String(op.colonistId);
+    if (!Object.values(player.augments || {}).some((a) => a && String(a.colonistId) === id)) return fail('not_augmented');
+    for (const st of playerStacks(player)) {
+      if (st.siteId == null || String(st.siteId) !== String(sh.siteId)) continue;
+      const i = st.slots.findIndex((x) => x && String(x.id) === id && isColonistSlot(x));
+      if (i < 0) continue;
+      const [sl] = st.slots.splice(i, 1);
+      sh.cards.push({ ownerId: player.profileId, slot: sl });
+      sh.passengers[player.profileId] = id;
+      return { ok: true, state, log: `${cardNameOf(id)} boards the starship.` };
+    }
+    return fail('not_colocated');
+  }
+  // Isotopes: the rocket's isotope tank at the starship's space.
+  if (!player.rocket || String(player.rocket.siteId) !== String(sh.siteId)) return fail('not_colocated');
+  if (tankGradeOf(player.rocket) !== 'isotope') return fail('not_isotope');
+  const n = Math.floor(Number(player.rocket.tank) || 0);
+  if (n <= 0) return fail('no_isotope');
+  player.rocket.tank = round6((Number(player.rocket.tank) || 0) - n);
+  recallIfEmpty(player);
+  player.isovault = Math.max(0, player.isovault | 0) + n;
+  return { ok: true, state, log: `${player.name} loads ${n} isotope${n === 1 ? '' : 's'} into the starship (isovault ${player.isovault}).` };
+}
+// STARSHIP_MOVE (the commander, once per turn). op = { segments:[{from,to,burns}],
+// afterburn?, payFinao? }. Burns this turn <= 1 (2 with afterburn).
+function applyStarshipMove(state, op, player) {
+  if (!starshipInFlight(state)) return fail('no_starship');
+  const sh = state.starship;
+  if (sh.commanderId !== player.profileId) return fail('not_commander');
+  if (sh.jsjTurns != null) return fail('starship_at_solar_oberth');
+  if (sh.movedTurn === `${state.round}:${state.turn}`) return fail('no_moves_left');
+  const twAboard = sh.cards.some((c) => c.slot && c.slot.id === sh.twCardId);
+  if (!twAboard) return fail('starship_stranded');
+  const segs = Array.isArray(op.segments) ? op.segments.filter((sg) => sg && sg.to != null) : [];
+  if (!segs.length) return fail('no_route');
+  const burns = segs.reduce((n, sg) => n + Math.max(0, Number(sg.burns) || 0), 0);
+  const thrust = op.afterburn ? 2 : 1;
+  if (burns > thrust) return fail('not_enough_thrust', { burns, thrust });
+  if (op.afterburn) {
+    if ((player.isovault | 0) <= 0) return fail('no_isofuel');
+    player.isovault -= 1;
+  }
+  // Hazards along the way: crash / aerobrake rolls (a 1 destroys it; FINAO
+  // doubled), radiation belts decommission cards below the belt's strength.
+  const gen = makeRng(state.seed, state.rng.cursor);
+  const notes = [];
+  let rolled = false;
+  let at = sh.siteId;
+  const per = 2 * finaoPerFor(state, player);
+  for (const sg of segs) {
+    const to = String(sg.to);
+    const kind = hazardKind(to);
+    if (kind === 'skull' || kind === 'aero') {
+      if (op.payFinao) {
+        if (finaoFunds(state, player) < per) return fail('insufficient_aqua');
+        payFinao(state, player, per);
+        notes.push(`paid ${per} FINAO`);
+      } else {
+        const first = gen.d6();
+        const rr = crashReroll(state, player, { kind }, first, gen);
+        const d6 = rr != null ? rr : first;
+        rolled = true;
+        notes.push(`hazard d6 ${d6}${rr != null ? ` (re-rolled a 1)` : ''}`);
+        if (d6 === 1) {
+          state.rng.cursor = gen.cursor;
+          return { ok: true, state, rolled: true, log: `The desperation starship was DESTROYED at ${(siteById(to) || {}).name || to} (rolled a 1). ${starshipLost(state)}` };
+        }
+      }
+    } else if (kind === 'rad' && !contractBeltImmune(state, player)) {
+      const d6 = gen.d6();
+      rolled = true;
+      const rad = Math.max(0, d6 - 1);
+      const lost = [];
+      sh.cards = sh.cards.filter((c) => {
+        if (isColonistSlot(c.slot) || slotRadHardness(c.slot) >= rad) return true;
+        const owner = playerByProfile(state, c.ownerId);
+        if (owner) decommissionSlotTo(state, owner, c.slot);
+        lost.push(c.slot.id);
+        return false;
+      });
+      notes.push(`rad d6 ${d6}${lost.length ? `: ${cardNames(lost)} lost` : ''}`);
+    }
+    at = to;
+  }
+  state.rng.cursor = gen.cursor;
+  sh.siteId = at;
+  sh.movedTurn = `${state.round}:${state.turn}`;
+  if (!sh.cards.some((c) => c.slot && c.slot.id === sh.twCardId)) sh.stranded = true;
+  let log = `${player.name} flies the starship to ${(siteById(at) || {}).name || at}${op.afterburn ? ' on afterburn (1 isotope burned)' : ''}${notes.length ? ` [${notes.join('; ')}]` : ''}.`;
+  if (isAdAstraExit(at) && !sh.stranded) {
+    if (exodusBand(isototalOf(state), state.players.length) === 'none') {
+      log += ' The isototal is below Reckless, so the starship cannot leave the map yet.';
+    } else if (/jupiter-sol-jupiter/i.test(String((NODE_TAGS[at] || {}).label || ''))) {
+      // Jupiter-Sol-Jupiter: two Turns at the solar oberth, then it exits.
+      sh.siteId = 'burn-utoma'; sh.jsjTurns = 2;
+      log += ' It takes the Jupiter-Sol-Jupiter exit: two Turns at the solar oberth, then it leaves.';
+    } else {
+      log += starshipExit(state);
+    }
+  }
+  return rolled ? { ok: true, state, rolled: true, log } : { ok: true, state, noUndo: true, log };
+}
+function starshipExit(state) {
+  const sh = state.starship;
+  sh.exited = true;
+  sh.exitedRound = state.round | 0;
+  state.anarchy = false;
+  return ' The starship leaves the map: its cards and isotopes are frozen, Anarchy ends.';
+}
+function starshipLost(state) {
+  const sh = state.starship;
+  for (const c of sh.cards) {
+    const owner = playerByProfile(state, c.ownerId);
+    if (!owner) continue;
+    if (isColonistSlot(c.slot)) retireColonistId(state, owner, c.slot.id);
+    else decommissionSlotTo(state, owner, c.slot);
+  }
+  sh.cards = [];
+  sh.destroyed = true;
+  state.anarchy = false;
+  return 'Its cards are lost and Anarchy ends.';
+}
+// End of the commander's turn: the Jupiter-Sol-Jupiter countdown.
+function starshipTurnEnd(state, player) {
+  const sh = state.starship;
+  if (!starshipInFlight(state) || sh.commanderId !== player.profileId || sh.jsjTurns == null) return '';
+  sh.jsjTurns -= 1;
+  if (sh.jsjTurns > 0) return ' The starship waits at the solar oberth.';
+  sh.jsjTurns = null;
+  if (!sh.cards.some((c) => c.slot && c.slot.id === sh.twCardId)) return ' The starship has no TW thruster left and stays at the solar oberth.';
+  return starshipExit(state);
 }
 
 // Gold beads (Isotopes) stored at your Bank are currency worth 10 Aquas each
@@ -14136,6 +14415,9 @@ const FUNCTIONAL = {
   REFUEL: applyRefuel,
   CASH_WATER: applyCashWater,
   ISOTOPE_EXCHANGE: applyIsotopeExchange,
+  STARSHIP_LAUNCH: applyStarshipLaunch,
+  STARSHIP_BOARD: applyStarshipBoard,
+  STARSHIP_MOVE: applyStarshipMove,
   CHILD_COMES_OF_AGE: applyChildComesOfAge,
   DUMP: applyDump,
   CAN_FUEL: applyCanFuel,
@@ -14782,7 +15064,7 @@ function applyEndTurn(state, _op, player) {
   if (childChoiceDue(state, player)) return fail('child_choice_due');
   if (mustExomigrate(state, player)) return fail('must_exomigrate');
   // 4D2a: the isobank is founded on your Turn once you qualify.
-  const isobankNote = maybeFoundIsobank(state, player);
+  const isobankNote = maybeFoundIsobank(state, player) + starshipTurnEnd(state, player);
   // BLUE PLANET: settle the coming aerobrake hazard now, before the turn passes.
   let bluePlanetNote = '';
   if (_op && _op.bluePlanet) {
@@ -16704,7 +16986,7 @@ function contractPairsOpenTo(state, player) {
   const open = Object.keys(CONTRACT_PAIRS).filter((pair) => anyDeck || CONTRACT_PAIRS[pair].some((k) => playerCanUseLaw(state, player, k)
     || (connections && playerDelegatesInPlace(asm, k, player.profileId) > 0)));
   // 4B3c: once the isobank exists the Exodus deck may be chosen regardless of law.
-  if (state.isobank && state.contractDecks && state.contractDecks.EX) open.push('EX');
+  if (state.isobank && state.contractDecks && state.contractDecks.EX && !starshipInFlight(state)) open.push('EX');
   return open;
 }
 // May this player bid on this contract? Timepiece in the Reserve (4B3b), and the
@@ -16799,7 +17081,8 @@ function contractCtx(state, player = null, where = {}) {
     // "Operational buggy robonaut": a buggy robonaut card (a Crew's own buggy
     // prospecting does not count).
     stackBuggy: () => !where.glitched && cards.some((sl) => sl && (PATENTS_BY_ID[sl.id] || {}).type === 'robonaut' && prospectorKind(sl) === 'buggy'),
-    isobankSite: () => (state.isobank ? String(state.isobank.siteId) : null),
+    // 4D3c: once launched, an "isobank" destination is the starship.
+    isobankSite: () => (starshipInFlight(state) ? String(state.starship.siteId) : state.isobank ? String(state.isobank.siteId) : null),
     spacebornOrPromotedAt: (n) => (state.players || []).some((q) => playerSlotArrays(q).some((arr) => augHolderSiteOfArr(q, arr) === String(n)
       && arr.some((sl) => { const c = sl && COLONISTS_BY_ID[sl.id]; return c && (c.spaceborn || sl.face === 'secondary'); }))),
     // Chipjack: one of YOUR Colonists (a Crew without Module 2) in the carrying

@@ -658,9 +658,9 @@ export const FUTURE_GOALS = {
   },
   col_prehensilists: {                      // -> Transplaneteers
     name: 'INTERSTELLAR EXPLORATION FUTURE', vp: 14, effects: ['researchGrant'],
-    location: 'An EM Sunlens',
+    location: 'The EM Sunlens',
     requirements: [
-      item('sunlens', 'This card at an EM Sunlens', (ctx) => !!sunlensAt(here(ctx))),
+      item('sunlens', 'This card at the EM Sunlens', (ctx) => (sunlensAt(here(ctx)) || {}).key === 'em-sunlens'),
       item('augmented', 'An augmented Colonist there', (ctx) => augmentedColonistAt(ctx, here(ctx))),
     ],
   },

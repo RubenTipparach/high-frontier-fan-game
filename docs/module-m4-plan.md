@@ -281,9 +281,31 @@ BUILT 2026-11-22 (Stage 3, isotope monetization + the isobank):
   hovering fades the pieces, a small hex beside it peeks at the site, a tap opens
   the Bank tab.
 
-STILL TO DO in Stage 3: the desperation starshot (4D3: commander, launch,
-flight, mutiny), Ad Astra Futures adding 4 isotopes, trading isofuel between
-isovaults, beads in contract payments other than FINAO and research auctions,
-the Exodus back faces, the Atmospheric Iso-Refinery isotope for Freighter /
-Bernal GW moves (rocket only today), and the R8 question (FINAO doubling in M1
-games without M4).
+- **Desperation starshot (4D3), 2026-11-23.** `state.starship`. STARSHIP_LAUNCH
+  (free action, the commander: the most isofuel among Exodus contract holders,
+  isobanker breaks ties): needs a Reckless+ isototal, the highest-thrust TW
+  thruster at the isobank operational without afterburn (it and its support
+  chain move aboard), and the commander's augmented Colonist; sets Anarchy until
+  exit and ends the game this Solar Cycle (maxRounds = round). STARSHIP_BOARD:
+  one augmented Colonist per player, or isotopes into your isovault.
+  STARSHIP_MOVE (commander, once a turn): 1 burn, 2 on afterburn (1 isotope off
+  the isovault), crash / aerobrake rolls with double FINAO, belts decommission
+  cards. An Ad Astra exit freezes it (Jupiter-Sol-Jupiter waits 2 turns at the
+  solar oberth). The Exodus deck closes in flight and "isobank" destinations
+  read the starship. Scoring (4E4): command medal to the commander, propulsion to
+  the TW owner, augmentation VP for passengers only; still in flight at the end
+  = mutiny (-3, isobanker medal to the next passenger). UI: Launch / Board / Fly
+  in the Bank tab's Starship Stack box; Fly plots with the route planner
+  (budget 2, 3 Bonus Pivots); a starship token on the map.
+- **Spaceborn colonist Futures (16), 2026-11-23** in `data/future-goals.js`.
+- **FINAO doubles on monetization in every game** (owner 2026-11-23,
+  `finaoDoubled`), and the Lofstrom Loop Home anchor rolls the Epic Hazard (4A7j).
+- **Colony contracts** play on colony domes without M2, on anchored Bernals with
+  M2 (owner 2026-11-23): `colony` / `isobank` step verbs.
+
+STILL TO DO in Stage 3: trading isofuel between isovaults, beads in contract
+payments other than FINAO and research auctions, the Exodus back faces, the
+Atmospheric Iso-Refinery isotope for Freighter / Bernal GW moves (rocket only
+today), the starship's combined-game cargo (Promoted Freighter / Bernal), and
+a deck picker for the Interstellar Exploration research grant (it takes the
+first deck with cards).

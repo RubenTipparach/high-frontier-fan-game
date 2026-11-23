@@ -82,3 +82,9 @@ export function starshipHexSvg(players, market, rim = '#c9a227') {
     + `<polygon points="${outer}" fill="none" stroke="${rim}" stroke-width="3.6" stroke-linejoin="round"/>`
     + `<text x="50" y="56" ${NUM} font-size="16" fill="#ffd24a" stroke-width="3">${Math.max(0, market | 0)}</text></svg>`;
 }
+
+// The flying starship token (4D3): the gold-rimmed chit with the starship.
+export function starshipTokenSvg(rim = '#c9a227') {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">`
+    + `<circle cx="50" cy="50" r="48" fill="${rim}"/><circle cx="50" cy="50" r="44.5" fill="url(#ss-bg)"/>${ART}</svg>`;
+}

@@ -122,7 +122,7 @@ import { futureGoalForCard, checkFutureGoal, CENTAUR_SITE_IDS, GREEK_CAMP_IDS, T
 import { colonistPower } from '../../data/colonist-abilities.js';
 import { openBernalStackModal, openBernalFuelTank } from './bernal-modal.js';
 import { initContractsUi, closeContractsPanel, contractSpaceName, contractsBeforeEndTurn, setContractAuctionMinimized, refreshContractsUi, abandonBlock, contractFeeDue, payContractFee, abandonContract, timepieceBadge, renderContractAuctionStep, openCompletedContracts, openBankTab } from './contracts-ui.js';
-import { starshipHexSvg } from './starship-chit.js';
+import { starshipHexSvg, starshipTokenSvg } from './starship-chit.js';
 import { getBernalSprite } from './bernal-sprite.js';
 import { fuelTankCylinderMarkup, fuelTransferSectionMarkup } from './fuel-tank-view.js';
 // One client card-lookup: patents PLUS the M2 Bernal cards (which live in
@@ -16062,7 +16062,7 @@ function myFreighterThrust() {
 //                 freighter card's Bonus Pivots (N), origin = the freighter's
 //                 site. The route commits as a MOVE with unit:'freighter'.
 function enterManualMoveMode(opts = {}) {
-  const unit = (opts.unit === 'freighter' || opts.unit === 'factory') ? opts.unit : 'rocket';
+  const unit = (opts.unit === 'freighter' || opts.unit === 'factory' || opts.unit === 'starship') ? opts.unit : 'rocket';
   _manualUnit = unit;
   _plannedRouteUnit = unit;   // this plot belongs to the chosen vehicle
   _plannedFactoryId = unit === 'factory' ? (opts.factoryId || null) : null;
@@ -16075,7 +16075,15 @@ function enterManualMoveMode(opts = {}) {
   _manualPivotsUsed = 0;
   _manualBonus = 0;
   _manualUndo = [];
-  if (unit === 'freighter' || unit === 'factory') {
+  if (unit === 'starship') {
+    // 4D3d: the starship's TW thruster gives net thrust 1, 2 on afterburn (1
+    // isotope), with 3 Bonus Pivots; it tracks no fuel.
+    _manualBudget = 2;
+    _manualBudgetMax = 2;
+    _manualPirouettes = 3;
+    const sh = _onlineSnapshot && _onlineSnapshot.starship;
+    _manualOriginId = sh ? (toPlannerId(_onlineMaps, sh.siteId) || sh.siteId) : null;
+  } else if (unit === 'freighter' || unit === 'factory') {
     // A Freighter counts as 1 thrust (2 with Powersat) burn spaces per turn and
     // uses the Freighter card's Bonus Pivots (1B6a); a Mobile Factory still
     // crawls one burn space per turn.
@@ -26469,6 +26477,14 @@ function computeBernalLayout(snapshot) {
 // showing every isovault. Only in an M4 game.
 function syncStarshipChit(snapshot) {
   if (!_renderer || typeof _renderer.setStarshipChit !== 'function') return;
+  // The flying starship (4D3): its token at its space until it leaves or is lost.
+  if (typeof _renderer.setStarshipToken === 'function') {
+    const sh = _online && snapshot && snapshot.m4 && snapshot.starship;
+    const fly = sh && !sh.exited && !sh.destroyed;
+    const at = fly ? mpRocketCoords(sh.siteId) : null;
+    const cmd = fly && (snapshot.players || []).find((p) => p.profileId === sh.commanderId);
+    _renderer.setStarshipToken(at ? { x: at.x, y: at.y, svg: starshipTokenSvg((cmd && cmd.color) || '#c9a227') } : null);
+  }
   const ib = _online && snapshot && snapshot.m4 && snapshot.isobank;
   const pos = ib ? mpRocketCoords(ib.siteId) : null;
   if (!pos) { _renderer.setStarshipChit(null); return; }
@@ -27579,6 +27595,30 @@ async function runPlannedMoveSimulation() {
 // size-1 / aerobrake-landable site (size > 1 needs a factory assist), generic +
 // FINAO hazards as normal, and a non-payable rad roll that glitches (then
 // destroys) the unit. The server resolves every die authoritatively.
+// 4D3d: fly the desperation starship (the commander's). One burn, two on
+// afterburn (1 isotope off your isovault); hazards cost double FINAO to skip.
+async function commitStarshipMoveOnline() {
+  const built = buildTurn1MoveOp();
+  if (built.error) { _onlineToast(built.error, 'error'); return false; }
+  const burns = built.segments.reduce((n, sg) => n + (Number(sg.burns) || 0), 0);
+  if (burns > 2) { _onlineToast('The starship has net thrust 1, or 2 on afterburn.', 'error'); return false; }
+  const afterburn = burns === 2;
+  // Crash / aerobrake hazards roll (or pay FINAO); belts roll on their own.
+  const hazards = routeHazards(built.turn1Segs).filter((h) => h.glyph !== '☢');
+  let payFinao = false;
+  if (hazards.length) {
+    const choice = await hazardConfirmModal(hazards);
+    if (choice === 'cancel' || choice == null) return false;
+    payFinao = choice === 'pay';
+  }
+  if (afterburn) {
+    const ok = await confirmModal({ title: '🔥 Afterburn', body: 'Burn 1 isotope from your isovault for a second burn this turn?', yes: 'Afterburn', no: 'Cancel' });
+    if (!ok) return false;
+  }
+  const done = await submitOnlineOp({ kind: 'STARSHIP_MOVE', segments: built.segments, afterburn, payFinao });
+  if (done) { clearRoute(); _plannedRouteUnit = 'rocket'; }
+  return !!done;
+}
 async function commitFreighterMoveOnline() {
   const built = buildTurn1MoveOp();
   if (built.error) { _onlineToast(built.error, 'error'); return false; }
@@ -28167,6 +28207,7 @@ async function moveRocket() {
     // hazards). The server (applyMoveFreighter) is authoritative. Dispatch on
     // the route's OWNER so a popup-planned freighter route (never in manual
     // mode) still commits down the freighter path.
+    if (_plannedRouteUnit === 'starship') return await commitStarshipMoveOnline();
     if (_plannedRouteUnit === 'freighter') return await commitFreighterMoveOnline();
     if (ownerIsBernal) return await commitBernalMoveOnline(Number(_plannedRouteUnit.slice('bernal'.length)) || 0);
     // Execute ONLY this turn's segments - a multi-turn Hohmann transfer's
@@ -36219,6 +36260,8 @@ initContractsUi({
   myTurn: () => isOnlineMyTurn(),
   submitTurnOp: (op) => submitOnlineOp(op),
   submitAuctionOp: (op) => submitMpAuctionOp(op),
+  // Plot the desperation starship's flight on the map planner.
+  planStarship: () => enterManualMoveMode({ unit: 'starship' }),
   // A rules dry run of an op (nothing changes): { ok, log } or { ok:false, error }.
   dryRun: async (op) => {
     if (!_online || !_onlineGameId || !_onlineMe) return null;
