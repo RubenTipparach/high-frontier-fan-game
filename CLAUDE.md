@@ -251,9 +251,15 @@ per room and carried into the game state as a boolean (`state.m0`,
   finished (owner 2026-11-20; `m4_no_m2` is back on create AND room settings). The
   M4 + M2 rules stay in the engine (with M2 a chit rides a Colonist and its marks
   go on that Colonist's slot), and the Spacer colonists show in the card library
-  for M4 previewers. Contracts whose destination needs a piece the game lacks (Bernals,
-  colonists, freighters, the isobank) are dealt out of the decks
-  (`data/contracts.js#faceUnplayable`; owner 2026-11-17). Lagrange ring
+  for M4 previewers. Contracts whose destination needs a piece the game lacks (freighters, GW
+  thrusters, the isobank without M2, bodies not on our map) are dealt out of the
+  decks (`data/contracts.js#faceUnplayable(face, {m1, m2})`; owner 2026-11-17).
+  A contract naming a Bernal / Colony / Colonist plays on colony domes without
+  M2 (its Colonist is a Crew) and ONLY on anchored Bernals with M2 unless the
+  card says colony dome (a BEO Colony = an anchored non-Home Bernal); the step
+  verbs are `colony` / `isobank` (owner 2026-11-23). FINAO doubles on isotope
+  monetization in every game (`finaoDoubled`, set at monetization so a game
+  monetized before 2026-11-23 is not doubled mid-game). Lagrange ring
   numbers (L1-L5) read off the board live in `data/lagrange-labels.js`.
   Without M2 the Augment operation (IMPLANT, `applyImplantOnCrew`) puts a chit
   on a Crew card standing at a BEO Colony (owner 2026-11-18, replacing the

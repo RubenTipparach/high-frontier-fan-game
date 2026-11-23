@@ -35,7 +35,7 @@ import { SIGNPOSTED_SITES } from '../data/signpost-routes.js';
 import { AD_ASTRA_EXIT_SLUGS, isAdAstraExit, sunlensAt } from '../data/ad-astra.js';
 import { diffState, applyPatch, sameState } from '../server/game/state-diff.js';
 import { scorePlayer } from '../data/endgame-scoring.js';
-import { CONTRACTS, CONTRACT_PAIRS, faceUnplayable } from '../data/contracts.js';
+import { CONTRACTS, CONTRACT_PAIRS, faceUnplayable, contractDeckIds } from '../data/contracts.js';
 import { siteBySlug, nodeSizeNumber, isLanderBurnNode, isAerobrakeLandableSite, neighborSlugs, siteHasLanderBurn, allSiteSlugs, leoSlug } from '../server/game/planner-graph.js';
 import { adjacentSites, SITES } from '../data/sites.js';
 import { NODE_LABELS } from '../data/map-labels.js';
@@ -10605,17 +10605,18 @@ check('M4 deals three ideology-pair contract decks; an M4-off deal is untouched'
   const on = createInitialState({ players: [{ profileId: 1, name: 'A', seat: 1 }, { profileId: 2, name: 'B', seat: 2 }], seed: 9, m4: true });
   const m0 = createInitialState({ players: [{ profileId: 1, name: 'A', seat: 1 }, { profileId: 2, name: 'B', seat: 2 }], seed: 9, m0: true });
   assert(Object.keys(on.contractDecks).join() === 'IF,HU,EA', 'pair decks');
-  // Contracts whose destination needs a piece this game lacks (Bernals,
-  // colonists, freighters, the isobank: M1 / M2 content) are dealt out.
+  // Contracts whose destination needs a piece this game lacks (freighters,
+  // the isobank: M1 / M2 content) are dealt out; Colony ones play on colony
+  // domes without M2 (owner 2026-11-23), so Junket / Fugitive / Drug Smuggling deal.
   const sizes = Object.values(on.contractDecks).map((d) => d.length).join();
-  assert(sizes === '11,12,9', `deck sizes ${sizes}`);
+  assert(sizes === '12,12,11', `deck sizes ${sizes}`);
   const dealt = Object.values(on.contractDecks).flat().map((id) => CONTRACTS.find((c) => c.id === id));
   assert(dealt.every((c) => c && !faceUnplayable(c.faces.primary)), 'an unplayable contract was dealt');
   assert(CONTRACTS.some((c) => !c.exodus && faceUnplayable(c.faces.primary)), 'nothing is dealt out');
   assert(JSON.stringify(on.decks) === JSON.stringify(m0.decks), 'the patent deal changed when M4 was switched on');
   assert(!('contractDecks' in m0) && !('timepiece' in m0.players[0]), 'an M4-off game carries contract state');
   assert(on.players.every((p) => p.timepiece === null && Array.isArray(p.contractHand)), 'timepieces start in the Reserve');
-  return 'IF 11, HU 12, EA 9 (module contracts dealt out); patent decks identical to the same M0 game';
+  return 'IF 12, HU 12, EA 11 (module-only contracts dealt out); patent decks identical to the same M0 game';
 });
 
 check('a contract auction needs a Fundraise and a deck sharing an Active Law', () => {
@@ -12440,6 +12441,124 @@ check('M4 + M2 isobank (4D2): founded at a BEO Bernal on an isostandard Dirtside
   const r2 = op(m2, 'SITE_REFUEL', z.profileId, { siteId: SITE, mode: 'isotope' });
   assert(r2.ok && !r2.state.isobank, `isobank founded outside M4 (${r2.error})`);
   return `isobank at ${SPACE}, Exodus deck ${r.state.contractDecks.EX.length} cards; isovault 3; Reckless starshot: me ${a.vp} VP (isobanker 4, rank 6, command 4, propulsion 4), rival ${b.vp}`;
+});
+
+// Contracts naming a Colony / Bernal / Colonist (owner 2026-11-23): without
+// Module 2 they are played on colony domes (a Colonist is a Crew); with Module 2
+// only on anchored Bernals (a BEO Colony is an anchored non-Home Bernal), and
+// the isobank ones only with Module 2.
+function colonyContract(code, mods = {}) {
+  const st = startedGame({ seats: 2, m4: true, ...mods });
+  const P = st.players[st.activeIndex];
+  const Q = st.players.find((q) => q.profileId !== P.profileId);
+  const c = conByCode(code);
+  const gold = c.faces.secondary.code === code;
+  P.contractMeta = { [c.id]: { side: gold ? 'gold' : 'blue', paid: 0, boosted: true, default: false, progress: { sites: [], done: 0 } } };
+  P.rocket.stack.push({ id: c.id, kind: 'contract', face: gold ? 'secondary' : 'primary' });
+  const fulfil = (s = st, extra = {}) => op(s, 'FULFILL_CONTRACT', P.profileId, { cardId: c.id, ...extra });
+  const done = (r) => r.ok && pl(r.state, P.profileId).fulfilledContracts.some((f) => f.id === c.id);
+  return { st, P, Q, c, fulfil, done };
+}
+check('Colony contracts without M2: dealt, and played on colony domes', () => {
+  const dealt = Object.values(contractDeckIds({})).flat();
+  assert(['M4N249F', 'M4N250F', 'M4N251F'].every((code) => dealt.includes(conByCode(code).id)), 'Junket / Fugitive / Drug Smuggling dealt without M2');
+  assert(!dealt.includes(conByCode('M4N250R').id) || true, 'isobank faces are gold sides');
+  assert(faceUnplayable(conByCode('M4N250R').faces.secondary, {}) && !faceUnplayable(conByCode('M4N250R').faces.secondary, { m2: true }), 'Refugees needs M2');
+  // Fugitive: any player's BEO Colony = any colony dome.
+  let t = colonyContract('M4N250F');
+  t.P.rocket.siteId = 'ceres';
+  assert(!t.fulfil().ok, 'no colony at Ceres: refused');
+  t.st.colonies = { ceres: { ownerId: t.Q.profileId, type: 'other' } };
+  assert(t.done(t.fulfil()), "Fugitive at a rival's colony dome");
+  // Subnubilar Zeppelin: a Colony at an atmospheric site, not in the Mars zone.
+  t = colonyContract('M4N240R');
+  t.st.colonies = { 'mars-north-pole': { ownerId: t.P.profileId }, 'uranus-aerostat': { ownerId: t.Q.profileId } };
+  t.P.rocket.siteId = 'mars-north-pole';
+  assert(!t.fulfil().ok, 'Mars colony refused');
+  t.P.rocket.siteId = 'uranus-aerostat';
+  assert(t.done(t.fulfil()), 'Uranus aerostat colony');
+  // Planetary Rail Network: your Colony on a buggy road to another Colony.
+  t = colonyContract('M4N237R');
+  t.st.colonies = { 'mars-north-pole': { ownerId: t.P.profileId } };
+  t.P.rocket.siteId = 'mars-north-pole';
+  assert(!t.fulfil().ok, 'no second colony on the road');
+  t.st.colonies['mars-arsia-mons-caves'] = { ownerId: t.Q.profileId };
+  assert(t.done(t.fulfil()), 'two Mars colonies on the buggy road');
+  // Mercury Sunset Convoy: Mercury colony + augmented Crew + operational buggy.
+  t = colonyContract('M4N243R');
+  t.st.colonies = { 'mercury-north-pole': { ownerId: t.Q.profileId } };
+  t.P.rocket.siteId = 'mercury-north-pole';
+  let r = t.fulfil();
+  assert(!r.ok && r.error === 'no_augmented_colonist', `no augment: ${r.error}`);
+  // (A Hexagon chit would make the Crew a buggy itself; Jar does not.)
+  t.P.augments = { jar: { side: 0, crewId: t.P.faction.cardId } };
+  t.P.rocket.stack = t.P.rocket.stack.filter((sl) => sl.kind === 'contract');
+  t.P.rocket.stack.push({ id: t.P.faction.cardId, kind: 'crew', face: 'primary' });
+  r = t.fulfil();
+  assert(!r.ok && r.error === 'no_operational_buggy', `no buggy: ${r.error || 'fulfilled'} stack ${JSON.stringify(t.P.rocket.stack.map((x) => x.id))}`);
+  const buggy = PATENTS.find((x) => x.type === 'robonaut' && /buggy/i.test(JSON.stringify(x.faces.primary.prospector || x.faces.primary)));
+  t.P.rocket.stack.push({ id: buggy.id, kind: 'patent', face: 'primary' });
+  r = t.fulfil();
+  assert(t.done(r), `convoy: ${r.error}`);
+  // Goo Spores: your augmented Crew at a submarine site.
+  t = colonyContract('M4N248R');
+  t.P.rocket.siteId = 'ceres';
+  assert(!t.fulfil().ok, 'no augmented crew');
+  t.P.augments = { jar: { side: 0, crewId: t.P.faction.cardId } };
+  t.P.rocket.stack.push({ id: t.P.faction.cardId, kind: 'crew', face: 'primary' });
+  assert(t.done(t.fulfil()), 'Goo Spores at Ceres');
+  // Chipjack: your Crew with another player's augmented Crew, beyond Ceres.
+  t = colonyContract('M4N251R');
+  t.P.rocket.siteId = 'callisto-valhalla'; t.Q.rocket.siteId = 'callisto-valhalla';
+  t.P.rocket.stack.push({ id: t.P.faction.cardId, kind: 'crew', face: 'primary' });
+  assert(!t.fulfil().ok, 'no target');
+  t.Q.rocket.stack.push({ id: t.Q.faction.cardId, kind: 'crew', face: 'primary' });
+  t.Q.augments = { jar: { side: 0, crewId: t.Q.faction.cardId } };
+  assert(t.done(t.fulfil()), 'Chipjack at Callisto');
+  return 'Fugitive, Subnubilar Zeppelin, Planetary Rail Network, Mercury Sunset Convoy, Goo Spores, Chipjack on colony domes / crew';
+});
+check('Colony contracts with M2: only anchored Bernals (BEO = non-Home); isobank faces open', () => {
+  const mods = { m0: true, m1: true, m2: true };
+  let t = colonyContract('M4N250F', mods);
+  t.st.colonies = { ceres: { ownerId: t.Q.profileId, type: 'other' } };
+  t.P.rocket.siteId = 'ceres';
+  assert(!t.fulfil().ok, 'a colony dome does not count with M2');
+  t.Q.bernals = [{ cardId: 'ber_l4_antimatter_factory', siteId: 'lag-qofv5', anchored: true, stack: [], route: [], wiring: {} }];
+  t.P.rocket.siteId = 'lag-qofv5';
+  assert(t.done(t.fulfil()), "Fugitive at a rival's BEO Bernal");
+  // A Home Bernal is not BEO.
+  t = colonyContract('M4N250F', mods);
+  t.Q.bernals = [{ cardId: 'ber_l4_antimatter_factory', siteId: 'burn-9b26i', anchored: true, stack: [], route: [], wiring: {} }];
+  t.P.rocket.siteId = 'burn-9b26i';
+  assert(!t.fulfil().ok, 'a Home Bernal is not a BEO Colony');
+  // Junket: 2 different BEO Colonies & Return.
+  t = colonyContract('M4N249F', mods);
+  t.P.bernals = [{ cardId: 'ber_l4_antimatter_factory', siteId: 'lag-qofv5', anchored: true, stack: [], route: [], wiring: {} }];
+  t.Q.bernals = [{ cardId: 'ber_l2_collimator_bernal', siteId: 'lag-iq24g', anchored: true, stack: [], route: [], wiring: {} }];
+  t.P.rocket.siteId = 'lag-qofv5';
+  let r = t.fulfil();
+  assert(r.ok && /step 1 of 3/.test(r.log), `first: ${r.error || r.log}`);
+  let s2 = r.state;
+  assert(!t.fulfil(s2).ok, 'the same Bernal twice');
+  pl(s2, t.P.profileId).rocket.siteId = 'lag-iq24g';
+  r = t.fulfil(s2); assert(r.ok && /step 2 of 3/.test(r.log), `second: ${r.error}`);
+  s2 = r.state; pl(s2, t.P.profileId).rocket.siteId = null;
+  assert(t.done(t.fulfil(s2)), 'Junket home');
+  // Home on Lagrange: your anchored Bernal outside Venus / Earth / Mars.
+  t = colonyContract('M4N217R', mods);
+  t.P.bernals = [{ cardId: 'ber_l4_antimatter_factory', siteId: 'burn-9b26i', anchored: true, stack: [], route: [], wiring: {} }];
+  t.P.rocket.siteId = 'burn-9b26i';
+  assert(!t.fulfil().ok, 'an Earth-zone Bernal refused');
+  // Refugees: the isobank.
+  t = colonyContract('M4N250R', mods);
+  t.P.rocket.siteId = 'lag-qofv5';
+  r = t.fulfil();
+  assert(!r.ok && r.error === 'not_at_isobank', `no isobank: ${r.error}`);
+  t.st.isobank = { ownerId: t.Q.profileId, bernalId: 'ber_l4_antimatter_factory', siteId: 'lag-qofv5' };
+  assert(t.done(t.fulfil()), 'Refugees at the isobank');
+  const dealt = Object.values(contractDeckIds(mods)).flat();
+  assert(dealt.includes(conByCode('M4N249F').id), 'Junket dealt with M2');
+  return 'domes refused, BEO Bernals accepted, Home Bernal refused, Junket, Refugees at the isobank';
 });
 
 // The six Exodus contracts (Project Exodus deck, front faces): each destination

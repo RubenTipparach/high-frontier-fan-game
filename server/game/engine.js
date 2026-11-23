@@ -7534,7 +7534,7 @@ function contractUpheaval(state) {
   for (const pair of Object.keys(state.contractDecks)) {
     if (pair === 'EX') continue;   // 4B1b: the three non-Exodus decks only
     state.contractDecks[pair] = state.contractDecks[pair].slice().reverse()
-      .filter((id) => !faceUnplayable(contractFace(id, 'gold')));
+      .filter((id) => !faceUnplayable(contractFace(id, 'gold'), { m1: state.m1, m2: state.m2 }));
   }
   return ' Isobank Contract Upheaval: the contract decks flip to their gold sides.';
 }
@@ -7590,7 +7590,7 @@ function maybeFoundIsobank(state, player) {
     if (!match) continue;
     state.isobank = { ownerId: player.profileId, bernalId: bn.cardId, siteId: bn.siteId };
     // 4D2c: the starship token comes off the Exodus deck, which opens for auction.
-    const exodus = CONTRACTS.filter((c) => c.exodus && !faceUnplayable(c.faces.primary)).map((c) => c.id);
+    const exodus = CONTRACTS.filter((c) => c.exodus && !faceUnplayable(c.faces.primary, { m1: state.m1, m2: state.m2 })).map((c) => c.id);
     const gen = makeRng(state.seed, state.rng.cursor);
     for (let i = exodus.length - 1; i > 0; i--) { const j = Math.floor(gen.next() * (i + 1)); [exodus[i], exodus[j]] = [exodus[j], exodus[i]]; }
     state.rng.cursor = gen.cursor;
@@ -16681,7 +16681,54 @@ function contractCtx(state, player = null, where = {}) {
     synodic: (id) => SYNODIC_SITE_IDS.includes(id),
     nodeZone: (n) => zoneOfSlug(n),
     ownBeoBernal: (n) => !!(player && (player.bernals || []).some((bn) => bn && bn.anchored && !isHomeBernal(bn) && String(bn.siteId) === String(n))),
+    // Contract Colonies (owner 2026-11-23): without Module 2 a colony dome on a
+    // site; with Module 2 only an anchored Bernal (BEO = not a Home Bernal),
+    // whose site properties are those of its Dirtsides.
+    coloniesAt: (n) => contractColonies(state, player).filter((c) => c.place === String(n)),
+    roadToOtherColony: (c) => contractColonies(state, player).some((o) => o !== c
+      && c.sites.some((a) => o.sites.some((b) => isBuggyRoadPair(a, b)))),
+    augmentedAt: (n, ownOnly) => (state.players || []).some((q) => (!ownOnly || (player && q.profileId === player.profileId))
+      && Object.values(q.augments || {}).some((a) => a && (a.crewId || a.colonistId) && augHolderSite(q, a.crewId || a.colonistId) === String(n))),
+    // "Operational buggy robonaut": a buggy robonaut card (a Crew's own buggy
+    // prospecting does not count).
+    stackBuggy: () => !where.glitched && cards.some((sl) => sl && (PATENTS_BY_ID[sl.id] || {}).type === 'robonaut' && prospectorKind(sl) === 'buggy'),
+    isobankSite: () => (state.isobank ? String(state.isobank.siteId) : null),
+    spacebornOrPromotedAt: (n) => (state.players || []).some((q) => playerSlotArrays(q).some((arr) => augHolderSiteOfArr(q, arr) === String(n)
+      && arr.some((sl) => { const c = sl && COLONISTS_BY_ID[sl.id]; return c && (c.spaceborn || sl.face === 'secondary'); }))),
+    // Chipjack: one of YOUR Colonists (a Crew without Module 2) in the carrying
+    // stack, colocated with another player's augmented one.
+    targetHere: (n) => !!player && cards.some((sl) => sl && (state.m2 ? COLONISTS_BY_ID[sl.id] : CREW_BY_ID[sl.id]))
+      && (state.players || []).some((q) => q.profileId !== player.profileId
+        && Object.values(q.augments || {}).some((a) => a && (a.crewId || a.colonistId) && augHolderSite(q, a.crewId || a.colonistId) === String(n))),
   };
+}
+// The map place one of a player's stacks stands at ('leo' at LEO).
+function augHolderSiteOfArr(player, arr) {
+  if (player.rocket && player.rocket.stack === arr) return player.rocket.siteId == null ? 'leo' : String(player.rocket.siteId);
+  if (player.leo === arr) return 'leo';
+  for (const o of Object.values(player.outposts || {})) if (o && o.cards === arr) return o.siteId == null ? 'leo' : String(o.siteId);
+  if (player.freighter && player.freighter.stack === arr) return player.freighter.siteId == null ? 'leo' : String(player.freighter.siteId);
+  for (const bn of (player.bernals || [])) if (bn && bn.stack === arr) return bn.siteId == null ? 'leo' : String(bn.siteId);
+  return undefined;
+}
+// Every Colony a contract destination can name: { place, own, beo, sites }.
+function contractColonies(state, player) {
+  const out = [];
+  if (state.m2) {
+    for (const q of state.players || []) {
+      for (const bn of (q.bernals || [])) {
+        if (!bn || !bn.anchored || bn.siteId == null) continue;
+        out.push({ place: String(bn.siteId), own: !!player && q.profileId === player.profileId,
+          beo: !isHomeBernal(bn), sites: bernalDirtsides(state, bn, q) });
+      }
+    }
+  } else {
+    for (const [slug, col] of Object.entries(state.colonies || {})) {
+      if (!col) continue;
+      out.push({ place: String(slug), own: !!player && col.ownerId === player.profileId, beo: true, sites: [String(slug)] });
+    }
+  }
+  return out;
 }
 // The map places a contract's destination names, for the "show on the map"
 // link: every place each step could be announced at right now, read with the

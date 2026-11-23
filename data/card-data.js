@@ -3962,7 +3962,7 @@ export const CARD_DATA = {
         "Cybernetics": "heart, jar",
         "Destination": "Your Anchored Bernal not in Venus/Earth/Mars zones.",
         "Fulfilled Ability": "Connections.",
-        "Destination Steps": "manual:your anchored Bernal (M2)"
+        "Destination Steps": "colony own notzone=Venus|Earth|Mars"
       }
     },
     {
@@ -4726,7 +4726,7 @@ export const CARD_DATA = {
         "Cybernetics": "splat, hexagon",
         "Destination": "Your Colony connected by buggy road to any Colony.",
         "Fulfilled Ability": "Transport.",
-        "Destination Steps": "manual:Colony buggy road (M2)"
+        "Destination Steps": "colony own road"
       }
     },
     {
@@ -4837,7 +4837,7 @@ export const CARD_DATA = {
         "Cybernetics": "splat, hexagon",
         "Destination": "Any player's Colony at an Atmospheric Site not in Mars zone.",
         "Fulfilled Ability": "Transport.",
-        "Destination Steps": "manual:Colony at an Atmospheric site (M2)"
+        "Destination Steps": "colony atmospheric notzone=Mars"
       }
     },
     {
@@ -4948,7 +4948,7 @@ export const CARD_DATA = {
         "Cybernetics": "splat, hexagon",
         "Destination": "Any player's Mercury Colony with augmented Colonist and Operational buggy robonaut.",
         "Fulfilled Ability": "Transport.",
-        "Destination Steps": "manual:Mercury Colony with augmented Colonist (M2)"
+        "Destination Steps": "colony zone=Mercury augmented buggy"
       }
     },
     {
@@ -5100,7 +5100,7 @@ export const CARD_DATA = {
         "Destination": "Isobank with an augmented Colonist.",
         "When Fulfilling": "Decommission a Colocated augmented Colonist.",
         "Transcription Notes": "No FULFILLED ABILITY box on this card.",
-        "Destination Steps": "manual:Isobank (Stage 3)"
+        "Destination Steps": "isobank augmented"
       }
     },
     {
@@ -5138,7 +5138,7 @@ export const CARD_DATA = {
         "Cybernetics": "heart, jar",
         "Destination": "Your augmented Colonist at a Submarine Site.",
         "Fulfilled Ability": "Secured.",
-        "Destination Steps": "manual:augmented Colonist at a Submarine site (M2)"
+        "Destination Steps": "site submarine augmented own"
       }
     },
     {
@@ -5158,7 +5158,7 @@ export const CARD_DATA = {
         "Cybernetics": "hexagon",
         "Destination": "2 different BEO Colonies (any Players') & Return.",
         "Fulfilled Ability": "Transport.",
-        "Destination Steps": "manual:2 BEO Colonies (M2)"
+        "Destination Steps": "colony beo ; colony beo different ; return"
       },
       "tier2": {
         "Name": "Spaceborn Political Rally",
@@ -5176,7 +5176,7 @@ export const CARD_DATA = {
         "Destination": "Isobank with a spaceborn or Promoted Colonist.",
         "When Fulfilling": "Exomigrate to isobank; Discard a different Colonist.",
         "Transcription Notes": "No FULFILLED ABILITY box on this card.",
-        "Destination Steps": "manual:Isobank (Stage 3)"
+        "Destination Steps": "isobank spaceborn"
       }
     },
     {
@@ -5198,7 +5198,7 @@ export const CARD_DATA = {
         "Destination": "Any player's BEO Colony.",
         "When Fulfilling": "Owner of destination Colony suffers immediate budget cuts.",
         "Transcription Notes": "No FULFILLED ABILITY box on this card (the art is a WANTED poster; 'REWARD: 7 AQUA' is part of the picture, not a rule).",
-        "Destination Steps": "manual:BEO Colony (M2)"
+        "Destination Steps": "colony beo"
       },
       "tier2": {
         "Name": "Refugees",
@@ -5217,7 +5217,7 @@ export const CARD_DATA = {
         "Destination": "Isobank.",
         "When Fulfilling": "Isobanker suffers immediate budget cuts.",
         "Transcription Notes": "No FULFILLED ABILITY box on this card.",
-        "Destination Steps": "manual:Isobank (Stage 3)"
+        "Destination Steps": "isobank"
       }
     },
     {
@@ -5239,7 +5239,7 @@ export const CARD_DATA = {
         "Destination": "Any player's BEO Colony.",
         "When Fulfilling": "Owner of destination Colony Discards 4 Aquas or the Colony.",
         "Transcription Notes": "No FULFILLED ABILITY box on this card.",
-        "Destination Steps": "manual:BEO Colony (M2)"
+        "Destination Steps": "colony beo"
       },
       "tier2": {
         "Name": "Chipjack",
@@ -5258,7 +5258,7 @@ export const CARD_DATA = {
         "Destination": "Your Colonist Colocated with a \"target\" augmented Colonist beyond Ceres zone.",
         "Fulfilled Ability": "You may perform implant Operations at your Colonies.",
         "When Fulfilling": "\"Target\" Colonist moves to LEO unless owner Discards 8 Aqua.",
-        "Destination Steps": "manual:target augmented Colonist (M2)"
+        "Destination Steps": "space beyond=Ceres target"
       }
     },
     {
