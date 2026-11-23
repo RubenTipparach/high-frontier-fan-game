@@ -12768,6 +12768,38 @@ function exodusBack(name) {
   const grant = (s2) => { const Q = pl(s2, P.profileId); Q.fulfilledContracts = [{ id: c.id, side: 'exodusBack', round: 1 }]; return Q; };
   return { st, P, c, fulfil, done, grant };
 }
+check('Exodus deck (C4): each card is dealt on a random face, and that face is auctioned', () => {
+  const seen = { exodus: 0, exodusBack: 0 };
+  let auctioned = null;
+  for (let seed = 1; seed <= 12; seed++) {
+    const SITE = 'luna-shackleton-polar-rim', SPACE = 'lag-qofv5';
+    const st = startedGame({ m0: true, m1: true, m2: true, m4: true, seats: 2, maxRounds: 7, seed });
+    const me = st.players[st.activeIndex];
+    st.factories = { [SITE]: { ownerId: me.profileId, spectralType: 'S' } };
+    me.bernals = [{ cardId: 'ber_l4_antimatter_factory', figure: 'stanford', face: 'secondary', promoted: true, siteId: SPACE, anchored: true, tank: 0, wiring: {}, route: [], stack: [] }];
+    me.rocket.siteId = SPACE; me.rocket.turnStartSiteId = SPACE;
+    me.rocket.stack = [{ id: 'gw-_amat_catalyzed_fission_fusion', kind: 'patent', face: 'secondary' }];
+    me.rocket.activeThrusterId = 'gw-_amat_catalyzed_fission_fusion';
+    me.rocket.tank = 0; me.rocket.tankGrade = 'isotope'; me.rocket.tankSpectral = 'S';
+    me.isostandards = ['S']; me.opsRemaining = 1; me.refueledSites = []; st.turnActions = [];
+    const r = op(st, 'SITE_REFUEL', me.profileId, { siteId: SITE, mode: 'isotope' });
+    assert(r.ok && r.state.isobank, `isobank (seed ${seed}): ${r.error}`);
+    const sides = r.state.exodusSides || {};
+    assert(Object.keys(sides).length === r.state.contractDecks.EX.length && r.state.contractDecks.EX.length === 6, 'a side per Exodus card');
+    for (const v of Object.values(sides)) seen[v] += 1;
+    if (!auctioned) {
+      const s2 = r.state; const P = pl(s2, me.profileId);
+      P.fundraisedThisTurn = true; P.contractAuctionDone = false; P.timepiece = null; P.opsRemaining = 1;
+      const a = op(s2, 'AUCTION_CONTRACT_START', me.profileId, { pair: 'EX' });
+      if (a.ok && a.state.auction) {
+        auctioned = { side: a.state.auction.side, want: sides[s2.contractDecks.EX[0]] };
+        assert(auctioned.side === auctioned.want, `auctioned ${auctioned.side}, dealt ${auctioned.want}`);
+      }
+    }
+  }
+  assert(seen.exodus > 0 && seen.exodusBack > 0, `both faces dealt: ${JSON.stringify(seen)}`);
+  return `fronts ${seen.exodus}, backs ${seen.exodusBack} over 12 seeds${auctioned ? `; auction on the dealt ${auctioned.side} face` : ''}`;
+});
 check('Exodus backs: every back face reads as engine abilities and rewards', () => {
   for (const x of CONTRACTS.filter((y) => y.exodus)) {
     const f = x.faces.secondary;

@@ -7610,12 +7610,25 @@ function maybeFoundIsobank(state, player) {
     if (!match) continue;
     state.isobank = { ownerId: player.profileId, bernalId: bn.cardId, siteId: bn.siteId };
     // 4D2c: the starship token comes off the Exodus deck, which opens for auction.
-    const exodus = CONTRACTS.filter((c) => c.exodus && !faceUnplayable(c.faces.primary, { m1: state.m1, m2: state.m2 })).map((c) => c.id);
+    // C4: the Exodus contracts are shuffled "randomizing which side of each is
+    // faceup" - the blue front ('exodus') or the gold back ('exodusBack'), and
+    // that face is the one auctioned. A face this game cannot play turns over.
+    const mods = { m1: state.m1, m2: state.m2 };
     const gen = makeRng(state.seed, state.rng.cursor);
+    const sides = {};
+    const exodus = [];
+    for (const c of CONTRACTS.filter((x) => x.exodus)) {
+      let side = gen.next() < 0.5 ? 'exodus' : 'exodusBack';
+      if (faceUnplayable(contractFace(c.id, side), mods)) side = side === 'exodus' ? 'exodusBack' : 'exodus';
+      if (faceUnplayable(contractFace(c.id, side), mods)) continue;
+      sides[c.id] = side;
+      exodus.push(c.id);
+    }
     for (let i = exodus.length - 1; i > 0; i--) { const j = Math.floor(gen.next() * (i + 1)); [exodus[i], exodus[j]] = [exodus[j], exodus[i]]; }
     state.rng.cursor = gen.cursor;
     state.contractDecks = state.contractDecks || {};
     state.contractDecks.EX = exodus;
+    state.exodusSides = sides;
     const where = (siteById(bn.siteId) || {}).name || bn.siteId;
     const card = PATENTS_BY_ID[bn.cardId];
     return ` ${player.name} founds the ISOBANK at the ${(card && card.name) || 'Bernal'} (${where}) and becomes the isobanker:`
@@ -17204,7 +17217,8 @@ export function contractStepPlaces(state, cardId, side, viewerId = null) {
 // Claim the single default chit on the side of the contract that caused it.
 function claimDefaultChit(state, player, cardId) {
   const meta = contractMetaOf(player, cardId);
-  state.defaultChit = { profileId: player.profileId, side: meta && meta.side === 'gold' ? 'gold' : 'blue' };
+  // An Exodus contract's back is its gold side.
+  state.defaultChit = { profileId: player.profileId, side: meta && (meta.side === 'gold' || meta.side === 'exodusBack') ? 'gold' : 'blue' };
 }
 // Take a contract off whatever it is on (hand or a stack).
 function pullContract(state, player, cardId) {
@@ -17262,7 +17276,7 @@ function applyContractAuctionStart(state, op, ctx) {
   if (op.abandon) return { ok: true, state, log: `${log}${player.name} looked over the ${CONTRACT_PAIR_NAMES[pair]} contracts and walked away.` };
   // Gold side once the Isobank Contract Upheaval has happened (4B1b); an Exodus
   // contract has its own side.
-  const side = pair === 'EX' ? 'exodus' : (state.contractSide === 'gold' ? 'gold' : 'blue');
+  const side = pair === 'EX' ? ((state.exodusSides || {})[deck[0]] || 'exodus') : (state.contractSide === 'gold' ? 'gold' : 'blue');
   // The default-chit holder may not take a manned contract (4B2d / 4B6c), and
   // opening the auction is the initiator's own 10-year bid, so they may not put
   // one up either (they may still send it to the bottom with discardTop first).
@@ -17808,7 +17822,7 @@ function augShapesAt(player, siteId) {
 }
 // Completed a gold-side (4B1b) or Exodus (4B1c) contract.
 function hasGoldOrExodusContract(player) {
-  return (player.fulfilledContracts || []).some((f) => f && (f.side === 'gold' || f.side === 'exodus' || (CONTRACTS_BY_ID[f.id] || {}).exodus));
+  return (player.fulfilledContracts || []).some((f) => f && (f.side === 'gold' || f.side === 'exodus' || f.side === 'exodusBack' || (CONTRACTS_BY_ID[f.id] || {}).exodus));
 }
 function colonistAugCount(player, colonistId) {
   return Object.values(player.augments || {}).filter((a) => a && a.colonistId === colonistId).length;

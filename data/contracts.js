@@ -240,8 +240,8 @@ export const CONTRACTS = [...build('Contracts', false), ...build('Exodus Contrac
 export const CONTRACTS_BY_ID = Object.fromEntries(CONTRACTS.map((c) => [c.id, c]));
 export const isContractId = (id) => !!CONTRACTS_BY_ID[id];
 // The face a contract is on: 'blue' / 'exodus' -> primary, 'gold' -> secondary.
-// 'exodusBack' is an Exodus contract played on its back (rear) face; which face
-// an Exodus contract is auctioned on is open question R9.
+// 'exodusBack' is an Exodus contract on its gold back face. C4 shuffles the
+// Exodus deck with a random side of each card face up (state.exodusSides).
 export const sideFace = (side) => (side === 'gold' || side === 'exodusBack' ? 'secondary' : 'primary');
 export function contractFace(cardId, side = 'blue') {
   const c = CONTRACTS_BY_ID[cardId];
