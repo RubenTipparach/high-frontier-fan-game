@@ -257,7 +257,8 @@ per room and carried into the game state as a boolean (`state.m0`,
   A contract naming a Bernal / Colony / Colonist plays on colony domes without
   M2 (its Colonist is a Crew) and ONLY on anchored Bernals with M2 unless the
   card says colony dome (a BEO Colony = an anchored non-Home Bernal); the step
-  verbs are `colony` / `isobank` (owner 2026-11-23). FINAO doubles on isotope
+  verbs are `colony` / `isobank` (owner 2026-11-23). The Exodus deck is 12 one-sided cards, one per printed face (house rule, owner
+  2026-11-23; C4's random side is not used). FINAO doubles on isotope
   monetization in M4 rooms only (`finaoDoubled`; owner answer to R8). Lagrange ring
   numbers (L1-L5) read off the board live in `data/lagrange-labels.js`.
   Without M2 the Augment operation (IMPLANT, `applyImplantOnCrew`) puts a chit

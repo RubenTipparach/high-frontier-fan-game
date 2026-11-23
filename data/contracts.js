@@ -216,23 +216,32 @@ function buildFace(row, pair, exodus) {
   };
 }
 
+function record(row, primary, secondary, exodus, pair) {
+  return {
+    id: slug(row.Name),
+    name: row.Name,
+    type: 'contract',
+    pair: exodus ? 'EX' : pair,
+    exodus,
+    mass: primary.mass,
+    radHardness: primary.radHardness,
+    spectralType: null,
+    requires: [], supplies: [], properties: [],
+    faces: { primary, secondary },
+  };
+}
 function build(tab, exodus) {
-  return (CARD_DATA[tab] || []).filter((r) => r && r.tier1).map((r) => {
+  return (CARD_DATA[tab] || []).filter((r) => r && r.tier1).flatMap((r) => {
     const pair = r.tier1['Ideology Pair'] || null;
     const primary = buildFace(r.tier1, pair, exodus);
     const secondary = buildFace(r.tier2, pair, exodus);
-    return {
-      id: slug(r.tier1.Name),
-      name: r.tier1.Name,
-      type: 'contract',
-      pair: exodus ? 'EX' : pair,
-      exodus,
-      mass: primary.mass,
-      radHardness: primary.radHardness,
-      spectralType: null,
-      requires: [], supplies: [], properties: [],
-      faces: { primary, secondary },
-    };
+    // House rule (owner 2026-11-23): each of the six two-sided Exodus cards
+    // plays as TWO one-sided cards, a 12-card Exodus deck. Both faces of each
+    // record are the same face, so a stray gold-side read stays on it.
+    if (exodus) {
+      return [record(r.tier1, primary, primary, true, pair), ...(r.tier2 && r.tier2.Name ? [record(r.tier2, secondary, secondary, true, pair)] : [])];
+    }
+    return [record(r.tier1, primary, secondary, false, pair)];
   });
 }
 
@@ -240,9 +249,8 @@ export const CONTRACTS = [...build('Contracts', false), ...build('Exodus Contrac
 export const CONTRACTS_BY_ID = Object.fromEntries(CONTRACTS.map((c) => [c.id, c]));
 export const isContractId = (id) => !!CONTRACTS_BY_ID[id];
 // The face a contract is on: 'blue' / 'exodus' -> primary, 'gold' -> secondary.
-// 'exodusBack' is an Exodus contract on its gold back face. C4 shuffles the
-// Exodus deck with a random side of each card face up (state.exodusSides).
-export const sideFace = (side) => (side === 'gold' || side === 'exodusBack' ? 'secondary' : 'primary');
+// Every Exodus face is its own one-sided card (12 in all), always 'exodus'.
+export const sideFace = (side) => (side === 'gold' ? 'secondary' : 'primary');
 export function contractFace(cardId, side = 'blue') {
   const c = CONTRACTS_BY_ID[cardId];
   return c ? c.faces[sideFace(side)] : null;

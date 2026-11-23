@@ -467,7 +467,7 @@ function decksHtml(s, p, auctionOpen) {
     const top = deck[0];
     const open = (byLaw || byConnections) && !!top;
     // The default-chit holder may not put a manned contract up (4B2d).
-    const exSide = exodus && top ? ((s.exodusSides || {})[top] || 'exodus') : null;
+    const exSide = exodus && top ? 'exodus' : null;
     const topFace = top ? contractFace(top, exSide || (s.contractSide === 'gold' ? 'gold' : 'blue')) : null;
     const stigma = !!(topFace && topFace.manned && s.defaultChit && s.defaultChit.profileId === p.profileId);
     const btn = auctionOpen && open
@@ -739,7 +739,7 @@ function isobankPlacardHtml(s, p, myTurn, tankIso) {
   // Exodus contracts slot.
   const ex = (s.contractDecks || {}).EX;
   const exBox = ib && ex
-    ? `<div class="m4p-ex-count">${ex.length} left</div>${ex[0] ? cardThumb(ex[0], (s.exodusSides || {})[ex[0]] || 'exodus') : '<div class="muted">empty</div>'}`
+    ? `<div class="m4p-ex-count">${ex.length} left</div>${ex[0] ? cardThumb(ex[0], 'exodus') : '<div class="muted">empty</div>'}`
     : `<div class="m4p-locked">🔒</div><p class="m4p-small"><b>Inactive until isobank founded (4D2).</b></p>`;
   // Fueling table, the player-count column and the current band lit.
   const rows = [['max', 2], ['crisis', 1], ['reckless', 0], ['none', -1]];

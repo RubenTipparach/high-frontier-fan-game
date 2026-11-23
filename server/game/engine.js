@@ -7610,25 +7610,16 @@ function maybeFoundIsobank(state, player) {
     if (!match) continue;
     state.isobank = { ownerId: player.profileId, bernalId: bn.cardId, siteId: bn.siteId };
     // 4D2c: the starship token comes off the Exodus deck, which opens for auction.
-    // C4: the Exodus contracts are shuffled "randomizing which side of each is
-    // faceup" - the front ('exodus') or the back ('exodusBack'), both purple, and
-    // that face is the one auctioned. A face this game cannot play turns over.
+    // House rule (owner 2026-11-23): instead of C4's six cards on a random
+    // side, every Exodus face is its own card, so the deck is 12 cards,
+    // shuffled. A face this game cannot play is left out.
     const mods = { m1: state.m1, m2: state.m2 };
     const gen = makeRng(state.seed, state.rng.cursor);
-    const sides = {};
-    const exodus = [];
-    for (const c of CONTRACTS.filter((x) => x.exodus)) {
-      let side = gen.next() < 0.5 ? 'exodus' : 'exodusBack';
-      if (faceUnplayable(contractFace(c.id, side), mods)) side = side === 'exodus' ? 'exodusBack' : 'exodus';
-      if (faceUnplayable(contractFace(c.id, side), mods)) continue;
-      sides[c.id] = side;
-      exodus.push(c.id);
-    }
+    const exodus = CONTRACTS.filter((x) => x.exodus && !faceUnplayable(contractFace(x.id, 'exodus'), mods)).map((x) => x.id);
     for (let i = exodus.length - 1; i > 0; i--) { const j = Math.floor(gen.next() * (i + 1)); [exodus[i], exodus[j]] = [exodus[j], exodus[i]]; }
     state.rng.cursor = gen.cursor;
     state.contractDecks = state.contractDecks || {};
     state.contractDecks.EX = exodus;
-    state.exodusSides = sides;
     const where = (siteById(bn.siteId) || {}).name || bn.siteId;
     const card = PATENTS_BY_ID[bn.cardId];
     return ` ${player.name} founds the ISOBANK at the ${(card && card.name) || 'Bernal'} (${where}) and becomes the isobanker:`
@@ -17276,7 +17267,7 @@ function applyContractAuctionStart(state, op, ctx) {
   if (op.abandon) return { ok: true, state, log: `${log}${player.name} looked over the ${CONTRACT_PAIR_NAMES[pair]} contracts and walked away.` };
   // Gold side once the Isobank Contract Upheaval has happened (4B1b); an Exodus
   // contract has its own side.
-  const side = pair === 'EX' ? ((state.exodusSides || {})[deck[0]] || 'exodus') : (state.contractSide === 'gold' ? 'gold' : 'blue');
+  const side = pair === 'EX' ? 'exodus' : (state.contractSide === 'gold' ? 'gold' : 'blue');
   // The default-chit holder may not take a manned contract (4B2d / 4B6c), and
   // opening the auction is the initiator's own 10-year bid, so they may not put
   // one up either (they may still send it to the bottom with discardTop first).
@@ -17822,7 +17813,7 @@ function augShapesAt(player, siteId) {
 }
 // Completed a gold-side (4B1b) or Exodus (4B1c) contract.
 function hasGoldOrExodusContract(player) {
-  return (player.fulfilledContracts || []).some((f) => f && (f.side === 'gold' || f.side === 'exodus' || f.side === 'exodusBack' || (CONTRACTS_BY_ID[f.id] || {}).exodus));
+  return (player.fulfilledContracts || []).some((f) => f && (f.side === 'gold' || f.side === 'exodus' || (CONTRACTS_BY_ID[f.id] || {}).exodus));
 }
 function colonistAugCount(player, colonistId) {
   return Object.values(player.augments || {}).filter((a) => a && a.colonistId === colonistId).length;

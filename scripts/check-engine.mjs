@@ -36,7 +36,7 @@ import { SIGNPOSTED_SITES } from '../data/signpost-routes.js';
 import { AD_ASTRA_EXIT_SLUGS, isAdAstraExit, sunlensAt } from '../data/ad-astra.js';
 import { diffState, applyPatch, sameState } from '../server/game/state-diff.js';
 import { scorePlayer } from '../data/endgame-scoring.js';
-import { CONTRACTS, CONTRACT_PAIRS, faceUnplayable, contractDeckIds } from '../data/contracts.js';
+import { CONTRACTS, CONTRACTS_BY_ID, CONTRACT_PAIRS, faceUnplayable, contractDeckIds } from '../data/contracts.js';
 import { siteBySlug, nodeSizeNumber, isLanderBurnNode, isAerobrakeLandableSite, neighborSlugs, siteHasLanderBurn, allSiteSlugs, leoSlug } from '../server/game/planner-graph.js';
 import { adjacentSites, SITES } from '../data/sites.js';
 import { NODE_LABELS } from '../data/map-labels.js';
@@ -12754,22 +12754,24 @@ function exodusSetup(name) {
   const grant = (s) => { const Q = pl(s, P.profileId); Q.fulfilledContracts = [{ id: c.id, side: 'exodus', round: 1 }]; return Q; };
   return { st, P, c, fulfil, done, grant };
 }
-// The six Exodus BACK faces (played as side 'exodusBack'; which face is
-// auctioned is open question R9, so they are not dealt yet).
+// The six former Exodus BACK faces: each is now its own one-sided card
+// (12-card Exodus deck, owner 2026-11-23), played on side 'exodus'.
 function exodusBack(name) {
   const st = startedGame({ m0: true, m1: true, m2: true, m4: true, seats: 2, maxRounds: 7 });
   const P = st.players[st.activeIndex];
-  const c = CONTRACTS.find((x) => x.exodus && x.faces.secondary.name === name);
-  P.contractMeta = { [c.id]: { side: 'exodusBack', paid: 0, boosted: true, default: false, progress: { sites: [], done: 0 } } };
-  P.rocket.stack.push({ id: c.id, kind: 'contract', face: 'secondary' });
+  const c = CONTRACTS.find((x) => x.exodus && x.name === name);
+  P.contractMeta = { [c.id]: { side: 'exodus', paid: 0, boosted: true, default: false, progress: { sites: [], done: 0 } } };
+  P.rocket.stack.push({ id: c.id, kind: 'contract', face: 'primary' });
   P.isostandards = ['S']; P.isotopes = 0;
   const fulfil = (s2 = st, extra = {}) => op(s2, 'FULFILL_CONTRACT', P.profileId, { cardId: c.id, ...extra });
   const done = (r) => r.ok && pl(r.state, P.profileId).fulfilledContracts.some((f) => f.id === c.id);
-  const grant = (s2) => { const Q = pl(s2, P.profileId); Q.fulfilledContracts = [{ id: c.id, side: 'exodusBack', round: 1 }]; return Q; };
+  const grant = (s2) => { const Q = pl(s2, P.profileId); Q.fulfilledContracts = [{ id: c.id, side: 'exodus', round: 1 }]; return Q; };
   return { st, P, c, fulfil, done, grant };
 }
-check('Exodus deck (C4): each card is dealt on a random face, and that face is auctioned', () => {
-  const seen = { exodus: 0, exodusBack: 0 };
+check('Exodus deck: 12 one-sided cards, shuffled, auctioned on their only face', () => {
+  const exodusIds = CONTRACTS.filter((x) => x.exodus).map((x) => x.id);
+  assert(exodusIds.length === 12 && new Set(exodusIds).size === 12, `12 distinct Exodus cards: ${exodusIds.length}`);
+  const tops = new Set();
   let auctioned = null;
   for (let seed = 1; seed <= 12; seed++) {
     const SITE = 'luna-shackleton-polar-rim', SPACE = 'lag-qofv5';
@@ -12784,29 +12786,31 @@ check('Exodus deck (C4): each card is dealt on a random face, and that face is a
     me.isostandards = ['S']; me.opsRemaining = 1; me.refueledSites = []; st.turnActions = [];
     const r = op(st, 'SITE_REFUEL', me.profileId, { siteId: SITE, mode: 'isotope' });
     assert(r.ok && r.state.isobank, `isobank (seed ${seed}): ${r.error}`);
-    const sides = r.state.exodusSides || {};
-    assert(Object.keys(sides).length === r.state.contractDecks.EX.length && r.state.contractDecks.EX.length === 6, 'a side per Exodus card');
-    for (const v of Object.values(sides)) seen[v] += 1;
+    const EX = r.state.contractDecks.EX;
+    assert(EX.length === 12 && new Set(EX).size === 12, `a 12-card Exodus deck: ${EX.length}`);
+    tops.add(EX[0]);
     if (!auctioned) {
       const s2 = r.state; const P = pl(s2, me.profileId);
       P.fundraisedThisTurn = true; P.contractAuctionDone = false; P.timepiece = null; P.opsRemaining = 1;
       const a = op(s2, 'AUCTION_CONTRACT_START', me.profileId, { pair: 'EX' });
       if (a.ok && a.state.auction) {
-        auctioned = { side: a.state.auction.side, want: sides[s2.contractDecks.EX[0]] };
-        assert(auctioned.side === auctioned.want, `auctioned ${auctioned.side}, dealt ${auctioned.want}`);
+        auctioned = { side: a.state.auction.side, name: CONTRACTS_BY_ID[a.state.auction.cardId].name };
+        assert(auctioned.side === 'exodus', `auctioned on ${auctioned.side}`);
       }
     }
   }
-  assert(seen.exodus > 0 && seen.exodusBack > 0, `both faces dealt: ${JSON.stringify(seen)}`);
-  return `fronts ${seen.exodus}, backs ${seen.exodusBack} over 12 seeds${auctioned ? `; auction on the dealt ${auctioned.side} face` : ''}`;
+  assert(tops.size > 1, 'the deck is shuffled');
+  return `12 cards; ${tops.size} different tops over 12 seeds${auctioned ? `; auctioned ${auctioned.name}` : ''}`;
 });
-check('Exodus backs: every back face reads as engine abilities and rewards', () => {
-  for (const x of CONTRACTS.filter((y) => y.exodus)) {
-    const f = x.faces.secondary;
+check('Exodus backs: every former back face reads as engine abilities and rewards', () => {
+  const backs = CONTRACTS.filter((y) => y.exodus).slice(1).filter((_, i) => i % 2 === 0);
+  assert(backs.length === 6, `six back cards: ${backs.length}`);
+  for (const x of backs) {
+    const f = x.faces.primary;
     assert(!f.steps.some((st2) => st2.verb === 'manual'), `${f.name}: manual step`);
     assert(Object.keys(f.abilities).length === 1, `${f.name}: ${JSON.stringify(f.abilities)}`);
   }
-  return CONTRACTS.filter((y) => y.exodus).map((y) => y.faces.secondary.name).join(', ');
+  return backs.map((y) => y.name).join(', ');
 });
 check('Exodus backs: Isotope Fueling Station, Rival Isobank, Decanting Network', () => {
   // Isotope Fueling Station: your Factory of your isostandard in the Neptune zone.
@@ -12890,8 +12894,8 @@ check('Isovault: storing with no amount stores everything carried', () => {
 });
 
 check('Exodus: every front face reads as engine abilities and isotope rewards', () => {
-  const ex = CONTRACTS.filter((x) => x.exodus);
-  assert(ex.length === 6, `six Exodus contracts (${ex.length})`);
+  const ex = CONTRACTS.filter((x) => x.exodus).filter((_, i) => i % 2 === 0);
+  assert(ex.length === 6, `six Exodus front cards (${ex.length})`);
   for (const x of ex) {
     const f = x.faces.primary;
     assert(!f.steps.some((st) => st.verb === 'manual'), `${f.name}: a manual destination step`);

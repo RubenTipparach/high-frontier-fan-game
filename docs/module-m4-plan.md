@@ -303,10 +303,10 @@ BUILT 2026-11-22 (Stage 3, isotope monetization + the isobank):
 - **Colony contracts** play on colony domes without M2, on anchored Bernals with
   M2 (owner 2026-11-23): `colony` / `isobank` step verbs.
 
-- **2026-11-23 follow-ups:** the six Exodus back (gold) faces are built (side
-  `exodusBack`). Setup C4 shuffles the Exodus deck "randomizing which side of
-  each is faceup": the deck built at the isobank founding picks a random face per
-  card (`state.exodusSides`) and the auction plays that face (this settles R9); isofuel
+- **2026-11-23 follow-ups:** the six Exodus back faces are built. House rule
+  (owner 2026-11-23): instead of C4's six cards on a random side, every Exodus
+  face is its own one-sided card, so the Exodus deck is 12 cards, shuffled at the
+  isobank founding and always played on side `exodus` (this settles R9); isofuel
   trades between isovaults (an `isovault` trade term, 4D2f); gold beads pay late
   fees and contract debt; a deck picker for the Interstellar Exploration research
   grant; storing in the isovault with no amount stores everything carried.
