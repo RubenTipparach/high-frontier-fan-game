@@ -2193,7 +2193,10 @@ function cardLabel(id) {
   const c = PATENTS_BY_ID[id] || CONTRACTS_BY_ID[id];
   if (c && c.name) return c.name;
   const crew = CREW_BY_ID[id];
-  if (crew && crew.faces) return crew.faces.primary.name + ' / ' + crew.faces.secondary.name;
+  if (crew && crew.faces) {
+    const a = crew.faces.primary.name, b = crew.faces.secondary.name;
+    return a === b ? a : a + ' / ' + b;
+  }
   return String(id);
 }
 function slotInfo(slot) {
