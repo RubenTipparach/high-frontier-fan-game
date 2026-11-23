@@ -1352,6 +1352,75 @@ export class MapRenderer {
     this._scheduleDraw();
   }
 
+  // M4 starship chit at the isobank. chit = { x, y, svg } in world coords (the
+  // isobank's node) or null. Tapping it fires onStarshipClick.
+  setStarshipChit(chit) {
+    if (!chit || !Number.isFinite(chit.x) || !Number.isFinite(chit.y) || !chit.svg) { this._starship = null; this._scheduleDraw(); return; }
+    if (!this._starship || this._starship.svg !== chit.svg) {
+      const img = new Image();
+      img.onload = () => this._scheduleDraw();
+      img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(chit.svg);
+      this._starship = { x: chit.x, y: chit.y, svg: chit.svg, img, rim: chit.rim || null };
+    } else { this._starship.x = chit.x; this._starship.y = chit.y; this._starship.rim = chit.rim || null; }
+    this._scheduleDraw();
+  }
+  // The isobank hexagon covers its site hexagon at the same size. A small
+  // gold hex beside it peeks: hover (or tap, on a phone) to hide the isobank
+  // and see the site underneath.
+  // The flying desperation starship (4D3): a round token at its space, on top
+  // of the pieces. token = { x, y, svg } or null.
+  setStarshipToken(token) {
+    if (!token || !Number.isFinite(token.x) || !Number.isFinite(token.y) || !token.svg) { this._shipToken = null; this._scheduleDraw(); return; }
+    if (!this._shipToken || this._shipToken.svg !== token.svg) {
+      const img = new Image();
+      img.onload = () => this._scheduleDraw();
+      img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(token.svg);
+      this._shipToken = { x: token.x, y: token.y, svg: token.svg, img };
+    } else { this._shipToken.x = token.x; this._shipToken.y = token.y; }
+    this._scheduleDraw();
+  }
+  _drawShipTokenScreen(ctx) {
+    const t = this._shipToken;
+    this._shipTokenBox = null;
+    if (!t || !t.img.complete || !t.img.naturalWidth) return;
+    const eff = this.zoom * this.fitScale;
+    const d = 40;
+    const cx = this.pan.x + t.x * eff, cy = this.pan.y + t.y * eff - 14;
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 6; ctx.shadowOffsetY = 2;
+    ctx.drawImage(t.img, cx - d / 2, cy - d / 2, d, d);
+    ctx.restore();
+    this._shipTokenBox = { x: cx, y: cy, r: d / 2 };
+  }
+  _drawStarshipScreen(ctx, { over = false } = {}) {
+    const c = this._starship;
+    if (!over) { this._starshipBox = null; this._starshipPeekBox = null; }
+    if (!c || !c.img.complete || !c.img.naturalWidth) return;
+    const eff = this.zoom * this.fitScale;
+    const R = HEX_R * this._hexScale();
+    const cx = this.pan.x + c.x * eff, cy = this.pan.y + c.y * eff;
+    const pr = Math.max(8, R * 0.32);
+    const bx = cx + R + pr * 0.6, by = cy - R * 0.62;
+    this._starshipPeekBox = { x: bx, y: by, r: pr };
+    if (!(this._starshipPeek || this._starshipHidden)) {
+      const d = (2 * R * 100) / 98;
+      ctx.save();
+      if (over) ctx.globalAlpha = 0.82;
+      ctx.shadowColor = 'rgba(0,0,0,0.6)'; ctx.shadowBlur = 6; ctx.shadowOffsetY = 2;
+      ctx.drawImage(c.img, cx - d / 2, cy - d / 2, d, d);
+      ctx.restore();
+      this._starshipBox = { x: cx, y: cy, r: R };
+    }
+    ctx.save();
+    ctx.beginPath();
+    for (let k = 0; k < 6; k += 1) { const a = (Math.PI / 3) * k; const x = bx + pr * Math.cos(a), y = by + pr * Math.sin(a); if (k) ctx.lineTo(x, y); else ctx.moveTo(x, y); }
+    ctx.closePath();
+    ctx.fillStyle = this._starshipHidden ? (c.rim || '#c9a227') : '#0f1120';
+    ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = c.rim || '#c9a227'; ctx.stroke();
+    ctx.restore();
+  }
+
   // Built Space Elevators (M1). list = [{ ax, ay, bx, by, color }] in world
   // coords (the two end nodes + the owner's seat colour) or null. Drawn as a
   // cable between the ends, behind the markers.
@@ -2887,6 +2956,8 @@ export class MapRenderer {
       this._drawPlayerShipScreen(ctx);
       // Reset the per-frame ship hit-boxes; each ship draw routine repopulates
       // them so a tap can map a screen point back to the ship under it.
+      // The isobank sits on its site under every piece (pieces always on top).
+      if (this._starship) this._drawStarshipScreen(ctx); else { this._starshipBox = null; this._starshipPeekBox = null; }
       this._mpRocketBoxes = [];
       this._freighterBoxes = [];
       this._bernalBoxes = [];
@@ -2901,6 +2972,10 @@ export class MapRenderer {
       // which is the whole complaint the offset was meant to fix. A small chit
       // layered over a sprite stays both readable AND next to its own node.
       this._drawOutpostsScreen(ctx);
+      // Hovering the isobank lifts it over the pieces standing on it, so they
+      // read as faded behind it.
+      if (this._starship && this._starshipHover && this._starshipBox) this._drawStarshipScreen(ctx, { over: true });
+      if (this._shipToken) this._drawShipTokenScreen(ctx); else this._shipTokenBox = null;
       if (this._explosion)     this._drawExplosionScreen(ctx);
       if (this._beltWaivers)   this._drawBeltWaiversScreen(ctx);
       // Selection ring drawn LAST so nothing - labels, ships, hexes
@@ -5387,6 +5462,27 @@ export class MapRenderer {
   // drawn on top wins: local rocket, opponent rockets, then freighters (which
   // hang below the node anchor). A box list is rebuilt every frame, so a stale
   // box from a ship that moved or left the board never lingers.
+  // The isobank hexagon sits ON its site, so it is picked before the node: a
+  // tap on it opens the isobank; a tap on the peek button hides / shows it.
+  _starshipTap(sx, sy) {
+    const tb = this._shipTokenBox;
+    if (tb && Math.hypot(sx - tb.x, sy - tb.y) <= tb.r) {
+      if (this.onStarshipClick) this.onStarshipClick();
+      return true;
+    }
+    const pk = this._starshipPeekBox;
+    if (pk && Math.hypot(sx - pk.x, sy - pk.y) <= pk.r + 3) {
+      this._starshipHidden = !this._starshipHidden;
+      this._scheduleDraw();
+      return true;
+    }
+    const sb = this._starshipBox;
+    if (sb && Math.hypot(sx - sb.x, sy - sb.y) <= sb.r * 0.92) {
+      if (this.onStarshipClick) this.onStarshipClick();
+      return true;
+    }
+    return false;
+  }
   _handleSpriteTap(sx, sy) {
     if (this.hitTestSandboxRocket(sx, sy)) {
       if (this.onSandboxRocketClick) this.onSandboxRocketClick();
@@ -5765,6 +5861,7 @@ export class MapRenderer {
       // Nodes are picked FIRST: a click on/near a map node selects that node.
       // Only a click that misses every node falls through to the ship / figure
       // sprites (user 2026-06-27: prioritise nodes, then figure collision).
+      { const r0 = this.canvas.getBoundingClientRect(); if (this._starshipTap(toLayoutPx(ev.clientX - r0.left), toLayoutPx(ev.clientY - r0.top))) return; }
       const pt = this._eventToWorld(ev);
       const hit = this._hitTest(pt.x, pt.y);
       if (this.options.debug) this._emitDebugClick(pt, hit);
@@ -5888,6 +5985,7 @@ export class MapRenderer {
               // Nodes first: a tap on/near a map node selects it; only a tap
               // that misses every node falls through to the ship / figure
               // sprites (user 2026-06-27: prioritise nodes, then figure).
+              { const r0 = this.canvas.getBoundingClientRect(); if (this._starshipTap(toLayoutPx(last.clientX - r0.left), toLayoutPx(last.clientY - r0.top))) { this._gesture = null; return; } }
               const hit = this._hitTest(pt.x, pt.y);
               if (this.options.debug) this._emitDebugClick(pt, hit);
               if (hit) {
@@ -6241,6 +6339,13 @@ export class MapRenderer {
       const rect = this.canvas.getBoundingClientRect();
       const scx = toLayoutPx(ev.clientX - rect.left);
       const scy = toLayoutPx(ev.clientY - rect.top);
+      // Isobank peek button: hovering it hides the isobank hexagon.
+      const pk = this._starshipPeekBox;
+      const peek = !!(pk && Math.hypot(scx - pk.x, scy - pk.y) <= pk.r + 3);
+      if (peek !== !!this._starshipPeek) { this._starshipPeek = peek; this._scheduleDraw(); }
+      const sbx = this._starshipBox;
+      const over = !peek && !!(sbx && Math.hypot(scx - sbx.x, scy - sbx.y) <= sbx.r * 0.92);
+      if (over !== !!this._starshipHover) { this._starshipHover = over; this._scheduleDraw(); }
       const badge = this._prospectorBadgeBox;
       if (badge) {
         const dx = scx - badge.x;

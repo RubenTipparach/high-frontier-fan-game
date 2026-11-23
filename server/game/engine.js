@@ -38,9 +38,11 @@ import { COLONISTS_BY_ID, isSpacebornColonist } from '../../data/colonists.js';
 // M4 contract cards ride the same lookup (a boosted contract is a stack slot
 // with a mass); they only ever enter play through m4-gated paths.
 import {
-  CONTRACTS_BY_ID, CONTRACT_PAIRS, CONTRACT_PAIR_NAMES, CONTRACT_BID_MAX, contractFace, sideFace, stepSatisfied, siteMatches, FLYBY_NODES,
+  CONTRACTS, CONTRACTS_BY_ID, CONTRACT_PAIRS, CONTRACT_PAIR_NAMES, CONTRACT_BID_MAX, contractFace, sideFace, stepSatisfied, siteMatches, FLYBY_NODES,
   acetyleneTerms, faceUnplayable,
 } from '../../data/contracts.js';
+import { EXODUS_RANK_VP, exodusBand } from '../../data/exodus.js';
+export { exodusBand };
 const PATENTS_BY_ID = { ..._PATENTS_BY_ID, ...BERNALS_BY_ID, ...COLONISTS_BY_ID, ...CONTRACTS_BY_ID };
 import { resolveSupportChain, unmetRequirements, openCycleChainCard } from '../../data/support-chain.js';
 import { CREW_BY_ID, PROMO_CREW } from '../../data/crew.js';
@@ -101,6 +103,8 @@ import { siteHasHazardousLanderBurn, routeFlewAerobrake } from '../../data/lande
 import { SIGNPOSTED_SITES } from '../../data/signpost-routes.js';
 import { GREEK_TAGS } from '../../data/fleet-tags.js';
 import { isBuggyRoamBody, isBuggyRoadPair } from '../../data/buggy-roam.js';
+import { isAdAstraExit } from '../../data/ad-astra.js';
+import { NODE_TAGS } from '../../data/node-tags.js';
 import { isSungrazerSite, closePassFires, SUNGRAZER_SITE_IDS } from '../../data/sungrazer.js';
 import {
   railsBlock as tutorialRailsBlock, tutorialD6, advanceTutorial,
@@ -1261,7 +1265,7 @@ function advanceClock(state) {
   if (closePassFires(seasonBefore, seasonForSlot(state.turn))) sungrazerClosePass(state);
 
   // Anarchy lapses the moment the cube exits season blue.
-  if (state.anarchy && seasonForSlot(state.turn) !== 'blue') {
+  if (state.anarchy && seasonForSlot(state.turn) !== 'blue' && !starshipInFlight(state)) {
     state.anarchy = false;
     state.anarchyLifted = true; // one-shot note for the END_TURN log
   }
@@ -1587,7 +1591,9 @@ function spacerUnionGame(state) {
 export function inSpacerUnion(state, player) {
   if (!spacerUnionGame(state) || state.spacerUnionDissolved || !player) return false;
   for (const e of colonistLocations(player)) if (isSpacebornColonist(e.slot.id)) return true;
-  return (player.hand || []).some((id) => isSpacebornColonist(id) && (COLONISTS_BY_ID[id] || {}).colonistKind === 'Robot');
+  // A Robot set aside for the keep pick (4C2b) is on its way to the hand.
+  const held = [...(player.hand || []), ...((player.robotPick && player.robotPick.ids) || [])];
+  return held.some((id) => isSpacebornColonist(id) && (COLONISTS_BY_ID[id] || {}).colonistKind === 'Robot');
 }
 // Joining (4C2c): discard every earthborn Colonist the player has in play (not a
 // Felony). They go under the earthborn queue.
@@ -1691,10 +1697,18 @@ function fixPhantomFuelInHand(state) {
 // Future grants one extra colonist on top.
 function colonistAllowance(player) {
   let n = 0;
+  // Life Support Reconfig Team (Exodus): "Your Bernals add to Colonist limit even
+  // when unanchored." Fulfilled contracts only exist in an M4 game.
+  const unanchoredToo = (player.fulfilledContracts || []).some((f) => {
+    const face = contractFace(f.id, f.side);
+    return !!(face && face.abilities && face.abilities.bernalLimitUnanchored);
+  });
   for (const bn of (player.bernals || [])) {
-    if (bn && bn.anchored) n += (bn.promoted || bn.face === 'secondary') ? 2 : 1;
+    if (bn && (bn.anchored || unanchoredToo)) n += (bn.promoted || bn.face === 'secondary') ? 2 : 1;
   }
   if (n > 0 && hasFutureEffect(player, 'extraColonist')) n += 1;
+  // Decanting Network (Exodus back): "Allowed 1 extra Colonist."
+  if (n > 0 && (player.fulfilledContracts || []).some((f) => ((contractFace(f.id, f.side) || {}).abilities || {}).extraColonist)) n += 1;
   return n;
 }
 
@@ -1774,6 +1788,14 @@ function contractIsruBonusAt(state, player, site) {
   return contractAbilityList(state, player, 'isruBody')
     .reduce((n, x) => n + ((x && x.body === body) ? (x.n | 0) : 0), 0);
 }
+// QUANTUM ENTANGLEMENT FUTURE (Bubbleopolis, M4): "1 reroll per Crash Hazard
+// Roll." A failed (1) crash roll is rolled once more; the second die stands.
+function crashReroll(state, player, item, first, gen) {
+  if (first !== 1 || !item || item.kind !== 'skull' || !hasFutureEffect(player, 'crashReroll')) return null;
+  return gen.d6();
+}
+// Radiation Shield Prototype (Exodus): "Your Stacks are immune to Belt/CME Rolls."
+const contractBeltImmune = (state, player) => contractAbilityCount(state, player, 'beltCmeImmune') > 0;
 // Shielded (4B2f): -2 to Belt & CME Rolls to your Stacks, per copy.
 const contractShield = (state, player) => 2 * contractAbilityCount(state, player, 'shielded');
 
@@ -1806,12 +1828,15 @@ function colonistSizeRollModAt(state, player, siteId) {
 // season-blue event), halved again (fractions dropped) by a Frankenstein
 // Navigator / Josephson Implants colonist in play. Mirror the client's
 // finaoPer (browse.js) if the order ever changes.
+// M4 rooms only (owner answer to R8, 2026-11-19): an M1 / M2 game never doubles.
+export function finaoDoubled(state) {
+  return !!(state && state.isotopeMonetized && state.m4);
+}
 export function finaoPerFor(state, player) {
   let per = hasPrivilege(state, player, 'OPEN_SOURCE_FINAO') ? 3 : HAZARD_COST_PER;
   // 3B5a / 4D1a: once isotope is monetized, FINAO costs are permanently doubled
-  // for everyone, Open Source included. Wired for M4 rooms only for now, so an
-  // M1 game already in flight does not double mid-game.
-  if (state.m4 && state.isotopeMonetized) per *= 2;
+  // for everyone, Open Source included. M4 rooms only (R8).
+  if (finaoDoubled(state)) per *= 2;
   if (state.internationalAssistance) per = Math.floor(per / 2);
   if (playerHasColonistPower(state, player, 'finaoHalved')) per = Math.floor(per / 2);
   return Math.max(1, per);
@@ -1827,7 +1852,7 @@ function seniorityDisksOnAssembly(state) {
   if (!state.m0 || !state.assembly) return 0;
   return ASSEMBLY_PLACES.reduce((n, p) => n + seniorityInPlace(state.assembly, p), 0);
 }
-function payFinao(state, player, cost) {
+export function payFinao(state, player, cost) {
   const paid = Math.max(0, cost | 0);
   if (paid <= 0) return 0;
   chargeFinao(state, player, paid);
@@ -1854,13 +1879,15 @@ function finaoWaterTaps(player, { rocketTank = null } = {}) {
   }
   return taps;
 }
-function finaoFunds(state, player, opts) {
-  const aqua = player.aqua | 0;
+export function finaoFunds(state, player, opts) {
+  const aqua = bankFunds(state, player);
   if (!(state.m4 && hasAugmentSide(player, 'jar', 2))) return aqua;
   return aqua + finaoWaterTaps(player, opts).reduce((n, tp) => n + Math.max(0, tp.have()), 0);
 }
 function chargeFinao(state, player, cost) {
   let need = Math.max(0, cost | 0);
+  // Beads at the Bank pay like aqua (4D1b): top the aqua up before charging.
+  if (!(state.m4 && hasAugmentSide(player, 'jar', 2))) coverFromBeads(state, player, need);
   const fromAqua = state.m4 && hasAugmentSide(player, 'jar', 2) ? Math.min(Math.max(0, player.aqua | 0), need) : need;
   player.aqua = (player.aqua | 0) - fromAqua;
   need -= fromAqua;
@@ -2936,10 +2963,11 @@ function rocketShelteredByBernal(player) {
   if (s == null) return false;
   return (player.bernals || []).some((bn) => bn && bn.anchored && bn.siteId === s);
 }
-function applyFlareToPlayer(state, p, flare, notesArr) {
+export function applyFlareToPlayer(state, p, flare, notesArr) {
   let touched = 0;
   // Golden Apples Future: the completing player ignores solar flares entirely.
   if (hasFutureEffect(p, 'ignoreSolarFlares')) return 0;
+  if (contractBeltImmune(state, p)) return 0;   // Radiation Shield Prototype: immune to CME rolls
   const sweep = (slots, slug, where) => {
     const zone = zoneOfSlug(slug) || 'Earth';
     const info = SOLAR_ZONE_INFO[zone];
@@ -3274,7 +3302,7 @@ function resolveSunspotEvent(state, kind, opts = {}) {
       // had to shift it off for a purge that discarded nothing (user
       // 2026-09-02). The purge roll itself still happens and is still logged.
       if (purged.length) {
-        const voteWon = voteWinners(asm);
+        const voteWon = voteWinners(asm, voteWeights(state));
         if (voteWon.length === 1 && voteWon[0] !== state.activeLawStar) {
           state.activeLawStar = voteWon[0];
           const starName = (IDEOLOGY_BY_KEY[voteWon[0]] || {}).name || voteWon[0];
@@ -3599,10 +3627,14 @@ function describeHazardRolls(rolls) {
   const tourTail = toured
     ? ` Tourism Cycler: ${toured} radiation belt${toured === 1 ? '' : 's'} crossed with no roll.`
     : '';
+  const rerolled = (rolls || []).filter((r) => r && r.rerolledFrom != null).length;
+  const rerollTail = rerolled ? ` Quantum Entanglement: ${rerolled} crash roll${rerolled === 1 ? '' : 's'} of 1 rolled again.` : '';
+  const immune = (rolls || []).filter((r) => r && r.beltImmune).length;
+  const immuneTail = immune ? ` Radiation shield: ${immune} radiation belt${immune === 1 ? '' : 's'} crossed with no roll.` : '';
   // Shielded contracts (4B2f) took 2 off every belt roll per copy.
   const sh = (rolls || []).find((r) => r && r.kind === 'rad' && r.d6 != null && r.shielded);
   const shieldTail = sh ? ` Shielded: -${sh.shielded} on each belt roll.` : '';
-  return (parts.length ? ` [${parts.join('; ')}]` : '') + tourTail + shieldTail;
+  return (parts.length ? ` [${parts.join('; ')}]` : '') + tourTail + immuneTail + shieldTail + rerollTail;
 }
 
 // Does a (normalized) face carry the solar capability badge? Mirror of
@@ -4561,7 +4593,9 @@ function applyMoveFreighter(state, op, player) {
   let originThrustBonus = 0;
   if (frPw0 && frPw0.beltOriginThrust && hazardKind(here) === 'rad') originThrustBonus += frPw0.beltOriginThrust;
   if (frPw0 && frPw0.factoryOriginThrust && state.factories[here]) originThrustBonus += frPw0.factoryOriginThrust;
-  const frThrust = freighterNetThrust(powersatPushFor(state, player)) + originThrustBonus;
+  // WARDEN STARSHOT FUTURE (Shipbrain): Freighter / Mobile Factories +1 thrust.
+  const frThrust = freighterNetThrust(powersatPushFor(state, player)) + originThrustBonus
+    + (hasFutureEffect(player, 'freighterThrustPlus1') ? 1 : 0);
   // Acetylene Rocketplane Liftoff (H6c). The published text names the craft
   // outright - "A Spacecraft (Rocket, Freighter or Mobile Factory) may use
   // factory-assist to exit (but not enter) an Atmospheric Site to allow movement
@@ -4681,7 +4715,7 @@ function applyMoveFreighter(state, op, player) {
   const radWaived = [];
   for (const slug of arrivals) {
     const k = hazardKind(slug);
-    if (k === 'rad') { if (tourismWaivesBelt(state, player, slug)) radWaived.push(slug); else rad.push(slug); }
+    if (k === 'rad') { if (contractBeltImmune(state, player) || tourismWaivesBelt(state, player, slug)) radWaived.push(slug); else rad.push(slug); }
     else if (k === 'skull' || k === 'aero') generic.push(slug);
   }
   const rollItems = [];
@@ -4743,7 +4777,7 @@ function applyMoveFreighter(state, op, player) {
 
   const gen = makeRng(state.seed, state.rng.cursor);
   const rolls = [];
-  for (const slug of radWaived) rolls.push({ slug, kind: 'rad', bypassed: true, tourismCycler: true });
+  for (const slug of radWaived) rolls.push({ slug, kind: 'rad', bypassed: true, ...(contractBeltImmune(state, player) ? { beltImmune: true } : { tourismCycler: true }) });
   for (const slug of frCrashIgnored) rolls.push({ slug, kind: hazardKind(slug), safe: true });
   for (const slug of frColonyWaived) rolls.push({ slug, kind: hazardKind(slug), safe: true });
   let destroyed = false;
@@ -4751,9 +4785,11 @@ function applyMoveFreighter(state, op, player) {
   // Generic + assist rolls: a critical (a 1) destroys the freighter.
   if (!wantPay) {
     for (const item of rollItems) {
-      const d6 = gen.d6();
+      const first = gen.d6();
+      const reroll = crashReroll(state, player, item, first, gen);
+      const d6 = reroll != null ? reroll : first;
       const crit = d6 === 1;
-      rolls.push({ slug: item.slug, kind: item.kind, phase: item.phase, d6, crit });
+      rolls.push({ slug: item.slug, kind: item.kind, phase: item.phase, d6, crit, ...(reroll != null ? { rerolledFrom: first } : {}) });
       if (crit) { destroyed = true; haltSlug = item.slug; break; }
     }
   }
@@ -5049,7 +5085,7 @@ function applyMoveBernal(state, op, player) {
   const radWaived = [];
   for (const slug of arrivals) {
     const k = hazardKind(slug);
-    if (k === 'rad') { if (tourismWaivesBelt(state, player, slug)) radWaived.push(slug); else rad.push(slug); }
+    if (k === 'rad') { if (contractBeltImmune(state, player) || tourismWaivesBelt(state, player, slug)) radWaived.push(slug); else rad.push(slug); }
     else if (k === 'skull' || k === 'aero') generic.push(slug);
   }
   // Same order and waivers as the rocket and the Freighter: the liftoff assist
@@ -5082,15 +5118,17 @@ function applyMoveBernal(state, op, player) {
 
   const gen = makeRng(state.seed, state.rng.cursor);
   const rolls = [];
-  for (const slug of radWaived) rolls.push({ slug, kind: 'rad', bypassed: true, tourismCycler: true });
+  for (const slug of radWaived) rolls.push({ slug, kind: 'rad', bypassed: true, ...(contractBeltImmune(state, player) ? { beltImmune: true } : { tourismCycler: true }) });
   for (const slug of bnCrashIgnored) rolls.push({ slug, kind: hazardKind(slug), safe: true });
   for (const slug of bnColonyWaived) rolls.push({ slug, kind: hazardKind(slug), safe: true });
   let destroyed = false, haltSlug = dest;
   if (!wantPay) {
     for (const item of rollItems) {
-      const d6 = gen.d6();
+      const first = gen.d6();
+      const reroll = crashReroll(state, player, item, first, gen);
+      const d6 = reroll != null ? reroll : first;
       const crit = d6 === 1;
-      rolls.push({ slug: item.slug, kind: item.kind, phase: item.phase, d6, crit });
+      rolls.push({ slug: item.slug, kind: item.kind, phase: item.phase, d6, crit, ...(reroll != null ? { rerolledFrom: first } : {}) });
       if (crit) { destroyed = true; haltSlug = item.slug; break; }
     }
   }
@@ -5470,7 +5508,7 @@ function applyMoveFactory(state, op, player) {
   const radWaived = [];
   for (const slug of arrivals) {
     const k = hazardKind(slug);
-    if (k === 'rad') { if (tourismWaivesBelt(state, player, slug)) radWaived.push(slug); else rad.push(slug); }
+    if (k === 'rad') { if (contractBeltImmune(state, player) || tourismWaivesBelt(state, player, slug)) radWaived.push(slug); else rad.push(slug); }
     else if (k === 'skull' || k === 'aero') generic.push(slug);
   }
   const rollItems = [];
@@ -5518,15 +5556,17 @@ function applyMoveFactory(state, op, player) {
 
   const gen = makeRng(state.seed, state.rng.cursor);
   const rolls = [];
-  for (const slug of radWaived) rolls.push({ slug, kind: 'rad', bypassed: true, tourismCycler: true });
+  for (const slug of radWaived) rolls.push({ slug, kind: 'rad', bypassed: true, ...(contractBeltImmune(state, player) ? { beltImmune: true } : { tourismCycler: true }) });
   let destroyed = false, haltSlug = dest;
   const wasGlitched = lifting ? !!fac.glitched : !!cube.glitched;
   let glitched = wasGlitched;
   if (!wantPay) {
     for (const item of rollItems) {
-      const d6 = gen.d6();
+      const first = gen.d6();
+      const reroll = crashReroll(state, player, item, first, gen);
+      const d6 = reroll != null ? reroll : first;
       const crit = d6 === 1;
-      rolls.push({ slug: item.slug, kind: item.kind, phase: item.phase, d6, crit });
+      rolls.push({ slug: item.slug, kind: item.kind, phase: item.phase, d6, crit, ...(reroll != null ? { rerolledFrom: first } : {}) });
       if (crit) { destroyed = true; haltSlug = item.slug; break; }
     }
   }
@@ -5992,7 +6032,7 @@ function applyMove(state, op, player) {
       // still says Earth and a non-Sirens game must read exactly as before.
       // Scoped to a SIREN player: this sits with the Sirenian Bernal rules, so
       // an Earthling sharing a Sirens table does not get free passage.
-      if (tourismWaivesBelt(state, player, slug)) radWaived.push(slug);
+      if (contractBeltImmune(state, player) || tourismWaivesBelt(state, player, slug)) radWaived.push(slug);
       else rad.push(slug);
     } else if (k === 'skull' || k === 'aero') generic.push(slug);
   }
@@ -6011,7 +6051,7 @@ function applyMove(state, op, player) {
   const engineLive = !!op._replay || (!!player.rocket.activeThrusterId
     && rocketSupportStatus(player.rocket, player).operational);
   const thrust = asFreighter
-    ? freighterNetThrust(powersatPush)
+    ? freighterNetThrust(powersatPush) + (hasFutureEffect(player, 'freighterThrustPlus1') ? 1 : 0)
     : (engineLive
       ? activeNetThrust(player.rocket, powersatPush, solarBonus, powersatFutureBonus, playerCrewReactorKinds(player))
       : 0);
@@ -6183,7 +6223,7 @@ function applyMove(state, op, player) {
   }
   for (const slug of colonyWaivedSlugs) rolls.push({ slug, kind: hazardKind(slug), safe: true });
   for (const slug of crashIgnoredSlugs) rolls.push({ slug, kind: hazardKind(slug), safe: true });
-  for (const slug of radWaived) rolls.push({ slug, kind: 'rad', bypassed: true, tourismCycler: true });
+  for (const slug of radWaived) rolls.push({ slug, kind: 'rad', bypassed: true, ...(contractBeltImmune(state, player) ? { beltImmune: true } : { tourismCycler: true }) });
 
   // Hazards resolve in TRAVEL order: "if your Spacecraft enters one,
   // immediately roll" (H7), and a Belt Roll is made on entering each belt
@@ -6310,12 +6350,14 @@ function applyMove(state, op, player) {
         rolls.push({ slug: item.slug, kind: item.kind, phase: item.phase, paid: true });
         continue;
       }
-      const d6 = gen.d6();
+      const first = gen.d6();
+      const reroll = crashReroll(state, player, item, first, gen);
+      const d6 = reroll != null ? reroll : first;
       // The guided tutorial never punishes a hazard roll: the die still shows, but
       // a critical does NOT destroy the ship (nothing is lost to a roll in the
       // tutorial). (User 2026-07-10.)
       const crit = d6 === 1 && !state.tutorial;
-      rolls.push({ slug: item.slug, kind: item.kind, phase: item.phase, d6, crit });
+      rolls.push({ slug: item.slug, kind: item.kind, phase: item.phase, d6, crit, ...(reroll != null ? { rerolledFrom: first } : {}) });
       if (crit) {
         destroyed = true; haltSlug = item.slug;
         // Every later hazard is never reached.
@@ -6479,6 +6521,7 @@ function applyMove(state, op, player) {
   // so stamp it - it cannot be transferred to another vehicle and moved again
   // until this player's next turn.
   stampStackMoved(player.rocket.stack);
+  const aeroIsoNote = exodusAeroIsotope(state, player, player.rocket, dest);
   // Advance the stored route past this turn. A turn-tagged route drops its
   // turn-1 legs and shifts the rest down (T2 -> T1, ...); a legacy untagged
   // route pops everything up to the node we reached. A ship that lost its
@@ -6585,6 +6628,7 @@ function applyMove(state, op, player) {
       + ` the hazard on the first space out was ignored.`;
   }
   log += describeHazardRolls(rolls);
+  log += aeroIsoNote;
   if (decommissioned.length) log += ` Radiation decommissioned ${countedCards(decommissioned)}.`;
   if (degradedRadiators.length) log += ` Radiation degraded ${countedCards(degradedRadiators, 'radiator')} to the light side.`;
   if (sailDecommissioned.length) log += ` Aerobraking burned off ${sailDecommissioned.join(', ')} (decommissioned to hand).`;
@@ -7510,11 +7554,442 @@ function contractUpheaval(state) {
   if (!state.m4 || state.contractSide === 'gold' || !state.contractDecks) return '';
   state.contractSide = 'gold';
   for (const pair of Object.keys(state.contractDecks)) {
+    if (pair === 'EX') continue;   // 4B1b: the three non-Exodus decks only
     state.contractDecks[pair] = state.contractDecks[pair].slice().reverse()
-      .filter((id) => !faceUnplayable(contractFace(id, 'gold')));
+      .filter((id) => !faceUnplayable(contractFace(id, 'gold'), { m1: state.m1, m2: state.m2 }));
   }
   return ' Isobank Contract Upheaval: the contract decks flip to their gold sides.';
 }
+// ---- 4D1b / 3B5: gold beads at your Bank pay like aqua --------------------------
+// "At your Bank, as a free action or in a payment, you may exchange 1 gold bead
+// for 10 Aqua (but not vice versa)." A payment that the aqua alone cannot cover
+// sells just enough beads (to the Earth market, 4D1d) and keeps the change.
+// Only once isotope is monetized, and only in Module 4.
+function beadsPay(state) { return !!(state.m4 && state.isotopeMonetized); }
+function bankFunds(state, player) {
+  return (player.aqua | 0) + (beadsPay(state) ? Math.max(0, player.isotopes | 0) * isoAqua(state) : 0);
+}
+// Sell beads so the player holds at least `need` aqua; returns how many sold.
+function coverFromBeads(state, player, need) {
+  if (!beadsPay(state)) return 0;
+  const short = (need | 0) - (player.aqua | 0);
+  if (short <= 0) return 0;
+  const n = Math.min(Math.max(0, player.isotopes | 0), Math.ceil(short / isoAqua(state)));
+  if (n <= 0) return 0;
+  player.isotopes -= n;
+  state.earthMarket = Math.max(0, state.earthMarket | 0) + n;
+  player.aqua = (player.aqua | 0) + n * isoAqua(state);
+  return n;
+}
+const beadNote = (n) => (n ? ` (${n} gold bead${n === 1 ? '' : 's'} exchanged at the Bank)` : '');
+// 1Cb / 4D1d: a player with no isostandard (never had a GW/TW thruster) cannot
+// hold gold beads; beads reaching their Bank convert to aqua at once.
+function hasIsostandard(player) { return (player.isostandards || []).length > 0; }
+
+// ---- 4D2 the isobank, 4E3 / 4E4 Project Exodus ---------------------------------
+// The isototal: every isovault's beads (4E3a).
+function isototalOf(state) {
+  return (state.players || []).reduce((n, p) => n + Math.max(0, p.isovault | 0), 0);
+}
+// The isobank Bernal (an anchored BEO Bernal), or null.
+function isobankBernal(state) {
+  const ib = state.isobank;
+  if (!ib) return null;
+  const owner = (state.players || []).find((p) => p.profileId === ib.ownerId);
+  return owner ? (owner.bernals || []).find((bn) => bn && bn.cardId === ib.bernalId) || null : null;
+}
+// 4D2a: on your Turn, with no isobank yet, an isostandard and an Anchored
+// non-Home Bernal with a Dirtside matching it, you MUST found the isobank there.
+// Module 4 + Module 2 (Bernals are Module 2). Returns the log note.
+function maybeFoundIsobank(state, player) {
+  if (!(state.m4 && state.m2) || state.isobank || !player || !hasIsostandard(player)) return '';
+  for (const bn of (player.bernals || [])) {
+    if (!bn || !bn.anchored || bn.siteId == null || isHomeBernal(bn)) continue;
+    const match = bernalDirtsides(state, bn, player).find((slug) => {
+      const f = state.factories && state.factories[slug];
+      return f && player.isostandards.includes(f.spectralType || 'C');
+    });
+    if (!match) continue;
+    state.isobank = { ownerId: player.profileId, bernalId: bn.cardId, siteId: bn.siteId };
+    // 4D2c: the starship token comes off the Exodus deck, which opens for auction.
+    // House rule (owner 2026-11-23): instead of C4's six cards on a random
+    // side, every Exodus face is its own card, so the deck is 12 cards,
+    // shuffled. A face this game cannot play is left out.
+    const mods = { m1: state.m1, m2: state.m2 };
+    const gen = makeRng(state.seed, state.rng.cursor);
+    const exodus = CONTRACTS.filter((x) => x.exodus && !faceUnplayable(contractFace(x.id, 'exodus'), mods)).map((x) => x.id);
+    for (let i = exodus.length - 1; i > 0; i--) { const j = Math.floor(gen.next() * (i + 1)); [exodus[i], exodus[j]] = [exodus[j], exodus[i]]; }
+    state.rng.cursor = gen.cursor;
+    state.contractDecks = state.contractDecks || {};
+    state.contractDecks.EX = exodus;
+    const where = (siteById(bn.siteId) || {}).name || bn.siteId;
+    const card = PATENTS_BY_ID[bn.cardId];
+    return ` ${player.name} founds the ISOBANK at the ${(card && card.name) || 'Bernal'} (${where}) and becomes the isobanker:`
+      + ` the starship token goes on the map and the Exodus contract deck opens.`;
+  }
+  return '';
+}
+// Is this map space the isobank, or one of its Dirtsides? (4D2h mining bonus)
+function atIsobankOrDirtside(state, siteId) {
+  const bn = isobankBernal(state);
+  if (!bn || siteId == null) return false;
+  if (bn.siteId === siteId) return true;
+  const owner = state.players.find((p) => p.profileId === state.isobank.ownerId);
+  return bernalDirtsides(state, bn, owner).includes(siteId);
+}
+// 4D2h: an isotope refuel at the isobank or its Dirtsides by the isobanker gains
+// 1 extra Isotope.
+function isobankMiningBonus(state, player, siteId) {
+  return state.isobank && state.isobank.ownerId === player.profileId && atIsobankOrDirtside(state, siteId) ? 1 : 0;
+}
+// The TW thrusters (Promoted GW thrusters) standing at the isobank, any owner.
+function twThrustersAtIsobank(state) {
+  const bn = isobankBernal(state);
+  if (!bn) return [];
+  const out = [];
+  for (const p of state.players) {
+    const stacks = [];
+    if (p.rocket && p.rocket.siteId === bn.siteId) stacks.push(p.rocket.stack || []);
+    for (const b of (p.bernals || [])) if (b && b.siteId === bn.siteId) stacks.push(b.stack || []);
+    if (p.freighter && p.freighter.siteId === bn.siteId) stacks.push(p.freighter.stack || []);
+    for (const o of Object.values(p.outposts || {})) if (o && o.siteId === bn.siteId) stacks.push(o.cards || []);
+    for (const st of stacks) for (const sl of st) {
+      const card = sl && PATENTS_BY_ID[sl.id];
+      if (card && card.type === 'gw-thruster' && sl.face === 'secondary') {
+        const f = card.faces && card.faces.secondary;
+        out.push({ ownerId: p.profileId, cardId: sl.id, thrust: Number((f && f.thrust) || card.thrust || 0) });
+      }
+    }
+  }
+  return out;
+}
+// Endgame Exodus rows (4E2e, 4E2f, 4E3, 4E4): the isobanker medal, and, if the
+// isototal is at least Reckless with a TW thruster at the isobank, the starshot:
+// rank VP by isovault, the command and propulsion medals, and 1 VP per
+// augmentation on each player's most augmented Colonist.
+export function exodusScoring(state) {
+  const out = {};
+  if (!state.m4) return out;
+  for (const p of state.players) out[p.profileId] = { isobanker: 0, rank: 0, command: 0, propulsion: 0, augmented: 0, isovault: Math.max(0, p.isovault | 0) };
+  const bn = isobankBernal(state);
+  if (bn && bn.anchored && out[state.isobank.ownerId]) out[state.isobank.ownerId].isobanker = 4;
+  const total = isototalOf(state);
+  const band = exodusBand(total, state.players.length);
+  const sh = state.starship;
+  // 4E4 (1): a desperation starship that exited with its TW thruster and an
+  // augmented Colonist aboard. (2): the endgame starshot at the isobank, which a
+  // launched starship has taken the TW thruster away from.
+  const aboard = (sh && sh.cards) || [];
+  const desperation = !!(sh && sh.exited && aboard.some((c) => c.slot && c.slot.id === sh.twCardId)
+    && aboard.some((c) => isColonistSlot(c.slot)) && band !== 'none');
+  const tws = (sh && !sh.destroyed) ? [] : twThrustersAtIsobank(state);
+  const starshot = desperation || (!!bn && band !== 'none' && tws.length > 0);
+  // 4D3h Endgame Mutiny: the starship never left. The commander takes the
+  // default chit (-3 VP) and surrenders the isobanker medal to the passenger
+  // with the next most isofuel.
+  if (sh && !sh.exited && !sh.destroyed && out[sh.commanderId]) {
+    out[sh.commanderId].mutiny = -3;
+    if (state.isobank && state.isobank.ownerId === sh.commanderId && out[sh.commanderId].isobanker) {
+      out[sh.commanderId].isobanker = 0;
+      const next = Object.keys(sh.passengers || {}).filter((pid) => String(pid) !== String(sh.commanderId))
+        .map((pid) => state.players.find((p) => String(p.profileId) === String(pid))).filter(Boolean)
+        .sort((a, b) => (b.isovault | 0) - (a.isovault | 0))[0];
+      if (next) out[next.profileId].isobanker = 4;
+    }
+  }
+  if (starshot) {
+    const vps = EXODUS_RANK_VP[band];
+    const ranked = state.players.map((p) => ({ id: p.profileId, n: Math.max(0, p.isovault | 0) }))
+      .filter((r) => r.n > 0).sort((a, b) => b.n - a.n);
+    // Tied players split the VP of the positions they share, rounding down.
+    let pos = 0;
+    while (pos < ranked.length && pos < 3) {
+      const tie = ranked.filter((r) => r.n === ranked[pos].n);
+      const pool = vps.slice(pos, pos + tie.length).reduce((a, b) => a + b, 0);
+      for (const r of tie) out[r.id].rank = Math.floor(pool / tie.length);
+      pos += tie.length;
+    }
+    // Command medal: most isotopes in the isovaults (the isobanker breaks ties);
+    // for a desperation starship, its commander.
+    if (desperation && out[sh.commanderId]) out[sh.commanderId].command = 4;
+    else if (ranked.length) {
+      const top = ranked.filter((r) => r.n === ranked[0].n);
+      const cmd = top.find((r) => r.id === state.isobank.ownerId) || top[0];
+      out[cmd.id].command = 4;
+    }
+    // Propulsion medal: the owner of the highest base thrust TW thruster there.
+    const best = [...tws].sort((a, b) => b.thrust - a.thrust)[0];
+    if (desperation && out[sh.twOwnerId]) out[sh.twOwnerId].propulsion = 4;
+    else if (best && out[best.ownerId]) out[best.ownerId].propulsion = 4;
+    for (const p of state.players) {
+      const perColonist = {};
+      for (const a of Object.values(p.augments || {})) if (a && a.colonistId) perColonist[a.colonistId] = (perColonist[a.colonistId] || 0) + 1;
+      // A desperation starship counts only the Colonist aboard (4E4d).
+      if (desperation) {
+        const mine = (sh.passengers || {})[p.profileId];
+        out[p.profileId].augmented = mine ? (perColonist[mine] || 0) : 0;
+      } else {
+        out[p.profileId].augmented = Math.max(0, ...Object.values(perColonist));
+      }
+    }
+  }
+  for (const id of Object.keys(out)) {
+    const r = out[id];
+    r.vp = r.isobanker + r.rank + r.command + r.propulsion + r.augmented + (r.mutiny || 0);
+    r.isototal = total; r.band = band; r.starshot = starshot; r.desperation = desperation;
+  }
+  return out;
+}
+
+// ===== 4D3 Desperation Starshot ================================================
+// state.starship = { siteId, commanderId, commanderColonistId, twCardId,
+//   twOwnerId, cards: [{ ownerId, slot }], passengers: { profileId: colonistId },
+//   launchedRound, exited, destroyed, jsjTurns, movedTurn, stranded }.
+// The commander launches it from the isobank (a free action), then flies the
+// starship token on their turns: net thrust 1, 2 with afterburn (1 isotope off
+// the commander's isovault), 3 Bonus Pivots in the planner, double FINAO, no
+// fuel tracked. Taking an Ad Astra exit freezes it; the endgame scores it (4E4).
+export function starshipInFlight(state) {
+  const sh = state && state.starship;
+  return !!(sh && !sh.exited && !sh.destroyed);
+}
+// 4D3b: among the players with a completed Exodus contract, the most Isofuel in
+// the isovault commands (the isobanker breaks ties).
+export function starshipCommanderOf(state) {
+  const ok = (state.players || []).filter((p) => (p.fulfilledContracts || []).some((f) => f && (f.side === 'exodus' || (CONTRACTS_BY_ID[f.id] || {}).exodus)));
+  if (!ok.length) return null;
+  const max = Math.max(...ok.map((p) => p.isovault | 0));
+  const top = ok.filter((p) => (p.isovault | 0) === max);
+  return top.find((p) => state.isobank && p.profileId === state.isobank.ownerId) || top[0];
+}
+const isTwSlotE = (sl) => !!(sl && (PATENTS_BY_ID[sl.id] || {}).type === 'gw-thruster' && (sl.face === 'secondary' || sl.promoted));
+// Every TW thruster in any stack at `site`, with its owner, stack and base thrust.
+function twThrustersAt(state, site) {
+  const out = [];
+  for (const q of state.players || []) {
+    for (const st of playerStacks(q)) {
+      if (st.siteId == null || String(st.siteId) !== String(site)) continue;
+      for (const sl of st.slots) {
+        if (!isTwSlotE(sl)) continue;
+        const f = (PATENTS_BY_ID[sl.id].faces || {}).secondary || {};
+        out.push({ owner: q, stack: st, slot: sl, thrust: Number(f.thrust) || 0 });
+      }
+    }
+  }
+  return out;
+}
+// The TW thruster's support chain in its stack: operational (no afterburn) and
+// the support card ids that ride with it.
+function twChain(tw, owner) {
+  const pseudo = { stack: tw.stack.slots, activeThrusterId: tw.slot.id, wiring: {} };
+  const cards = chainCardsFromRocket(pseudo, playerCrewReactorKinds(owner));
+  const chain = resolveSupportChain({ cards, activeId: tw.slot.id, wiring: {} });
+  const missing = unmetRequirements({ cards, order: chain.order, edges: chain.edges });
+  return { operational: missing.length === 0, supportIds: chain.order.filter((id) => id !== tw.slot.id) };
+}
+// STARSHIP_LAUNCH (free action, the commander). op = { colonists: [cardId...]
+// (augmented Colonists at the isobank, one per player; the first is the
+// commander's own and commands) }.
+function applyStarshipLaunch(state, op, player) {
+  if (!state.m4) return fail('not_m4');
+  if (!state.isobank) return fail('no_isobank');
+  if (state.starship) return fail('starship_launched');
+  const cmd = starshipCommanderOf(state);
+  if (!cmd || cmd.profileId !== player.profileId) return fail('not_commander');
+  const site = String(state.isobank.siteId);
+  const total = isototalOf(state);
+  if (exodusBand(total, state.players.length) === 'none') return fail('isototal_too_low', { isototal: total });
+  // The TW thruster present with the highest base thrust, operational without afterburn.
+  const tws = twThrustersAt(state, site).sort((a, b) => b.thrust - a.thrust);
+  if (!tws.length) return fail('no_tw_thruster');
+  const tw = tws[0];
+  const chain = twChain(tw, tw.owner);
+  if (!chain.operational) return fail('tw_not_operational');
+  // Crew: augmented Colonists at the isobank, one per player.
+  const want = (Array.isArray(op.colonists) ? op.colonists : []).map(String);
+  const crew = [];
+  for (const id of want) {
+    for (const q of state.players) {
+      const aug = Object.values(q.augments || {}).some((a) => a && String(a.colonistId) === id);
+      if (!aug) continue;
+      for (const st of playerStacks(q)) {
+        if (st.siteId == null || String(st.siteId) !== site) continue;
+        const sl = st.slots.find((x) => x && String(x.id) === id && isColonistSlot(x));
+        if (sl) crew.push({ owner: q, stack: st, slot: sl });
+      }
+    }
+  }
+  if (!crew.length || !crew.some((c) => c.owner.profileId === player.profileId)) return fail('needs_augmented_commander');
+  const owners = new Set(crew.map((c) => c.owner.profileId));
+  if (owners.size !== crew.length) return fail('one_colonist_per_player');
+  // Cargo transfer everything aboard the starship stack.
+  const cards = [];
+  const take = (stack, id, owner) => {
+    const i = stack.slots.findIndex((x) => x && String(x.id) === String(id));
+    if (i >= 0) { const [sl] = stack.slots.splice(i, 1); cards.push({ ownerId: owner.profileId, slot: sl }); }
+  };
+  take(tw.stack, tw.slot.id, tw.owner);
+  for (const id of chain.supportIds) take(tw.stack, id, tw.owner);
+  for (const c of crew) take(c.stack, c.slot.id, c.owner);
+  const passengers = {};
+  for (const c of crew) passengers[c.owner.profileId] = String(c.slot.id);
+  const twCard = PATENTS_BY_ID[tw.slot.id];
+  const spectral = (twCard && twCard.spectralType) || 'C';
+  state.starship = {
+    siteId: site, commanderId: player.profileId, commanderColonistId: passengers[player.profileId],
+    twCardId: tw.slot.id, twOwnerId: tw.owner.profileId, spectral, cards, passengers,
+    launchedRound: state.round | 0, exited: false, destroyed: false, jsjTurns: null, movedTurn: null,
+  };
+  // Exodus Endgame: all Seniority Disks but one come off (the game ends at the
+  // next threshold). Exodus Anarchy until the starship exits.
+  const before = state.maxRounds | 0;
+  if (state.maxRounds) state.maxRounds = Math.min(state.maxRounds, state.round | 0);
+  state.anarchy = true;
+  const names = cards.map((c) => cardNameOf(c.slot.id));
+  return { ok: true, state, noUndo: true,
+    log: `${player.name} launches the desperation starship from the isobank, commanding ${cardNameOf(passengers[player.profileId])}: ${names.join(', ')} aboard, isototal ${total} (spectral-${spectral} isofuel). Anarchy until it leaves the map; the game ends this Solar Cycle${before && before !== state.maxRounds ? '' : ''}.` };
+}
+// STARSHIP_BOARD (free action): an augmented Colonist of yours at the
+// starship's space boards it (one per player), or isotopes carried there join
+// your isovault. op = { colonistId } | { isotopes: true }.
+function applyStarshipBoard(state, op, player) {
+  if (!starshipInFlight(state)) return fail('no_starship');
+  const sh = state.starship;
+  if (op.colonistId) {
+    if (sh.passengers[player.profileId]) return fail('one_colonist_per_player');
+    const id = String(op.colonistId);
+    if (!Object.values(player.augments || {}).some((a) => a && String(a.colonistId) === id)) return fail('not_augmented');
+    for (const st of playerStacks(player)) {
+      if (st.siteId == null || String(st.siteId) !== String(sh.siteId)) continue;
+      const i = st.slots.findIndex((x) => x && String(x.id) === id && isColonistSlot(x));
+      if (i < 0) continue;
+      const [sl] = st.slots.splice(i, 1);
+      sh.cards.push({ ownerId: player.profileId, slot: sl });
+      sh.passengers[player.profileId] = id;
+      return { ok: true, state, log: `${cardNameOf(id)} boards the starship.` };
+    }
+    return fail('not_colocated');
+  }
+  // Isotopes: the rocket's isotope tank at the starship's space.
+  if (!player.rocket || String(player.rocket.siteId) !== String(sh.siteId)) return fail('not_colocated');
+  if (tankGradeOf(player.rocket) !== 'isotope') return fail('not_isotope');
+  const n = Math.floor(Number(player.rocket.tank) || 0);
+  if (n <= 0) return fail('no_isotope');
+  player.rocket.tank = round6((Number(player.rocket.tank) || 0) - n);
+  recallIfEmpty(player);
+  player.isovault = Math.max(0, player.isovault | 0) + n;
+  return { ok: true, state, log: `${player.name} loads ${n} isotope${n === 1 ? '' : 's'} into the starship (isovault ${player.isovault}).` };
+}
+// STARSHIP_MOVE (the commander, once per turn). op = { segments:[{from,to,burns}],
+// afterburn?, payFinao? }. Burns this turn <= 1 (2 with afterburn).
+function applyStarshipMove(state, op, player) {
+  if (!starshipInFlight(state)) return fail('no_starship');
+  const sh = state.starship;
+  if (sh.commanderId !== player.profileId) return fail('not_commander');
+  if (sh.jsjTurns != null) return fail('starship_at_solar_oberth');
+  if (sh.movedTurn === `${state.round}:${state.turn}`) return fail('no_moves_left');
+  const twAboard = sh.cards.some((c) => c.slot && c.slot.id === sh.twCardId);
+  if (!twAboard) return fail('starship_stranded');
+  const segs = Array.isArray(op.segments) ? op.segments.filter((sg) => sg && sg.to != null) : [];
+  if (!segs.length) return fail('no_route');
+  const burns = segs.reduce((n, sg) => n + Math.max(0, Number(sg.burns) || 0), 0);
+  const thrust = op.afterburn ? 2 : 1;
+  if (burns > thrust) return fail('not_enough_thrust', { burns, thrust });
+  if (op.afterburn) {
+    if ((player.isovault | 0) <= 0) return fail('no_isofuel');
+    player.isovault -= 1;
+  }
+  // Hazards along the way: crash / aerobrake rolls (a 1 destroys it; FINAO
+  // doubled), radiation belts decommission cards below the belt's strength.
+  const gen = makeRng(state.seed, state.rng.cursor);
+  const notes = [];
+  let rolled = false;
+  let at = sh.siteId;
+  const per = 2 * finaoPerFor(state, player);
+  for (const sg of segs) {
+    const to = String(sg.to);
+    const kind = hazardKind(to);
+    if (kind === 'skull' || kind === 'aero') {
+      if (op.payFinao) {
+        if (finaoFunds(state, player) < per) return fail('insufficient_aqua');
+        payFinao(state, player, per);
+        notes.push(`paid ${per} FINAO`);
+      } else {
+        const first = gen.d6();
+        const rr = crashReroll(state, player, { kind }, first, gen);
+        const d6 = rr != null ? rr : first;
+        rolled = true;
+        notes.push(`hazard d6 ${d6}${rr != null ? ` (re-rolled a 1)` : ''}`);
+        if (d6 === 1) {
+          state.rng.cursor = gen.cursor;
+          return { ok: true, state, rolled: true, log: `The desperation starship was DESTROYED at ${(siteById(to) || {}).name || to} (rolled a 1). ${starshipLost(state)}` };
+        }
+      }
+    } else if (kind === 'rad' && !contractBeltImmune(state, player)) {
+      const d6 = gen.d6();
+      rolled = true;
+      const rad = Math.max(0, d6 - 1);
+      const lost = [];
+      sh.cards = sh.cards.filter((c) => {
+        if (isColonistSlot(c.slot) || slotRadHardness(c.slot) >= rad) return true;
+        const owner = playerByProfile(state, c.ownerId);
+        if (owner) decommissionSlotTo(state, owner, c.slot);
+        lost.push(c.slot.id);
+        return false;
+      });
+      notes.push(`rad d6 ${d6}${lost.length ? `: ${cardNames(lost)} lost` : ''}`);
+    }
+    at = to;
+  }
+  state.rng.cursor = gen.cursor;
+  sh.siteId = at;
+  sh.movedTurn = `${state.round}:${state.turn}`;
+  if (!sh.cards.some((c) => c.slot && c.slot.id === sh.twCardId)) sh.stranded = true;
+  let log = `${player.name} flies the starship to ${(siteById(at) || {}).name || at}${op.afterburn ? ' on afterburn (1 isotope burned)' : ''}${notes.length ? ` [${notes.join('; ')}]` : ''}.`;
+  if (isAdAstraExit(at) && !sh.stranded) {
+    if (exodusBand(isototalOf(state), state.players.length) === 'none') {
+      log += ' The isototal is below Reckless, so the starship cannot leave the map yet.';
+    } else if (/jupiter-sol-jupiter/i.test(String((NODE_TAGS[at] || {}).label || ''))) {
+      // Jupiter-Sol-Jupiter: two Turns at the solar oberth, then it exits.
+      sh.siteId = 'burn-utoma'; sh.jsjTurns = 2;
+      log += ' It takes the Jupiter-Sol-Jupiter exit: two Turns at the solar oberth, then it leaves.';
+    } else {
+      log += starshipExit(state);
+    }
+  }
+  return rolled ? { ok: true, state, rolled: true, log } : { ok: true, state, noUndo: true, log };
+}
+function starshipExit(state) {
+  const sh = state.starship;
+  sh.exited = true;
+  sh.exitedRound = state.round | 0;
+  state.anarchy = false;
+  return ' The starship leaves the map: its cards and isotopes are frozen, Anarchy ends.';
+}
+function starshipLost(state) {
+  const sh = state.starship;
+  for (const c of sh.cards) {
+    const owner = playerByProfile(state, c.ownerId);
+    if (!owner) continue;
+    if (isColonistSlot(c.slot)) retireColonistId(state, owner, c.slot.id);
+    else decommissionSlotTo(state, owner, c.slot);
+  }
+  sh.cards = [];
+  sh.destroyed = true;
+  state.anarchy = false;
+  return 'Its cards are lost and Anarchy ends.';
+}
+// End of the commander's turn: the Jupiter-Sol-Jupiter countdown.
+function starshipTurnEnd(state, player) {
+  const sh = state.starship;
+  if (!starshipInFlight(state) || sh.commanderId !== player.profileId || sh.jsjTurns == null) return '';
+  sh.jsjTurns -= 1;
+  if (sh.jsjTurns > 0) return ' The starship waits at the solar oberth.';
+  sh.jsjTurns = null;
+  if (!sh.cards.some((c) => c.slot && c.slot.id === sh.twCardId)) return ' The starship has no TW thruster left and stays at the solar oberth.';
+  return starshipExit(state);
+}
+
 // Gold beads (Isotopes) stored at your Bank are currency worth 10 Aquas each
 // (3B5). 4D1d Blue/Gold Exchange: transport gold beads to your Bank; as a free
 // action sell 1 Isotope for 10 Aquas (it goes, unowned, to the Earth market), or
@@ -7523,11 +7998,17 @@ function contractUpheaval(state) {
 // leaves (4D1e). player.isotopes = beads at the Bank; state.earthMarket = the
 // unowned beads on Earth. Module 4 only.
 export const ISOTOPE_AQUA = 10;
+// ISOTOPE CARTEL FUTURE (Space Jockeys): the exchange rate becomes 12 aqua.
+export function isoAqua(state) { return (state && state.isotopeRate) || ISOTOPE_AQUA; }
 // op = { action: 'deposit', amount?, cardId?, holder? }  - whole isotope units
 //        from an isotope fuel can (cardId in holder, default the LEO Stack) or
 //        from the rocket's isotope tank, at your Bank (LEO / your Home Bernal).
 //      { action: 'sell', amount }  - Bank beads to the Earth market, +10 aqua each.
 //      { action: 'buy', amount }   - Earth market beads to your Bank, -10 aqua each.
+//      { action: 'withdraw', amount, spectral? } - Bank beads into an isotope can
+//        in your Bank's stack; they become your isostandard as they leave (4D1e).
+//      { action: 'vault', amount?, cardId?, holder? } - carry isotopes to the
+//        isobank and deposit them in your isovault, never to come out (4D2f).
 function applyIsotopeExchange(state, op, player) {
   if (!state.m4) return fail('not_m4');
   const action = String(op.action || '');
@@ -7553,8 +8034,9 @@ function applyIsotopeExchange(state, op, player) {
       can.amount = have - n;
       if (can.amount <= 0) arr.splice(idx, 1);
       if (holderId === 'rocket') recallIfEmpty(player);
+      if (!hasIsostandard(player)) return debase(state, player, n);
       player.isotopes += n;
-      return { ok: true, state, log: `${player.name} brought ${n} isotope${n === 1 ? '' : 's'} from a can in ${stackLabel(holderId)} to their Bank (${player.isotopes} at the Bank, worth ${player.isotopes * ISOTOPE_AQUA} aqua).` };
+      return { ok: true, state, log: `${player.name} brought ${n} isotope${n === 1 ? '' : 's'} from a can in ${stackLabel(holderId)} to their Bank (${player.isotopes} at the Bank, worth ${player.isotopes * isoAqua(state)} aqua).` };
     }
     if (!rocketAtRefuelDepot(state, player)) return fail('not_at_bank');
     if (tankGradeOf(player.rocket) !== 'isotope') return fail('not_isotope');
@@ -7563,27 +8045,104 @@ function applyIsotopeExchange(state, op, player) {
     const n = Math.min(want == null ? have : want, have);
     if (n <= 0) return fail('no_isotope');
     player.rocket.tank = round6((Number(player.rocket.tank) || 0) - n);
-    player.isotopes += n;
     recallIfEmpty(player);
-    return { ok: true, state, log: `${player.name} brought ${n} isotope${n === 1 ? '' : 's'} from the rocket's tank to their Bank (${player.isotopes} at the Bank, worth ${player.isotopes * ISOTOPE_AQUA} aqua).` };
+    if (!hasIsostandard(player)) return debase(state, player, n);
+    player.isotopes += n;
+    return { ok: true, state, log: `${player.name} brought ${n} isotope${n === 1 ? '' : 's'} from the rocket's tank to their Bank (${player.isotopes} at the Bank, worth ${player.isotopes * isoAqua(state)} aqua).` };
   }
-  if (want == null) return fail('bad_amount');
+  // Storing in your isovault takes all you carry unless an amount is named;
+  // the Rival Isobank exchange is always 1.
+  if (want == null && action !== 'vault' && action !== 'rival') return fail('bad_amount');
   if (action === 'sell') {
     if (player.isotopes < want) return fail('no_isotope');
     player.isotopes -= want;
     state.earthMarket += want;
-    player.aqua = (player.aqua | 0) + want * ISOTOPE_AQUA;
-    return { ok: true, state, log: `${player.name} sold ${want} isotope${want === 1 ? '' : 's'} to the Earth market for ${want * ISOTOPE_AQUA} aqua (aqua ${player.aqua}; ${state.earthMarket} on the Earth market).` };
+    player.aqua = (player.aqua | 0) + want * isoAqua(state);
+    return { ok: true, state, log: `${player.name} sold ${want} isotope${want === 1 ? '' : 's'} to the Earth market for ${want * isoAqua(state)} aqua (aqua ${player.aqua}; ${state.earthMarket} on the Earth market).` };
   }
   if (action === 'buy') {
+    if (!hasIsostandard(player)) return fail('no_isostandard');
     if (state.earthMarket < want) return fail('earth_market_short');
-    if ((player.aqua | 0) < want * ISOTOPE_AQUA) return fail('insufficient_aqua');
+    if ((player.aqua | 0) < want * isoAqua(state)) return fail('insufficient_aqua');
     state.earthMarket -= want;
-    player.aqua -= want * ISOTOPE_AQUA;
+    player.aqua -= want * isoAqua(state);
     player.isotopes += want;
-    return { ok: true, state, log: `${player.name} bought ${want} isotope${want === 1 ? '' : 's'} from the Earth market for ${want * ISOTOPE_AQUA} aqua (${player.isotopes} at the Bank; aqua ${player.aqua}).` };
+    return { ok: true, state, log: `${player.name} bought ${want} isotope${want === 1 ? '' : 's'} from the Earth market for ${want * isoAqua(state)} aqua (${player.isotopes} at the Bank; aqua ${player.aqua}).` };
+  }
+  if (action === 'withdraw') {
+    // 4D1e: a bead that leaves the Bank becomes your isostandard. It lands as an
+    // isotope can in the stack at your Bank (your Home Bernal, else LEO).
+    if (!hasIsostandard(player)) return fail('no_isostandard');
+    if (player.isotopes < want) return fail('no_isotope');
+    const spectral = player.isostandards.includes(op.spectral) ? op.spectral : player.isostandards[0];
+    const homeIdx = (player.bernals || []).findIndex((bn) => isHomeBernal(bn));
+    const holderId = homeIdx >= 0 ? `bernal${homeIdx}` : 'leo';
+    const arr = stackArrayOf(player, holderId);
+    if (!arr) return fail('bad_holder');
+    player.isotopes -= want;
+    const can = arr.find((s) => isFuelCardSlot(s) && s.grade === 'isotope' && (s.spectral || 'C') === spectral);
+    if (can) can.amount = (Number(can.amount) || 0) + want;
+    else arr.push({ id: nextFuelCardId(state), kind: 'fuel', grade: 'isotope', spectral, amount: want, face: 'primary' });
+    return { ok: true, state, log: `${player.name} took ${want} gold bead${want === 1 ? '' : 's'} out of the Bank as spectral-${spectral} isotope fuel in ${stackLabel(holderId)} (${player.isotopes} left at the Bank).` };
+  }
+  if (action === 'rival') {
+    // Rival Isobank (Exodus back): 1 Isotope per Turn at your Anchored
+    // non-Home Bernal for 6 Aquas. The isotope comes from a can in that
+    // Bernal's stack, or from the rocket's isotope tank docked there.
+    if (!contractAbilityCount(state, player, 'rivalIsobank')) return fail('no_rival_isobank');
+    const stamp = `${state.round}:${state.turn}`;
+    if (player.rivalIsobankTurn === stamp) return fail('once_per_turn');
+    const bn = (player.bernals || []).find((b) => b && b.anchored && !isHomeBernal(b)
+      && ((b.stack || []).some((x) => isFuelCardSlot(x) && x.grade === 'isotope' && (Number(x.amount) || 0) >= 1)
+        || (player.rocket && player.rocket.siteId === b.siteId && tankGradeOf(player.rocket) === 'isotope' && (Number(player.rocket.tank) || 0) >= 1)));
+    if (!bn) return fail('no_isotope_at_beo_bernal');
+    const can = (bn.stack || []).find((x) => isFuelCardSlot(x) && x.grade === 'isotope' && (Number(x.amount) || 0) >= 1);
+    if (can) { can.amount = (Number(can.amount) || 0) - 1; if (can.amount <= 0) bn.stack.splice(bn.stack.indexOf(can), 1); }
+    else { player.rocket.tank = round6((Number(player.rocket.tank) || 0) - 1); recallIfEmpty(player); }
+    player.aqua = (player.aqua | 0) + 6;
+    player.rivalIsobankTurn = stamp;
+    return { ok: true, state, log: `${player.name} exchanged 1 isotope at the ${cardNameOf(bn.cardId)} for 6 aqua (Rival Isobank).` };
+  }
+  if (action === 'vault') {
+    // 4D2f: isotopes carried TO the isobank go into your isovault for good.
+    if (!state.isobank) return fail('no_isobank');
+    const ibSite = state.isobank.siteId;
+    let n = 0;
+    if (op.cardId != null) {
+      const holderId = typeof op.holder === 'string' ? op.holder : 'rocket';
+      const arr = stackArrayOf(player, holderId);
+      if (!arr || stackEndpointSite(player, holderId) !== ibSite) return fail('not_at_isobank');
+      const idx = arr.findIndex((sl) => isFuelCardSlot(sl) && sl.id === String(op.cardId));
+      if (idx < 0) return fail('no_fuel_card');
+      const can = arr[idx];
+      if (can.grade !== 'isotope') return fail('not_isotope');
+      const have = Math.max(0, Math.floor(Number(can.amount) || 0));
+      n = Math.min(want == null ? have : want, have);
+      if (n <= 0) return fail('no_isotope');
+      can.amount = have - n;
+      if (can.amount <= 0) arr.splice(idx, 1);
+      if (holderId === 'rocket') recallIfEmpty(player);
+    } else {
+      if (!player.rocket || player.rocket.siteId !== ibSite) return fail('not_at_isobank');
+      if (tankGradeOf(player.rocket) !== 'isotope') return fail('not_isotope');
+      const have = Math.floor(Number(player.rocket.tank) || 0);
+      n = Math.min(want == null ? have : want, have);
+      if (n <= 0) return fail('no_isotope');
+      player.rocket.tank = round6((Number(player.rocket.tank) || 0) - n);
+      recallIfEmpty(player);
+    }
+    player.isovault = Math.max(0, player.isovault | 0) + n;
+    const total = isototalOf(state);
+    return { ok: true, state, log: `${player.name} deposited ${n} isotope${n === 1 ? '' : 's'} in their isovault at the isobank (isovault ${player.isovault}; isototal ${total}, ${exodusBand(total, state.players.length)}).` };
   }
   return fail('bad_action');
+}
+// 4D1d Debasement: no isostandard, so beads reaching the Bank become aqua at once
+// (the beads go to the Earth market).
+function debase(state, player, n) {
+  state.earthMarket = Math.max(0, state.earthMarket | 0) + n;
+  player.aqua = (player.aqua | 0) + n * isoAqua(state);
+  return { ok: true, state, log: `${player.name} has no isostandard: ${n} isotope${n === 1 ? '' : 's'} reaching the Bank convert${n === 1 ? 's' : ''} to ${n * isoAqua(state)} aqua (aqua ${player.aqua}).` };
 }
 
 // Jettison fuel from the tank (Internal Tankage free action - destroyed for
@@ -8813,7 +9372,18 @@ function exomigrateOne(state, player, opts = {}) {
   const gone = discardEarthborns(state, player);
   return { ...res, log: `${res.log} Joined the Spacer Union${gone.length ? `: ${gone.join(', ')} discarded` : ''}.` };
 }
+// Deep Freeze (Exodus): "Before exomigrating, you may Discard the top card from
+// the queue you are drawing from." It goes to the bottom of that queue, then
+// the draw runs as usual.
 function exomigrateDraw(state, player, opts = {}) {
+  const queue = colonistQueueFor(state, player, opts.which);
+  if (!(opts.discardTop && queue.length > 1 && contractAbilityCount(state, player, 'exomigrateDiscard')
+    && countColonists(player) < colonistAllowance(player))) return exomigrateDrawTop(state, player, opts);
+  queue.push(queue.shift());
+  const res = exomigrateDrawTop(state, player, opts);
+  return res.ok ? { ...res, log: `Deep Freeze sends the top colonist to the bottom of the queue. ${res.log}` } : res;
+}
+function exomigrateDrawTop(state, player, opts = {}) {
   // Under a Sirens species split each species migrates from its OWN half of the
   // queue; one shared queue in every other game.
   const queue = colonistQueueFor(state, player, opts.which);
@@ -8936,23 +9506,21 @@ function exomigrateDraw(state, player, opts = {}) {
     cardId = id; card = c;
     break;
   }
-  // M4 + M2 (4C2b): several Robots drawn in one spaceborn exomigration: keep
-  // one, the rest go back and the spaceborn queue is shuffled.
-  let robotsBack = [];
+  // M4 + M2 (4C2b): several Robots drawn in one spaceborn exomigration: the
+  // player keeps ONE of their choice (KEEP_ROBOT), the rest go back and the
+  // spaceborn queue is shuffled. Until then they wait set aside, and End Turn
+  // waits on the pick.
+  let robotsAside = false;
   if (state.m4 && Array.isArray(state.spacebornQueue) && queue === state.spacebornQueue && robotsDrawn.length > 1) {
-    const kept = player.hand.splice(player.hand.length - robotIds.length, robotIds.length);
-    player.hand.push(kept[0]);
-    robotsBack = kept.slice(1);
-    queue.push(...robotsBack);
-    const gen = makeRng(state.seed, state.rng.cursor);
-    const mixed = shuffle(gen, queue.slice());
-    state.rng.cursor = gen.cursor;
-    queue.splice(0, queue.length, ...mixed);
-    robotsDrawn.splice(1);
+    const aside = player.hand.splice(player.hand.length - robotIds.length, robotIds.length);
+    player.robotPick = { ids: aside };
+    robotsAside = true;
   }
-  const robotNote = immigrantNote + (robotsDrawn.length
-    ? `${robotsDrawn.join(' and ')} (Robot${robotsDrawn.length === 1 ? '' : 's'}) to the hand${robotsBack.length ? ` (${robotsBack.length} other Robot${robotsBack.length === 1 ? '' : 's'} back to the spaceborn queue)` : ''}; `
-    : '');
+  const robotNote = immigrantNote + (robotsAside
+    ? `drew ${robotsDrawn.length} Robots (${robotsDrawn.join(', ')}): one to keep, the rest back to the spaceborn queue; `
+    : robotsDrawn.length
+      ? `${robotsDrawn.join(' and ')} (Robot${robotsDrawn.length === 1 ? '' : 's'}) to the hand; `
+      : '');
   if (!cardId) {
     // The queue drained mid-draw (Handy skimmed the rest to hand). This is the
     // empty-queue exomigration, so Robot Emancipation fires: one freed Robot
@@ -8986,7 +9554,9 @@ function questZones(player) {
 // Push the exomigrated colonist onto its destination stack and seat its delegate
 // (M0, optional). Shared by the normal draw and the Robot Emancipation draw.
 function placeExomigrant(state, player, cardId, card, dest, baseLog, opts) {
-  dest.arr.push({ id: cardId, kind: 'colonist', face: 'primary' });
+  // VON NEUMANN FUTURE: your Robots are always Promoted.
+  const robotUp = hasFutureEffect(player, 'robotsPromoted') && (COLONISTS_BY_ID[cardId] || {}).colonistKind === 'Robot';
+  dest.arr.push({ id: cardId, kind: 'colonist', face: robotUp ? 'secondary' : 'primary' });
   let log = baseLog;
   // The delegate is OPTIONAL (user decision 2026-07-02): the player may seat it
   // or keep the cube in reserve. Callers that don't ask (Homesteading's refill,
@@ -8994,7 +9564,7 @@ function placeExomigrant(state, player, cardId, card, dest, baseLog, opts) {
   if (opts.placeDelegate === false) return { ok: true, log: `${log}.` };
   if (state.m0 && card && card.ideology) {
     const ideo = ideologyForColorName(card.ideology);
-    if (ideo && cubesInPlay(state, player.profileId) < FACTORY_CUBES) {
+    if (ideo && cubesInPlay(state, player.profileId) < delegateCap(state, player)) {
       const asm = assemblyOf(state);
       setPlaceCount(asm, ideo, player.profileId, placeCount(asm, ideo, player.profileId) + 1);
       const ideoName = (IDEOLOGY_BY_KEY[ideo] || {}).name || ideo;
@@ -9066,6 +9636,7 @@ function applyExomigrate(state, op, player) {
     placeDelegate: op.placeDelegate !== false,
     specialty: op.specialty,
     queue: op.queue,
+    discardTop: !!op.discardTop,
     // Player-invoked exomigration CAN pause for a tie pick (unlike the automatic
     // mid-op exomigrations, which resolve ties quietly): a tied vote after the
     // arriving delegate seats leaves the active-law star for the player to set
@@ -9481,8 +10052,11 @@ function applyAnchorBernal(state, op, player) {
   // species-scoped above, so this can only fire at a Uranus-zone space.
   const isUranusElevatorBuild = !!state.sirens && isSirenPlayer(state, player) && homeOrbit
     && (cardId === GEO_ELEVATOR_BERNAL_ID || cardId === LOFSTROM_LOOP_BERNAL_ID);
+  // 4A7j (Module 2 living rule): anchoring the Lofstrom Loop Microgravity in a
+  // Home Orbit is the same Epic Hazard that risks the Bernal's supports.
+  const isLofstromHomeAnchor = cardId === LOFSTROM_LOOP_BERNAL_ID && homeOrbit;
   const isGeoElevatorBuild = (cardId === GEO_ELEVATOR_BERNAL_ID && slug === GEO_NODE)
-    || isUranusElevatorBuild;
+    || isUranusElevatorBuild || isLofstromHomeAnchor;
   let opSpent = false;
   let didRoll = false;
   let hazardNote = '';
@@ -9534,7 +10108,9 @@ function applyAnchorBernal(state, op, player) {
           : '';
         return {
           ok: true, state, rolled: true,
-          log: `${player.name}'s attempt to anchor the ${name0} at GEO failed the Epic Hazard (rolled a 1); the space elevator was not raised, so the Bernal stays mobile.${lostNote} Try again next turn.`,
+          log: isLofstromHomeAnchor && !isUranusElevatorBuild
+            ? `${player.name}'s attempt to anchor the ${name0} failed the Epic Hazard (rolled a 1), so the Bernal stays mobile.${lostNote} Try again next turn.`
+            : `${player.name}'s attempt to anchor the ${name0} at GEO failed the Epic Hazard (rolled a 1); the space elevator was not raised, so the Bernal stays mobile.${lostNote} Try again next turn.`,
         };
       }
       hazardNote = ` (Epic Hazard rolled ${d6})`;
@@ -9597,6 +10173,14 @@ function applyAnchorBernal(state, op, player) {
   if (freeViaColonist) log += ' (Industrialist colonist: free action.)';
   if (decoN) log += ` Support${decoN === 1 ? '' : 's'} decommissioned to hand in the build: ${cardNames(decoIds)}.`;
   if (crewMoved) log += ` ${crewMoved} crew boarded the Home Bernal from LEO.`;
+  // 4D1a: anchoring the Lofstrom Loop, or the GEO Space Elevator at GEO, as a
+  // Home Bernal monetizes isotope (and sets off the contract upheaval).
+  // A rule of the M1+M2 books too (3B5a), so it is not gated on M4; the
+  // contract upheaval inside monetizeIsotope still is.
+  if (state.m1 && homeOrbit && (cardId === LOFSTROM_LOOP_BERNAL_ID || (cardId === GEO_ELEVATOR_BERNAL_ID && slug === GEO_NODE))) {
+    log += monetizeIsotope(state);
+  }
+  log += maybeFoundIsobank(state, player);
   // Secretary General under Module 2: the +2 aqua lands on the FIRST anchoring
   // of the player's Home Bernal (instead of at game start).
   if (state.m2 && isHomeBernal(bn) && !player.sgHomePaid
@@ -9630,6 +10214,8 @@ function applyUnanchorBernal(state, op, player) {
   const bn = cardId ? (player.bernals || []).find((b) => b && b.cardId === cardId) : null;
   if (!bn) return fail('no_bernal');
   if (!bn.anchored) return fail('not_anchored');
+  // 4D2i: the isobank can never be moved or voluntarily unanchored.
+  if (state.isobank && state.isobank.ownerId === player.profileId && state.isobank.bernalId === bn.cardId) return fail('isobank_cannot_unanchor');
   // 2B6c Dirt Refuel: "You may add a gray Wet Mass Chit for the Bernal and set
   // it to any value per G1c." It comes with the unanchoring itself - stripping
   // the colony down is where the dirt comes from - so it needs no Dirtside or
@@ -9962,6 +10548,8 @@ function applyClaimJump(state, op, player) {
   // Secured contract ability (4B2f): during Anarchy the holder is immune to
   // Felonies, so their Claims cannot be jumped.
   if (prev && state.anarchy && contractAbilityCount(state, prev, 'secured')) return fail('target_secured');
+  // AVATAR FUTURE (Zombie Wanderers): immune to Felonies.
+  if (prev && hasFutureEffect(prev, 'felonyImmune')) return fail('target_immune');
   disc.ownerId = player.profileId;
   const log = `${player.name} claim-jumped ${site.name}${prev ? ` from ${prev.name}` : ''} (Felony).`;
   pushNews(state, '\u{1F5FD}', log);
@@ -10536,7 +11124,9 @@ function applyProspect(state, op, player) {
   // rocket, or the freighter / bernal / outpost the prospect fires from).
   const colocatedPowers = unit.stack.map(powerOfSlot);
   const isruMod = sumColocatedIsruMod(colocatedPowers, { isAerostat: isAerostatSite(site) })
-    - contractIsruBonusAt(state, player, site);   // Closest Planet: -1 ISRU at Mercury
+    - contractIsruBonusAt(state, player, site)   // Closest Planet: -1 ISRU at Mercury
+    // Warden Proving Ground (Exodus back): your robonauts are -1 ISRU.
+    - (((PATENTS_BY_ID[provSlot && provSlot.id] || {}).type === 'robonaut') ? contractAbilityCount(state, player, 'robonautIsru') : 0);
   const effIsru = Math.max(0, prospectorIsru(provSlot) + isruMod);   // isruMod <= 0 (easier), floored at 0
   // V5 Hermes Fall: prospecting the binary auto-succeeds with a robonaut of ANY
   // ISRU - but SOLO ONLY (user 2026-08-07). Both halves are hydration 0, so the
@@ -11084,6 +11674,7 @@ function applyEtProduce(state, op, player) {
     // Felonies, "superseding all other Felony Abilities".
     const facOwner = playerByProfile(state, fac.ownerId);
     if (state.anarchy && facOwner && contractAbilityCount(state, facOwner, 'secured') > 0) return fail('target_secured');
+    if (facOwner && hasFutureEffect(facOwner, 'felonyImmune')) return fail('target_immune');
     if (!actorCrewAtSite(state, siteId, player.profileId)) return fail('felony_needs_human');
     if (!sitdown && opposingHumanAtSite(state, siteId, player.profileId)) return fail('factory_defended');
   }
@@ -11361,8 +11952,14 @@ function setPlaceCount(asm, place, profileId, count) {
 // limit (silently a no-op once the supply is exhausted, same as the
 // exomigration delegate below). Shared by any M0 rule that grants a
 // delegate outside the Fundraise operation - Colony Build's G3c delegate.
+// TW Evaluation Committee (Exodus back): "You may use Claim disks as
+// delegates" - each unused claim disc is one more delegate.
+function delegateCap(state, player) {
+  if (!contractAbilityCount(state, player, 'claimDelegates')) return FACTORY_CUBES;
+  return FACTORY_CUBES + Math.max(0, CLAIM_DISCS - ownedClaimCount(state.discs, player.profileId));
+}
 function grantDelegate(state, player, ideo) {
-  if (!ideo || cubesInPlay(state, player.profileId) >= FACTORY_CUBES) return false;
+  if (!ideo || cubesInPlay(state, player.profileId) >= delegateCap(state, player)) return false;
   const asm = assemblyOf(state);
   setPlaceCount(asm, ideo, player.profileId, placeCount(asm, ideo, player.profileId) + 1);
   return true;
@@ -11380,7 +11977,7 @@ function grantDelegate(state, player, ideo) {
 function tallyWinnersFor(state, tallier) {
   const asm = assemblyOf(state);
   if (tallier && hasPrivilege(state, tallier, 'ARBITER')) return arbiterWinners(asm, tallier.profileId, true);
-  return voteWinners(asm);
+  return voteWinners(asm, voteWeights(state));
 }
 function quietVoteTally(state, tallier = null) {
   const winners = tallyWinnersFor(state, tallier);
@@ -11416,7 +12013,7 @@ function emissaryLawActive(state, player, key) {
   const cur = currentPlayer(state);
   if (!cur || cur.profileId !== player.profileId) return false;
   if (!hasPrivilege(state, player, 'EMISSARIES')) return false;
-  const winners = voteWinners(assemblyOf(state));
+  const winners = voteWinners(assemblyOf(state), voteWeights(state));
   return winners.length >= 2 && winners.includes(key);
 }
 // May `player` operate at this factory for a NON-VICTORY purpose (site refuel,
@@ -11517,7 +12114,7 @@ function applyFundraise(state, op, player) {
   // (op.freeDelegate = the place to pull it from), the same escape hatch the
   // factory build offers. Without it a full pool is a hard cap. (User 2026-07-07.)
   let freedPlace = null;
-  if (place && cubesInPlay(state, pid) >= FACTORY_CUBES) {
+  if (place && cubesInPlay(state, pid) >= delegateCap(state, player)) {
     const free = op.freeDelegate ? String(op.freeDelegate) : null;
     if (free && ASSEMBLY_PLACES.includes(free) && placeCount(asm, free, pid) > 0) {
       setPlaceCount(asm, free, pid, placeCount(asm, free, pid) - 1);
@@ -11574,7 +12171,7 @@ function applyFundraise(state, op, player) {
   // ARBITER (African Union, black): "Your vote tallies may treat your delegates
   // as 2 delegates each" - opt-in on the Fundraise's own tally (op.arbiterDouble).
   if (op.arbiterDouble && !hasPrivilege(state, player, 'ARBITER')) return fail('no_arbiter');
-  const winners = op.arbiterDouble ? arbiterWinners(asm, pid, true) : voteWinners(asm);
+  const winners = op.arbiterDouble ? arbiterWinners(asm, pid, true) : voteWinners(asm, voteWeights(state));
   let newStar;
   if (winners.length === 0) newStar = 'centrist';
   else if (winners.length === 1) [newStar] = winners;
@@ -11771,7 +12368,7 @@ function applyEmissaries(state, op, player) {
   if (!hasPrivilege(state, player, 'EMISSARIES')) return fail('no_emissaries');
   const want = Array.isArray(op.ideologies) ? [...new Set(op.ideologies.map(String))] : [];
   if (!want.length) return fail('no_ideologies');
-  const winners = voteWinners(assemblyOf(state));
+  const winners = voteWinners(assemblyOf(state), voteWeights(state));
   if (winners.length < 2) return fail('no_tie');
   if (want.some((k) => !winners.includes(k))) return fail('not_tied', { winners });
   const fresh = want.filter((k) => k !== state.activeLawStar);
@@ -11909,7 +12506,10 @@ function applySiteRefuel(state, op, player) {
     if (!outpost || outpost.siteId !== siteId) return fail('no_outpost');
     const fac = state.factories[siteId];
     if (!canUseFactoryNonVictory(state, player, fac)) return fail('no_factory');
-    const facSpectral = site.spectralType || 'C';
+    // Iso-Exchange (Exodus): your isostandard can be produced at any Factory.
+    const isoStd = contractAbilityCount(state, player, 'isostandardAnyFactory')
+      ? (player.isostandards || []).find((x) => playerOwnsGwOfSpectral(player, x)) : null;
+    const facSpectral = isoStd || site.spectralType || 'C';
     if (!playerOwnsGwOfSpectral(player, facSpectral)) return fail('no_matching_gw', { spectral: facSpectral });
     const gate = siteRefuelGate(state, player, siteId);
     if (!gate.ok) return fail('already_refueled');
@@ -11927,20 +12527,27 @@ function applySiteRefuel(state, op, player) {
       return pw && pw.doubleIsotopeRefuel && colonistColocatedWithSite(state, player, e, siteId);
     }));
     if (alchemist) iBase *= 2;
+    const ibBonus = state.m4 ? isobankMiningBonus(state, player, siteId) : 0;
+    iBase += ibBonus;
     outpost.cards = outpost.cards || [];
     // Increment an existing isotope card of THIS spectral in the outpost, else
     // mint a new one (grades / spectrals never merge).
     const existing = outpost.cards.find((s) => s && s.kind === 'fuel'
       && s.grade === 'isotope' && (s.spectral || 'C') === facSpectral);
-    if (existing) existing.amount = (Number(existing.amount) || 0) + iBase;
-    else outpost.cards.push({ id: nextFuelCardId(state), kind: 'fuel', grade: 'isotope', spectral: facSpectral, amount: iBase, face: 'primary' });
+    // LIC SCAN FUTURE (Drone Queen): 1 of the isotopes produced may go to the Bank.
+    const licBankO = (op.licToBank && hasFutureEffect(player, 'isotopeToBank')) ? 1 : 0;
+    if (licBankO) { player.isotopes = Math.max(0, player.isotopes | 0) + 1; iBase -= 1; }
+    if (iBase > 0) {
+      if (existing) existing.amount = (Number(existing.amount) || 0) + iBase;
+      else outpost.cards.push({ id: nextFuelCardId(state), kind: 'fuel', grade: 'isotope', spectral: facSpectral, amount: iBase, face: 'primary' });
+    }
     player.refueledSites.push(siteId);
     if (!gate.freeRepeat) player.opsRemaining -= 1;
     const monetizeNote = monetizeIsotope(state);
     const minerTail = gate.freeRepeat ? ' (Miner colonist: extra production)' : '';
     return {
       ok: true, state,
-      log: `${player.name} refined +${iBase} spectral-${facSpectral} isotope into a fuel card at ${site.name} (Outpost ${letter})${minerTail}.${monetizeNote}`,
+      log: `${player.name} refined +${iBase} spectral-${facSpectral} isotope into a fuel card at ${site.name} (Outpost ${letter})${minerTail}${ibBonus ? ' (isobank mining bonus +1)' : ''}${licBankO ? ' (Lic Scan: 1 isotope to the Bank)' : ''}.${monetizeNote}${maybeFoundIsobank(state, player)}`,
     };
   }
 
@@ -12015,7 +12622,11 @@ function applySiteRefuel(state, op, player) {
     // it matches the GW thruster's spectral type.
     const thrSpectral = tcard.spectralType || 'C';
     const facSpectral = site.spectralType || 'C';
-    if (thrSpectral !== facSpectral) return fail('spectral_mismatch', { need: thrSpectral, have: facSpectral });
+    // Iso-Exchange (Exodus): "Produce your isostandard during a site refuel op
+    // at any Factory." Your isostandard refines whatever the Factory's spectral.
+    const isoAnyFactory = contractAbilityCount(state, player, 'isostandardAnyFactory')
+      && (player.isostandards || []).includes(thrSpectral);
+    if (thrSpectral !== facSpectral && !isoAnyFactory) return fail('spectral_mismatch', { need: thrSpectral, have: facSpectral });
     const gateI = siteRefuelGate(state, player, siteId);
     if (!gateI.ok) return fail('already_refueled');
     if (!gateI.freeRepeat && player.opsRemaining <= 0) return fail('no_ops_left');
@@ -12043,10 +12654,15 @@ function applySiteRefuel(state, op, player) {
       return pw && pw.doubleIsotopeRefuel && colonistColocatedWithSite(state, player, e, siteId);
     }));
     if (alchemist) iBase *= 2;
+    const ibBonusR = state.m4 ? isobankMiningBonus(state, player, siteId) : 0;
+    iBase += ibBonusR;
     const iroom = redStepsBetween(idry + itank);
-    const isteps = Math.min(iBase, iroom);
-    if (isteps <= 0) return fail('tank_full');
-    const ires = loadFuelUpLadder(idry, itank, isteps);   // walk the red line, land on a node
+    // LIC SCAN FUTURE (Drone Queen): 1 of the isotopes produced may go to the Bank.
+    const licBank = (op.licToBank && hasFutureEffect(player, 'isotopeToBank') && igrade === 'isotope') ? 1 : 0;
+    const isteps = Math.min(iBase - licBank, iroom);
+    if (isteps <= 0 && !licBank) return fail('tank_full');
+    if (licBank) player.isotopes = Math.max(0, player.isotopes | 0) + 1;
+    const ires = isteps > 0 ? loadFuelUpLadder(idry, itank, isteps) : { tank: itank };   // walk the red line, land on a node
     const igain = round6(ires.tank - itank);
     player.rocket.tank = ires.tank;
     setRocketGrade(player.rocket, igrade);
@@ -12056,9 +12672,15 @@ function applySiteRefuel(state, op, player) {
     // First isotope ever refined monetizes the substance (M1 economy hook;
     // the price consequences land in a later slice).
     const monetizeNote = monetizeIsotope(state);
+    // 1Cb: producing Isofuel for your GW/TW thruster establishes its spectral
+    // as your isostandard.
+    if (igrade === 'isotope' && thrSpectral) {
+      player.isostandards = player.isostandards || [];
+      if (!player.isostandards.includes(thrSpectral)) player.isostandards.push(thrSpectral);
+    }
     return {
       ok: true, state,
-      log: `${player.name}: Isotope Refuel at ${site.name} (+${round6(igain)} isotope; tank ${round6(player.rocket.tank)}).${monetizeNote}`,
+      log: `${player.name}: Isotope Refuel at ${site.name} (+${round6(igain)} isotope; tank ${round6(player.rocket.tank)})${ibBonusR ? ' (isobank mining bonus +1)' : ''}${licBank ? ' (Lic Scan: 1 isotope to the Bank)' : ''}.${monetizeNote}${maybeFoundIsobank(state, player)}`,
     };
   }
 
@@ -12157,9 +12779,20 @@ function applySiteRefuel(state, op, player) {
   // Triangle augmentation, side 2: "Site refuel yields +2 Aqua" (4C3).
   const tri = augmentSideAt(player, 'triangle', 2, siteId) ? 2 : 0;
   if (tri) player.aqua = (player.aqua | 0) + tri;
+  // Isotope Fueling Station (Exodus back): a factory refuel gains 1 Isotope
+  // at that Factory (a can in the refuelling stack).
+  let ifs = '';
+  if (op.mode === 'factory' && contractAbilityCount(state, player, 'factoryRefuelIsotope')) {
+    const arr = bernalDest ? (bernalDest.stack = bernalDest.stack || []) : player.rocket.stack;
+    const spectral = String(site.spectralType || 'C').toUpperCase();
+    const can = arr.find((x) => isFuelCardSlot(x) && x.grade === 'isotope' && (x.spectral || 'C') === spectral);
+    if (can) can.amount = (Number(can.amount) || 0) + 1;
+    else arr.push({ id: nextFuelCardId(state), kind: 'fuel', grade: 'isotope', spectral, amount: 1, face: 'primary' });
+    ifs = ', +1 isotope (Isotope Fueling Station)';
+  }
   return {
     ok: true, state,
-    log: `${player.name}: ${label} at ${site.name} (+${round6(gain)} water${destNote}; tank ${round6(destTank)})${tri ? `, +${tri} aqua (Triangle)` : ''}.`,
+    log: `${player.name}: ${label} at ${site.name} (+${round6(gain)} water${destNote}; tank ${round6(destTank)})${tri ? `, +${tri} aqua (Triangle)` : ''}${ifs}.`,
   };
 }
 
@@ -13514,6 +14147,26 @@ function decommissionHuman(state, player, slot) {
   return `${cardNameOf(slot.id)} was lost in the attempt`;
 }
 
+// TW COMMANDER FUTURE (The Presence): "Your delegates count as 2 votes."
+function voteWeights(state) {
+  const w = {};
+  for (const p of state.players || []) if (hasFutureEffect(p, 'doubleVotes')) w[p.profileId] = 2;
+  return Object.keys(w).length ? w : null;
+}
+// INTERSTELLAR EXPLORATION FUTURE: "immediate research grant at no cost" - the
+// top card of the patent deck named by op.grantDeck (any deck with cards when
+// none is named) goes to the hand, ignoring the hand limit.
+function researchGrantNow(state, player, deckKey) {
+  const decks = state.decks || {};
+  const key = (deckKey && Array.isArray(decks[deckKey]) && decks[deckKey].length) ? deckKey
+    : Object.keys(decks).find((k) => Array.isArray(decks[k]) && decks[k].length);
+  if (!key) return '';
+  const id = decks[key].shift();
+  player.hand = player.hand || [];
+  player.hand.push(id);
+  return ` Research grant: ${cardNameOf(id)} from the top of the ${key} deck.`;
+}
+
 // EPIC_HAZARD (M2 operation, rules 1A6 + 1D): attempt to complete a Future. A
 // Human (Crew or Human Colonist) colocated with the promoted card runs a
 // Hazard Roll (avoidable by paying FINAO). A 1 fails: the star is not gained
@@ -13566,7 +14219,7 @@ function applyEpicHazard(state, op, player) {
   const humanPw = colonistSlotPower(human) || {};
   const freeAction = !!humanPw.epicHazardFree;
   if (!freeAction && player.opsRemaining <= 0) return fail('no_ops_left');
-  const ctx = buildFutureCtx(state, player, loc.siteId);
+  const ctx = { ...buildFutureCtx(state, player, loc.siteId), cardId };
   const chk = checkFutureGoal(goal, ctx);
   if (!chk.met) return fail('future_requirements', { items: chk.items });
   // Printed costs must be payable before the roll.
@@ -13618,6 +14271,24 @@ function applyEpicHazard(state, op, player) {
   // Success: settle costs, grant the star + effects.
   if (aquaCost) player.aqua -= aquaCost;
   let costNote = '';
+  // VON NEUMANN FUTURE: decommission this card and an Operational refinery there.
+  if (goal.cost && goal.cost.decommissionCard) {
+    const gone = [];
+    if (goal.cost.refinery) {
+      for (const st of playerStacks(player)) {
+        if (st.siteId !== loc.siteId) continue;
+        const i = st.slots.findIndex((sl) => sl && (PATENTS_BY_ID[sl.id] || {}).type === 'refinery');
+        if (i >= 0) { const [sl] = st.slots.splice(i, 1); decommissionSlotTo(state, player, sl); gone.push(sl.id); break; }
+      }
+    }
+    for (const st of playerStacks(player)) {
+      const i = st.slots.findIndex((sl) => sl && sl.id === cardId);
+      if (i >= 0) { st.slots.splice(i, 1); break; }
+    }
+    retireColonistId(state, player, cardId);
+    gone.push(cardId);
+    costNote += ` ${cardNames(gone)} decommissioned in the attempt.`;
+  }
   if (thrusterId) {
     const idx = player.rocket.stack.findIndex((s) => s.id === thrusterId);
     if (idx >= 0) player.rocket.stack.splice(idx, 1);
@@ -13657,6 +14328,15 @@ function applyEpicHazard(state, op, player) {
     // assembly migrates to the Authority space. Not an ongoing standing effect,
     // so it fires here rather than riding player.futureEffects.
     if (eff === 'migrateSeniorityAuthority') { migratedSeniority = migrateSeniorityTo(state, 'authority'); continue; }
+    // M4 spaceborn Futures with a one-off board action.
+    if (eff === 'isotopeCartel') { state.isotopeRate = 12; continue; }
+    if (eff === 'robotsPromoted') {
+      for (const st of playerStacks(player)) for (const sl of st.slots) {
+        if (isColonistSlot(sl) && (COLONISTS_BY_ID[sl.id] || {}).colonistKind === 'Robot') sl.face = 'secondary';
+      }
+    }
+    if (eff === 'freeImplant') { player.freeImplantSite = loc.siteId; continue; }
+    if (eff === 'researchGrant') { costNote += researchGrantNow(state, player, op.grantDeck); continue; }
     if (!player.futureEffects.includes(eff)) player.futureEffects.push(eff);
   }
   let log = `${player.name} completed the ${futName}${wantPay ? ' (paid FINAO)' : ` (Epic Hazard rolled ${d6})`} - an orange future star is earned`;
@@ -13664,6 +14344,14 @@ function applyEpicHazard(state, op, player) {
   log += costNote;
   if ((goal.effects || []).includes('emancipateRobots')) log += ' Every Robot colonist is now Emancipated.';
   if (migratedSeniority > 0) log += ` All ${migratedSeniority} Seniority Disk${migratedSeniority === 1 ? '' : 's'} migrated to Authority.`;
+  if ((goal.effects || []).includes('isotopeCartel')) log += ' The isotope exchange rate is now 12 aqua for every player.';
+  if ((goal.effects || []).includes('spaceEmpire')) log += ' A Space Empire is established.';
+  if ((goal.effects || []).includes('spaceRepublic')) log += ' A Space Republic is established.';
+  // 4E3a: each Ad Astra Future adds 4 Isotopes to your isovault (M4).
+  if (goal.adAstra && state.m4) {
+    player.isovault = Math.max(0, player.isovault | 0) + 4;
+    log += ` 4 isotopes join ${player.name}'s isovault (${player.isovault}).`;
+  }
   if (goal.casusBelli) {
     state.casusBelli = { name: goal.name, ownerId: player.profileId };
     log += ` Casus belli: ${player.name} declares independence from Earth.`;
@@ -13678,7 +14366,23 @@ function applyEpicHazard(state, op, player) {
   // the player and handing them back to the market (reported 2026-09-23 after an
   // ENZMANN STARSHIP) - the same mistake the big-thruster cost above was fixed
   // for on 2026-08-17.
-  if (goal.adAstra) {
+  if (goal.adAstra && goal.adAstraUnit === 'bernal') {
+    // EXODUS FUTURE: your Promoted Bernal leaves the map ad astra with its
+    // stack; the stack is decommissioned (1D1b) and the Bernal card returns to hand.
+    const bi = (player.bernals || []).findIndex((bn) => bn && (bn.promoted || bn.face === 'secondary') && isAdAstraExit(bn.siteId));
+    if (bi >= 0) {
+      const bn = player.bernals[bi];
+      const out = [];
+      for (const sl of (bn.stack || [])) {
+        if (isCrewSlot(sl)) player.leo.push({ id: sl.id, kind: 'crew', face: sl.face === 'secondary' ? 'secondary' : 'primary' });
+        else if (isColonistSlot(sl)) retireColonistId(state, player, sl.id);
+        else if (!isFuelCardSlot(sl)) decommissionSlotTo(state, player, sl);
+        out.push(sl.id);
+      }
+      player.bernals.splice(bi, 1);
+      log += ` The ${cardNameOf(bn.cardId)} exits the map ad astra${out.length ? ` with ${cardNames(out)}` : ''} - godspeed.`;
+    }
+  } else if (goal.adAstra) {
     let exported = 0;
     const toHandIds = [], exportedIds = [], crewHome = [];
     for (const s of [...player.rocket.stack]) {
@@ -13754,7 +14458,11 @@ const FUNCTIONAL = {
   REFUEL: applyRefuel,
   CASH_WATER: applyCashWater,
   ISOTOPE_EXCHANGE: applyIsotopeExchange,
+  STARSHIP_LAUNCH: applyStarshipLaunch,
+  STARSHIP_BOARD: applyStarshipBoard,
+  STARSHIP_MOVE: applyStarshipMove,
   CHILD_COMES_OF_AGE: applyChildComesOfAge,
+  KEEP_ROBOT: applyKeepRobot,
   DUMP: applyDump,
   CAN_FUEL: applyCanFuel,
   LOAD_FUEL: applyLoadFuel,
@@ -13845,7 +14553,8 @@ function pickPayload(op) {
       ...(op.cardId != null ? { cardId: op.cardId, holder: op.holder } : {}) };
     case 'DUMP': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
     case 'CHILD_COMES_OF_AGE': return { colonistId: op.colonistId };
-    case 'ISOTOPE_EXCHANGE': return { action: op.action, amount: op.amount, ...(op.cardId != null ? { cardId: op.cardId, holder: op.holder } : {}) };
+    case 'KEEP_ROBOT': return { cardId: op.cardId };
+    case 'ISOTOPE_EXCHANGE': return { action: op.action, amount: op.amount, ...(op.spectral ? { spectral: op.spectral } : {}), ...(op.cardId != null ? { cardId: op.cardId, holder: op.holder } : {}) };
     case 'CAN_FUEL': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
     // TRANSFER_FUEL_CARD and LOAD_FREIGHTER_WATER were MISSING here, so they
     // recorded an empty payload and an UNDO later in the same turn replayed them
@@ -14436,7 +15145,11 @@ function applyEndTurn(state, _op, player) {
   if (player.insightPending) return fail('insight_auction_due');
   // Parenthood: a grown child is chosen before the turn ends.
   if (childChoiceDue(state, player)) return fail('child_choice_due');
+  // 4C2b: the Robots set aside by a spaceborn draw wait on the keep pick.
+  if (player.robotPick && (player.robotPick.ids || []).length) return fail('robot_pick_due');
   if (mustExomigrate(state, player)) return fail('must_exomigrate');
+  // 4D2a: the isobank is founded on your Turn once you qualify.
+  const isobankNote = maybeFoundIsobank(state, player) + starshipTurnEnd(state, player);
   // BLUE PLANET: settle the coming aerobrake hazard now, before the turn passes.
   let bluePlanetNote = '';
   if (_op && _op.bluePlanet) {
@@ -14481,7 +15194,7 @@ function applyEndTurn(state, _op, player) {
     player.opsRemaining -= 1;
     log = `${player.name} passed and took income (+${INCOME_AQUA} aqua; bank ${player.aqua}).`;
   }
-  log += bluePlanetNote;
+  log += bluePlanetNote + isobankNote;
   // M4: a turn that began late and left the late fee unpaid defaults (4B5d).
   log += contractEndTurnCheck(state, player);
 
@@ -16152,7 +16865,7 @@ function applyAuctionBid(state, op, ctx) {
   const rivalHigh = highestOtherBid(state, bidder.profileId);
   const floorBefore = winsTies ? rivalHigh : (a.highBid || 0);
   if (amount < floorBefore) return fail('bid_too_low');
-  if (amount > bidder.aqua) return fail('insufficient_aqua');
+  if (amount > bankFunds(state, bidder)) return fail('insufficient_aqua');
 
   a.bids[bidder.profileId] = amount;
   a.passed = (a.passed || []).filter((id) => id !== bidder.profileId);
@@ -16289,7 +17002,8 @@ function applyAuctionSell(state, op, ctx) {
   // unless a rival's Pharmaceutics Bernal imposes it anyway.
   const winnerExempt = hasPrivilege(state, winner, 'SKUNKWORKS') && !pharmaceuticsImposesOn(state, winner);
   if ((winner.hand || []).length >= AUCTION_HAND_LIMIT && !winnerExempt) return fail('hand_limit');
-  if (winner.aqua < price) return fail('winner_cannot_pay');
+  if (bankFunds(state, winner) < price) return fail('winner_cannot_pay');
+  const beadsSold = coverFromBeads(state, winner, price);
 
   if (winner.profileId === a.auctioneerId) {
     auctioneer.aqua -= price; // keep: aqua leaves play to the bank
@@ -16302,7 +17016,7 @@ function applyAuctionSell(state, op, ctx) {
   const name = awarded.card ? awarded.card.name : awarded.cardId;
   let log;
   if (winner.profileId === a.auctioneerId) {
-    const tail = price > 0 ? ` and paid ${price} aqua to the bank` : ' unopposed';
+    const tail = price > 0 ? ` and paid ${price} aqua to the bank${beadNote(beadsSold)}` : ' unopposed';
     log = `${auctioneer.name} kept ${name}${tail}.${bonusNote(awarded.bonusIds)}`;
   } else {
     log = `${winner.name} won ${name} for ${price} aqua, paid to ${auctioneer.name}.${bonusNote(awarded.bonusIds)}`;
@@ -16361,8 +17075,13 @@ function contractPairsOpenTo(state, player) {
   // delegate in one of its two ideologies.
   const connections = contractAbilityCount(state, player, 'connections') > 0;
   const asm = connections ? assemblyOf(state) : null;
-  return Object.keys(CONTRACT_PAIRS).filter((pair) => CONTRACT_PAIRS[pair].some((k) => playerCanUseLaw(state, player, k)
+  // EXONET FUTURE: choose any contract deck when fundraising.
+  const anyDeck = hasFutureEffect(player, 'anyContractDeck');
+  const open = Object.keys(CONTRACT_PAIRS).filter((pair) => anyDeck || CONTRACT_PAIRS[pair].some((k) => playerCanUseLaw(state, player, k)
     || (connections && playerDelegatesInPlace(asm, k, player.profileId) > 0)));
+  // 4B3c: once the isobank exists the Exodus deck may be chosen regardless of law.
+  if (state.isobank && state.contractDecks && state.contractDecks.EX && !starshipInFlight(state)) open.push('EX');
+  return open;
 }
 // May this player bid on this contract? Timepiece in the Reserve (4B3b), and the
 // default chit bars manned contracts (4B2d / 4B6c).
@@ -16444,7 +17163,58 @@ function contractCtx(state, player = null, where = {}) {
     elevator: (id) => isSpaceElevatorSite(id),
     synodic: (id) => SYNODIC_SITE_IDS.includes(id),
     nodeZone: (n) => zoneOfSlug(n),
+    isostandardSite: (site) => !!(player && (player.isostandards || []).includes(String((site && site.spectralType) || '').toUpperCase())),
+    anyFactory: (n) => !!state.factories[n],
+    ownBeoBernal: (n) => !!(player && (player.bernals || []).some((bn) => bn && bn.anchored && !isHomeBernal(bn) && String(bn.siteId) === String(n))),
+    // Contract Colonies (owner 2026-11-23): without Module 2 a colony dome on a
+    // site; with Module 2 only an anchored Bernal (BEO = not a Home Bernal),
+    // whose site properties are those of its Dirtsides.
+    coloniesAt: (n) => contractColonies(state, player).filter((c) => c.place === String(n)),
+    roadToOtherColony: (c) => contractColonies(state, player).some((o) => o !== c
+      && c.sites.some((a) => o.sites.some((b) => isBuggyRoadPair(a, b)))),
+    augmentedAt: (n, ownOnly) => (state.players || []).some((q) => (!ownOnly || (player && q.profileId === player.profileId))
+      && Object.values(q.augments || {}).some((a) => a && (a.crewId || a.colonistId) && augHolderSite(q, a.crewId || a.colonistId) === String(n))),
+    // "Operational buggy robonaut": a buggy robonaut card (a Crew's own buggy
+    // prospecting does not count).
+    stackBuggy: () => !where.glitched && cards.some((sl) => sl && (PATENTS_BY_ID[sl.id] || {}).type === 'robonaut' && prospectorKind(sl) === 'buggy'),
+    // 4D3c: once launched, an "isobank" destination is the starship.
+    isobankSite: () => (starshipInFlight(state) ? String(state.starship.siteId) : state.isobank ? String(state.isobank.siteId) : null),
+    spacebornOrPromotedAt: (n) => (state.players || []).some((q) => playerSlotArrays(q).some((arr) => augHolderSiteOfArr(q, arr) === String(n)
+      && arr.some((sl) => { const c = sl && COLONISTS_BY_ID[sl.id]; return c && (c.spaceborn || sl.face === 'secondary'); }))),
+    // Chipjack: one of YOUR Colonists (a Crew without Module 2) in the carrying
+    // stack, colocated with another player's augmented one.
+    targetHere: (n) => !!player && cards.some((sl) => sl && (state.m2 ? COLONISTS_BY_ID[sl.id] : CREW_BY_ID[sl.id]))
+      && (state.players || []).some((q) => q.profileId !== player.profileId
+        && Object.values(q.augments || {}).some((a) => a && (a.crewId || a.colonistId) && augHolderSite(q, a.crewId || a.colonistId) === String(n))),
   };
+}
+// The map place one of a player's stacks stands at ('leo' at LEO).
+function augHolderSiteOfArr(player, arr) {
+  if (player.rocket && player.rocket.stack === arr) return player.rocket.siteId == null ? 'leo' : String(player.rocket.siteId);
+  if (player.leo === arr) return 'leo';
+  for (const o of Object.values(player.outposts || {})) if (o && o.cards === arr) return o.siteId == null ? 'leo' : String(o.siteId);
+  if (player.freighter && player.freighter.stack === arr) return player.freighter.siteId == null ? 'leo' : String(player.freighter.siteId);
+  for (const bn of (player.bernals || [])) if (bn && bn.stack === arr) return bn.siteId == null ? 'leo' : String(bn.siteId);
+  return undefined;
+}
+// Every Colony a contract destination can name: { place, own, beo, sites }.
+function contractColonies(state, player) {
+  const out = [];
+  if (state.m2) {
+    for (const q of state.players || []) {
+      for (const bn of (q.bernals || [])) {
+        if (!bn || !bn.anchored || bn.siteId == null) continue;
+        out.push({ place: String(bn.siteId), own: !!player && q.profileId === player.profileId,
+          beo: !isHomeBernal(bn), promoted: !!(bn.promoted || bn.face === 'secondary'), sites: bernalDirtsides(state, bn, q) });
+      }
+    }
+  } else {
+    for (const [slug, col] of Object.entries(state.colonies || {})) {
+      if (!col) continue;
+      out.push({ place: String(slug), own: !!player && col.ownerId === player.profileId, beo: true, promoted: true, sites: [String(slug)] });
+    }
+  }
+  return out;
 }
 // The map places a contract's destination names, for the "show on the map"
 // link: every place each step could be announced at right now, read with the
@@ -16489,6 +17259,7 @@ export function contractStepPlaces(state, cardId, side, viewerId = null) {
 // Claim the single default chit on the side of the contract that caused it.
 function claimDefaultChit(state, player, cardId) {
   const meta = contractMetaOf(player, cardId);
+  // An Exodus contract's back is its gold side.
   state.defaultChit = { profileId: player.profileId, side: meta && meta.side === 'gold' ? 'gold' : 'blue' };
 }
 // Take a contract off whatever it is on (hand or a stack).
@@ -16531,7 +17302,7 @@ function applyContractAuctionStart(state, op, ctx) {
   if (player.timepiece) return fail('timepiece_in_use');
   if (state.anarchy || state.war) return fail('contract_auction_prohibited');
   const pair = String(op.pair || '');
-  if (!CONTRACT_PAIRS[pair]) return fail('bad_deck');
+  if (!CONTRACT_PAIRS[pair] && !(pair === 'EX' && state.isobank)) return fail('bad_deck');
   if (!contractPairsOpenTo(state, player).includes(pair)) return fail('deck_not_open', { open: contractPairsOpenTo(state, player) });
   const deck = state.contractDecks[pair];
   if (!deck || !deck.length) return fail('deck_empty');
@@ -16545,8 +17316,9 @@ function applyContractAuctionStart(state, op, ctx) {
     log += `${player.name} sent ${(CONTRACTS_BY_ID[top] || {}).name || top} to the bottom of the ${CONTRACT_PAIR_NAMES[pair]} contracts. `;
   }
   if (op.abandon) return { ok: true, state, log: `${log}${player.name} looked over the ${CONTRACT_PAIR_NAMES[pair]} contracts and walked away.` };
-  // Gold side once the Isobank Contract Upheaval has happened (4B1b).
-  const side = state.contractSide === 'gold' ? 'gold' : 'blue';
+  // Gold side once the Isobank Contract Upheaval has happened (4B1b); an Exodus
+  // contract has its own side.
+  const side = pair === 'EX' ? 'exodus' : (state.contractSide === 'gold' ? 'gold' : 'blue');
   // The default-chit holder may not take a manned contract (4B2d / 4B6c), and
   // opening the auction is the initiator's own 10-year bid, so they may not put
   // one up either (they may still send it to the bottom with discardTop first).
@@ -16701,10 +17473,88 @@ function applyFulfillContract(state, op, player) {
     when += planetaryProtection(state, player, destSlug, op);
   } else if (fx.beehive) {
     when += beehiveProspect(state, player, destSlug);   // its die is an undo barrier (rng cursor)
+  } else if (fx.isoBank || fx.isoSite) {
+    when += exodusIsotopes(state, player, fx, loc, destSlug);
+    if (fx.bernalSwap && op.swapBernals) when += swapBernalCards(state, player);
+    if (fx.delegates2) when += planetaryDelegates(state, player, op);
+    if (fx.discardColonist && op.discardColonistId) when += discardColonistFree(state, player, String(op.discardColonistId));
+    if (fx.wardenFreighter && op.promoteFreighter && player.freighter && !(player.freighter.promoted || player.freighter.face === 'secondary')) {
+      player.freighter.face = 'secondary'; player.freighter.promoted = true;
+      when += ' The Freighter is Promoted.';
+    }
   } else if (face.whenFulfilling) {
     when += ` When fulfilling (not yet automated): ${face.whenFulfilling}`;
   }
   return { ok: true, state, log: `${player.name} fulfilled ${face.name}${late ? ' (late)' : ''} (+${face.vp} VP).${when}` };
+}
+
+// Exodus contracts (When Fulfilling): "Gain 3 Isotopes at your Bank" lands as
+// gold beads at the Bank (debased to aqua without an isostandard, 4D1b); "at
+// this Site" puts an isotope can in the stack that fulfilled it, of the site's
+// spectral type (your isostandard when the space has none).
+function exodusIsotopes(state, player, fx, loc, slug) {
+  if (fx.isoBank) {
+    const n = fx.isoBank;
+    if (!hasIsostandard(player)) {
+      debase(state, player, n);
+      return ` When fulfilling: ${n} isotopes reach the Bank and convert to ${n * isoAqua(state)} aqua (no isostandard).`;
+    }
+    player.isotopes = Math.max(0, player.isotopes | 0) + n;
+    return ` When fulfilling: gained ${n} isotopes at the Bank (${player.isotopes} there).`;
+  }
+  const n = fx.isoSite;
+  const site = slug ? siteById(slug) : null;
+  const spectral = String((site && site.spectralType) || (player.isostandards || [])[0] || 'C').toUpperCase().slice(0, 1);
+  const arr = loc.arr;
+  const can = arr.find((x) => isFuelCardSlot(x) && x.grade === 'isotope' && (x.spectral || 'C') === spectral);
+  if (can) can.amount = (Number(can.amount) || 0) + n;
+  else arr.push({ id: nextFuelCardId(state), kind: 'fuel', grade: 'isotope', spectral, amount: n, face: 'primary' });
+  return ` When fulfilling: gained ${n} spectral-${spectral} isotopes${site ? ` at ${site.name}` : ''}.`;
+}
+// Atmospheric Iso-Refinery (Exodus): "If your GW/TW thruster ends its move on an
+// Aerobrake Hazard, that Stack gains 1 Isotope." The rocket's active thruster is
+// a GW thruster (its Promoted side is the TW thruster).
+function exodusAeroIsotope(state, player, rocket, dest) {
+  if (!contractAbilityCount(state, player, 'aeroIsotope') || hazardKind(dest) !== 'aero') return '';
+  const slot = rocket.activeThrusterId && (rocket.stack || []).find((x) => x.id === rocket.activeThrusterId);
+  const card = slot && PATENTS_BY_ID[slot.id];
+  if (!card || card.type !== 'gw-thruster') return '';
+  const spectral = String((player.isostandards || [])[0] || 'C').toUpperCase();
+  const can = rocket.stack.find((x) => isFuelCardSlot(x) && x.grade === 'isotope' && (x.spectral || 'C') === spectral);
+  if (can) can.amount = (Number(can.amount) || 0) + 1;
+  else rocket.stack.push({ id: nextFuelCardId(state), kind: 'fuel', grade: 'isotope', spectral, amount: 1, face: 'primary' });
+  return ' Atmospheric Iso-Refinery: the stack gains 1 isotope on the aerobrake.';
+}
+// TW Evaluation Committee: "place 2 delegates on any 1 ideology" (M0).
+function planetaryDelegates(state, player, op) {
+  const ideo = String(op.ideology || '');
+  if (!state.m0 || !IDEOLOGY_BY_KEY[ideo]) return '';
+  let placed = 0;
+  for (let i = 0; i < 2; i++) if (grantDelegate(state, player, ideo)) placed++;
+  if (!placed) return '';
+  const moved = quietVoteTally(state, player);
+  return ` ${placed} delegate${placed === 1 ? '' : 's'} join${placed === 1 ? 's' : ''} ${IDEOLOGY_BY_KEY[ideo].name}${moved ? `; the active-law star moves to ${moved}` : ''}.`;
+}
+// Life Support Test Protocol: "you may Discard a Colonist (this is not a Felony)".
+function discardColonistFree(state, player, id) {
+  for (const st of playerStacks(player)) {
+    const i = st.slots.findIndex((sl) => sl && String(sl.id) === id && isColonistSlot(sl));
+    if (i < 0) continue;
+    st.slots.splice(i, 1);
+    retireColonistId(state, player, id);
+    return ` ${cardNameOf(id)} is discarded.`;
+  }
+  return '';
+}
+// Life Support Reconfig Team (When Fulfilling, optional): swap your two Bernal
+// cards, each moving to the other Bernal stack.
+function swapBernalCards(state, player) {
+  const bs = (player.bernals || []).filter(Boolean);
+  if (bs.length < 2) return '';
+  const [a, b] = bs;
+  const ca = a.cardId; a.cardId = b.cardId; b.cardId = ca;
+  const na = (BERNALS_BY_ID[a.cardId] || {}).name || a.cardId, nb = (BERNALS_BY_ID[b.cardId] || {}).name || b.cardId;
+  return ` The Bernal cards swap: ${na} and ${nb} trade stacks.`;
 }
 
 // Planetary Protection (When Fulfilling): "Bust the destination Site & place up
@@ -16776,11 +17626,13 @@ function applyPayLateFee(state, op, player) {
   // per turn.
   const paidNow = player.lateFeePaidThisTurn | 0;
   if (!meta.default && paidNow + amount > face.lateFee) return fail('over_late_fee', { max: face.lateFee - paidNow });
-  if (amount > (player.aqua | 0)) return fail('insufficient_aqua');
+  // 4D1b: gold beads at the Bank pay like aqua once monetized.
+  if (amount > bankFunds(state, player)) return fail('insufficient_aqua');
+  const beads = coverFromBeads(state, player, amount);
   player.aqua -= amount;
   if (!meta.default) player.lateFeePaidThisTurn = paidNow + amount;
   meta.paid += amount;
-  let log = `${player.name} paid ${amount} aqua toward ${face.name} (${meta.paid} of ${contractDebt(player, cardId)} paid).`;
+  let log = `${player.name} paid ${amount} aqua toward ${face.name} (${meta.paid} of ${contractDebt(player, cardId)} paid)${beadNote(beads)}.`;
   log += maybeRepayDebt(state, player, cardId);
   return { ok: true, state, log };
 }
@@ -16886,7 +17738,11 @@ function contractScoring(state) {
   if (state.defaultChit && out[state.defaultChit.profileId]) {
     out[state.defaultChit.profileId].chit = state.defaultChit.side === 'gold' ? -6 : -3;
   }
-  for (const id of Object.keys(out)) out[id].vp = out[id].fulfilled - out[id].debt + out[id].chit;
+  const ex = exodusScoring(state);
+  for (const id of Object.keys(out)) {
+    out[id].exodus = ex[id] || null;
+    out[id].vp = out[id].fulfilled - out[id].debt + out[id].chit + ((ex[id] || {}).vp || 0);
+  }
   return out;
 }
 // The live scoreboard's contract line (pure read): fulfilled contract VP, the
@@ -16947,6 +17803,28 @@ function childChoiceDue(state, player) {
   if (![...playerStacks(player)].some((st) => st.slots.some((sl) => isColonistSlot(sl) && sl.id === c.parentId))) return false;
   return (state.colonistQueue || []).some((id) => { const k = COLONISTS_BY_ID[id]; return k && k.colonistKind === 'Human' && !k.spaceborn; });
 }
+// KEEP_ROBOT op = { cardId } (4C2b): of the Robots set aside by one spaceborn
+// draw, this one goes to the hand; the others return to the spaceborn queue,
+// which is shuffled.
+function applyKeepRobot(state, op, player) {
+  if (!state.m4) return fail('not_m4');
+  const pick = player.robotPick;
+  if (!pick || !Array.isArray(pick.ids) || !pick.ids.length) return fail('no_robot_pick');
+  const keep = String(op.cardId || '');
+  if (!pick.ids.includes(keep)) return fail('not_a_drawn_robot');
+  const back = pick.ids.filter((id) => id !== keep);
+  (player.hand = player.hand || []).push(keep);
+  const queue = state.spacebornQueue = state.spacebornQueue || [];
+  queue.push(...back);
+  const gen = makeRng(state.seed, state.rng.cursor);
+  const mixed = shuffle(gen, queue.slice());
+  state.rng.cursor = gen.cursor;
+  queue.splice(0, queue.length, ...mixed);
+  delete player.robotPick;
+  const nm = (id) => (PATENTS_BY_ID[id] || {}).name || id;
+  return { ok: true, state, noUndo: true,
+    log: `${player.name} keeps ${nm(keep)} (Robot) in hand; ${back.map(nm).join(', ')} back to the spaceborn queue, shuffled.` };
+}
 // CHILD_COMES_OF_AGE op = { colonistId }: the earthborn chosen as the child.
 function applyChildComesOfAge(state, op, player) {
   if (!(state.m4 && state.m2)) return fail('not_m4');
@@ -16964,6 +17842,8 @@ function applyChildComesOfAge(state, op, player) {
   if (!at) { delete player.childChit; return fail('parent_gone'); }
   const parentSlot = at.st.slots[at.i];
   const wunderkind = parentSlot.face === 'secondary';
+  // VATS FUTURE: your life-support Colonist has had a wunderkind.
+  if (wunderkind) player.lifeSupportWunderkind = true;
   queue.splice(queue.indexOf(childId), 1);
   // Inheritance (4C5e): every chit on the parent moves to the child, the heart
   // turned to its other side.
@@ -17027,7 +17907,13 @@ function applyImplant(state, op, player) {
   const ids = new Set(here.map((s) => s.id));
   if (!ids.size) return fail('no_colonist_here');
   const industrialist = here.some((s) => /industrialist/i.test((COLONISTS_BY_ID[s.id] || {}).specialty || ''));
-  const free = industrialist && !player.implantFreeUsed;
+  // NANITE GOO FUTURE: 1 free implant op at its site (a Bernal there or
+  // Dirtside to it).
+  const goo = player.freeImplantSite != null && (String(bn.siteId) === String(player.freeImplantSite)
+    || bernalDirtsides(state, bn, player).includes(String(player.freeImplantSite)));
+  // Life Support Test Protocol (Exodus back): Implant is a free action.
+  const lstp = contractAbilityCount(state, player, 'freeImplant') > 0;
+  const free = (industrialist && !player.implantFreeUsed) || goo || lstp;
   if (!free && player.opsRemaining <= 0) return fail('no_ops_left');
   player.augments = player.augments || {};
   const removes = Array.isArray(op.remove) ? op.remove.map(String) : [];
@@ -17067,11 +17953,13 @@ function applyImplant(state, op, player) {
       parts.push(`a child is on the way (${CHILD_YEARS} years)`);
     }
   }
-  if (free) player.implantFreeUsed = true;
+  if (goo) delete player.freeImplantSite;
+  else if (lstp) { /* always free */ }
+  else if (free) player.implantFreeUsed = true;
   else player.opsRemaining -= 1;
   syncCrewAugmentMarks(state);
   const where = (siteById(bn.siteId) || {}).name || 'the Bernal';
-  return { ok: true, state, log: `${player.name} ${parts.join(' and ')} at ${where}${free ? ' (Industrialist: free)' : ''}.` };
+  return { ok: true, state, log: `${player.name} ${parts.join(' and ')} at ${where}${goo ? ' (Nanite Goo: free)' : free ? ' (Industrialist: free)' : ''}.` };
 }
 // IMPLANT without Module 2 (user ruling 2026-11-17: "augmentations without m2
 // use regular colonies instead of bernal"): there are no Colonists or Bernals,
@@ -17263,6 +18151,9 @@ function normTradeSide(raw) {
     // party permission to prospect Luna as an atomic trade term (sealed with the
     // rest of the deal on accept). Abstract, so it trades anywhere (not in-space).
     lunaGrant: !!raw.lunaGrant,
+    // 4D2f: isofuel negotiated / purchased between two isovaults (abstract:
+    // it never leaves the isobank, so it trades anywhere).
+    isovault: ints(raw.isovault),
   };
 }
 
@@ -17272,7 +18163,7 @@ function sideHasInSpace(side) {
 function sideIsEmpty(side) {
   return !side.aqua && !side.water && !side.handCardIds.length
     && !side.cargoCardIds.length && !(side.leoCardIds || []).length && !side.abilities.length && !side.lunaGrant
-    && !(side.contractIds || []).length;
+    && !(side.contractIds || []).length && !side.isovault;
 }
 // Where a contract the giver trades sits: 'hand' | 'leo' | null.
 function contractTradeWhere(giver, id) {
@@ -17355,6 +18246,10 @@ function validateTradeSide(state, owner, side) {
     if (meta.default) return 'contract_in_default';
     if (!contractTradeWhere(owner, id)) return 'contract_not_in_hand_or_leo';
   }
+  if (side.isovault) {
+    if (!state.m4 || !state.isobank) return 'no_isobank';
+    if ((owner.isovault | 0) < side.isovault) return 'insufficient_isofuel';
+  }
   // Only the first player can grant Luna prospecting access (Luna Treaty), so a
   // lunaGrant term is deliverable only from the first player's side of the deal.
   if (side.lunaGrant) {
@@ -17404,6 +18299,10 @@ function reconcileRocketAfterTrade(player) {
 
 // Move one side's items from `giver` to `receiver`. Mutates both players.
 function executeTradeSide(giver, receiver, side) {
+  if (side.isovault) {
+    giver.isovault = Math.max(0, (giver.isovault | 0) - side.isovault);
+    receiver.isovault = Math.max(0, receiver.isovault | 0) + side.isovault;
+  }
   if (side.aqua) {
     // Pay aqua from the bank first; at LEO any shortfall comes from tank water
     // (1:1 at the bank). The receiver always banks it as aqua.
@@ -17504,6 +18403,7 @@ function tradeSideSummary(state, side) {
     parts.push(`${abilityLabel(g.ability)} (${g.turns == null ? 'permanent' : g.turns + ' turns'})`);
   }
   if (side.lunaGrant) parts.push('Luna prospecting access');
+  if (side.isovault) parts.push(`${side.isovault} isofuel (isovault)`);
   return parts.length ? parts.join(' + ') : 'nothing';
 }
 

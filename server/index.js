@@ -1106,9 +1106,8 @@ app.post('/lobbies', requireProfile, (req, res) => {
     if (withVariant.length) {
       return res.status(400).json({ error: 'm4_no_variants', detail: withVariant });
     }
-    // M4 with M2 is refused again until isotope monetization is finished (owner
-    // 2026-11-20). The M4 + M2 rules stay in the engine; only new rooms wait.
-    if (m2) return res.status(400).json({ error: 'm4_no_m2' });
+    // M4 combines with M1 and with M2 (owner 2026-11-23: isotope monetization
+    // is finished, M1 + M2 + M4 and M1 + M4 open to the M4 previewers).
     m0 = 1;
   }
   // A room runs AT MOST ONE variant (see VARIANT_KEYS). Rejected rather than
@@ -1751,11 +1750,8 @@ app.post('/lobbies/:id/settings', requireProfile, (req, res) => {
   if (body.m1 !== undefined) { sets.push('m1 = ?'); args.push(body.m1 ? 1 : 0); }
   // M2 is released (v1.3.0): any host may toggle it pre-start (a ceoSolo room may
   // carry it too - Futures in solo).
-  // M4 does not combine with M2 until isotope monetization is finished (owner
-  // 2026-11-20): refuse a save that would leave both on.
+  // M4 combines with M1 and M2 (owner 2026-11-23).
   const m4After = (body.m4 !== undefined && m4Allowed(req)) ? !!body.m4 : !!lobby.m4;
-  const m2After = body.m2 !== undefined ? !!body.m2 : !!lobby.m2;
-  if (m4After && m2After) return res.status(400).json({ error: 'm4_no_m2' });
   // M4 does not combine with The Sirens (owner 2026-11-18) or the tutorial;
   // CEO Solitaire, Altruism and Hermes Fall are fine (owner 2026-11-22). The
   // same refusal the create route gives.

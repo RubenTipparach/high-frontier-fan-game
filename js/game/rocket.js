@@ -1783,6 +1783,7 @@ export function getActiveThrusterStats(overrideId) {
     // through the Promotion operation, engine.js#applyPromote), so the face
     // read alone is the promotion test. Drives the C3b synodic-comet season
     // waiver in the route planner.
+    isGw:               !!(card && card.type === 'gw-thruster'),
     isTw:               !!(card && card.type === 'gw-thruster'
                            && slot && (slot.face === 'secondary' || slot.promoted)),
     afterburnCost:      (card && card.type === 'gw-thruster') ? 1 : (Number(f.afterburn) || 0),

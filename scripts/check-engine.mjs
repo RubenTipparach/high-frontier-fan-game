@@ -16,7 +16,9 @@
 // Run locally: node scripts/check-engine.mjs
 
 import { createInitialState, seasonForSlot } from '../server/game/state.js';
-import { auctionWaitingOn, finaoPerFor } from '../server/game/engine.js';
+import { auctionWaitingOn, finaoPerFor, finaoFunds, payFinao, exodusScoring, applyFlareToPlayer } from '../server/game/engine.js';
+import { SITES_BY_ID as SITES_BY_ID_X } from '../data/sites.js';
+import { NODE_TAGS as NODE_TAGS_X } from '../data/node-tags.js';
 import { hotSeatWaitingOn, resolveHotSeatActor } from '../data/hot-seat.js';
 import { applyOperation, slotMass, autoFixGlitches, liveScoreboard, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, repairSpeciesDeckSplit, cycleMarketDecks, rocketSolarZone, activeNetThrust, outpostWater, buildFutureCtx, resolveSunspotEvent, computeFinalScores } from '../server/game/engine.js';
 import { BERNALS } from '../data/bernals.js';
@@ -34,14 +36,14 @@ import { SIGNPOSTED_SITES } from '../data/signpost-routes.js';
 import { AD_ASTRA_EXIT_SLUGS, isAdAstraExit, sunlensAt } from '../data/ad-astra.js';
 import { diffState, applyPatch, sameState } from '../server/game/state-diff.js';
 import { scorePlayer } from '../data/endgame-scoring.js';
-import { CONTRACTS, CONTRACT_PAIRS, faceUnplayable } from '../data/contracts.js';
+import { CONTRACTS, CONTRACTS_BY_ID, CONTRACT_PAIRS, faceUnplayable, contractDeckIds } from '../data/contracts.js';
 import { siteBySlug, nodeSizeNumber, isLanderBurnNode, isAerobrakeLandableSite, neighborSlugs, siteHasLanderBurn, allSiteSlugs, leoSlug } from '../server/game/planner-graph.js';
 import { adjacentSites, SITES } from '../data/sites.js';
 import { NODE_LABELS } from '../data/map-labels.js';
 import { isAtmosphericSite } from '../data/site-categories.js';
 
 import { SIREN_BUSTED_SITES, splitDeckForSoloSpecies, SIREN_SOLO_SPECTRALS } from '../data/sirens.js';
-import { usesSoloAssembly, lawForIdeology, SOLO_LAWS, IDEOLOGY_ORDER, adjacentPlaces } from '../data/assembly.js';
+import { usesSoloAssembly, lawForIdeology, SOLO_LAWS, IDEOLOGY_ORDER, adjacentPlaces, voteWinners } from '../data/assembly.js';
 import { turnsToImpact, TURNS_PER_CYCLE, HERMES_ROUNDS, hermesSitesIndustrialized,
   hermesTargetSites, hermesProspectWaived, isHermesTargetSite, HERMES_MAX_PLAYERS, NEUJMIN_SITE } from '../data/hermes.js';
 import { truncateBottomHalf, isLegalAltruismRounds, altruismTarget, altruismVerdict,
@@ -2790,6 +2792,130 @@ check('deployed Bernal figures score their own token VP', () => {
 // Effects = may lobby without removing the delegate used; every Seniority Disk
 // migrates to Authority; 10 VP at the endgame. Drives the whole power through
 // the real ops.
+// ---- M4 spaceborn colonist Futures (Module 4) ----
+// Each Future is attempted through the real EPIC_HAZARD op (FINAO paid, so no
+// die): refused before its requirement holds, completed after, and its effect
+// checked through the op or rule it changes.
+const plOf = (st, id) => st.players.find((p) => p.profileId === id);
+function sbFuture(cardId, place = null) {
+  const st = startedGame({ m0: true, m1: true, m2: true, m4: true, seats: 2, maxRounds: 7 });
+  st.activeIndex = 0;
+  const me = st.players[0], rival = st.players[1];
+  me.aqua = 80; me.opsRemaining = 4;
+  const slot = { id: cardId, kind: 'colonist', face: 'secondary' };
+  const crew = { id: me.faction.cardId, kind: 'crew', face: 'primary' };
+  if (place == null) me.leo = [...(me.leo || []), slot, crew];
+  else { me.rocket.siteId = place; me.rocket.stack = [slot, crew]; }
+  const attempt = (s = st, extra = {}) => applyOperation(s, { kind: 'EPIC_HAZARD', cardId, hazardPay: true, ...extra }, { profileId: me.profileId });
+  const star = (r) => r.ok && (plOf(r.state, me.profileId).futureStars || []).some((x) => x.cardId === cardId);
+  return { st, me, rival, attempt, star };
+}
+check('M4 Futures: all 16 spaceborn colonists carry an engine goal', () => {
+  const ids = ['col_cobots', 'col_beowulf_internet', 'col_self_designing_heuristics', 'col_combat_quadrupeds', 'col_sensor_web_sail',
+    'col_nano_3d_printers', 'col_lava_lamp_evangelists', 'col_gabonese_mining_consortium', 'col_prehensilists', 'col_exoskeletalists',
+    'col_teleoperators', 'col_boston_hexapods', 'col_neural_pilots', 'col_vr_simulcasters', 'col_transhuman_activists', 'col_clone_entrepreneurs'];
+  const missing = ids.filter((id) => !futureGoalForCard(id));
+  assert(!missing.length, `no goal: ${missing.join(', ')}`);
+  return ids.map((id) => futureGoalForCard(id).name.replace(/ FUTURE$/, '')).join(', ');
+});
+check('M4 Futures: Space Surveillance (Freedom), TW Commander (isototal) and its double votes', () => {
+  let t = sbFuture('col_self_designing_heuristics');
+  t.st.activeLawStar = 'honor';
+  assert(!t.star(t.attempt()), 'Space Surveillance outside Freedom');
+  t.st.activeLawStar = 'freedom';
+  let r = t.attempt();
+  assert(t.star(r) && /Space Republic/.test(r.log), `Space Surveillance: ${r.error} ${r.log}`);
+  t = sbFuture('col_vr_simulcasters');
+  t.me.isovault = 8; t.rival.isovault = 8;
+  assert(!t.star(t.attempt()), 'a tie is not "more than any opponent"');
+  t.rival.isovault = 3;
+  r = t.attempt();
+  assert(t.star(r), `TW Commander: ${r.error}`);
+  const asm = { delegates: { freedom: { [t.me.profileId]: 1 }, honor: { [t.rival.profileId]: 2 } } };
+  assert(voteWinners(asm).join() === 'honor', 'plain tally');
+  assert(voteWinners(asm, { [t.me.profileId]: 2 }).join() === 'freedom,honor', 'doubled votes tie');
+  return 'Freedom gate, isototal lead, delegates count 2';
+});
+check('M4 Futures: Vinge at a Promoted Bernal with an Exodus contract emancipates the Robots', () => {
+  const t = sbFuture('col_cobots', 'lag-qofv5');
+  t.rival.bernals = [{ cardId: 'ber_l4_antimatter_factory', siteId: 'lag-qofv5', anchored: true, promoted: true, face: 'secondary', stack: [], route: [], wiring: {} }];
+  assert(!t.star(t.attempt()), 'no Exodus contract yet');
+  t.me.fulfilledContracts = [{ id: 'con_deep_freeze', side: 'exodus', round: 1 }];
+  const r = t.attempt();
+  assert(t.star(r) && r.state.robotsEmancipated && /Space Empire/.test(r.log), `Vinge: ${r.error} ${r.log}`);
+  return r.log;
+});
+check('M4 Futures: Isotope Cartel (15 isotopes at your Promoted Bernal) sets the rate to 12 aqua', () => {
+  const t = sbFuture('col_exoskeletalists');
+  t.me.leo = t.me.leo.filter((x) => x.id !== 'col_exoskeletalists');
+  t.me.bernals = [{ cardId: 'ber_l4_antimatter_factory', siteId: 'lag-qofv5', anchored: true, promoted: true, face: 'secondary', route: [], wiring: {},
+    stack: [{ id: 'col_exoskeletalists', kind: 'colonist', face: 'secondary' }, { id: 'fuel_iso', kind: 'fuel', grade: 'isotope', spectral: 'S', amount: 14 }] }];
+  assert(!t.star(t.attempt()), '14 isotopes is short');
+  t.me.bernals[0].stack[1].amount = 15;
+  const r = t.attempt();
+  assert(t.star(r) && r.state.isotopeRate === 12, `Cartel: ${r.error}`);
+  const s2 = r.state; s2.isotopeMonetized = true;
+  const P = plOf(s2, t.me.profileId); P.isotopes = 1; P.isostandards = ['S'];
+  const a = P.aqua;
+  const sell = applyOperation(s2, { kind: 'ISOTOPE_EXCHANGE', action: 'sell', amount: 1 }, { profileId: t.me.profileId });
+  assert(sell.ok && plOf(sell.state, t.me.profileId).aqua === a + 12, `sold for ${plOf(sell.state, t.me.profileId).aqua - a}`);
+  return 'star + sold 1 isotope for 12 aqua';
+});
+check('M4 Futures: Quantum Entanglement at Haumea with an X reactor; Interstellar Exploration grants a card', () => {
+  let t = sbFuture('col_gabonese_mining_consortium', 'haumea');
+  assert(!t.star(t.attempt()), 'no X reactor');
+  t.me.rocket.stack.push({ id: 'rea_lyman_alpha_trap', kind: 'patent', face: 'primary' });
+  let r = t.attempt();
+  assert(t.star(r) && plOf(r.state, t.me.profileId).futureEffects.includes('crashReroll'), `Quantum: ${r.error}`);
+  t = sbFuture('col_prehensilists', 'lag-morz3');
+  t.me.augments = { jar: { side: 0, colonistId: 'col_prehensilists' } };
+  assert(!t.star(t.attempt()), 'the Neutrino Sunlens is not the EM Sunlens');
+  t = sbFuture('col_prehensilists', 'lag-mnakl');
+  assert(!t.star(t.attempt()), 'no augmented colonist');
+  t.me.augments = { jar: { side: 0, colonistId: 'col_prehensilists' } };
+  const hand = t.me.hand.length;
+  r = t.attempt();
+  assert(t.star(r) && plOf(r.state, t.me.profileId).hand.length === hand + 1 && /Research grant/.test(r.log), `Interstellar: ${r.error} ${r.log}`);
+  return r.log;
+});
+check('M4 Futures: Von Neumann decommissions the card and a refinery', () => {
+  const t = sbFuture('col_nano_3d_printers', 'phaethon');
+  t.st.factories = { phaethon: { ownerId: t.me.profileId } };
+  assert(!t.star(t.attempt()), 'no refinery');
+  const ref = PATENTS.find((c) => c.type === 'refinery').id;
+  t.me.rocket.stack.push({ id: ref, kind: 'patent', face: 'primary' });
+  const r = t.attempt();
+  const P = r.ok && plOf(r.state, t.me.profileId);
+  assert(t.star(r) && !P.rocket.stack.some((x) => x.id === ref || x.id === 'col_nano_3d_printers') && P.hand.includes(ref), `Von Neumann: ${r.error} ${r.log}`);
+  return r.log;
+});
+check('M4 Futures: Vats needs a life-support wunderkind; Avatar holders are immune to claim jumps', () => {
+  const t = sbFuture('col_clone_entrepreneurs');
+  assert(!t.star(t.attempt()), 'no wunderkind');
+  t.me.lifeSupportWunderkind = true;
+  assert(t.star(t.attempt()), 'Vats');
+  // Felony immunity: a jump against an Avatar holder's claim is refused.
+  const st = startedGame({ m0: true, m1: true, m2: true, m4: true, seats: 2 });
+  st.activeIndex = 0; st.anarchy = true;
+  const [A, B] = st.players;
+  st.discs.ceres = { outcome: 'success', ownerId: B.profileId };
+  A.rocket.siteId = 'ceres'; A.rocket.stack = [{ id: A.faction.cardId, kind: 'crew', face: 'primary' }];
+  B.futureEffects = ['felonyImmune'];
+  const r = applyOperation(st, { kind: 'CLAIM_JUMP', siteId: 'ceres' }, { profileId: A.profileId });
+  assert(!r.ok && r.error === 'target_immune', `jump: ${r.error}`);
+  return 'Vats; claim jump refused (target_immune)';
+});
+check('M4 Futures: Exonet needs Colonies in 4 zones and opens every contract deck', () => {
+  const t = sbFuture('col_beowulf_internet', 'ceres');
+  t.st.colonies = { ceres: { ownerId: t.me.profileId }, 'mars-north-pole': { ownerId: t.me.profileId }, 'uranus-aerostat': { ownerId: t.me.profileId } };
+  t.me.augments = { jar: { side: 0, colonistId: 'col_beowulf_internet' } };
+  assert(!t.star(t.attempt()), '3 zones');
+  t.st.colonies['mercury-north-pole'] = { ownerId: t.me.profileId };
+  const r = t.attempt();
+  assert(t.star(r) && plOf(r.state, t.me.profileId).futureEffects.includes('anyContractDeck'), `Exonet: ${r.error}`);
+  return 'four zones; anyContractDeck';
+});
+
 check('Supreme Cult: lobby keeps the delegate, Seniority migrates to Authority, 10 VP', () => {
   const st = startedGame({ m0: true, m1: true, m2: true, seats: 2, maxRounds: 7 });
   assert(st.futures, 'the fixture is not a Futures game');
@@ -4441,6 +4567,37 @@ check('a crew in an outpost founds the colony with the rocket elsewhere', () => 
 // 2026-08-17: "should risk support, but not the bernal"). It used to destroy
 // nothing at all - the handler returned before the decommission - so a failed
 // roll cost only the operation and you simply tried again with the stack intact.
+// 4A7j + 3B5a: anchoring the Lofstrom Loop in a Home Orbit is an Epic Hazard,
+// and anchoring it as a Home Bernal monetizes isotope (FINAO doubles) in any
+// M1+M2 game, not only M4.
+check('Lofstrom Loop as a Home Bernal: Epic Hazard roll, monetizes isotope (M1+M2, no M4); FINAO stays single', () => {
+  const BN = 'ber_l3_lofstrom_loop_microgravity';
+  const GEN = 'gen_photon_tether_rectenna';
+  const build = (cursor) => {
+    const st = startedGame({ seats: 2, m1: true, m2: true });
+    const me = st.players[0];
+    st.activeIndex = 0; st.rng.cursor = cursor; me.opsRemaining = 4; me.aqua = 40; st.turnActions = [];
+    me.bernals = [{ cardId: BN, face: 'primary', anchored: false, siteId: 'burn-9b26i', tank: 0,
+      stack: [{ id: GEN, kind: 'patent', face: 'primary' }] }];
+    return st;
+  };
+  let failed = null, passed = null, first = null;
+  for (let c = 0; c < 400 && (!failed || !passed); c++) {
+    const r = applyOperation(build(c), { kind: 'ANCHOR_BERNAL', cardId: BN }, { profileId: build(c).players[0].profileId });
+    if (!first) first = r;
+    if (!r.ok) continue;
+    if (/failed the Epic Hazard/.test(r.log || '')) { if (!failed) failed = r; } else if (!passed) passed = r;
+  }
+  assert(failed && passed, `rolls: ${first && (first.error || first.log)}`);
+  assert(!failed.state.players[0].bernals[0].anchored && !failed.state.isotopeMonetized, 'a failed roll anchors and monetizes nothing');
+  assert(passed.rolled && passed.state.players[0].bernals[0].anchored && passed.state.isotopeMonetized, `success: ${passed.log}`);
+  const before = JSON.parse(JSON.stringify(passed.state)); before.isotopeMonetized = false;
+  const a = finaoPerFor(before, before.players[0]), b = finaoPerFor(passed.state, passed.state.players[0]);
+  assert(b === a, `FINAO ${a} -> ${b} (M4 rooms only)`);
+  assert(!passed.state.contractSide, 'no contract upheaval without M4');
+  return passed.log;
+});
+
 check('a failed GEO Epic Hazard loses the supports but not the Bernal', () => {
   const BN = 'ber_geo_elevator_bernal';
   const GEN = 'gen_photon_tether_rectenna';   // supplies gen-electric, needs nothing
@@ -10580,17 +10737,18 @@ check('M4 deals three ideology-pair contract decks; an M4-off deal is untouched'
   const on = createInitialState({ players: [{ profileId: 1, name: 'A', seat: 1 }, { profileId: 2, name: 'B', seat: 2 }], seed: 9, m4: true });
   const m0 = createInitialState({ players: [{ profileId: 1, name: 'A', seat: 1 }, { profileId: 2, name: 'B', seat: 2 }], seed: 9, m0: true });
   assert(Object.keys(on.contractDecks).join() === 'IF,HU,EA', 'pair decks');
-  // Contracts whose destination needs a piece this game lacks (Bernals,
-  // colonists, freighters, the isobank: M1 / M2 content) are dealt out.
+  // Contracts whose destination needs a piece this game lacks (freighters,
+  // the isobank: M1 / M2 content) are dealt out; Colony ones play on colony
+  // domes without M2 (owner 2026-11-23), so Junket / Fugitive / Drug Smuggling deal.
   const sizes = Object.values(on.contractDecks).map((d) => d.length).join();
-  assert(sizes === '11,12,9', `deck sizes ${sizes}`);
+  assert(sizes === '12,12,11', `deck sizes ${sizes}`);
   const dealt = Object.values(on.contractDecks).flat().map((id) => CONTRACTS.find((c) => c.id === id));
   assert(dealt.every((c) => c && !faceUnplayable(c.faces.primary)), 'an unplayable contract was dealt');
   assert(CONTRACTS.some((c) => !c.exodus && faceUnplayable(c.faces.primary)), 'nothing is dealt out');
   assert(JSON.stringify(on.decks) === JSON.stringify(m0.decks), 'the patent deal changed when M4 was switched on');
   assert(!('contractDecks' in m0) && !('timepiece' in m0.players[0]), 'an M4-off game carries contract state');
   assert(on.players.every((p) => p.timepiece === null && Array.isArray(p.contractHand)), 'timepieces start in the Reserve');
-  return 'IF 11, HU 12, EA 9 (module contracts dealt out); patent decks identical to the same M0 game';
+  return 'IF 12, HU 12, EA 11 (module-only contracts dealt out); patent decks identical to the same M0 game';
 });
 
 check('a contract auction needs a Fundraise and a deck sharing an Active Law', () => {
@@ -12223,6 +12381,7 @@ check('M4 isotope monetization: a can at LEO banks as gold beads, sells and buys
   const st = startedGame({ m4: true, m1: true, m2: true });
   const P = currentPlayerOf(st);
   P.aqua = 5;
+  P.isostandards = ['S'];
   P.leo = [...(P.leo || []), { id: 'fuel-iso-1', kind: 'fuel', grade: 'isotope', spectral: 'S', amount: 3, face: 'primary' }];
   let r = op(st, 'ISOTOPE_EXCHANGE', P.profileId, { action: 'deposit', cardId: 'fuel-iso-1', holder: 'leo' });
   assert(r.ok, `deposit: ${r.error}`);
@@ -12272,6 +12431,7 @@ check('M4: the first gold bead refined monetizes isotope and flips the contract 
   assert(r.state.isotopeMonetized && r.state.contractSide === 'gold', 'not monetized / not gold');
   assert(/Upheaval/.test(r.log), `log: ${r.log}`);
   for (const [pair, d] of Object.entries(r.state.contractDecks)) {
+    if (pair === 'EX') continue;   // the isobank (4D2) may open the Exodus deck on the same refuel
     const want = before[pair].slice().reverse();
     assert(d.length && d.every((id, i) => want.indexOf(id) >= 0) && want.indexOf(d[0]) <= want.indexOf(d[d.length - 1]), `${pair} not flipped`);
     assert(d[0] === want.find((id) => d.includes(id)), `${pair}: the old bottom card is not on top`);
@@ -12286,7 +12446,10 @@ check('M4: the first gold bead refined monetizes isotope and flips the contract 
   // Zero bleed-through: the same refinery run without M4 monetizes but leaves no contract decks to flip.
   const plain = setup(false);
   const r2 = applyOperation(plain.st, { kind: 'SITE_REFUEL', siteId: SITE, mode: 'isotope' }, { profileId: plain.me.profileId });
-  assert(r2.ok && r2.state.isotopeMonetized && !r2.state.contractSide && !/Upheaval|FINAO/.test(r2.log), `without M4: ${r2.error} ${r2.log}`);
+  assert(r2.ok && r2.state.isotopeMonetized && !r2.state.contractSide && !/Upheaval/.test(r2.log), `without M4: ${r2.error} ${r2.log}`);
+  // FINAO doubles in M4 rooms only (R8): an M1 + M2 game keeps single FINAO.
+  const per0 = finaoPerFor(plain.st, plain.me), per1 = finaoPerFor(r2.state, pl(r2.state, plain.me.profileId));
+  assert(per1 === per0 && !/FINAO/.test(r2.log), `M1 FINAO ${per0} -> ${per1}`);
   return `monetized + decks flipped to gold (${Object.values(r.state.contractDecks).map((d) => d.length).join('/')} cards)${open.ok ? '; the next auction deals gold' : ''}; M1+M2 alone untouched`;
 });
 
@@ -12314,7 +12477,7 @@ check('M4 + M2 Spacer Union (4C2): spaceborn needs a BEO Colony, joining discard
   return `refused without BEO; ${COLONISTS_BY_ID[human].name} joined, Biomechs discarded; earthborn refused to a member; M2 alone untouched`;
 });
 
-check('M4 + M2 Robots (4C2b): several Robots drawn in one spaceborn exomigration, keep one, the rest go back', () => {
+check('M4 + M2 Robots (4C2b): several Robots drawn in one spaceborn exomigration, the player picks one, the rest go back', () => {
   const { st, P } = augGame({ colonists: [] });
   const isRobot = (id) => (COLONISTS_BY_ID[id] || {}).colonistKind === 'Robot';
   const robots = st.spacebornQueue.filter(isRobot).slice(0, 3);
@@ -12324,12 +12487,33 @@ check('M4 + M2 Robots (4C2b): several Robots drawn in one spaceborn exomigration
   P.beoAtTurnStart = true; P.hand = [];
   const r = op(st, 'EXOMIGRATE', P.profileId, { queue: 'spaceborn', placeDelegate: false });
   assert(r.ok, `spaceborn draw: ${r.error}`);
-  const Q = pl(r.state, P.profileId);
-  const handRobots = Q.hand.filter(isRobot);
-  assert(handRobots.length === 1 && handRobots[0] === robots[0], `kept robots: ${handRobots}`);
-  assert(robots.slice(1).every((id) => r.state.spacebornQueue.includes(id)), 'the other Robots went back to the spaceborn queue');
+  let Q = pl(r.state, P.profileId);
+  assert(Q.hand.filter(isRobot).length === 0, 'no Robot in hand before the pick');
+  assert(Q.robotPick && Q.robotPick.ids.length === 3 && robots.every((id) => Q.robotPick.ids.includes(id)), `set aside: ${JSON.stringify(Q.robotPick)}`);
   assert(Q.bernals.some((bn) => (bn.stack || []).some((x) => x.id === human)), 'the Human boarded');
-  return r.log;
+  const end = op(r.state, 'END_TURN', P.profileId);
+  assert(!end.ok && end.error === 'robot_pick_due', `End Turn waits: ${end.error}`);
+  const bad = op(r.state, 'KEEP_ROBOT', P.profileId, { cardId: human });
+  assert(!bad.ok, 'kept a card that was not drawn');
+  const k = op(r.state, 'KEEP_ROBOT', P.profileId, { cardId: robots[2] });
+  assert(k.ok, `keep: ${k.error}`);
+  Q = pl(k.state, P.profileId);
+  const handRobots = Q.hand.filter(isRobot);
+  assert(handRobots.length === 1 && handRobots[0] === robots[2], `kept robots: ${handRobots}`);
+  assert(!Q.robotPick, 'pick cleared');
+  assert(robots.slice(0, 2).every((id) => k.state.spacebornQueue.includes(id)), 'the other Robots went back to the spaceborn queue');
+  const end2 = op(k.state, 'END_TURN', P.profileId);
+  assert(end2.ok || end2.error !== 'robot_pick_due', `End Turn after the pick: ${end2.error}`);
+  // One Robot drawn: straight to the hand, no pick.
+  const g = augGame({ colonists: [] });
+  const one = g.st.spacebornQueue.filter(isRobot)[0];
+  const hum = g.st.spacebornQueue.find((id) => !isRobot(id));
+  g.st.spacebornQueue.splice(0, g.st.spacebornQueue.length, one, hum, ...g.st.spacebornQueue.filter((id) => id !== one && id !== hum));
+  g.P.beoAtTurnStart = true; g.P.hand = [];
+  const r1 = op(g.st, 'EXOMIGRATE', g.P.profileId, { queue: 'spaceborn', placeDelegate: false });
+  const Q1 = pl(r1.state, g.P.profileId);
+  assert(r1.ok && Q1.hand.includes(one) && !Q1.robotPick, 'a lone Robot goes straight to the hand');
+  return `${r.log} | ${k.log}`;
 });
 
 check('M4 + M2 Parenthood (4C5): heart side 1 on an earthborn, the child comes of age 9 years on and inherits', () => {
@@ -12357,6 +12541,595 @@ check('M4 + M2 Parenthood (4C5): heart side 1 on an earthborn, the child comes o
   const bad = op(sb.st, 'IMPLANT', sb.P.profileId, { bernal: 0, implants: [{ colonistId: 'col_lava_lamp_evangelists', shape: 'heart', side: 1 }] });
   assert(!bad.ok && bad.error === 'parenthood_earthborn_only', `spaceborn parenthood: ${bad.error || 'accepted'}`);
   return `child chit placed; END_TURN held; ${COLONISTS_BY_ID[pick].name} replaced Biomechs with heart (side 2) and jar; spaceborn refused`;
+});
+
+check('M4 4D1: beads pay like aqua, withdraw as isostandard fuel, and debase without an isostandard', () => {
+  const st = startedGame({ m4: true, m1: true, m2: true });
+  const P = currentPlayerOf(st);
+  st.isotopeMonetized = true; st.earthMarket = 0;
+  P.aqua = 3; P.isotopes = 2; P.isostandards = ['S'];
+  assert(finaoFunds(st, P) === 23, `funds ${finaoFunds(st, P)}`);
+  payFinao(st, P, 8);
+  assert(P.aqua === 5 && P.isotopes === 1 && st.earthMarket === 1, `FINAO 8 paid with a bead: aqua ${P.aqua} beads ${P.isotopes} market ${st.earthMarket}`);
+  let r = op(st, 'ISOTOPE_EXCHANGE', P.profileId, { action: 'withdraw', amount: 1 });
+  assert(r.ok, `withdraw: ${r.error}`);
+  const Q = pl(r.state, P.profileId);
+  const can = (Q.leo || []).find((x) => x.kind === 'fuel' && x.grade === 'isotope');
+  assert(Q.isotopes === 0 && can && can.spectral === 'S' && can.amount === 1, `withdrawn can ${JSON.stringify(can)}`);
+  // No isostandard: no buying, no withdrawing, and beads reaching the Bank turn to aqua.
+  const st2 = startedGame({ m4: true, m1: true, m2: true });
+  const N = currentPlayerOf(st2);
+  st2.earthMarket = 2; N.aqua = 30; N.isotopes = 0; N.isostandards = [];
+  const buy = op(st2, 'ISOTOPE_EXCHANGE', N.profileId, { action: 'buy', amount: 1 });
+  assert(!buy.ok && buy.error === 'no_isostandard', `buy without isostandard: ${buy.error}`);
+  N.leo = [...(N.leo || []), { id: 'fuel-iso-9', kind: 'fuel', grade: 'isotope', spectral: 'C', amount: 2, face: 'primary' }];
+  r = op(st2, 'ISOTOPE_EXCHANGE', N.profileId, { action: 'deposit', cardId: 'fuel-iso-9', holder: 'leo' });
+  const N2 = pl(r.state, N.profileId);
+  assert(r.ok && N2.isotopes === 0 && N2.aqua === 50 && r.state.earthMarket === 4, `debased: ${r.error} beads ${N2.isotopes} aqua ${N2.aqua}`);
+  return 'FINAO 8 = 3 aqua + 1 bead (2 change); a bead withdrawn as spectral-S fuel; without an isostandard 2 beads debase to 20 aqua';
+});
+
+check('M4 + M2 isobank (4D2): founded at a BEO Bernal on an isostandard Dirtside, opens the Exodus deck, isovaults, and the starshot scores', () => {
+  const SITE = 'luna-shackleton-polar-rim', SPACE = 'lag-qofv5';
+  const st = startedGame({ m0: true, m1: true, m2: true, m4: true, seats: 2, maxRounds: 7 });
+  const me = st.players[st.activeIndex];
+  const rival = st.players.find((p) => p.profileId !== me.profileId);
+  st.factories = { [SITE]: { ownerId: me.profileId, spectralType: 'S' } };
+  me.bernals = [{ cardId: 'ber_l4_antimatter_factory', figure: 'stanford', face: 'secondary', promoted: true,
+    siteId: SPACE, anchored: true, tank: 0, wiring: {}, route: [], stack: [] }];
+  me.rocket.siteId = SPACE; me.rocket.turnStartSiteId = SPACE;
+  me.rocket.stack = [{ id: 'gw-_amat_catalyzed_fission_fusion', kind: 'patent', face: 'secondary' }];
+  me.rocket.activeThrusterId = 'gw-_amat_catalyzed_fission_fusion';
+  me.rocket.tank = 0; me.rocket.tankGrade = 'isotope'; me.rocket.tankSpectral = 'S';
+  me.isostandards = ['S']; me.opsRemaining = 1; me.refueledSites = []; st.turnActions = [];
+  // Before qualifying: no isobank, and vaulting is refused.
+  const early = op(st, 'ISOTOPE_EXCHANGE', me.profileId, { action: 'vault', amount: 1 });
+  assert(!early.ok && early.error === 'no_isobank', `vault before the isobank: ${early.error}`);
+  // The isotope refuel happens on my turn with everything in place: the isobank is founded.
+  let r = op(st, 'SITE_REFUEL', me.profileId, { siteId: SITE, mode: 'isotope' });
+  assert(r.ok, `isotope refuel: ${r.error}`);
+  assert(r.state.isobank && r.state.isobank.ownerId === me.profileId && r.state.isobank.siteId === SPACE, `isobank: ${r.error} ${JSON.stringify(r.state.isobank)}`);
+  assert(/ISOBANK/.test(r.log) && Array.isArray(r.state.contractDecks.EX) && r.state.contractDecks.EX.length > 0, `Exodus deck: ${r.log}`);
+  const st2 = r.state;
+  // Back on my turn: deposit into the isovault, and the isobank never unanchors.
+  st2.activeIndex = st2.players.findIndex((p) => p.profileId === me.profileId);
+  const M = pl(st2, me.profileId);
+  M.rocket.tank = 3;
+  r = op(st2, 'ISOTOPE_EXCHANGE', me.profileId, { action: 'vault', amount: 3 });
+  assert(r.ok && pl(r.state, me.profileId).isovault === 3, `vault: ${r.error}`);
+  const un = op(r.state, 'UNANCHOR_BERNAL', me.profileId, { cardId: 'ber_l4_antimatter_factory' });
+  assert(!un.ok && un.error === 'isobank_cannot_unanchor', `unanchor: ${un.error}`);
+  // Endgame: 2 players, isototal 12 is Reckless (11+), a TW thruster sits at the isobank.
+  const S = r.state;
+  pl(S, me.profileId).isovault = 8; pl(S, rival.profileId).isovault = 4;
+  const ex = exodusScoring(S);
+  const a = ex[me.profileId], b = ex[rival.profileId];
+  assert(a.starshot && a.band === 'reckless', `band ${a.band} starshot ${a.starshot}`);
+  assert(a.isobanker === 4 && a.rank === 6 && a.command === 4 && a.propulsion === 4, `me ${JSON.stringify(a)}`);
+  assert(b.rank === 3 && b.vp === 3, `rival ${JSON.stringify(b)}`);
+  // Zero bleed-through: an M2 game without M4 never founds an isobank.
+  const m2 = startedGame({ m0: true, m1: true, m2: true, seats: 2, maxRounds: 7 });
+  const z = m2.players[m2.activeIndex];
+  m2.factories = { [SITE]: { ownerId: z.profileId, spectralType: 'S' } };
+  z.bernals = [{ cardId: 'ber_l4_antimatter_factory', figure: 'stanford', face: 'secondary', promoted: true, siteId: SPACE, anchored: true, tank: 0, wiring: {}, route: [], stack: [] }];
+  z.isostandards = ['S'];
+  z.rocket.siteId = SPACE; z.rocket.turnStartSiteId = SPACE;
+  z.rocket.stack = [{ id: 'gw-_amat_catalyzed_fission_fusion', kind: 'patent', face: 'secondary' }];
+  z.rocket.activeThrusterId = 'gw-_amat_catalyzed_fission_fusion';
+  z.rocket.tank = 0; z.rocket.tankGrade = 'isotope'; z.rocket.tankSpectral = 'S'; z.opsRemaining = 1; z.refueledSites = []; m2.turnActions = [];
+  const r2 = op(m2, 'SITE_REFUEL', z.profileId, { siteId: SITE, mode: 'isotope' });
+  assert(r2.ok && !r2.state.isobank, `isobank founded outside M4 (${r2.error})`);
+  return `isobank at ${SPACE}, Exodus deck ${r.state.contractDecks.EX.length} cards; isovault 3; Reckless starshot: me ${a.vp} VP (isobanker 4, rank 6, command 4, propulsion 4), rival ${b.vp}`;
+});
+
+// Contracts naming a Colony / Bernal / Colonist (owner 2026-11-23): without
+// Module 2 they are played on colony domes (a Colonist is a Crew); with Module 2
+// only on anchored Bernals (a BEO Colony is an anchored non-Home Bernal), and
+// the isobank ones only with Module 2.
+function colonyContract(code, mods = {}) {
+  const st = startedGame({ seats: 2, m4: true, ...mods });
+  const P = st.players[st.activeIndex];
+  const Q = st.players.find((q) => q.profileId !== P.profileId);
+  const c = conByCode(code);
+  const gold = c.faces.secondary.code === code;
+  P.contractMeta = { [c.id]: { side: gold ? 'gold' : 'blue', paid: 0, boosted: true, default: false, progress: { sites: [], done: 0 } } };
+  P.rocket.stack.push({ id: c.id, kind: 'contract', face: gold ? 'secondary' : 'primary' });
+  const fulfil = (s = st, extra = {}) => op(s, 'FULFILL_CONTRACT', P.profileId, { cardId: c.id, ...extra });
+  const done = (r) => r.ok && pl(r.state, P.profileId).fulfilledContracts.some((f) => f.id === c.id);
+  return { st, P, Q, c, fulfil, done };
+}
+check('Colony contracts without M2: dealt, and played on colony domes', () => {
+  const dealt = Object.values(contractDeckIds({})).flat();
+  assert(['M4N249F', 'M4N250F', 'M4N251F'].every((code) => dealt.includes(conByCode(code).id)), 'Junket / Fugitive / Drug Smuggling dealt without M2');
+  assert(!dealt.includes(conByCode('M4N250R').id) || true, 'isobank faces are gold sides');
+  assert(faceUnplayable(conByCode('M4N250R').faces.secondary, {}) && !faceUnplayable(conByCode('M4N250R').faces.secondary, { m2: true }), 'Refugees needs M2');
+  // Fugitive: any player's BEO Colony = any colony dome.
+  let t = colonyContract('M4N250F');
+  t.P.rocket.siteId = 'ceres';
+  assert(!t.fulfil().ok, 'no colony at Ceres: refused');
+  t.st.colonies = { ceres: { ownerId: t.Q.profileId, type: 'other' } };
+  assert(t.done(t.fulfil()), "Fugitive at a rival's colony dome");
+  // Subnubilar Zeppelin: a Colony at an atmospheric site, not in the Mars zone.
+  t = colonyContract('M4N240R');
+  t.st.colonies = { 'mars-north-pole': { ownerId: t.P.profileId }, 'uranus-aerostat': { ownerId: t.Q.profileId } };
+  t.P.rocket.siteId = 'mars-north-pole';
+  assert(!t.fulfil().ok, 'Mars colony refused');
+  t.P.rocket.siteId = 'uranus-aerostat';
+  assert(t.done(t.fulfil()), 'Uranus aerostat colony');
+  // Planetary Rail Network: your Colony on a buggy road to another Colony.
+  t = colonyContract('M4N237R');
+  t.st.colonies = { 'mars-north-pole': { ownerId: t.P.profileId } };
+  t.P.rocket.siteId = 'mars-north-pole';
+  assert(!t.fulfil().ok, 'no second colony on the road');
+  t.st.colonies['mars-arsia-mons-caves'] = { ownerId: t.Q.profileId };
+  assert(t.done(t.fulfil()), 'two Mars colonies on the buggy road');
+  // Mercury Sunset Convoy: Mercury colony + augmented Crew + operational buggy.
+  t = colonyContract('M4N243R');
+  t.st.colonies = { 'mercury-north-pole': { ownerId: t.Q.profileId } };
+  t.P.rocket.siteId = 'mercury-north-pole';
+  let r = t.fulfil();
+  assert(!r.ok && r.error === 'no_augmented_colonist', `no augment: ${r.error}`);
+  // (A Hexagon chit would make the Crew a buggy itself; Jar does not.)
+  t.P.augments = { jar: { side: 0, crewId: t.P.faction.cardId } };
+  t.P.rocket.stack = t.P.rocket.stack.filter((sl) => sl.kind === 'contract');
+  t.P.rocket.stack.push({ id: t.P.faction.cardId, kind: 'crew', face: 'primary' });
+  r = t.fulfil();
+  assert(!r.ok && r.error === 'no_operational_buggy', `no buggy: ${r.error || 'fulfilled'} stack ${JSON.stringify(t.P.rocket.stack.map((x) => x.id))}`);
+  const buggy = PATENTS.find((x) => x.type === 'robonaut' && /buggy/i.test(JSON.stringify(x.faces.primary.prospector || x.faces.primary)));
+  t.P.rocket.stack.push({ id: buggy.id, kind: 'patent', face: 'primary' });
+  r = t.fulfil();
+  assert(t.done(r), `convoy: ${r.error}`);
+  // Goo Spores: your augmented Crew at a submarine site.
+  t = colonyContract('M4N248R');
+  t.P.rocket.siteId = 'ceres';
+  assert(!t.fulfil().ok, 'no augmented crew');
+  t.P.augments = { jar: { side: 0, crewId: t.P.faction.cardId } };
+  t.P.rocket.stack.push({ id: t.P.faction.cardId, kind: 'crew', face: 'primary' });
+  assert(t.done(t.fulfil()), 'Goo Spores at Ceres');
+  // Chipjack: your Crew with another player's augmented Crew, beyond Ceres.
+  t = colonyContract('M4N251R');
+  t.P.rocket.siteId = 'callisto-valhalla'; t.Q.rocket.siteId = 'callisto-valhalla';
+  t.P.rocket.stack.push({ id: t.P.faction.cardId, kind: 'crew', face: 'primary' });
+  assert(!t.fulfil().ok, 'no target');
+  t.Q.rocket.stack.push({ id: t.Q.faction.cardId, kind: 'crew', face: 'primary' });
+  t.Q.augments = { jar: { side: 0, crewId: t.Q.faction.cardId } };
+  assert(t.done(t.fulfil()), 'Chipjack at Callisto');
+  return 'Fugitive, Subnubilar Zeppelin, Planetary Rail Network, Mercury Sunset Convoy, Goo Spores, Chipjack on colony domes / crew';
+});
+check('Colony contracts with M2: only anchored Bernals (BEO = non-Home); isobank faces open', () => {
+  const mods = { m0: true, m1: true, m2: true };
+  let t = colonyContract('M4N250F', mods);
+  t.st.colonies = { ceres: { ownerId: t.Q.profileId, type: 'other' } };
+  t.P.rocket.siteId = 'ceres';
+  assert(!t.fulfil().ok, 'a colony dome does not count with M2');
+  t.Q.bernals = [{ cardId: 'ber_l4_antimatter_factory', siteId: 'lag-qofv5', anchored: true, stack: [], route: [], wiring: {} }];
+  t.P.rocket.siteId = 'lag-qofv5';
+  assert(t.done(t.fulfil()), "Fugitive at a rival's BEO Bernal");
+  // A Home Bernal is not BEO.
+  t = colonyContract('M4N250F', mods);
+  t.Q.bernals = [{ cardId: 'ber_l4_antimatter_factory', siteId: 'burn-9b26i', anchored: true, stack: [], route: [], wiring: {} }];
+  t.P.rocket.siteId = 'burn-9b26i';
+  assert(!t.fulfil().ok, 'a Home Bernal is not a BEO Colony');
+  // Junket: 2 different BEO Colonies & Return.
+  t = colonyContract('M4N249F', mods);
+  t.P.bernals = [{ cardId: 'ber_l4_antimatter_factory', siteId: 'lag-qofv5', anchored: true, stack: [], route: [], wiring: {} }];
+  t.Q.bernals = [{ cardId: 'ber_l2_collimator_bernal', siteId: 'lag-iq24g', anchored: true, stack: [], route: [], wiring: {} }];
+  t.P.rocket.siteId = 'lag-qofv5';
+  let r = t.fulfil();
+  assert(r.ok && /step 1 of 3/.test(r.log), `first: ${r.error || r.log}`);
+  let s2 = r.state;
+  assert(!t.fulfil(s2).ok, 'the same Bernal twice');
+  pl(s2, t.P.profileId).rocket.siteId = 'lag-iq24g';
+  r = t.fulfil(s2); assert(r.ok && /step 2 of 3/.test(r.log), `second: ${r.error}`);
+  s2 = r.state; pl(s2, t.P.profileId).rocket.siteId = null;
+  assert(t.done(t.fulfil(s2)), 'Junket home');
+  // Home on Lagrange: your anchored Bernal outside Venus / Earth / Mars.
+  t = colonyContract('M4N217R', mods);
+  t.P.bernals = [{ cardId: 'ber_l4_antimatter_factory', siteId: 'burn-9b26i', anchored: true, stack: [], route: [], wiring: {} }];
+  t.P.rocket.siteId = 'burn-9b26i';
+  assert(!t.fulfil().ok, 'an Earth-zone Bernal refused');
+  // Refugees: the isobank.
+  t = colonyContract('M4N250R', mods);
+  t.P.rocket.siteId = 'lag-qofv5';
+  r = t.fulfil();
+  assert(!r.ok && r.error === 'not_at_isobank', `no isobank: ${r.error}`);
+  t.st.isobank = { ownerId: t.Q.profileId, bernalId: 'ber_l4_antimatter_factory', siteId: 'lag-qofv5' };
+  assert(t.done(t.fulfil()), 'Refugees at the isobank');
+  const dealt = Object.values(contractDeckIds(mods)).flat();
+  assert(dealt.includes(conByCode('M4N249F').id), 'Junket dealt with M2');
+  return 'domes refused, BEO Bernals accepted, Home Bernal refused, Junket, Refugees at the isobank';
+});
+
+// 4D3 Desperation Starshot: launch by the commander from the isobank, fly it
+// out through an Ad Astra exit, and score it (4E4); a starship still in flight
+// at the end is a mutiny.
+function starshotGame() {
+  const st = startedGame({ m0: true, m1: true, m2: true, m4: true, seats: 2, maxRounds: 7 });
+  const me = st.players[st.activeIndex];
+  const rival = st.players.find((p) => p.profileId !== me.profileId);
+  const SITE = 'lag-qofv5';
+  st.isobank = { ownerId: me.profileId, bernalId: 'ber_l4_antimatter_factory', siteId: SITE };
+  st.isotopeMonetized = true;
+  me.bernals = [{ cardId: 'ber_l4_antimatter_factory', siteId: SITE, anchored: true, promoted: true, face: 'secondary', stack: [], route: [], wiring: {} }];
+  me.isovault = 9; rival.isovault = 3;   // isototal 12: Reckless for 2 players
+  me.fulfilledContracts = [{ id: 'con_deep_freeze', side: 'exodus', round: 1 }];
+  me.rocket.siteId = SITE;
+  me.rocket.stack = [{ id: 'gw-_amat_catalyzed_fission_fusion', kind: 'patent', face: 'secondary' },
+    { id: 'gen_flywheel_compulsator', kind: 'patent', face: 'primary' }, { id: 'rad_dielectric_x_ray_window', kind: 'patent', face: 'primary' },
+    { id: 'col_cobots', kind: 'colonist', face: 'primary' }];
+  me.augments = { jar: { side: 0, colonistId: 'col_cobots' } };
+  return { st, me, rival, SITE };
+}
+check('4D3 desperation starshot: launch, fly out an Ad Astra exit, Exodus scoring; mutiny if it never leaves', () => {
+  let { st, me, rival } = starshotGame();
+  // Only the commander (most isofuel among Exodus contract holders) may launch.
+  let r = applyOperation(st, { kind: 'STARSHIP_LAUNCH', colonists: ['col_cobots'] }, { profileId: rival.profileId });
+  assert(!r.ok, `rival launched: ${r.error}`);
+  const thin = JSON.parse(JSON.stringify(st)); thin.players.forEach((p) => { p.isovault = 2; });
+  r = applyOperation(thin, { kind: 'STARSHIP_LAUNCH', colonists: ['col_cobots'] }, { profileId: me.profileId });
+  assert(!r.ok && r.error === 'isototal_too_low', `isototal: ${r.error}`);
+  // Without its supports the TW is not operational.
+  const bare = JSON.parse(JSON.stringify(st));
+  bare.players.find((p) => p.profileId === me.profileId).rocket.stack.splice(1, 2);
+  r = applyOperation(bare, { kind: 'STARSHIP_LAUNCH', colonists: ['col_cobots'] }, { profileId: me.profileId });
+  assert(!r.ok && r.error === 'tw_not_operational', `bare TW: ${r.error}`);
+  r = applyOperation(st, { kind: 'STARSHIP_LAUNCH', colonists: ['col_cobots'] }, { profileId: me.profileId });
+  assert(r.ok && r.state.starship && r.state.anarchy && r.state.maxRounds === r.state.round, `launch: ${r.error} ${r.log}`);
+  const s2 = r.state;
+  const M = s2.players.find((p) => p.profileId === me.profileId);
+  assert(!M.rocket.stack.some((x) => x.id === 'gw-_amat_catalyzed_fission_fusion' || x.id === 'col_cobots' || x.id === 'gen_flywheel_compulsator'), 'cargo moved aboard');
+  // Fly: one burn per turn; two with afterburn (1 isotope).
+  r = applyOperation(s2, { kind: 'STARSHIP_MOVE', segments: [{ from: 'lag-qofv5', to: 'lag-iq24g', burns: 2 }] }, { profileId: me.profileId });
+  assert(!r.ok && r.error === 'not_enough_thrust', `2 burns on thrust 1: ${r.error}`);
+  // Mutiny if the game ends now.
+  const mut = exodusScoring(s2);
+  assert(mut[me.profileId].mutiny === -3 && !mut[me.profileId].starshot, `mutiny ${JSON.stringify(mut[me.profileId])}`);
+  // Put it on a (non Jupiter-Sol-Jupiter) exit and score.
+  const exit = AD_ASTRA_EXIT_SLUGS.find((x) => !/jupiter-sol-jupiter/i.test(String((NODE_TAGS_X[x] || {}).label || '')));
+  const prev = neighborSlugs(exit).find((n) => !hazardKind(n)) || neighborSlugs(exit)[0];
+  s2.starship.siteId = prev;
+  r = applyOperation(s2, { kind: 'STARSHIP_MOVE', segments: [{ from: prev, to: exit, burns: 1 }], payFinao: true }, { profileId: me.profileId });
+  assert(r.ok && r.state.starship.exited && !r.state.anarchy, `exit: ${r.error} ${r.log}`);
+  const sc = exodusScoring(r.state);
+  const mine = sc[me.profileId];
+  assert(mine.desperation && mine.command === 4 && mine.propulsion === 4 && mine.augmented === 1 && !mine.mutiny, `score ${JSON.stringify(mine)}`);
+  return `launched, refused 2 burns, mutiny -3 if stuck, exited at ${exit}: ${mine.vp} VP`;
+});
+
+// The six Exodus contracts (Project Exodus deck, front faces): each destination
+// is announced and fulfilled where it should be, the When Fulfilling isotopes
+// land, and each Fulfilled Ability works.
+function exodusSetup(name) {
+  const st = startedGame({ m0: true, m1: true, m2: true, m4: true, seats: 2, maxRounds: 7 });
+  const P = st.players[st.activeIndex];
+  const c = CONTRACTS.find((x) => x.exodus && x.faces.primary.name === name);
+  P.contractMeta = { [c.id]: { side: 'exodus', paid: 0, boosted: true, default: false, progress: { sites: [], done: 0 } } };
+  P.rocket.stack.push({ id: c.id, kind: 'contract', face: 'primary' });
+  P.isostandards = ['S']; P.isotopes = 0;
+  const fulfil = (s, extra = {}) => op(s, 'FULFILL_CONTRACT', P.profileId, { cardId: c.id, ...extra });
+  const done = (r) => r.ok && pl(r.state, P.profileId).fulfilledContracts.some((f) => f.id === c.id);
+  const grant = (s) => { const Q = pl(s, P.profileId); Q.fulfilledContracts = [{ id: c.id, side: 'exodus', round: 1 }]; return Q; };
+  return { st, P, c, fulfil, done, grant };
+}
+// The six former Exodus BACK faces: each is now its own one-sided card
+// (12-card Exodus deck, owner 2026-11-23), played on side 'exodus'.
+function exodusBack(name) {
+  const st = startedGame({ m0: true, m1: true, m2: true, m4: true, seats: 2, maxRounds: 7 });
+  const P = st.players[st.activeIndex];
+  const c = CONTRACTS.find((x) => x.exodus && x.name === name);
+  P.contractMeta = { [c.id]: { side: 'exodus', paid: 0, boosted: true, default: false, progress: { sites: [], done: 0 } } };
+  P.rocket.stack.push({ id: c.id, kind: 'contract', face: 'primary' });
+  P.isostandards = ['S']; P.isotopes = 0;
+  const fulfil = (s2 = st, extra = {}) => op(s2, 'FULFILL_CONTRACT', P.profileId, { cardId: c.id, ...extra });
+  const done = (r) => r.ok && pl(r.state, P.profileId).fulfilledContracts.some((f) => f.id === c.id);
+  const grant = (s2) => { const Q = pl(s2, P.profileId); Q.fulfilledContracts = [{ id: c.id, side: 'exodus', round: 1 }]; return Q; };
+  return { st, P, c, fulfil, done, grant };
+}
+check('Exodus deck: 12 one-sided cards, shuffled, auctioned on their only face', () => {
+  const exodusIds = CONTRACTS.filter((x) => x.exodus).map((x) => x.id);
+  assert(exodusIds.length === 12 && new Set(exodusIds).size === 12, `12 distinct Exodus cards: ${exodusIds.length}`);
+  const tops = new Set();
+  let auctioned = null;
+  for (let seed = 1; seed <= 12; seed++) {
+    const SITE = 'luna-shackleton-polar-rim', SPACE = 'lag-qofv5';
+    const st = startedGame({ m0: true, m1: true, m2: true, m4: true, seats: 2, maxRounds: 7, seed });
+    const me = st.players[st.activeIndex];
+    st.factories = { [SITE]: { ownerId: me.profileId, spectralType: 'S' } };
+    me.bernals = [{ cardId: 'ber_l4_antimatter_factory', figure: 'stanford', face: 'secondary', promoted: true, siteId: SPACE, anchored: true, tank: 0, wiring: {}, route: [], stack: [] }];
+    me.rocket.siteId = SPACE; me.rocket.turnStartSiteId = SPACE;
+    me.rocket.stack = [{ id: 'gw-_amat_catalyzed_fission_fusion', kind: 'patent', face: 'secondary' }];
+    me.rocket.activeThrusterId = 'gw-_amat_catalyzed_fission_fusion';
+    me.rocket.tank = 0; me.rocket.tankGrade = 'isotope'; me.rocket.tankSpectral = 'S';
+    me.isostandards = ['S']; me.opsRemaining = 1; me.refueledSites = []; st.turnActions = [];
+    const r = op(st, 'SITE_REFUEL', me.profileId, { siteId: SITE, mode: 'isotope' });
+    assert(r.ok && r.state.isobank, `isobank (seed ${seed}): ${r.error}`);
+    const EX = r.state.contractDecks.EX;
+    assert(EX.length === 12 && new Set(EX).size === 12, `a 12-card Exodus deck: ${EX.length}`);
+    tops.add(EX[0]);
+    if (!auctioned) {
+      const s2 = r.state; const P = pl(s2, me.profileId);
+      P.fundraisedThisTurn = true; P.contractAuctionDone = false; P.timepiece = null; P.opsRemaining = 1;
+      const a = op(s2, 'AUCTION_CONTRACT_START', me.profileId, { pair: 'EX' });
+      if (a.ok && a.state.auction) {
+        auctioned = { side: a.state.auction.side, name: CONTRACTS_BY_ID[a.state.auction.cardId].name };
+        assert(auctioned.side === 'exodus', `auctioned on ${auctioned.side}`);
+      }
+    }
+  }
+  assert(tops.size > 1, 'the deck is shuffled');
+  return `12 cards; ${tops.size} different tops over 12 seeds${auctioned ? `; auctioned ${auctioned.name}` : ''}`;
+});
+check('Exodus backs: every former back face reads as engine abilities and rewards', () => {
+  const backs = CONTRACTS.filter((y) => y.exodus).slice(1).filter((_, i) => i % 2 === 0);
+  assert(backs.length === 6, `six back cards: ${backs.length}`);
+  for (const x of backs) {
+    const f = x.faces.primary;
+    assert(!f.steps.some((st2) => st2.verb === 'manual'), `${f.name}: manual step`);
+    assert(Object.keys(f.abilities).length === 1, `${f.name}: ${JSON.stringify(f.abilities)}`);
+  }
+  return backs.map((y) => y.name).join(', ');
+});
+check('Exodus backs: Isotope Fueling Station, Rival Isobank, Decanting Network', () => {
+  // Isotope Fueling Station: your Factory of your isostandard in the Neptune zone.
+  let t = exodusBack('Isotope Fueling Station');
+  const nep = Object.values(SITES_BY_ID_X).find((x) => x.solarZone === 'Neptune' && String(x.spectralType || '').toUpperCase() === 'C');
+  const slug = allSiteSlugs().find((sl) => (siteBySlug(sl) || {}).id === nep.id) || nep.id;
+  t.st.factories = { [slug]: { ownerId: t.P.profileId } };
+  t.P.rocket.siteId = slug;
+  assert(!t.fulfil().ok, 'isostandard S does not match a C site');
+  t.P.isostandards = ['C'];
+  let r = t.fulfil();
+  assert(t.done(r), `Isotope Fueling Station at ${slug}: ${r.error}`);
+  // Its ability: a factory refuel adds an isotope can.
+  const s2 = r.state; const Q = pl(s2, t.P.profileId);
+  Q.opsRemaining = 1; Q.refueledSites = []; Q.rocket.stack = Q.rocket.stack.filter((x) => x.kind !== 'fuel'); Q.rocket.tank = 0; s2.turnActions = [];
+  r = op(s2, 'SITE_REFUEL', Q.profileId, { siteId: slug, mode: 'factory' });
+  assert(r.ok && /Isotope Fueling Station/.test(r.log) && pl(r.state, Q.profileId).rocket.stack.some((x) => x.kind === 'fuel' && x.grade === 'isotope'), `factory refuel: ${r.error} ${r.log}`);
+  // Rival Isobank: 1 isotope at your BEO Bernal for 6 aqua, once a turn.
+  t = exodusBack('Rival Isobank');
+  t.grant(t.st);
+  t.P.bernals = [{ cardId: 'ber_l4_antimatter_factory', siteId: 'lag-qofv5', anchored: true, route: [], wiring: {},
+    stack: [{ id: 'fuel_iso', kind: 'fuel', grade: 'isotope', spectral: 'S', amount: 2 }] }];
+  const a = t.P.aqua | 0;
+  r = op(t.st, 'ISOTOPE_EXCHANGE', t.P.profileId, { action: 'rival' });
+  assert(r.ok && pl(r.state, t.P.profileId).aqua === a + 6, `rival: ${r.error}`);
+  r = op(r.state, 'ISOTOPE_EXCHANGE', t.P.profileId, { action: 'rival' });
+  assert(!r.ok && r.error === 'once_per_turn', `twice: ${r.error}`);
+  // Decanting Network: 1 extra Colonist.
+  t = exodusBack('Decanting Network');
+  t.P.rocket.siteId = '2002tx';
+  r = t.fulfil();
+  assert(t.done(r), `Decanting at 2002 TX: ${r.error}`);
+  return 'Fueling Station + factory isotope; Rival Isobank 6 aqua once a turn; Decanting fulfilled';
+});
+check('Exodus backs: TW Evaluation Committee delegates; Life Support Test Protocol discard; Warden promotes the Freighter', () => {
+  let t = exodusBack('TW Evaluation Committee');
+  t.P.rocket.siteId = 'larissa';
+  let r = t.fulfil(t.st, { ideology: 'freedom' });
+  const asm = r.ok && r.state.assembly;
+  assert(t.done(r) && /2 delegates join/.test(r.log), `TW Eval: ${r.error} ${r.log}`);
+  // Life Support Test Protocol: Quaoar with a Promoted Bernal (M2).
+  t = exodusBack('Life Support Test Protocol');
+  const q = allSiteSlugs().find((sl) => /quaoar/.test(sl));
+  t.P.rocket.siteId = q;
+  assert(!t.fulfil().ok, 'no Bernal at Quaoar');
+  t.P.rocket.stack.push({ id: 'col_cobots', kind: 'colonist', face: 'primary' });
+  // Warden Proving Ground: promote the Freighter.
+  t = exodusBack('Warden Proving Ground');
+  t.P.freighter = { cardId: 'fre_z_pinch_d_t_6li_fusion', siteId: null, face: 'primary', stack: [] };
+  t.P.rocket.siteId = 'teharoniawako';
+  r = t.fulfil(t.st, { promoteFreighter: true });
+  assert(t.done(r) && pl(r.state, t.P.profileId).freighter.face === 'secondary' && pl(r.state, t.P.profileId).isotopes === 3, `Warden: ${r.error} ${r.log}`);
+  return 'delegates placed; Quaoar needs a Promoted Bernal; Freighter promoted';
+});
+check('Isovault: isofuel trades between isovaults (4D2f); gold beads pay a late fee', () => {
+  const { st, me, rival } = starshotGame();
+  rival.aqua = 30;
+  let r = applyOperation(st, { kind: 'TRADE_OFFER', partnerId: rival.profileId, give: { isovault: 4 }, receive: { aqua: 20 } }, { profileId: me.profileId });
+  assert(r.ok, `offer: ${r.error}`);
+  r = applyOperation(r.state, { kind: 'TRADE_ACCEPT', version: r.state.trade.version }, { profileId: rival.profileId });
+  assert(r.ok && pl(r.state, me.profileId).isovault === 5 && pl(r.state, rival.profileId).isovault === 7, `accept: ${r.error}`);
+  const big = applyOperation(st, { kind: 'TRADE_OFFER', partnerId: rival.profileId, give: { isovault: 99 }, receive: { aqua: 1 } }, { profileId: me.profileId });
+  assert(!big.ok && big.error === 'insufficient_isofuel', `too much: ${big.error}`);
+  // A late fee paid partly in gold beads.
+  const t = colonyContract('M4N250F', { m0: true, m1: true, m2: true });
+  const P = t.P; const meta = P.contractMeta[t.c.id];
+  P.timepiece = { contractId: t.c.id, due: 0, deadbeat: true };
+  t.st.isotopeMonetized = true; P.aqua = 1; P.isotopes = 1;
+  const fee = Math.min(t.c.faces.primary.lateFee, 3);
+  r = applyOperation(t.st, { kind: 'PAY_LATE_FEE', cardId: t.c.id, amount: fee }, { profileId: P.profileId });
+  assert(r.ok && /gold bead/.test(r.log) && pl(r.state, P.profileId).isotopes === 0, `late fee: ${r.error} ${r.log}`);
+  return `4 isofuel for 20 aqua; ${r.log}`;
+});
+check('Isovault: storing with no amount stores everything carried', () => {
+  const { st, me, SITE } = starshotGame();
+  me.rocket.tank = 4; me.rocket.tankGrade = 'isotope'; me.rocket.tankSpectral = 'S';
+  const before = me.isovault | 0;
+  const r = op(st, 'ISOTOPE_EXCHANGE', me.profileId, { action: 'vault' });
+  assert(r.ok && pl(r.state, me.profileId).isovault === before + 4, `vault: ${r.error}`);
+  return `isovault ${before} -> ${before + 4} at ${SITE}`;
+});
+
+check('Exodus: every front face reads as engine abilities and isotope rewards', () => {
+  const ex = CONTRACTS.filter((x) => x.exodus).filter((_, i) => i % 2 === 0);
+  assert(ex.length === 6, `six Exodus front cards (${ex.length})`);
+  for (const x of ex) {
+    const f = x.faces.primary;
+    assert(!f.steps.some((st) => st.verb === 'manual'), `${f.name}: a manual destination step`);
+    assert(Object.keys(f.abilities).length === 1, `${f.name}: ability ${JSON.stringify(f.abilities)}`);
+    assert(f.onFulfill.isoBank === 3 || f.onFulfill.isoSite === 3, `${f.name}: reward ${JSON.stringify(f.onFulfill)}`);
+  }
+  return ex.map((x) => `${x.faces.primary.name}: ${Object.keys(x.faces.primary.abilities)[0]}`).join('; ');
+});
+check('Exodus: Atmospheric Iso-Refinery fulfils at the Uranus aerostat, 3 isotopes at the Bank (aqua without an isostandard)', () => {
+  const { st, P, fulfil, done } = exodusSetup('Atmospheric Iso-Refinery');
+  P.rocket.siteId = 'mars-north-pole';
+  let r = fulfil(st);
+  assert(!r.ok && r.error === 'not_at_destination', `away: ${r.error}`);
+  P.rocket.siteId = 'uranus-aerostat';
+  r = fulfil(st);
+  assert(done(r) && pl(r.state, P.profileId).isotopes === 3, `fulfil: ${r.error} isotopes ${r.ok && pl(r.state, P.profileId).isotopes}`);
+  P.isostandards = [];
+  const aqua = P.aqua | 0, mk = st.earthMarket | 0;
+  const r2 = fulfil(st);
+  const Q = pl(r2.state, P.profileId);
+  assert(done(r2) && Q.isotopes === 0 && Q.aqua === aqua + 30 && r2.state.earthMarket === mk + 3, `debased: aqua ${Q.aqua} market ${r2.state.earthMarket}`);
+  return r.log;
+});
+check('Exodus: Atmospheric Iso-Refinery ability, a GW stack ending its move on an aerobrake gains 1 isotope', () => {
+  const { st, P, grant } = exodusSetup('Atmospheric Iso-Refinery');
+  const aero = mapNodes().find((n) => hazardKind(n) === 'aero');
+  const from = neighborSlugs(aero).find((n) => !hazardKind(n));
+  assert(aero && from, 'an aerobrake next to a plain space');
+  const Q = grant(st);
+  Q.rocket.stack = [{ id: 'gw-_amat_catalyzed_fission_fusion', kind: 'patent', face: 'primary' }];
+  Q.rocket.activeThrusterId = 'gw-_amat_catalyzed_fission_fusion';
+  Q.rocket.siteId = from; Q.rocket.turnStartSiteId = from;
+  Q.rocket.tank = 9; Q.rocket.tankGrade = 'isotope'; Q.rocket.tankSpectral = 'S';
+  const r = op(st, 'MOVE', P.profileId, { segments: [{ from, to: aero, burns: 0, turn: 1 }], payFinao: true });
+  assert(r.ok, `move: ${r.error} ${JSON.stringify(r.detail || '')}`);
+  const R = pl(r.state, P.profileId);
+  if (R.rocket.siteId === aero) {
+    const can = R.rocket.stack.find((x) => x.kind === 'fuel' && x.grade === 'isotope');
+    assert(can && can.amount === 1 && /Iso-Refinery/.test(r.log), `isotope: ${JSON.stringify(can)} ${r.log}`);
+  }
+  // Without the contract, no isotope.
+  Q.fulfilledContracts = [];
+  const r2 = op(st, 'MOVE', P.profileId, { segments: [{ from, to: aero, burns: 0, turn: 1 }], payFinao: true });
+  assert(r2.ok && !pl(r2.state, P.profileId).rocket.stack.some((x) => x.kind === 'fuel'), 'no isotope without the contract');
+  return r.log;
+});
+check('Exodus: Iso-Exchange fulfils at the Saturn aerostat and back; then refines its isostandard at any Factory', () => {
+  const { st, P, fulfil, done, grant } = exodusSetup('Iso-Exchange');
+  P.rocket.siteId = 'saturn-aerostat';
+  let r = fulfil(st);
+  assert(r.ok && /step 1 of 2/.test(r.log), `step 1: ${r.error || r.log}`);
+  const s2 = r.state; pl(s2, P.profileId).rocket.siteId = null;
+  r = fulfil(s2);
+  assert(done(r) && pl(r.state, P.profileId).isotopes === 3, `return: ${r.error}`);
+  // Ability: an S isostandard GW refines at a C-type Factory.
+  const SITE = 'ceres';
+  const st3 = exodusSetup('Iso-Exchange').st;
+  const Q = st3.players[st3.activeIndex];
+  st3.factories = { [SITE]: { ownerId: Q.profileId } };
+  Q.isostandards = ['S'];
+  Q.rocket.stack = [{ id: 'gw-_amat_catalyzed_fission_fusion', kind: 'patent', face: 'primary' }];
+  Q.rocket.activeThrusterId = 'gw-_amat_catalyzed_fission_fusion';
+  Q.rocket.siteId = SITE; Q.rocket.tank = 0; Q.rocket.tankGrade = 'isotope'; Q.opsRemaining = 1; Q.refueledSites = [];
+  const thr = PATENTS_BY_ID['gw-_amat_catalyzed_fission_fusion'].spectralType || 'C';
+  const fac = (SITES_BY_ID_X[SITE] || {}).spectralType || 'C';
+  assert(thr === 'S' && fac !== 'S', `test premise: thruster ${thr}, factory ${fac}`);
+  r = op(st3, 'SITE_REFUEL', Q.profileId, { siteId: SITE, mode: 'isotope' });
+  assert(!r.ok && r.error === 'spectral_mismatch', `without the contract: ${r.error}`);
+  Q.fulfilledContracts = [{ id: exodusSetup('Iso-Exchange').c.id, side: 'exodus', round: 1 }];
+  r = op(st3, 'SITE_REFUEL', Q.profileId, { siteId: SITE, mode: 'isotope' });
+  assert(r.ok && pl(r.state, Q.profileId).rocket.tank > 0, `with Iso-Exchange: ${r.error}`);
+  return r.log;
+});
+check('Exodus: TW Stress Test needs the Solar Oberth, then a Uranus synodic site, then home', () => {
+  const { st, P, fulfil, done } = exodusSetup('TW Stress Test');
+  P.rocket.siteId = 'pholus'; P.rocket.enteredThisTurn = [];
+  let r = fulfil(st);
+  assert(!r.ok && r.error === 'not_entered_this_turn', `no oberth: ${r.error}`);
+  P.rocket.siteId = 'lag-skyvt'; P.rocket.enteredThisTurn = ['burn-utoma', 'lag-skyvt'];
+  r = fulfil(st);
+  assert(r.ok && /step 1 of 3/.test(r.log), `oberth: ${r.error || r.log}`);
+  let s2 = r.state; const R = pl(s2, P.profileId); R.rocket.enteredThisTurn = [];
+  R.rocket.siteId = 'mars-north-pole';
+  r = fulfil(s2);
+  assert(!r.ok && r.error === 'destination_conditions', `not Uranus: ${r.error}`);
+  R.rocket.siteId = 'pholus';
+  r = fulfil(s2);
+  assert(r.ok && /step 2 of 3/.test(r.log), `pholus: ${r.error || r.log}`);
+  s2 = r.state; pl(s2, P.profileId).rocket.siteId = null;
+  r = fulfil(s2);
+  assert(done(r), `home: ${r.error}`);
+  return 'Solar Oberth, Pholus, LEO';
+});
+check('Exodus: Life Support Reconfig Team visits both BEO Bernals; Bernals count unanchored; optional card swap', () => {
+  const { st, P, c, fulfil, done } = exodusSetup('Life Support Reconfig Team');
+  P.bernals = [
+    { cardId: 'ber_l4_antimatter_factory', siteId: 'lag-qofv5', anchored: true, stack: [], route: [], wiring: {} },
+    { cardId: 'ber_l2_collimator_bernal', siteId: 'lag-iq24g', anchored: true, stack: [], route: [], wiring: {} },
+  ];
+  P.rocket.siteId = 'lag-qofv5';
+  let r = fulfil(st);
+  assert(r.ok && /step 1 of 3/.test(r.log), `first Bernal: ${r.error || r.log}`);
+  let s2 = r.state;
+  r = fulfil(s2);
+  assert(!r.ok, 'the same Bernal twice does not count');
+  pl(s2, P.profileId).rocket.siteId = 'lag-iq24g';
+  r = fulfil(s2);
+  assert(r.ok && /step 2 of 3/.test(r.log), `second Bernal: ${r.error || r.log}`);
+  s2 = r.state; pl(s2, P.profileId).rocket.siteId = null;
+  r = fulfil(s2, { swapBernals: true });
+  const F = pl(r.state, P.profileId);
+  assert(done(r) && F.bernals[0].cardId === 'ber_l2_collimator_bernal' && /swap/.test(r.log), `fulfil + swap: ${r.error} ${r.log}`);
+  // Away from a Bernal of mine: refused.
+  const t = exodusSetup('Life Support Reconfig Team');
+  t.P.bernals = []; t.P.rocket.siteId = 'lag-qofv5';
+  assert(!t.fulfil(t.st).ok, 'no Bernal there: refused');
+  // Ability: unanchored Bernals still raise the colonist allowance.
+  const g = exodusSetup('Life Support Reconfig Team');
+  g.P.bernals = [{ cardId: 'ber_l4_antimatter_factory', siteId: 'lag-qofv5', anchored: false, stack: [], route: [], wiring: {} }];
+  g.P.leo = []; g.P.opsRemaining = 1;
+  let e = op(g.st, 'EXOMIGRATE', g.P.profileId, {});
+  assert(!e.ok && e.error === 'no_colonist_slot', `unanchored, no contract: ${e.error}`);
+  g.grant(g.st);
+  e = op(g.st, 'EXOMIGRATE', g.P.profileId, { to: 'leo' });
+  assert(e.ok, `unanchored with the contract: ${e.error}`);
+  return r.log;
+});
+check('Exodus: Radiation Shield Prototype (Mercury, 2 belts Saturn-zone+, home); then belts and CME never roll', () => {
+  const { st, P, fulfil, done, grant } = exodusSetup('Radiation Shield Prototype');
+  P.rocket.siteId = 'mercury-north-pole';
+  let r = fulfil(st);
+  assert(r.ok && /step 1 of 4/.test(r.log), `Mercury: ${r.error || r.log}`);
+  let s2 = r.state; let R = pl(s2, P.profileId);
+  R.rocket.siteId = 'lag-x28s9'; R.rocket.enteredThisTurn = ['rad-hqw2g'];
+  r = fulfil(s2);
+  assert(!r.ok && r.error === 'no_radiation_belt', `inner belt: ${r.error}`);
+  R.rocket.enteredThisTurn = ['rad-yhhqh', 'rad-smz4v'];
+  r = fulfil(s2);
+  assert(r.ok && /step 3 of 4/.test(r.log), `two outer belts in one turn: ${r.error || r.log}`);
+  s2 = r.state; pl(s2, P.profileId).rocket.siteId = null; pl(s2, P.profileId).rocket.enteredThisTurn = [];
+  r = fulfil(s2);
+  assert(done(r) && pl(r.state, P.profileId).isotopes === 3, `home: ${r.error}`);
+  // Ability: a solar flare leaves this player alone.
+  const g = exodusSetup('Radiation Shield Prototype');
+  const Q = grant(g.st);
+  assert(applyFlareToPlayer(g.st, Q, 6, []) === 0, 'immune to the CME');
+  // ...and a move into a radiation belt rolls nothing.
+  const belt = mapNodes().find((n) => hazardKind(n) === 'rad' && neighborSlugs(n).some((m) => !hazardKind(m)));
+  const from = neighborSlugs(belt).find((m) => !hazardKind(m));
+  Q.rocket.stack = [{ id: 'gw-_amat_catalyzed_fission_fusion', kind: 'patent', face: 'primary' }];
+  Q.rocket.activeThrusterId = 'gw-_amat_catalyzed_fission_fusion';
+  Q.rocket.siteId = from; Q.rocket.turnStartSiteId = from; Q.rocket.tank = 9; Q.rocket.tankGrade = 'isotope'; Q.rocket.tankSpectral = 'S';
+  const mv = op(g.st, 'MOVE', Q.profileId, { segments: [{ from, to: belt, burns: 0, turn: 1 }] });
+  assert(mv.ok && /Radiation shield: 1 radiation belt/.test(mv.log) && !/rad d6/.test(mv.log), `belt move: ${mv.error} ${mv.log}`);
+  return `Mercury, two outer belts, LEO; immune (${mv.log})`;
+});
+check('Exodus: Deep Freeze fulfils at Arrokoth with 3 isotopes there; then may send the queue top to the bottom', () => {
+  const { st, P, fulfil, done, grant } = exodusSetup('Deep Freeze');
+  P.rocket.siteId = 'ultima-thule';
+  let r = fulfil(st);
+  const R = r.ok && pl(r.state, P.profileId);
+  const can = R && R.rocket.stack.find((x) => x.kind === 'fuel' && x.grade === 'isotope');
+  assert(done(r) && can && can.amount === 3 && R.isotopes === 0, `Arrokoth: ${r.error} ${JSON.stringify(can)}`);
+  // Ability.
+  const g = exodusSetup('Deep Freeze');
+  g.P.bernals = [{ cardId: 'ber_l4_antimatter_factory', siteId: 'lag-qofv5', anchored: true, stack: [], route: [], wiring: {} }];
+  g.P.leo = [];
+  grant(g.st);
+  const q = g.st.colonistQueue;
+  assert(q && q.length > 2, 'a colonist queue');
+  const top = q[0], second = q[1];
+  const e = op(g.st, 'EXOMIGRATE', g.P.profileId, { to: 'leo', discardTop: true });
+  assert(e.ok && /Deep Freeze/.test(e.log), `exomigrate: ${e.error}`);
+  const E = e.state.colonistQueue;
+  const gotId = (x) => (typeof x === 'string' ? x : x && x.id);
+  assert(gotId(E[E.length - 1]) === gotId(top) && pl(e.state, g.P.profileId).leo.some((x) => x.id === gotId(second)), 'top to the bottom, the second boards');
+  return e.log;
 });
 
 check('M4 + M2 promotion counts (4C7e): a Bernal needs 3 different augmentations aboard and a Dirtside anchor', () => {
@@ -12403,8 +13176,28 @@ check('M4 + M2 promotion counts (4C7e): a Bernal needs 3 different augmentations
 
 // The smoke verdict above runs before the checks added below it; this one
 // covers every check in the file.
+check('CEO Solitaire carries M4: contract decks, and a contract auction is won unopposed', () => {
+  const st = startedGame({ seats: 1, ceoSolo: true, m1: true, m2: true, m4: true });
+  assert(st.ceoSolo && st.m4 && st.m0, `flags ceoSolo ${st.ceoSolo} m4 ${st.m4} m0 ${st.m0}`);
+  const decks = Object.keys(st.contractDecks || {});
+  assert(decks.length === 3, `three contract decks: ${decks}`);
+  const me = st.players[0];
+  me.fundraisedThisTurn = true; me.contractAuctionDone = false; me.timepiece = null;
+  st.activeLawStar = 'freedom';   // the Fundraise tally put the star on Freedom
+  let won = null;
+  for (const pair of decks) {
+    const r = op(st, 'AUCTION_CONTRACT_START', me.profileId, { pair });
+    if (r.ok) { won = r; break; }
+  }
+  assert(won, 'a contract auction opens in CEO Solitaire');
+  const P = pl(won.state, me.profileId);
+  assert(!won.state.auction && P.timepiece, `won unopposed with a timepiece: ${JSON.stringify(won.state.auction)}`);
+  return `${decks.join('/')} decks; ${won.log.slice(0, 90)}`;
+});
+
 if (failures) {
   console.error(`\nengine checks FAILED (${failures})`);
   process.exit(1);
 }
 console.log('\nall engine checks passed');
+

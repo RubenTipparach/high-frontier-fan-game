@@ -244,16 +244,24 @@ per room and carried into the game state as a boolean (`state.m0`,
   counts are unavailable (owner 2026-11-18). M4 REQUIRES M0 (4A1a) and forces it on: ticking M4 ticks and LOCKS the M0
   box (create form, solo setup, room settings; `lobby.js#lockM0ForM4`), and room
   settings cannot clear M0 while the room keeps M4. It combines with CEO
-  Solitaire (V6), V4 Altruism and V5 Hermes Fall (owner 2026-11-22), but not with V9 The Sirens
-  (owner 2026-11-18) or the tutorial (`m4_no_variants`, on create AND room settings;
-  `createInitialState` drops it the same way). The 4G solitaire rules are DONE: CEO
-  Solitaire (V6) implements them, including the 4G3 Solitaire Assembly (owner 2026-11-17). M4 does NOT combine with M2 for new rooms until isotope monetization is
-  finished (owner 2026-11-20; `m4_no_m2` is back on create AND room settings). The
+  Solitaire (V6, whose 4G rules incl. the 4G3 Solitaire Assembly are built), V4
+  Altruism and V5 Hermes Fall (owner 2026-11-22), but not with V9 The Sirens
+  (owner 2026-11-18) or the tutorial (`m4_no_variants`, on create AND room
+  settings; `createInitialState` drops it the same way). M4 combines with M1
+  and with M2: M1 + M4 and M1 + M2 + M4 are open to the M4 previewers (owner
+  2026-11-23, isotope monetization finished; `m4_no_m2` is gone). The 4E5c
+  combined game (Interstellar) is out of scope. The
   M4 + M2 rules stay in the engine (with M2 a chit rides a Colonist and its marks
   go on that Colonist's slot), and the Spacer colonists show in the card library
-  for M4 previewers. Contracts whose destination needs a piece the game lacks (Bernals,
-  colonists, freighters, the isobank) are dealt out of the decks
-  (`data/contracts.js#faceUnplayable`; owner 2026-11-17). Lagrange ring
+  for M4 previewers. Contracts whose destination needs a piece the game lacks (freighters, GW
+  thrusters, the isobank without M2, bodies not on our map) are dealt out of the
+  decks (`data/contracts.js#faceUnplayable(face, {m1, m2})`; owner 2026-11-17).
+  A contract naming a Bernal / Colony / Colonist plays on colony domes without
+  M2 (its Colonist is a Crew) and ONLY on anchored Bernals with M2 unless the
+  card says colony dome (a BEO Colony = an anchored non-Home Bernal); the step
+  verbs are `colony` / `isobank` (owner 2026-11-23). The Exodus deck is 12 one-sided cards, one per printed face (house rule, owner
+  2026-11-23; C4's random side is not used). FINAO doubles on isotope
+  monetization in M4 rooms only (`finaoDoubled`; owner answer to R8). Lagrange ring
   numbers (L1-L5) read off the board live in `data/lagrange-labels.js`.
   Without M2 the Augment operation (IMPLANT, `applyImplantOnCrew`) puts a chit
   on a Crew card standing at a BEO Colony (owner 2026-11-18, replacing the

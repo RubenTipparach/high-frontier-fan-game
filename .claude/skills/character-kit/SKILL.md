@@ -105,6 +105,11 @@ loose generated finger sticks; that was rejected twice.
 |---|---|
 | `scripts/rig2d/cutout.mjs` | The kit. `skeleton(body)` (rest joints + joint radii per build), `fk` / `aim` (forward kinematics, turn a bone toward a point), shape builders (`capsule`, `sleeve`, `blob`), the parts (`buildParts(look)`: head + hair + face, torso, pelvis, arms, hands, legs, shoes), `drawCutout({ id, look, pose, explode })`, `drawHead`, `drawHand`, `OPTIONS` (every swap), `DEFAULT_LOOK`, `POSES` (named poses). Pure ES module. |
 | `scripts/rig2d/kit-sheet.mjs` | Lays a kit sheet out: rest figure, exploded parts, the expression row, the hair row, the hand set, posed examples. `node scripts/rig2d/kit-sheet.mjs` writes `docs/design/kits/kit-female.svg` and `kit-male.svg`; `node scripts/rig2d/kit-sheet.mjs look.json out.svg` builds one from a look. |
+| `scripts/rig2d/hand.mjs` | The hand rig: rest skeletons (back, side), FK with joint limits, `handPieces(pose)`, `HAND_POSES`. |
+| `tools/rig2d/hand.html` | The hand editor: drag a joint, fold sliders per finger, back / side view, copy the pose JSON. |
+| `scripts/colonist-art-traced.mjs` | The colonist card FRONTS with people: `FIGS` (each card's people as `{ fid, look, pose(sk) }`) and the backdrop + props per card, hung off the posed joints. |
+| `scripts/colonist-art-backs.mjs` | The promoted (purple) sides, second pass: kit people and the redrawn non-human subjects. |
+| `scripts/gen-colonist-art.mjs` | Writes every `assets/colonists/<id>-<front|back>.svg` and `data/colonist-art.js`. Later passes override earlier ones per id (`emit` skips an id a later module owns). |
 | `tools/rig2d/` | The browser app: the character at rest; drag a joint to rotate its bone (drag the pelvis to move), pose presets, every look option, arms behind, download SVG, copy / apply / load figure JSON (`scripts/rig2d/figures/<name>.json`). |
 
 Units: one head = 1, origin at the pelvis, y down, the figure's LEFT at +x. A pose
@@ -140,9 +145,9 @@ page with Playwright (`NODE_PATH=$(npm root -g)`) and screenshot it.
   its round end on the joint (`capsule`) and the same radius as its neighbour at
   that joint. If two colours meet at a joint, make one piece overlap the other
   instead of butting them.
-- **A new hand:** a list of shapes in hand-local coords (origin at the wrist, +y
-  down the hand, +x toward the body for the RIGHT hand; the left is mirrored).
-  Add the name to `OPTIONS.hand`.
+- **A new hand pose:** pose it in `tools/rig2d/hand.html`, copy the JSON, add it
+  to `HAND_POSES` in `hand.mjs` and its name to `OPTIONS.hand`. Never hand-draw a
+  one-off hand shape.
 - **A new expression or hair style:** a case in `faceShapes` / `hairShapes`,
   drawn on the face centre `cy`; hair that falls behind the body goes in `back`.
   Add the name to `OPTIONS`.
@@ -157,3 +162,56 @@ page with Playwright (`NODE_PATH=$(npm root -g)`) and screenshot it.
   1/6 of the height.
 - CLAUDE.md: SVG art goes to the owner as a rendered screenshot first, and only
   goes into the game after sign-off.
+
+## Putting people on cards (colonist art)
+
+1. Add the card to `FIGS` (fronts, `colonist-art-traced.mjs`) or `BACKS`
+   (`colonist-art-backs.mjs` / `colonist-art-traced.mjs#BACKS`): one entry per
+   person, `{ fid, look, pose: (sk) => pose }`. Get the skeleton with
+   `skeletonFor(look)`, never `skeleton(body)` alone, or props land off the body.
+2. Frame full figures on the 300 x 330 card at about 46 px a head, feet near
+   y 324 (`at(x, foot, h, rot)`). Two people stand about 110 px apart.
+3. Hang props off the posed joints: `F.m('<fid>.hand_r')`, `.head`, `.spine_03`
+   (the MPFB names map to kit joints). Draw a prop held in a hand AFTER the
+   figures and lay the gripping fingers back over it (the Teleoperators rose).
+4. `node scripts/gen-colonist-art.mjs`, then render through the GAME's card
+   renderer (`renderCard` from `js/game/card-ui.js`, no `type` option, so the
+   card carries its real classes), not just the bare SVG.
+
+### Pose cookbook
+
+| Want | How |
+|---|---|
+| Hand on a target (a hologram, a knee, a screen) | `reach(sk, pose, 'L'|'R', [x, y], { bend })`; try both bend signs, keep the one whose elbow points out and down. |
+| Handshake | both figures `reach` the SAME midpoint between them, about waist height, `hold` hands. Move the figures closer if `reach` cannot get there (it clamps). |
+| Hands to the face (binoculars, chin) | foreshorten the upper arms (`len: { upperL: 0.5, upperR: 0.5 }`) then `reach`; without it the elbows fly up beside the head. |
+| Hands on hips | `POSES.hipsHands` (upper -38 / 38, fore 78 / -78), fists. |
+| Wave, cheer, point, shrug, think | `POSES.wave` / `cheer` / `point` / `shrug` / `think`, plus the matching hand pose. |
+| Sitting cross-legged (levitating) | thighs -78 / 78, shins 150 / -150, hands `reach` the knees; drop the feet line to about y 300. |
+| Stride | `POSES.stride`; a front view cannot sell a walk, so keep it small. |
+| Two people meeting | each `reach`es toward the gap between them; draw the light / object over the hands. |
+| Silhouettes (a family at dawn) | draw kit figures inside a flat-colour `feColorMatrix` filter with `color-interpolation-filters="sRGB"`. |
+| Robots, armour | `ROBOT_LOOK` (same skeleton and poses). Robot hands are rigged hands in the joint colour. |
+
+### What the owner rejected (do not repeat)
+
+- Busts and figures generated procedurally, traced from renders, or fitted to 3D
+  poses ("inspired drawings, not filters, not tracing"); anything posed that was
+  not drawn at rest first.
+- Skinny limbs (use `classic`), seams at joints, sleeves not attached, a broken
+  hip / seat.
+- Elbows in impossible places; a thumb bending backwards; generated finger
+  sticks; shaded or outlined hands; a one-off drawn hand that skips the rig.
+- Arms that do not meet in a handshake; a prop floating near a hand instead of
+  held.
+- A face half-covered by a plate that does not follow the head outline (split
+  with a mask of the head, clipped at the centre line).
+- Blur behind card text (a faint dark backing only).
+
+## Comparing with the printed cards
+
+Owner check before sign-off: a page with each colonist's printed front, ours,
+printed promo side, ours. The printed scans live outside the repo (they are the
+publisher's art); build the page in a temporary folder at the repo root, render it
+full-page in Chromium, slice it into pages, and keep the result out of git. The
+in-repo sheet of only OUR cards is `docs/design/kits/all-colonist-cards.jpg`.

@@ -26,6 +26,7 @@ import { colonyClassOfSite, isAerostatSiteId, isAtmosphericSite } from './site-c
 import { isAdAstraExit, sunlensAt } from './ad-astra.js';
 import { COLONISTS_BY_ID } from './colonists.js';
 import { PLANNER_SLUG_ALIASES } from './site-aliases.js';
+import { CONTRACTS_BY_ID } from './contracts.js';
 
 // Two id spaces meet here: the curated tables key by data/sites.js id
 // (underscored), while the game state's maps + unit positions key by the WIRE
@@ -421,6 +422,56 @@ function synodicCometFactoryReqs() {
   ];
 }
 
+
+// ---- M4 spaceborn colonist Futures (Module 4, the spaceborn deck) ----
+// Each Future is printed on the colonist's Promoted face; "this card at X"
+// reads ctx.atSiteId, the place the attempt's card stands (the engine always
+// passes it). Places are compared as raw wire slugs: a Bernal stands on a map
+// space that is not a site.
+const samePlace = (a, b) => a != null && b != null && canonicalSiteId(a) === canonicalSiteId(b);
+// Every stack slot of the player standing at `place`.
+function slotsAt(ctx, place) {
+  const out = [];
+  const p = ctx.player;
+  const scan = (slots, at) => { if (samePlace(at, place)) for (const sl of (slots || [])) if (sl) out.push(sl); };
+  scan(p.rocket && p.rocket.stack, p.rocket && p.rocket.siteId);
+  for (const o of Object.values(p.outposts || {})) if (o) scan(o.cards, o.siteId);
+  if (p.freighter) scan(p.freighter.stack, p.freighter.siteId);
+  for (const bn of (p.bernals || [])) if (bn) scan(bn.stack, bn.siteId);
+  return out;
+}
+const augmentedIds = (ctx) => new Set(Object.values(ctx.player.augments || {})
+  .map((a) => a && (a.colonistId || a.crewId)).filter(Boolean).map(String));
+const augmentedColonistAt = (ctx, place) => slotsAt(ctx, place).some((sl) => COLONISTS_BY_ID[sl.id] && augmentedIds(ctx).has(String(sl.id)));
+// A Colony of yours at `place`: a colony dome there, or your anchored Bernal.
+function myColonyAt(ctx, place) {
+  if (place == null) return false;
+  if (myColonies(ctx).some((c) => samePlace(c.siteId, place))) return true;
+  return myBernals(ctx, { anchored: true }).some((bn) => samePlace(bn.siteId, place));
+}
+// The zones your Colonies stand in (domes and anchored Bernals).
+function myColonyZones(ctx) {
+  const z = new Set();
+  for (const c of myColonies(ctx)) z.add((siteOf(c.siteId) || {}).solarZone);
+  for (const bn of myBernals(ctx, { anchored: true })) z.add(ctx.zoneOf(bn.siteId));
+  z.delete(undefined); z.delete(null);
+  return z;
+}
+const hasExodusContract = (ctx) => (ctx.player.fulfilledContracts || []).some((f) => f && (f.side === 'exodus' || (CONTRACTS_BY_ID[f.id] || {}).exodus));
+const promotedBernalAt = (ctx, place, mineOnly = false) => (ctx.state.players || [])
+  .filter((q) => !mineOnly || q.profileId === ctx.player.profileId)
+  .some((q) => (q.bernals || []).some((bn) => bn && bn.anchored && (bn.promoted || bn.face === 'secondary') && samePlace(bn.siteId, place)));
+const isTwSlot = (ctx, sl) => sl && ((ctx.cardsById || {})[sl.id] || {}).type === 'gw-thruster' && (sl.face === 'secondary' || sl.promoted);
+function isotopesAt(ctx, place) {
+  let n = 0;
+  const p = ctx.player;
+  for (const sl of slotsAt(ctx, place)) if (sl.kind === 'fuel' && sl.grade === 'isotope') n += Number(sl.amount) || 0;
+  if (p.rocket && samePlace(p.rocket.siteId, place) && p.rocket.tankGrade === 'isotope') n += Number(p.rocket.tank) || 0;
+  for (const bn of (p.bernals || [])) if (bn && samePlace(bn.siteId, place) && bn.tankGrade === 'isotope') n += Number(bn.tank) || 0;
+  return Math.floor(n);
+}
+const here = (ctx) => ctx.atSiteId;
+
 export const FUTURE_GOALS = {
   // ---- Colonists (keyed by the card's white-face id; the Future is printed
   // on the purple face it flips to) ----
@@ -521,6 +572,159 @@ export const FUTURE_GOALS = {
     location: 'Your industrialized Synodic Comet',
     requirements: synodicCometFactoryReqs(),
     clearsTokensAt: (ctx) => myFactorySites(ctx).filter((sid) => SYNODIC_COMET_IDS.includes(sid)).flatMap(wireForms),
+  },
+
+
+  // ---- M4 spaceborn colonists (Module 4) ----
+  col_cobots: {                             // -> Singularity
+    name: 'VINGE FUTURE', vp: 10, effects: ['emancipateRobots', 'spaceEmpire'],
+    location: 'A Promoted Bernal',
+    requirements: [
+      item('bernal', 'This card at a Promoted Bernal', (ctx) => promotedBernalAt(ctx, here(ctx))),
+      item('exodus', 'A completed Exodus contract', hasExodusContract),
+    ],
+  },
+  col_beowulf_internet: {                   // -> Grendel
+    name: 'EXONET FUTURE', vp: 11, endgame: true, effects: ['anyContractDeck'],
+    location: 'One of your Colonies',
+    requirements: [
+      item('zones', 'Your Colonies in 4 heliocentric zones', (ctx) => myColonyZones(ctx).size >= 4),
+      item('at-colony', 'This card and an augmented Colonist at one of them', (ctx) => myColonyAt(ctx, here(ctx)) && augmentedColonistAt(ctx, here(ctx))),
+    ],
+  },
+  col_self_designing_heuristics: {          // -> Apex Algorithms
+    name: 'SPACE SURVEILLANCE FUTURE', vp: 9, effects: ['spaceRepublic'],
+    location: 'Anywhere',
+    requirements: [
+      item('freedom', 'The Active Law sits in Freedom', (ctx) => ctx.state.activeLawStar === 'freedom'),
+    ],
+  },
+  col_combat_quadrupeds: {                  // -> Lernaean Warbots
+    name: 'UNION WAR FUTURE', vp: 9, casusBelli: true, effects: [],
+    location: 'Your Colony on a size 7+ site',
+    requirements: [
+      item('colony', 'Your Colony on a size 7+ site', (ctx) => {
+        const at = here(ctx);
+        if (myColonies(ctx).some((c) => samePlace(c.siteId, at)) && (ctx.siteSizeOf ? ctx.siteSizeOf(at) : 0) >= 7) return true;
+        return myBernals(ctx, { anchored: true }).some((bn) => samePlace(bn.siteId, at) && dirtsideSizeOf(ctx, bn) >= 7);
+      }),
+      item('robots', '2 Promoted augmented Robots there', (ctx) => slotsAt(ctx, here(ctx)).filter((sl) => {
+        const c = COLONISTS_BY_ID[sl.id];
+        return c && c.colonistKind === 'Robot' && sl.face === 'secondary' && augmentedIds(ctx).has(String(sl.id));
+      }).length >= 2),
+    ],
+  },
+  col_sensor_web_sail: {                    // -> Wisp
+    name: 'TNO LAB FUTURE', vp: 0, endgame: true, effects: [],
+    location: 'Your Colony in the Neptune zone',
+    requirements: [
+      item('colony', 'Your Colony in the Neptune zone', (ctx) => myColonyAt(ctx, here(ctx)) && ctx.zoneOf(here(ctx)) === 'Neptune'),
+      item('promoted', 'This card and 2 other Promoted Colonists there', (ctx) => promotedColonistsAt(ctx, here(ctx)) >= 3),
+    ],
+    endgameVp: (ctx) => 4 * myFactorySites(ctx).filter((sid) => (siteOf(sid) || {}).solarZone === 'Neptune').length,
+    endgameVpLabel: '+4 VP per Factory in the Neptune zone',
+  },
+  col_nano_3d_printers: {                   // -> Offworld Replicators
+    name: 'VON NEUMANN FUTURE', vp: 9, effects: ['robotsPromoted'],
+    cost: { decommissionCard: true, refinery: true },
+    location: 'Your Synodic Comet Factory',
+    requirements: [
+      item('comet', 'This card at your Synodic Comet Factory', (ctx) => myFactorySites(ctx).some((sid) => SYNODIC_COMET_IDS.includes(sid) && samePlace(sid, here(ctx)))),
+      item('refinery', 'An Operational refinery there (decommissioned with this card)', (ctx) => slotsAt(ctx, here(ctx)).some((sl) => ((ctx.cardsById || {})[sl.id] || {}).type === 'refinery')),
+    ],
+  },
+  col_lava_lamp_evangelists: {              // -> Sunburn League
+    name: 'NANITE GOO FUTURE', vp: 11, effects: ['freeImplant'],
+    location: 'Your Colonized Push Factory',
+    requirements: [
+      item('push', 'This card at your Factory with a Colony on a Push site', (ctx) => {
+        const at = here(ctx);
+        const s = siteOf(at);
+        return !!(s && s.push && myFactorySites(ctx).some((sid) => samePlace(sid, at)) && myColonies(ctx).some((c) => samePlace(c.siteId, at)));
+      }),
+    ],
+  },
+  col_gabonese_mining_consortium: {         // -> Bubbleopolis
+    name: 'QUANTUM ENTANGLEMENT FUTURE', vp: 10, effects: ['crashReroll'],
+    location: 'Haumea',
+    requirements: [
+      item('haumea', 'This card at Haumea', (ctx) => /haumea/i.test(String(here(ctx) || ''))),
+      item('x-reactor', 'An Operational X reactor there', (ctx) => slotsAt(ctx, here(ctx)).some((sl) => {
+        const c = (ctx.cardsById || {})[sl.id];
+        const face = c && (sl.face === 'secondary' ? c.faces && c.faces.secondary : c.faces && c.faces.primary);
+        return c && c.type === 'reactor' && ((face && face.supplies) || c.supplies || []).includes('reactor-fission');
+      })),
+    ],
+  },
+  col_prehensilists: {                      // -> Transplaneteers
+    name: 'INTERSTELLAR EXPLORATION FUTURE', vp: 14, effects: ['researchGrant'],
+    location: 'The EM Sunlens',
+    requirements: [
+      item('sunlens', 'This card at the EM Sunlens', (ctx) => (sunlensAt(here(ctx)) || {}).key === 'em-sunlens'),
+      item('augmented', 'An augmented Colonist there', (ctx) => augmentedColonistAt(ctx, here(ctx))),
+    ],
+  },
+  col_exoskeletalists: {                    // -> Space Jockeys
+    name: 'ISOTOPE CARTEL FUTURE', vp: 9, endgame: true, effects: ['isotopeCartel'],
+    location: 'Your Promoted Anchored Bernal',
+    requirements: [
+      item('bernal', 'This card at your Promoted Anchored Bernal', (ctx) => promotedBernalAt(ctx, here(ctx), true)),
+      item('isotopes', '15 isotopes there', (ctx) => isotopesAt(ctx, here(ctx)) >= 15),
+    ],
+  },
+  col_teleoperators: {                      // -> Drone Queen
+    name: 'LIC SCAN FUTURE', vp: 9, effects: ['isotopeToBank'],
+    location: 'Your Synodic Comet Factory',
+    requirements: [
+      item('comet', 'This card at your Synodic Comet Factory', (ctx) => myFactorySites(ctx).some((sid) => SYNODIC_COMET_IDS.includes(sid) && samePlace(sid, here(ctx)))),
+      item('promoted', 'Another Promoted Colonist there', (ctx) => promotedColonistsAt(ctx, here(ctx)) >= 2),
+    ],
+  },
+  col_boston_hexapods: {                    // -> Zombie Wanderers
+    name: 'AVATAR FUTURE', vp: 9, effects: ['felonyImmune'],
+    location: 'A Promoted Bernal with a Neptune zone Dirtside',
+    requirements: [
+      item('bernal', 'This card at a Promoted Bernal with a Neptune zone Dirtside', (ctx) => (ctx.state.players || []).some((q) => (q.bernals || [])
+        .some((bn) => bn && bn.anchored && (bn.promoted || bn.face === 'secondary') && samePlace(bn.siteId, here(ctx))
+          && dirtsidesOf(ctx, bn).some((sid) => (siteOf(sid) || {}).solarZone === 'Neptune')))),
+      item('individuality', 'The Active Law sits in Individuality', (ctx) => ctx.state.activeLawStar === 'individuality'),
+    ],
+  },
+  col_neural_pilots: {                      // -> Shipbrain
+    name: 'WARDEN STARSHOT FUTURE', vp: 7, effects: ['freighterThrustPlus1'],
+    adAstra: true,
+    location: 'An Ad Astra exit',
+    requirements: [
+      item('exit', 'The stack stands at an Ad Astra exit', (ctx) => isAdAstraExit(ctx.player.rocket && ctx.player.rocket.siteId)),
+      item('tw', 'A TW thruster aboard', (ctx) => ((ctx.player.rocket && ctx.player.rocket.stack) || []).some((sl) => isTwSlot(ctx, sl))),
+      item('freighter', 'Your Promoted Freighter', (ctx) => !!(ctx.player.freighter && (ctx.player.freighter.promoted || ctx.player.freighter.face === 'secondary'))),
+    ],
+  },
+  col_vr_simulcasters: {                    // -> The Presence
+    name: 'TW COMMANDER FUTURE', vp: 9, effects: ['doubleVotes'],
+    location: 'Anywhere',
+    requirements: [
+      item('isototal', 'Contribute 8+ to the isototal, more than any opponent', (ctx) => {
+        const mine = Math.max(0, ctx.player.isovault | 0);
+        return mine >= 8 && (ctx.state.players || []).every((q) => q.profileId === ctx.player.profileId || (q.isovault | 0) < mine);
+      }),
+    ],
+  },
+  col_transhuman_activists: {               // -> Jarhead Insurgents
+    name: 'EXODUS FUTURE', vp: 12, casusBelli: true, effects: [],
+    adAstra: true, adAstraUnit: 'bernal',
+    location: 'An Ad Astra exit',
+    requirements: [
+      item('bernal', 'Your Promoted Bernal with a TW thruster at an Ad Astra exit', (ctx) => (ctx.player.bernals || []).some((bn) => bn
+        && (bn.promoted || bn.face === 'secondary') && isAdAstraExit(bn.siteId) && (bn.stack || []).some((sl) => isTwSlot(ctx, sl)))),
+    ],
+  },
+  col_clone_entrepreneurs: {                // -> Death Insurers
+    name: 'VATS FUTURE', vp: 9, effects: [],
+    location: 'Anywhere',
+    requirements: [
+      item('wunderkind', 'Your Colonist with the life-support augmentation has had a wunderkind', (ctx) => !!ctx.player.lifeSupportWunderkind),
+    ],
   },
 
   // ---- GW thrusters ----

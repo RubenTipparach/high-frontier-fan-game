@@ -24,6 +24,12 @@ import { COLONISTS_BY_ID } from '../../data/colonists.js';
 import { IDEOLOGY_ORDER, IDEOLOGY_BY_KEY, activeLaws, usesSoloAssembly, voteWinners } from '../../data/assembly.js';
 import { CREW_BY_ID } from '../../data/crew.js';
 import { augmentSideSvg } from './augment-sides.js';
+import { BERNALS_BY_ID } from '../../data/bernals.js';
+import { NODE_TAGS } from '../../data/node-tags.js';
+import { PATENTS_BY_ID } from '../../data/patents.js';
+import { starshipArtSvg } from './starship-chit.js';
+import { EXODUS_BANDS, EXODUS_RANK_VP } from '../../data/exodus.js';
+import { exodusBand, exodusThresholds, EXODUS_BAND_NAMES } from '../../data/exodus.js';
 
 let D = null;               // deps from browse.js (snapshot readers + submitters)
 let _panelOpen = false;
@@ -455,9 +461,12 @@ let _discardPair = null;
 function decksHtml(s, p, auctionOpen) {
   const laws = lawKeys(s, p);
   const side = s.contractSide === 'gold' ? 'gold' : 'blue';
-  return `<div class="m4c-decks">${Object.keys(CONTRACT_PAIRS).map((pair) => {
+  // The Exodus deck joins once the isobank is founded (4D2c), open to everyone.
+  const pairs = [...Object.keys(CONTRACT_PAIRS), ...(s.isobank && (s.contractDecks || {}).EX ? ['EX'] : [])];
+  return `<div class="m4c-decks">${pairs.map((pair) => {
     const deck = (s.contractDecks || {})[pair] || [];
-    const byLaw = CONTRACT_PAIRS[pair].some((k) => laws.has(k));
+    const exodus = pair === 'EX';
+    const byLaw = exodus || CONTRACT_PAIRS[pair].some((k) => laws.has(k));
     const byConnections = !byLaw && hasContractAbility(p, 'connections')
       && CONTRACT_PAIRS[pair].some((k) => delegateIn(s, k, p.profileId));
     const discarded = auctionOpen && _discardPair === pair && deck.length > 1;
@@ -465,7 +474,8 @@ function decksHtml(s, p, auctionOpen) {
     const top = discarded ? deck[1] : deck[0];
     const open = (byLaw || byConnections) && !!top;
     // The default-chit holder may not put a manned contract up (4B2d).
-    const topFace = top ? contractFace(top, side) : null;
+    const exSide = exodus && top ? 'exodus' : null;
+    const topFace = top ? contractFace(top, exSide || side) : null;
     const stigma = !!(topFace && topFace.manned && s.defaultChit && s.defaultChit.profileId === p.profileId);
     const noManned = stigma ? 'disabled title="Default chit: no manned contracts."' : '';
     let btn = '';
@@ -478,9 +488,9 @@ function decksHtml(s, p, auctionOpen) {
     return `<div class="m4c-deck ${open ? 'open' : 'closed'}" ${open ? '' : 'aria-disabled="true"'}>
       <div class="m4c-deck-head"><b>${CONTRACT_PAIR_NAMES[pair]}</b>
         <span>${deck.length} left</span>
-        <span class="m4c-law">${byLaw ? 'Active Law' : byConnections ? 'Connections' : ''}</span></div>
-      ${discarded ? `<div class="m4c-note">${esc((contractFace(deck[0], side) || {}).name || '')} to the bottom</div>` : ''}
-      ${top ? cardThumb(top, side) : '<div class="muted">empty</div>'}${btn}</div>`;
+        <span class="m4c-law">${exodus ? '' : byLaw ? 'Active Law' : byConnections ? 'Connections' : ''}</span></div>
+      ${discarded ? `<div class="m4c-note">${esc((contractFace(deck[0], exodus ? 'exodus' : side) || {}).name || '')} to the bottom</div>` : ''}
+      ${top ? cardThumb(top, exSide || side) : '<div class="muted">empty</div>'}${btn}</div>`;
   }).join('')}</div>`;
 }
 // The contract auction step of a Fundraise (owner 2026-11-18: the auction is
@@ -555,7 +565,6 @@ function renderPanel() {
   const auctionOpen = false;   // the auction starts only in the Fundraise window
   if (s.defaultChit) market.push(`<p class="muted">🏷 Default chit: ${esc(nameOf(s.defaultChit.profileId))} (${s.defaultChit.side === 'gold' ? -6 : -3} VP)</p>`);
   market.push(decksHtml(s, p, auctionOpen));
-  market.push(isotopesHtml(s, p, myTurn));
 
   // Contracts in hand live in the Hand area (4B3h: a won contract is a Hand
   // Card), so the panel only points there; boosted and fulfilled ones are here.
@@ -598,34 +607,277 @@ function renderPanel() {
       <div class="m4c-tabs" role="tablist">
         <button type="button" role="tab" data-tab="market" class="${tab === 'market' ? 'sel' : ''}">Market contracts</button>
         <button type="button" role="tab" data-tab="yours" class="${tab === 'yours' ? 'sel' : ''}">Completed contracts</button>
+        <button type="button" role="tab" data-tab="bank" class="${tab === 'bank' ? 'sel' : ''}">Bank</button>
       </div>
       <button type="button" class="m4c-close" aria-label="Close">✕</button></div>
-    <div class="m4c-body">${(tab === 'market' ? market : parts).join('')}</div></div>`;
+    <div class="m4c-body">${(tab === 'market' ? market : tab === 'bank' ? [bankHtml(s, p, myTurn)] : parts).join('')}</div></div>`;
   el.querySelector('.m4c-close').addEventListener('click', closePanel);
   el.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => { _tab = b.dataset.tab; renderPanel(); }));
   el.querySelectorAll('button[data-act]').forEach((b) => b.addEventListener('click', () => onAct(b)));
 }
 
-// ---- isotope monetization (3B5, 4D1) ------------------------------------------------
-// Gold beads at your Bank are worth 10 aqua each. Blue/Gold Exchange: sell one to
-// the Earth market for 10 aqua, or buy one from it for 10 aqua (free actions).
-function isotopesHtml(s, p, myTurn) {
-  const bank = Math.max(0, p.isotopes | 0);
+// ---- the Bank, isotopes and the isobank (3B5, 4D1, 4D2, 4E3) ------------------------
+// Your Bank: where your aqua and gold beads are (LEO, or your Home Bernal). Beads
+// are worth 10 aqua and pay like aqua once isotope is monetized. The isobank (a
+// BEO Bernal) holds every player's isovault; the isototal sets the starshot band.
+export function openBankTab() { _tab = 'bank'; _panelOpen = true; renderPanel(); }
+// Your Bank is at your Home Bernal once one is anchored, else LEO (4A7a). Mirrors
+// the game's Home Bernal test (the GEO Elevator at GEO, or a home-orbit space; a
+// Sirens game records the answer on the unit).
+function isHomeUnit(bn) {
+  if (!bn || !bn.anchored) return false;
+  if (typeof bn.home === 'boolean') return bn.home;
+  if (bn.cardId === 'ber_geo_elevator_bernal' && bn.siteId === 'burn-geo') return true;
+  return !!(bn.siteId && NODE_TAGS[String(bn.siteId)] && NODE_TAGS[String(bn.siteId)].homeBernal);
+}
+// Is the rocket at the Bank (LEO, or docked at the Home Bernal)?
+function atBank(p) {
+  const r = p.rocket || {};
+  if (r.siteId == null) return true;
+  const home = (p.bernals || []).find(isHomeUnit);
+  return !!(home && home.siteId === r.siteId);
+}
+function bankWhere(p) {
+  const home = (p.bernals || []).find(isHomeUnit);
+  return home ? `${(BERNALS_BY_ID[home.cardId] || {}).name || 'Home Bernal'}` : 'LEO';
+}
+// ---- the Isobank / Starship placard (Module 4), drawn after the printed one ----
+// Isovaults: a hexagon of six triangles, one per player colour, around the
+// Speculator's isovault (buy / sell at 10 aqua, 4D1d). Beside it the Exodus
+// contracts slot, the Exodus starship phases, the Exodus Fueling Table (4E3) and
+// the starship stack (4D3).
+const HEX_ORDER = [[4, 5], [5, 0], [0, 1], [1, 2], [2, 3], [3, 4]];   // top, then clockwise
+function hexVaultsSvg(s) {
+  const C = [150, 132], R = 128, r = 50;
+  const v = (k, rad = R) => [C[0] + rad * Math.cos((Math.PI / 3) * k), C[1] + rad * Math.sin((Math.PI / 3) * k)];
+  const pt = (q) => `${q[0].toFixed(1)},${q[1].toFixed(1)}`;
+  const players = s.players || [];
+  let tris = '';
+  HEX_ORDER.forEach(([a, b], i) => {
+    const q = players[i];
+    const col = q ? (q.color || '#9aa4b8') : null;
+    const A = v(a), B = v(b);
+    tris += `<polygon points="${pt(C)} ${pt(A)} ${pt(B)}" fill="${col || '#2a2e3a'}" fill-opacity="${col ? 0.34 : 0.3}" stroke="${col || '#4a5060'}" stroke-width="5" stroke-linejoin="round"/>`;
+    if (q) {
+      const m = [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2];
+      const at = [C[0] + 0.7 * (m[0] - C[0]), C[1] + 0.7 * (m[1] - C[1])];
+      const n = Math.max(0, q.isovault | 0);
+      tris += `<g transform="translate(${pt(at)})"><circle r="15" fill="url(#ib-bead)"/><text y="5.5" text-anchor="middle" font-size="15" font-weight="800" fill="#3a2600">${n}</text>`
+        + `<text y="${a === 4 ? -21 : 29}" text-anchor="middle" font-size="10" fill="#eef" >${esc(q.name)}</text></g>`;
+    }
+  });
+  const inner = Array.from({ length: 6 }, (_, k) => pt(v(k, r))).join(' ');
+  const market = Math.max(0, s.earthMarket | 0);
+  return `<svg class="m4p-hex" viewBox="0 0 300 264" role="img" aria-label="Isovaults">
+    <defs><radialGradient id="ib-bead" cx="35%" cy="30%" r="70%"><stop offset="0%" stop-color="#fff4c0"/><stop offset="60%" stop-color="#ffd24a"/><stop offset="100%" stop-color="#b8860b"/></radialGradient></defs>
+    <g opacity=".6" transform="translate(150 134) scale(2.75) translate(-50 -50)">${starshipArtSvg()}</g>
+    ${tris}
+    <polygon points="${inner}" fill="#15171e" fill-opacity=".72" stroke="#2c303a" stroke-width="3"/>
+    <text x="150" y="118" text-anchor="middle" font-size="9.5" font-weight="800" fill="#fff" letter-spacing=".5">SPECULATOR'S</text>
+    <text x="150" y="130" text-anchor="middle" font-size="9.5" font-weight="800" fill="#fff" letter-spacing=".5">ISOVAULT</text>
+    <circle cx="150" cy="150" r="12" fill="url(#ib-bead)"/><text x="150" y="155" text-anchor="middle" font-size="13" font-weight="800" fill="#3a2600">${market}</text>
+  </svg>`;
+}
+// The stacks standing at the isobank: TW thrusters (Promoted GW thrusters) and
+// augmented Colonists, for the starship stack box.
+function atIsobank(s) {
+  const ib = s.isobank;
+  const tws = [], cols = [];
+  if (!ib) return { tws, cols };
+  for (const q of (s.players || [])) {
+    const stacks = [];
+    if (q.rocket && q.rocket.siteId === ib.siteId) stacks.push(q.rocket.stack || []);
+    for (const b of (q.bernals || [])) if (b && b.siteId === ib.siteId) stacks.push(b.stack || []);
+    if (q.freighter && q.freighter.siteId === ib.siteId) stacks.push(q.freighter.stack || []);
+    for (const o of Object.values(q.outposts || {})) if (o && o.siteId === ib.siteId) stacks.push(o.cards || []);
+    const augOn = new Set(Object.values(q.augments || {}).map((a) => a && (a.colonistId || a.crewId)).filter(Boolean).map(String));
+    for (const st of stacks) for (const sl of st) {
+      const card = sl && PATENTS_BY_ID[sl.id];
+      if (card && card.type === 'gw-thruster' && sl.face === 'secondary') tws.push({ q, name: ((card.faces || {}).secondary || {}).name || card.name });
+      if (sl && augOn.has(String(sl.id))) cols.push({ q, name: (COLONISTS_BY_ID[sl.id] || CREW_BY_ID[sl.id] || {}).name || sl.id });
+    }
+  }
+  return { tws, cols };
+}
+// 4D3b, mirror of the engine's starshipCommanderOf: among players with a
+// completed Exodus contract, the most isofuel (the isobanker breaks ties).
+function starshipCommander(s) {
+  const ok = (s.players || []).filter((q) => (q.fulfilledContracts || []).some((f) => f && (f.side === 'exodus' || (CONTRACTS_BY_ID[f.id] || {}).exodus)));
+  if (!ok.length) return null;
+  const max = Math.max(...ok.map((q) => q.isovault | 0));
+  const top = ok.filter((q) => (q.isovault | 0) === max);
+  return top.find((q) => s.isobank && q.profileId === s.isobank.ownerId) || top[0];
+}
+// My augmented Colonists standing at a place.
+function myAugmentedColonistsAt(p, place) {
+  const aug = new Set(Object.values(p.augments || {}).map((a) => a && a.colonistId).filter(Boolean).map(String));
+  const out = [];
+  const scan = (slots, at) => { if (at != null && String(at) === String(place)) for (const sl of (slots || [])) if (sl && aug.has(String(sl.id))) out.push(sl.id); };
+  scan(p.rocket && p.rocket.stack, p.rocket && p.rocket.siteId);
+  for (const o of Object.values(p.outposts || {})) if (o) scan(o.cards, o.siteId);
+  if (p.freighter) scan(p.freighter.stack, p.freighter.siteId);
+  for (const bn of (p.bernals || [])) if (bn) scan(bn.stack, bn.siteId);
+  return out;
+}
+function starshipBoxHtml(s, p, myTurn, { req, aboard, band }) {
+  const sh = s.starship;
+  const btn = (act, label, ok, extra = '') => `<button type="button" data-act="${act}"${extra}${ok ? '' : ' disabled'}>${label}</button>`;
+  if (!sh) {
+    const cmd = starshipCommander(s);
+    const mine = cmd && cmd.profileId === p.profileId;
+    const crew = s.isobank ? myAugmentedColonistsAt(p, s.isobank.siteId) : [];
+    const who = cmd ? `<div class="m4p-aboard">Commander: <span class="player-name" style="--player-color:${esc(cmd.color || 'currentColor')}">@${esc(cmd.name)}</span></div>` : '';
+    return `<ul class="m4p-req">${req}</ul>${aboard.length ? `<div class="m4p-aboard">${aboard.join('<br>')}</div>` : ''}${who}
+      ${mine ? `<div class="m4c-controls">${btn('ship-launch', '🚀 Launch', myTurn && crew.length > 0 && band !== 'none', ` data-colonist="${esc(crew[0] || '')}"`)}</div>` : ''}`;
+  }
+  const cmdP = (s.players || []).find((q) => q.profileId === sh.commanderId) || {};
+  const state = sh.destroyed ? 'Destroyed' : sh.exited ? 'Left the map' : sh.jsjTurns != null ? `Solar oberth (${sh.jsjTurns})` : esc(spaceName(sh.siteId));
+  const cards = (sh.cards || []).map((c) => esc((PATENTS_BY_ID[c.slot.id] || COLONISTS_BY_ID[c.slot.id] || {}).name || c.slot.id));
+  const flying = !sh.exited && !sh.destroyed;
+  const imCmd = sh.commanderId === p.profileId;
+  const crew = flying ? myAugmentedColonistsAt(p, sh.siteId) : [];
+  const canBoard = flying && !(sh.passengers || {})[p.profileId] && crew.length > 0;
+  return `<div class="m4p-aboard"><b>${state}</b> · <span class="player-name" style="--player-color:${esc(cmdP.color || 'currentColor')}">@${esc(cmdP.name || '?')}</span></div>
+    <div class="m4p-aboard">${cards.join(', ')}</div>
+    <div class="m4c-controls">
+      ${imCmd && flying && sh.jsjTurns == null ? btn('ship-fly', '🚀 Fly', myTurn) : ''}
+      ${canBoard ? btn('ship-board', 'Board', myTurn, ` data-colonist="${esc(crew[0])}"`) : ''}
+    </div>`;
+}
+function isobankPlacardHtml(s, p, myTurn, tankIso) {
+  const ib = s.isobank;
+  const n = Math.max(1, Math.min(6, (s.players || []).length));
+  const total = (s.players || []).reduce((t, q) => t + Math.max(0, q.isovault | 0), 0);
+  const band = exodusBand(total, n);
+  const market = Math.max(0, s.earthMarket | 0);
+  const beads = Math.max(0, p.isotopes | 0);
+  const isos = p.isostandards || [];
+  const btn = (act, label, ok, tip) => `<button type="button" data-act="${act}"${ok ? '' : ' disabled'}${tip ? ` data-tip="${esc(tip)}"` : ''}>${label}</button>`;
+  const tick = (on) => `<span class="m4p-tick ${on ? 'on' : ''}">${on ? '✓' : ''}</span>`;
+  // Exodus starship phases, as printed; each lights once reached.
+  const beo = (s.players || []).some((q) => (q.bernals || []).some((b) => b && b.anchored && !isHomeUnit(b)));
+  const exodusDone = (s.players || []).some((q) => (q.fulfilledContracts || []).some((f) => f && (f.side === 'exodus' || (CONTRACTS_BY_ID[f.id] || {}).exodus)));
+  const phases = [
+    [beo, 'Anchored Bernal &amp; BEO Colony', 'May implant; may join spacer union.'],
+    [!!s.isotopeMonetized, '1st Isotope produced', 'Isotope monetization; gold-side contracts.'],
+    [!!ib, '1st Anchored Bernal with isostandard Dirtside', 'Must found isobank &amp; activate <i>Exodus</i> contracts.'],
+    [!!s.starship, '<i>Exodus</i> contract fulfilled &amp; most Isotope at isobank', 'Starship launch (4D3); remove all but 1 Seniority Disk.'],
+  ].map(([on, a, b]) => `<div class="m4p-phase ${on ? 'on' : ''}">${tick(on)}<b>${a}</b><span>${b}</span></div>`).join('');
+  // Exodus contracts slot.
+  const ex = (s.contractDecks || {}).EX;
+  const exBox = ib && ex
+    ? `<div class="m4p-ex-count">${ex.length} left</div>${ex[0] ? cardThumb(ex[0], 'exodus') : '<div class="muted">empty</div>'}`
+    : `<div class="m4p-locked">🔒</div><p class="m4p-small"><b>Inactive until isobank founded (4D2).</b></p>`;
+  // Fueling table, the player-count column and the current band lit.
+  const rows = [['max', 2], ['crisis', 1], ['reckless', 0], ['none', -1]];
+  const cell = (k, i) => {
+    const t = EXODUS_BANDS[k];
+    if (i === 2) return `${t[2]}+`;
+    if (i === 1) return `${t[1]} - ${t[2] - 1}`;
+    if (i === 0) return `${t[0]} - ${t[1] - 1}`;
+    return `0 - ${t[0] - 1}`;
+  };
+  const table = `<table class="m4p-fuel"><tbody>${rows.map(([b, i]) => `<tr class="${b === band ? 'now' : ''}"><th>${EXODUS_BAND_NAMES[b]}</th><td>${cell(n, i)}</td><td>${b === 'none' ? '-' : `${EXODUS_RANK_VP[b].join(' / ')} VP`}</td></tr>`).join('')}</tbody></table>`;
+  // Starship stack.
+  const { tws, cols } = atIsobank(s);
+  const req = [
+    [tws.length > 0, 'Operational TW thruster'],
+    [band !== 'none', `Isototal ${total} (Reckless ${EXODUS_BANDS[n][0]}+)`],
+    [exodusDone, '1 completed <i>Exodus</i> contract'],
+    [cols.length > 0, 'Augmented Colonist'],
+  ].map(([on, t]) => `<li class="${on ? 'on' : ''}">${tick(on)}${t}</li>`).join('');
+  const aboard = [...tws.map((x) => `🚀 ${esc(x.name)} <span class="player-name" style="--player-color:${esc(x.q.color || 'currentColor')}">@${esc(x.q.name)}</span>`),
+    ...cols.map((x) => `👩‍🚀 ${esc(x.name)} <span class="player-name" style="--player-color:${esc(x.q.color || 'currentColor')}">@${esc(x.q.name)}</span>`)];
+  const r = p.rocket || {};
+  const atIb = ib && r.siteId && r.siteId === ib.siteId;
+  const banker = ib ? (playerById(ib.ownerId) || {}) : null;
+  return `<div class="m4p">
+    <div class="m4p-title">ISOBANK/STARSHIP <small>(MODULE 4)</small>${ib ? `<div class="m4p-where">${esc((BERNALS_BY_ID[ib.bernalId] || {}).name || 'Bernal')} · ${esc(spaceName(ib.siteId))} · <span class="player-name" style="--player-color:${esc(banker.color || 'currentColor')}">@${esc(banker.name || '?')}</span></div>` : ''}</div>
+    <div class="m4p-ex"><h5>EXODUS<br>CONTRACTS</h5>${exBox}</div>
+    <div class="m4p-vaults"><h5>ISOVAULTS</h5>${hexVaultsSvg(s)}
+      <div class="m4c-controls m4p-spec">
+        ${btn('iso-trade-sell', 'Deposit', myTurn && beads > 0)}
+        ${btn('iso-trade-buy', 'Withdraw', myTurn && market > 0 && (p.aqua | 0) >= ((s.isotopeRate | 0) || 10) && isos.length > 0, isos.length ? '' : 'Needs an isostandard')}
+        ${atIb && tankIso > 0 ? btn('iso-vault', `Store ${tankIso} in your isovault`, myTurn) : ''}
+      </div></div>
+    <div class="m4p-phases"><h5>EXODUS STARSHIP PHASES</h5>${phases}</div>
+    <div class="m4p-table"><h5>EXODUS FUELING TABLE (4E3) <small>${n} Player${n > 1 ? 's' : ''}</small></h5>${table}<div class="m4p-total">Isototal <b>${total}</b> · ${EXODUS_BAND_NAMES[band]}</div></div>
+    <div class="m4p-ship"><h5>STARSHIP STACK</h5>${starshipBoxHtml(s, p, myTurn, { req, aboard, band, tws, cols })}</div>
+  </div>`;
+}
+
+// The Speculator's isovault trade (4D1d): Deposit sells gold beads into it,
+// Withdraw buys them out, 10 aqua each. A stepper like the water transfer one,
+// with the Bank aqua before and after. Resolves to the count, or null.
+function pickIsoTrade(action) {
+  const s = snap(), p = me();
+  if (!s || !p) return Promise.resolve(null);
+  const aqua = p.aqua | 0, beads = Math.max(0, p.isotopes | 0), market = Math.max(0, s.earthMarket | 0);
+  const sell = action === 'sell';
+  const rate = (s.isotopeRate | 0) || 10;   // Isotope Cartel: 12
+  const max = sell ? beads : Math.min(market, Math.floor(aqua / rate));
+  if (max < 1) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const ov = document.createElement('div');
+    ov.className = 'card-modal-overlay confirm-modal-overlay m4-iso-trade';
+    let n = 1;
+    const close = (v) => { ov.remove(); document.removeEventListener('keydown', onKey); resolve(v); };
+    const onKey = (e) => { if (e.key === 'Escape') close(null); else if (e.key === 'Enter') close(n); };
+    document.addEventListener('keydown', onKey);
+    const step = (d) => `<button type="button" class="popup-btn popup-btn-secondary fa-step" data-step="${d}">${d > 0 ? '+' : '−'}${Math.abs(d)}</button>`;
+    ov.innerHTML = `<div class="turn-confirm-panel">
+      <h3>${sell ? '🟡 Deposit in the Speculator\'s isovault' : '🟡 Withdraw from the Speculator\'s isovault'}</h3>
+      <div class="dump-stepper">${step(-10)}${step(-5)}${step(-1)}
+        <input type="number" class="fa-amount" min="1" max="${max}" value="1" inputmode="numeric" aria-label="Isotopes" />
+        ${step(1)}${step(5)}${step(10)}
+        <button type="button" class="popup-btn fa-all">Max (${max})</button></div>
+      <div class="m4-iso-ledger"></div>
+      <div class="turn-confirm-actions">
+        <button type="button" class="popup-btn primary" data-act="yes"></button>
+        <button type="button" class="popup-btn" data-act="no">Cancel</button></div></div>`;
+    const input = ov.querySelector('.fa-amount'), ledger = ov.querySelector('.m4-iso-ledger'), yes = ov.querySelector('[data-act="yes"]');
+    const set = (v) => {
+      n = Math.max(1, Math.min(max, Math.round(Number(v)) || 1));
+      input.value = String(n);
+      const dA = sell ? n * rate : -n * rate;
+      ledger.innerHTML = `<div><span>💧 Bank aqua</span><b>${aqua} -&gt; ${aqua + dA}</b><em class="${dA > 0 ? 'up' : 'down'}">${dA > 0 ? '+' : ''}${dA}</em></div>`
+        + `<div><span>🟡 Gold beads</span><b>${beads} -&gt; ${beads + (sell ? -n : n)}</b></div>`
+        + `<div><span>Speculator's isovault</span><b>${market} -&gt; ${market + (sell ? n : -n)}</b></div>`;
+      yes.textContent = sell ? `Deposit ${n} (+${n * rate} aqua)` : `Withdraw ${n} (−${n * rate} aqua)`;
+    };
+    ov.querySelectorAll('.fa-step').forEach((b) => b.addEventListener('click', () => set(n + Number(b.dataset.step))));
+    ov.querySelector('.fa-all').addEventListener('click', () => set(max));
+    input.addEventListener('input', () => set(input.value));
+    yes.addEventListener('click', () => close(n));
+    ov.querySelector('[data-act="no"]').addEventListener('click', () => close(null));
+    ov.addEventListener('click', (e) => { if (e.target === ov) close(null); });
+    set(1);
+    document.body.appendChild(ov);
+  });
+}
+
+function bankHtml(s, p, myTurn) {
+  const beads = Math.max(0, p.isotopes | 0);
   const market = Math.max(0, s.earthMarket | 0);
   const r = p.rocket || {};
   const tankIso = (r.tankGrade === 'isotope') ? Math.floor(Number(r.tank) || 0) : 0;
-  const status = s.isotopeMonetized
-    ? 'Isotope is monetized: FINAO costs are doubled.'
-    : 'Isotope is not monetized yet: the first gold bead refined monetizes it.';
-  const btn = (act, label, ok, tip) => `<button type="button" data-act="${act}"${ok ? '' : ' disabled'} data-tip="${esc(tip)}">${label}</button>`;
-  return `<h4>Isotopes</h4>
-    <p class="muted">${status}</p>
-    <p>🟡 At your Bank: <b>${bank}</b> (worth ${bank * 10} aqua) · Earth market: <b>${market}</b></p>
-    <div class="m4c-controls">
-      ${btn('iso-sell', 'Sell 1 for 10 aqua', myTurn && bank > 0, 'Sell a gold bead to the Earth market for 10 aqua. Free action.')}
-      ${btn('iso-buy', 'Buy 1 for 10 aqua', myTurn && market > 0 && (p.aqua | 0) >= 10, 'Buy a gold bead from the Earth market into your Bank. Free action.')}
-      ${tankIso > 0 ? btn('iso-tank', `Bring ${tankIso} from the tank to the Bank`, myTurn, 'Unload the whole isotope units in your rocket tank into your Bank. Your rocket must be at your Bank (LEO or your Home Bernal).') : ''}
-    </div>`;
+  const isos = p.isostandards || [];
+  const btn = (act, label, ok, tip) => `<button type="button" data-act="${act}"${ok ? '' : ' disabled'}${tip ? ` data-tip="${esc(tip)}"` : ''}>${label}</button>`;
+  const ib = s.isobank;
+  const out = [];
+  out.push(`<div class="m4b-grid">
+    <div class="m4b-stat"><span>🏦 Bank</span><b>${esc(bankWhere(p))}</b></div>
+    <div class="m4b-stat"><span>💧 Aqua</span><b>${p.aqua | 0}</b></div>
+    <div class="m4b-stat"><span>🟡 Gold beads</span><b>${beads}</b><small>${beads * ((s.isotopeRate | 0) || 10)} aqua</small></div>
+    <div class="m4b-stat"><span>Isostandard</span><b>${isos.length ? isos.map((x) => esc(x)).join(' ') : 'none'}</b></div>
+    <div class="m4b-stat"><span>FINAO</span><b>${s.isotopeMonetized ? '×2' : '×1'}</b><small>${s.isotopeMonetized ? 'monetized' : 'not monetized'}</small></div>
+  </div>
+  <div class="m4c-controls">
+    ${btn('iso-withdraw', 'Withdraw 1 as fuel', myTurn && beads > 0 && isos.length > 0, isos.length ? '' : 'Needs an isostandard')}
+    ${tankIso > 0 && atBank(p) ? btn('iso-tank', `Tank to Bank (${tankIso})`, myTurn) : ''}
+  </div>`);
+  out.push(isobankPlacardHtml(s, p, myTurn, tankIso));
+  return out.join('');
 }
 
 // ---- augmentations (4C) ------------------------------------------------------------
@@ -732,9 +984,17 @@ async function onAct(b) {
   }
   else if (act === 'augment') { openAugmentWizard(b.dataset.shape); return; }
   else if (act === 'chit-view') { openChitSides(b.dataset.shape); return; }
-  else if (act === 'iso-sell') await D.submitTurnOp({ kind: 'ISOTOPE_EXCHANGE', action: 'sell', amount: 1 });
-  else if (act === 'iso-buy') await D.submitTurnOp({ kind: 'ISOTOPE_EXCHANGE', action: 'buy', amount: 1 });
+  else if (act === 'iso-trade-sell' || act === 'iso-trade-buy') {
+    const action = act === 'iso-trade-sell' ? 'sell' : 'buy';
+    const amount = await pickIsoTrade(action);
+    if (amount) await D.submitTurnOp({ kind: 'ISOTOPE_EXCHANGE', action, amount });
+  }
   else if (act === 'iso-tank') await D.submitTurnOp({ kind: 'ISOTOPE_EXCHANGE', action: 'deposit' });
+  else if (act === 'iso-withdraw') await D.submitTurnOp({ kind: 'ISOTOPE_EXCHANGE', action: 'withdraw', amount: 1 });
+  else if (act === 'iso-vault') await D.submitTurnOp({ kind: 'ISOTOPE_EXCHANGE', action: 'vault' });
+  else if (act === 'ship-launch') await D.submitTurnOp({ kind: 'STARSHIP_LAUNCH', colonists: [b.dataset.colonist] });
+  else if (act === 'ship-board') await D.submitTurnOp({ kind: 'STARSHIP_BOARD', colonistId: b.dataset.colonist });
+  else if (act === 'ship-fly') { closePanel(); if (D.planStarship) D.planStarship(); }
   else if (act === 'pay') await payContractFee(id);
   else if (act === 'mishap') await D.submitTurnOp({ kind: 'LOBBY', ideology: 'centrist' });
   else if (act === 'abandon') await abandonContract(id);
@@ -775,10 +1035,39 @@ async function fulfillContract(id) {
     await D.submitTurnOp({ kind: 'FULFILL_CONTRACT', cardId: id, ...(ideology ? { ideology, delegates: 2 } : {}) });
     return;
   }
+  // Life Support Reconfig Team: you may swap your two Bernal cards.
+  if (f && last && f.onFulfill && f.onFulfill.bernalSwap && (p.bernals || []).filter(Boolean).length >= 2) {
+    const names = (p.bernals || []).filter(Boolean).slice(0, 2).map((b) => (BERNALS_BY_ID[b.cardId] || {}).name || 'Bernal');
+    const swap = await askSwapBernals(f.name, names);
+    if (swap === undefined) return;
+    await D.submitTurnOp({ kind: 'FULFILL_CONTRACT', cardId: id, ...(swap ? { swapBernals: true } : {}) });
+    return;
+  }
   await D.submitTurnOp({ kind: 'FULFILL_CONTRACT', cardId: id });
 }
 // One Ideology for 2 delegates, or none. Resolves the key, null (none) or
 // undefined (cancelled).
+// Life Support Reconfig Team: swap the two Bernal cards? true / false, or
+// undefined when cancelled.
+function askSwapBernals(title, names) {
+  return new Promise((resolve) => {
+    const ov = document.createElement('div');
+    ov.className = 'card-modal-overlay confirm-modal-overlay';
+    ov.innerHTML = `<div class="turn-confirm-panel" role="dialog" aria-label="${esc(title)}">
+      <h3>${esc(title)}</h3><p>Swap ${esc(names[0])} and ${esc(names[1])}?</p>
+      <div class="turn-confirm-actions"><button type="button" class="popup-btn primary" data-v="1">Swap</button><button type="button" class="popup-btn" data-v="0">Keep</button><button type="button" class="popup-btn" data-cancel>Cancel</button></div>
+    </div>`;
+    const done = (v) => { ov.remove(); resolve(v); };
+    ov.addEventListener('click', (e) => {
+      if (e.target === ov) return done(undefined);
+      const b = e.target.closest('button');
+      if (!b) return;
+      if (b.hasAttribute('data-cancel')) return done(undefined);
+      done(b.dataset.v === '1');
+    });
+    document.body.appendChild(ov);
+  });
+}
 function pickIdeology(title) {
   return new Promise((resolve) => {
     const ov = document.createElement('div');
@@ -799,6 +1088,13 @@ function pickIdeology(title) {
     document.body.appendChild(ov);
   });
 }
+// Aqua plus gold beads at the Bank once monetized (4D1b), mirror of the
+// engine's bankFunds.
+function bankAqua(p) {
+  const s = snap();
+  const beads = (s && s.m4 && s.isotopeMonetized) ? Math.max(0, p.isotopes | 0) * ((s.isotopeRate | 0) || 10) : 0;
+  return (p.aqua | 0) + beads;
+}
 export async function payContractFee(id) {
   const p = me();
   const f = p && faceOf(p, id);
@@ -808,7 +1104,7 @@ export async function payContractFee(id) {
   if (left <= 0) return;
   // In default: no per-turn cap, pay off as much as the aqua covers.
   if (meta.default) {
-    const amt = Math.min(left, p.aqua | 0);
+    const amt = Math.min(left, bankAqua(p));
     if (amt <= 0) { D.toast('No aqua to pay with.', 'info'); return; }
     await D.submitTurnOp({ kind: 'PAY_LATE_FEE', cardId: id, amount: amt });
     return;
@@ -816,7 +1112,7 @@ export async function payContractFee(id) {
   const owedTurn = f.lateFee - ((p.lateFeePaidThisTurn) | 0);
   if (owedTurn <= 0) { D.toast('You have paid this turn\'s late fee.', 'info'); return; }
   const cap = Math.max(1, Math.min(owedTurn, left));
-  await D.submitTurnOp({ kind: 'PAY_LATE_FEE', cardId: id, amount: Math.min(cap, p.aqua | 0) || cap });
+  await D.submitTurnOp({ kind: 'PAY_LATE_FEE', cardId: id, amount: Math.min(cap, bankAqua(p)) || cap });
 }
 export async function abandonContract(id) {
   const p = me();

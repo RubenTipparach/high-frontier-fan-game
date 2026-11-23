@@ -474,7 +474,7 @@ export function createInitialState({ players, seed, maxRounds, startingAqua, eco
   // AFTER every other draw so an m4-off game's deal is byte-for-byte unchanged.
   let contractDecks = null;
   if (m4) {
-    const raw = contractDeckIds();
+    const raw = contractDeckIds({ m1: !!m1, m2: !!m2 });
     contractDecks = {};
     for (const pair of Object.keys(raw)) contractDecks[pair] = shuffle(gen, raw[pair]);
   }

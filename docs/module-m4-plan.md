@@ -237,9 +237,81 @@ m4 + m2 and iso monetization"):
   three non-Exodus decks (bottom on top) and sets `state.contractSide = 'gold'`;
   auctions deal that side. Gold faces the engine cannot check are dealt out.
 
-STILL TO DO in Stage 3: paying with beads directly (auction bids, FINAO) instead
-of selling first; withdrawing a bead from the Bank as your isostandard (4D1e)
-and debasement (4D1b); the other 4D1a triggers (Lofstrom Loop / GEO Elevator
-Home Bernal, ET Home Bernal); the isobank and isobanker (4D2), Exodus contracts,
-the starship. Open question for the owner: should FINAO doubling also apply to
-M1 games without M4 (3B5a is an M1 rule)?
+BUILT 2026-11-22 (Stage 3, isotope monetization + the isobank):
+- **Beads pay like aqua (4D1b).** Once monetized (M4), a payment the aqua cannot
+  cover exchanges just enough Bank beads at 10 aqua each (to the Earth market):
+  FINAO (`finaoFunds` / `chargeFinao`) and research auction bids and payment
+  (`bankFunds` / `coverFromBeads`).
+- **Isostandard (1Cb).** An isotope refuel for your GW/TW thruster adds its
+  spectral (as does ET-producing one). **Debasement (4D1d):** without one, beads
+  reaching your Bank turn into aqua and you cannot buy beads. **Withdraw
+  (4D1e):** `ISOTOPE_EXCHANGE withdraw` takes beads out of the Bank as isotope
+  fuel of your isostandard in the Bank's stack.
+- **4D1a triggers:** anchoring the Lofstrom Loop, or the GEO Elevator at GEO, as a
+  Home Bernal monetizes isotope. (The ET Home Bernal trigger is Module 3.)
+- **The isobank (4D2), M4 + M2:** founded automatically on your turn (refuel,
+  anchor, End turn) with an isostandard and an anchored BEO Bernal with a
+  matching Dirtside. It opens the Exodus contract deck (`contractDecks.EX`, any
+  law), never unanchors, gives the isobanker +1 isotope on refuels there or at
+  its Dirtsides, and holds every player's isovault (`ISOTOPE_EXCHANGE vault`,
+  carried there, never withdrawn).
+- **Endgame (4E2e/f, 4E3, 4E4):** isobanker medal 4 VP; with a Reckless+ isototal
+  and a TW thruster at the isobank, the starshot scores rank VP by isovault, the
+  command and propulsion medals, and 1 VP per augmentation on each player's most
+  augmented Colonist. Tables in `data/exodus.js`.
+- **UI:** a Bank tab in the Contracts panel (Bank, beads, isostandard, Earth
+  market, FINAO, exchange buttons, the isobank, every isovault and the isototal
+  band). The Exodus deck shows in the market once open.
+
+- **The six Exodus contracts (front faces), 2026-11-22.** Every destination is
+  engine-checked (sheet `Destination Steps`; new `belt` verb and `space beo`
+  filter), every When Fulfilling runs (`isoBank` / `isoSite` isotopes, debased
+  without an isostandard; Life Support's optional Bernal card swap,
+  `swapBernals`), and every Fulfilled Ability works: Atmospheric Iso-Refinery
+  (`aeroIsotope`, rocket moves), Iso-Exchange (`isostandardAnyFactory`), TW Stress
+  Test (`twBonusPivot`, client planner), Life Support Reconfig Team
+  (`bernalLimitUnanchored`), Radiation Shield Prototype (`beltCmeImmune`, every
+  belt roll path and the solar flare), Deep Freeze (`exomigrateDiscard`, a
+  checkbox in the exomigrate dialog). Checks: "Exodus:" in check-engine.
+  The Exodus deck plays the FRONT face; the backs (Isotope Fueling Station,
+  Rival Isobank, TW Evaluation Committee, Life Support Test Protocol, Warden
+  Proving Ground, Decanting Network) are not reachable yet.
+- **Map:** the isobank draws over its space as a site-size hexagon (the starship
+  behind the isovault cells, rim in the isobanker's colour), under the pieces;
+  hovering fades the pieces, a small hex beside it peeks at the site, a tap opens
+  the Bank tab.
+
+- **Desperation starshot (4D3), 2026-11-23.** `state.starship`. STARSHIP_LAUNCH
+  (free action, the commander: the most isofuel among Exodus contract holders,
+  isobanker breaks ties): needs a Reckless+ isototal, the highest-thrust TW
+  thruster at the isobank operational without afterburn (it and its support
+  chain move aboard), and the commander's augmented Colonist; sets Anarchy until
+  exit and ends the game this Solar Cycle (maxRounds = round). STARSHIP_BOARD:
+  one augmented Colonist per player, or isotopes into your isovault.
+  STARSHIP_MOVE (commander, once a turn): 1 burn, 2 on afterburn (1 isotope off
+  the isovault), crash / aerobrake rolls with double FINAO, belts decommission
+  cards. An Ad Astra exit freezes it (Jupiter-Sol-Jupiter waits 2 turns at the
+  solar oberth). The Exodus deck closes in flight and "isobank" destinations
+  read the starship. Scoring (4E4): command medal to the commander, propulsion to
+  the TW owner, augmentation VP for passengers only; still in flight at the end
+  = mutiny (-3, isobanker medal to the next passenger). UI: Launch / Board / Fly
+  in the Bank tab's Starship Stack box; Fly plots with the route planner
+  (budget 2, 3 Bonus Pivots); a starship token on the map.
+- **Spaceborn colonist Futures (16), 2026-11-23** in `data/future-goals.js`.
+- **FINAO doubles on monetization in M4 rooms only** (R8, `finaoDoubled`), and
+  the Lofstrom Loop Home anchor rolls the Epic Hazard (4A7j).
+- **Colony contracts** play on colony domes without M2, on anchored Bernals with
+  M2 (owner 2026-11-23): `colony` / `isobank` step verbs.
+
+- **2026-11-23 follow-ups:** the six Exodus back faces are built. House rule
+  (owner 2026-11-23): instead of C4's six cards on a random side, every Exodus
+  face is its own one-sided card, so the Exodus deck is 12 cards, shuffled at the
+  isobank founding and always played on side `exodus` (this settles R9); isofuel
+  trades between isovaults (an `isovault` trade term, 4D2f); gold beads pay late
+  fees and contract debt; a deck picker for the Interstellar Exploration research
+  grant; storing in the isovault with no amount stores everything carried.
+  Atmospheric Iso-Refinery stays rocket-only by the rules (Freighters and Bernals
+  never fly under a GW thruster).
+
+STILL TO DO in Stage 3: the starship's combined-game cargo (Promoted Freighter /
+Bernal, 4E5c).

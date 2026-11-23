@@ -17,6 +17,17 @@
 //   enter:<node>                    the stack entered that space this turn
 //   flybys:N [beyond=Zone]          the stack entered N different flyby spaces this turn
 //   liftoff                         the stack has left the previous step's site
+//   colony <filters>                the stack is at a Colony: without Module 2 a
+//                                   colony dome on a site; with Module 2 an
+//                                   anchored Bernal (owner 2026-11-23). Filters:
+//                                   own, beo, zone=, notzone=, atmospheric,
+//                                   submarine, body=, road (buggy road to
+//                                   another Colony), augmented (an augmented
+//                                   Colonist / Crew there), buggy (the stack
+//                                   has an operational buggy), different
+//   isobank [augmented] [spaceborn] the stack is at the isobank (M4 + M2)
+//   belt [beyond=Zone]              the stack entered a Radiation Belt space this turn
+//                                   (a different one from earlier belt steps)
 //   return                          the contract is back at LEO / your Bank
 //   manual:<why>                    not engine-checkable yet (refused until it is)
 // Site filters: unexplored, size>=N, atmospheric, submarine, astrobiology,
@@ -31,7 +42,7 @@ export const CONTRACT_PAIRS = {
   EA: ['equality', 'authority'],
 };
 export const CONTRACT_PAIR_NAMES = {
-  IF: 'Individuality / Freedom', HU: 'Honor / Unity', EA: 'Equality / Authority',
+  IF: 'Individuality / Freedom', HU: 'Honor / Unity', EA: 'Equality / Authority', EX: 'Exodus',
 };
 // Heliocentric zones, Sun outward, for "beyond <zone>" (farther from the Sun).
 export const ZONE_ORDER = ['Mercury', 'Venus', 'Earth', 'Mars', 'Ceres', 'Jupiter', 'Saturn', 'Uranus', 'Neptune'];
@@ -72,6 +83,9 @@ export function parseSteps(text) {
     if (head === 'space') return { verb: 'space', filters, raw };
     if (head === 'return') return { verb: 'return', raw };
     if (head === 'liftoff') return { verb: 'liftoff', raw };
+    if (head === 'belt') return { verb: 'belt', filters, raw };
+    if (head === 'colony') return { verb: 'colony', filters, raw };
+    if (head === 'isobank') return { verb: 'isobank', filters, raw };
     return { verb: 'manual', why: `unreadable step "${raw}"`, raw };
   });
 }
@@ -125,6 +139,21 @@ export function parseFulfilledAbility(text) {
   const belt = t.match(/^\+1 flyby bonus from Radiation Belt \((once|twice)/i);
   if (belt) ab.beltFlyby = belt[1].toLowerCase() === 'twice' ? 2 : 1;
   if (/allowed Murder\/Suicide/i.test(t)) ab.murderSuicide = true;
+  // Exodus contract abilities.
+  if (/^If your GW\/TW thruster ends its move on an Aerobrake Hazard, that Stack gains 1 Isotope/i.test(t)) ab.aeroIsotope = true;
+  if (/^Produce your isostandard during a site refuel op at any Factory/i.test(t)) ab.isostandardAnyFactory = true;
+  if (/^Your GW\/TW thruster receives a Bonus Pivot/i.test(t)) ab.twBonusPivot = true;
+  if (/^Your Bernals add to Colonist limit even when unanchored/i.test(t)) ab.bernalLimitUnanchored = true;
+  if (/^Your Stacks are immune to Belt\/CME Rolls/i.test(t)) ab.beltCmeImmune = true;
+  if (/^Before exomigrating, you may Discard the top card from the queue/i.test(t)) ab.exomigrateDiscard = true;
+  // Exodus back faces.
+  if (/^After you do a factory refuel op, gain 1 Isotope at that Factory/i.test(t)) ab.factoryRefuelIsotope = true;
+  if (/^You may exchange 1 Isotope per Turn at your Anchored non-Home Bernal for 6 Aquas/i.test(t)) ab.rivalIsobank = true;
+  if (/^You may use Claim disks as delegates/i.test(t)) ab.claimDelegates = true;
+  if (/^Implant is a free action/i.test(t)) ab.freeImplant = true;
+  const rob = t.match(/^Your robonauts are -(\d+) ISRU/i);
+  if (rob) ab.robonautIsru = Number(rob[1]);
+  if (/^Allowed (\d+|1) extra Colonist/i.test(t)) ab.extraColonist = true;
   if (/^Acetylene rocketplane liftoff is possible from all your Factories/i.test(t)) ab.acetyleneFactories = true;
   if (/factory-assist landings\/liftoffs at Elevator Sites treat lander burns as normal Burn Spaces/i.test(t)) ab.elevatorLanderBurns = true;
   return ab;
@@ -140,6 +169,20 @@ export function parseWhenFulfilling(text) {
   //   beehive : true           (remove the Busted disk, prospect at ISRU 0 w/reroll)
   if (/^Bust the destination Site & place up to 2 delegates in any 1 Ideology/i.test(t)) fx.bustAndDelegates = true;
   if (/^Remove Busted disk; prospect here at ISRU 0 w\/reroll/i.test(t)) fx.beehive = true;
+  //   isoBank : N   ("Gain N Isotopes at your Bank")
+  //   isoSite : N   ("Gain N Isotopes at this Site": isotope fuel in the stack there)
+  //   bernalSwap : true (Life Support Reconfig: "you may swap your Bernal cards")
+  const ib = t.match(/^Gain (\d+) Isotopes? at your Bank/i);
+  if (ib) fx.isoBank = Number(ib[1]);
+  const is = t.match(/^Gain (\d+) Isotopes? at this Site/i);
+  if (is) fx.isoSite = Number(is[1]);
+  if (/swap your Bernal cards/i.test(t)) fx.bernalSwap = true;
+  //   delegates2 : place 2 delegates on any 1 ideology (TW Evaluation Committee)
+  //   discardColonist : you may Discard a Colonist, not a Felony (Life Support Test Protocol)
+  //   wardenFreighter : Promote your freighter or gain a Mobile Factory (Warden Proving Ground)
+  if (/place 2 delegates on any 1 ideology/i.test(t)) fx.delegates2 = true;
+  if (/you may Discard a Colonist/i.test(t)) fx.discardColonist = true;
+  if (/Promote your freighter/i.test(t)) fx.wardenFreighter = true;
   return fx;
 }
 
@@ -173,23 +216,32 @@ function buildFace(row, pair, exodus) {
   };
 }
 
+function record(row, primary, secondary, exodus, pair) {
+  return {
+    id: slug(row.Name),
+    name: row.Name,
+    type: 'contract',
+    pair: exodus ? 'EX' : pair,
+    exodus,
+    mass: primary.mass,
+    radHardness: primary.radHardness,
+    spectralType: null,
+    requires: [], supplies: [], properties: [],
+    faces: { primary, secondary },
+  };
+}
 function build(tab, exodus) {
-  return (CARD_DATA[tab] || []).filter((r) => r && r.tier1).map((r) => {
+  return (CARD_DATA[tab] || []).filter((r) => r && r.tier1).flatMap((r) => {
     const pair = r.tier1['Ideology Pair'] || null;
     const primary = buildFace(r.tier1, pair, exodus);
     const secondary = buildFace(r.tier2, pair, exodus);
-    return {
-      id: slug(r.tier1.Name),
-      name: r.tier1.Name,
-      type: 'contract',
-      pair: exodus ? 'EX' : pair,
-      exodus,
-      mass: primary.mass,
-      radHardness: primary.radHardness,
-      spectralType: null,
-      requires: [], supplies: [], properties: [],
-      faces: { primary, secondary },
-    };
+    // House rule (owner 2026-11-23): each of the six two-sided Exodus cards
+    // plays as TWO one-sided cards, a 12-card Exodus deck. Both faces of each
+    // record are the same face, so a stray gold-side read stays on it.
+    if (exodus) {
+      return [record(r.tier1, primary, primary, true, pair), ...(r.tier2 && r.tier2.Name ? [record(r.tier2, secondary, secondary, true, pair)] : [])];
+    }
+    return [record(r.tier1, primary, secondary, false, pair)];
   });
 }
 
@@ -197,6 +249,7 @@ export const CONTRACTS = [...build('Contracts', false), ...build('Exodus Contrac
 export const CONTRACTS_BY_ID = Object.fromEntries(CONTRACTS.map((c) => [c.id, c]));
 export const isContractId = (id) => !!CONTRACTS_BY_ID[id];
 // The face a contract is on: 'blue' / 'exodus' -> primary, 'gold' -> secondary.
+// Every Exodus face is its own one-sided card (12 in all), always 'exodus'.
 export const sideFace = (side) => (side === 'gold' ? 'secondary' : 'primary');
 export function contractFace(cardId, side = 'blue') {
   const c = CONTRACTS_BY_ID[cardId];
@@ -208,15 +261,19 @@ export function contractFace(cardId, side = 'blue') {
 // Destination Steps (the manual: reason). Owner 2026-11-17: these contracts are
 // dealt out of M4 for now, and M4 does not combine with M2.
 const NEEDS_ABSENT = /bernal|colon|BEO|freighter|isobank|isotop|\(M1\)|\(M2\)|not on this map/i;
-export function faceUnplayable(face) {
-  return !!(face && face.steps.some((s) => s.verb === 'manual' && NEEDS_ABSENT.test(s.why || '')));
+export function faceUnplayable(face, mods = {}) {
+  if (!face) return false;
+  if (face.steps.some((s) => s.verb === 'manual' && NEEDS_ABSENT.test(s.why || ''))) return true;
+  // The isobank exists only with Module 2 (4D2 founds it on a BEO Bernal).
+  if (!mods.m2 && face.steps.some((s) => s.verb === 'isobank')) return true;
+  return false;
 }
 // The three ideology-pair decks, blue side up, unshuffled (the server shuffles).
 // Cards are dealt and auctioned blue side up, so a card whose BLUE face cannot
 // be played is left out.
-export function contractDeckIds() {
+export function contractDeckIds(mods = {}) {
   const decks = { IF: [], HU: [], EA: [] };
-  for (const c of CONTRACTS) if (!c.exodus && decks[c.pair] && !faceUnplayable(c.faces.primary)) decks[c.pair].push(c.id);
+  for (const c of CONTRACTS) if (!c.exodus && decks[c.pair] && !faceUnplayable(c.faces.primary, mods)) decks[c.pair].push(c.id);
   return decks;
 }
 
@@ -265,6 +322,10 @@ export function siteMatches(site, filters, ctx, usedSites = [], slug = null) {
   if (f.beyond && !(zoneIdx(site.solarZone) > zoneIdx(f.beyond))) return false;
   if (f.glory === 'unclaimed' && !ctx.gloryUnclaimed(site.solarZone)) return false;
   if (f.different && usedSites.includes(id)) return false;
+  if (f.augmented && !(ctx.augmentedAt && ctx.augmentedAt(id, !!f.own))) return false;
+  // A site of your isostandard spectral type; any player's Factory there.
+  if (f.isostandard && !(ctx.isostandardSite && ctx.isostandardSite(site))) return false;
+  if (f.factory && !(ctx.anyFactory && ctx.anyFactory(id))) return false;
   return true;
 }
 
@@ -324,12 +385,29 @@ export function stepLabel(step, nameOf = (s) => s) {
       return `Reach ${article(noun)} ${noun}${place.length ? ' ' + place.join(', ') : ''}${fallback}${withTail}${rolled}${same}`;
     }
     case 'space': {
+      if (f.beo) return `Reach ${f.different ? 'another' : 'one'} of your Anchored non-Home Bernals`;
       const kind = f.aero ? 'an aerobrake space' : f.hazard ? 'a hazard space' : 'a space';
       return `Reach ${kind}${f.beyond ? ` beyond the ${f.beyond} zone` : ''}${same}`;
     }
     case 'enter': return `Pass through ${nameOf(step.node)}${same}`;
     case 'flybys': return `${step.count} flyby${step.count === 1 ? '' : 's'}${f.beyond ? ` beyond the ${f.beyond} zone` : ''} in one turn`;
     case 'liftoff': return 'Lift off from there';
+    case 'belt': return `Enter a Radiation Belt${f.beyond ? ` beyond the ${f.beyond} zone` : ''}`;
+    case 'colony': {
+      const who = f.own ? 'your' : 'a';
+      const kind = [f.beo ? 'BEO' : '', 'Colony'].filter(Boolean).join(' ');
+      const bits = [];
+      if (f.atmospheric) bits.push('at an atmospheric site');
+      if (f.submarine) bits.push('at a submarine site');
+      if (f.zone) bits.push(`in the ${f.zone} zone`);
+      if (f.notzone) bits.push(`outside the ${String(f.notzone).split('|').join(' / ')} zones`);
+      if (f.road) bits.push('on a buggy road to another Colony');
+      if (f.augmented) bits.push('with an augmented Colonist');
+      if (f.buggy) bits.push('with an operational buggy');
+      if (f.different) bits.push('(a different one)');
+      return `Reach ${who} ${kind}${bits.length ? ' ' + bits.join(', ') : ''}`;
+    }
+    case 'isobank': return `Reach the isobank${f.augmented ? ' with an augmented Colonist' : ''}${f.spaceborn ? ' with a spaceborn or Promoted Colonist' : ''}`;
     case 'return': return 'Return to LEO';
     default: return step.why || step.raw;
   }
@@ -376,7 +454,54 @@ export function stepSatisfied(step, where, progress, ctx, prev = null) {
       if (f.aero && kind !== 'aero') return { ok: false, why: 'destination_conditions' };
       if (f.hazard && kind !== 'skull') return { ok: false, why: 'destination_conditions' };
       if (f.beyond && !(zoneIdx(ctx.nodeZone(id)) > zoneIdx(f.beyond))) return { ok: false, why: 'destination_conditions' };
+      // Your Anchored non-Home Bernal (a BEO Bernal, 4A7d) stands here.
+      if (f.beo && !(ctx.ownBeoBernal && ctx.ownBeoBernal(id))) return { ok: false, why: 'destination_conditions' };
+      // Chipjack: your Colonist here with another player's augmented one.
+      if (f.target && !(ctx.targetHere && ctx.targetHere(id))) return { ok: false, why: 'destination_conditions' };
+      if (f.different && used.includes(id)) return { ok: false, why: 'destination_conditions' };
       return { ok: true, siteId: id };
+    }
+    case 'colony': {
+      const here = where.atLeo ? null : where.siteId;
+      if (!here) return { ok: false, why: 'not_at_a_colony' };
+      const f = step.filters || {};
+      if (f.different && used.includes(here)) return { ok: false, why: 'destination_conditions' };
+      const list = (ctx.coloniesAt ? ctx.coloniesAt(here) : []);
+      if (!list.length) return { ok: false, why: 'not_at_a_colony' };
+      const siteF = Object.fromEntries(['atmospheric', 'submarine', 'body'].filter((k) => f[k] != null).map((k) => [k, f[k]]));
+      const ok = list.some((c) => {
+        if (f.own && !c.own) return false;
+        if (f.beo && !c.beo) return false;
+        if (f.promoted && !c.promoted) return false;
+        const z = ctx.nodeZone(here);
+        if (f.zone && z !== f.zone) return false;
+        if (f.notzone && String(f.notzone).split('|').includes(z)) return false;
+        if (Object.keys(siteF).length && !c.sites.some((sl) => { const st = ctx.site(sl); return st && siteMatches(st, siteF, ctx, [], sl); })) return false;
+        if (f.road && !(ctx.roadToOtherColony && ctx.roadToOtherColony(c))) return false;
+        return true;
+      });
+      if (!ok) return { ok: false, why: 'destination_conditions' };
+      if (f.augmented && !(ctx.augmentedAt && ctx.augmentedAt(here, false))) return { ok: false, why: 'no_augmented_colonist' };
+      if (f.buggy && !(ctx.stackBuggy && ctx.stackBuggy())) return { ok: false, why: 'no_operational_buggy' };
+      return { ok: true, siteId: here };
+    }
+    case 'isobank': {
+      const here = where.atLeo ? null : where.siteId;
+      const ib = ctx.isobankSite ? ctx.isobankSite() : null;
+      if (!ib || here !== ib) return { ok: false, why: 'not_at_isobank' };
+      const f = step.filters || {};
+      if (f.augmented && !(ctx.augmentedAt && ctx.augmentedAt(here, false))) return { ok: false, why: 'no_augmented_colonist' };
+      if (f.spaceborn && !(ctx.spacebornOrPromotedAt && ctx.spacebornOrPromotedAt(here))) return { ok: false, why: 'no_spaceborn_colonist' };
+      return { ok: true, siteId: here };
+    }
+    // A Radiation Belt space entered this turn (or where the stack stands),
+    // one an earlier step has not already counted.
+    case 'belt': {
+      const f = step.filters || {};
+      const seen = [...(where.entered || []), ...(where.siteId && !where.atLeo ? [where.siteId] : [])];
+      const hit = seen.find((n) => ctx.nodeHazard && ctx.nodeHazard(n) === 'rad' && !used.includes(n)
+        && (!f.beyond || zoneIdx(ctx.nodeZone(n)) > zoneIdx(f.beyond)));
+      return hit ? { ok: true, siteId: hit } : { ok: false, why: 'no_radiation_belt' };
     }
     case 'enter':
       return (where.entered || []).includes(step.node) ? { ok: true } : { ok: false, why: 'not_entered_this_turn' };

@@ -776,9 +776,9 @@ function initNewGameModal() {
         : '<strong>Module 0: Politics</strong> - adds the Sol Political Assembly';
     }
     // One short note per scenario, so a host reading the picker knows what the
-    // mission IS before they start it. Module 4 (Exodus) is an admin preview
-    // (setAdminModuleRows reveals it) and runs in the plain sandbox only, so a
-    // scenario clears and locks it.
+    // mission IS before they start it. Module 4 (Exodus) is a tester preview
+    // (setAdminModuleRows reveals it); it runs in the sandbox and CEO Solitaire,
+    // so the other scenarios clear and lock it.
     {
       const m4cb = document.getElementById('solo-m4');
       // M4 plays with CEO Solitaire, Altruism and Hermes Fall (owner

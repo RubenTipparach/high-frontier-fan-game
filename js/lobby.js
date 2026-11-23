@@ -1484,7 +1484,7 @@ function renderLobbySettings(lobby, iAmHost, me) {
       <span><strong>Module 1: Terawatt</strong> - experimental (open playtest)</span></label>
     <label class="check-row"><input type="checkbox" id="set-m2"${lobby.m2 ? ' checked' : ''}/>
       <span><strong>Module 2: Colonization + Futures</strong> - experimental (open playtest)</span></label>
-    ${(lobby.m4 || _m4Allowed || (activeProfile() && activeProfile().isAdmin)) && !lobby.ceoSolo && !lobby.sirens && !lobby.hermes && !lobby.altruism && !lobby.tutorial ? `
+    ${(lobby.m4 || _m4Allowed || (activeProfile() && activeProfile().isAdmin)) && !lobby.sirens && !lobby.hermes && !lobby.altruism && !lobby.tutorial ? `
     <label class="check-row"><input type="checkbox" id="set-m4"${lobby.m4 ? ' checked' : ''}/>
       <span><strong>Module 4: Exodus</strong> - contracts (preview; turns on Module 0)</span></label>` : ''}
     ${lobby.hermes ? '' : `

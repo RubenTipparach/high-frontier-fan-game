@@ -2071,6 +2071,69 @@ button.m4c-aug:hover { border-color: #60a5fa; background: #232838; }
 .colonist-marks.robot { left: 34%; }
 .colonist-marks.beside-thrust { left: 58%; }
 
+/* M4 Bank tab (Contracts panel): Bank stats, isovaults, the isototal band. */
+.m4b-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; margin: 4px 0 10px; }
+.m4b-stat { background: rgba(255, 255, 255, .05); border: 1px solid rgba(255, 255, 255, .1); border-radius: 8px; padding: 6px 8px; display: flex; flex-direction: column; gap: 1px; }
+.m4b-stat span { font-size: 11px; color: #9aa4b8; }
+.m4b-stat b { font-size: 16px; }
+.m4b-stat small { font-size: 11px; color: #9aa4b8; }
+.m4b-vaults { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.m4b-vault { display: flex; gap: 6px; align-items: baseline; background: rgba(255, 210, 74, .08); border: 1px solid rgba(255, 210, 74, .3); border-radius: 6px; padding: 3px 8px; }
+.m4b-vault b { color: #ffd24a; }
+.m4b-band { margin: 8px 0; }
+.m4b-track { position: relative; height: 10px; border-radius: 5px; background: rgba(255, 255, 255, .08); overflow: visible; }
+.m4b-fill { height: 100%; border-radius: 5px; background: linear-gradient(90deg, #b88a1e, #ffd24a); }
+.m4b-track i { position: absolute; top: -3px; width: 2px; height: 16px; background: #e8ecf2; opacity: .7; }
+.m4b-band-label { font-size: 12px; margin-top: 6px; }
+
+/* M4 Isobank / Starship placard (Bank tab), after the printed placard. */
+.m4c-modal:has(.m4p) { width: min(1040px, 100%); }
+.m4p { display: grid; grid-template-columns: 210px minmax(280px, 1fr) 300px; grid-template-areas: "title vaults phases" "ex vaults phases" "ex table ship"; gap: 12px;
+  padding: 14px; border-radius: 12px; background: radial-gradient(ellipse at 30% 20%, #4a3a6a 0%, #1a1530 45%, #07080f 100%); color: #eef; }
+.m4p h5 { margin: 0 0 6px; font-size: 15px; letter-spacing: .5px; font-weight: 900; }
+.m4p-title { grid-area: title; font-size: 24px; font-weight: 900; letter-spacing: 1px; line-height: 1.05; }
+.m4p-title small { display: block; font-size: 12px; letter-spacing: 1px; margin-top: 4px; }
+.m4p-where { font-size: 12px; font-weight: 400; letter-spacing: 0; margin-top: 8px; color: #cfd3e8; }
+.m4p-ex { grid-area: ex; background: rgba(0, 0, 0, .78); color: #eef; border: 2px solid #6b5a96; border-radius: 14px; padding: 12px; text-align: center; }
+.m4p-ex h5 { font-size: 20px; line-height: 1.05; }
+.m4p-ex .card { margin: 0 auto; zoom: .82; }
+.m4p-ex-count { font-size: 12px; margin-bottom: 4px; }
+.m4p-locked { font-size: 34px; margin: 10px 0; }
+.m4p-small { font-size: 12px; text-align: left; }
+.m4p-vaults { grid-area: vaults; text-align: center; }
+.m4p-vaults h5 { font-size: 22px; }
+.m4p-hex { width: 100%; max-width: 360px; }
+.m4p-spec { justify-content: center; }
+.m4p-phases { grid-area: phases; background: rgba(0, 0, 0, .78); border-radius: 12px; padding: 10px 12px; }
+.m4p-phase { display: grid; grid-template-columns: 20px 1fr 1fr; gap: 8px; padding: 6px 0; border-top: 1px solid rgba(255, 255, 255, .12); font-size: 12px; opacity: .6; }
+.m4p-phase:first-of-type { border-top: 0; }
+.m4p-phase.on { opacity: 1; }
+.m4p-phase b { text-align: right; }
+.m4p-tick { display: inline-flex; width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid #ffd24a; align-items: center; justify-content: center; font-size: 11px; color: #1a1200; }
+.m4p-tick.on { background: #ffd24a; }
+.m4p-table { grid-area: table; background: rgba(0, 0, 0, .8); border-radius: 12px; padding: 10px 12px; }
+.m4p-fuel { width: 100%; border-collapse: collapse; font-size: 12px; }
+.m4p-fuel th, .m4p-fuel td { border: 1px solid #3a3f52; padding: 4px 5px; text-align: left; }
+.m4p-fuel th.me, .m4p-fuel td.me { background: rgba(255, 210, 74, .15); }
+.m4p-fuel tr.now td { background: rgba(255, 210, 74, .35); color: #fff; font-weight: 700; }
+.m4p-total { margin-top: 6px; font-size: 13px; }
+.m4p-ship { grid-area: ship; background: rgba(0, 0, 0, .78); color: #eef; border-radius: 14px; padding: 10px 12px; }
+.m4p-ship h5 { font-size: 20px; }
+.m4p-req { list-style: none; margin: 0; padding: 0; font-size: 12px; }
+.m4p-req li { display: flex; gap: 6px; align-items: center; padding: 2px 0; opacity: .7; }
+.m4p-req li.on { opacity: 1; font-weight: 700; }
+.m4p-req .m4p-tick { border-color: #ffd24a; }
+.m4p-aboard { margin-top: 6px; font-size: 12px; }
+@media (max-width: 860px) { .m4p { grid-template-columns: 1fr; grid-template-areas: "title" "vaults" "phases" "ex" "table" "ship"; } }
+.m4-iso-ledger { display: grid; gap: 4px; margin: 10px 0 4px; font-size: 13px; }
+.m4-iso-ledger div { display: grid; grid-template-columns: 1fr auto 52px; gap: 10px; align-items: baseline; }
+.m4-iso-ledger em { font-style: normal; text-align: right; font-weight: 700; }
+.m4-iso-ledger em.up { color: #6ee7a8; }
+.m4-iso-ledger em.down { color: #ff8a8a; }
+.m4-iso-trade .turn-confirm-panel { width: min(580px, calc(var(--vwpx, 1vw) * 94)); }
+.m4-iso-trade .dump-stepper { flex-wrap: nowrap; }
+.m4-iso-trade .fa-amount { width: 64px; }
+
 /* ---- Save a stack as an image (browse.js#saveStackImage) ----
    Built off-screen at a fixed width so the picture holds every card in the
    stack, then drawn into a PNG. */

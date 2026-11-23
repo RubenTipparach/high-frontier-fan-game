@@ -121,7 +121,8 @@ import { futureGoalForCard, checkFutureGoal, CENTAUR_SITE_IDS, GREEK_CAMP_IDS, T
 // M2 Colonist powers (FINAO halved etc.) - the same flags the engine reads.
 import { colonistPower } from '../../data/colonist-abilities.js';
 import { openBernalStackModal, openBernalFuelTank } from './bernal-modal.js';
-import { initContractsUi, closeContractsPanel, contractSpaceName, contractsBeforeEndTurn, setContractAuctionMinimized, refreshContractsUi, abandonBlock, contractFeeDue, payContractFee, abandonContract, timepieceBadge, renderContractAuctionStep, openCompletedContracts } from './contracts-ui.js';
+import { initContractsUi, closeContractsPanel, contractSpaceName, contractsBeforeEndTurn, setContractAuctionMinimized, refreshContractsUi, abandonBlock, contractFeeDue, payContractFee, abandonContract, timepieceBadge, renderContractAuctionStep, openCompletedContracts, openBankTab } from './contracts-ui.js';
+import { starshipHexSvg, starshipTokenSvg } from './starship-chit.js';
 import { getBernalSprite } from './bernal-sprite.js';
 import { fuelTankCylinderMarkup, fuelTransferSectionMarkup } from './fuel-tank-view.js';
 // One client card-lookup: patents PLUS the M2 Bernal cards (which live in
@@ -3000,6 +3001,17 @@ function buildTradeColumn(title, owner, context, opts = {}) {
   aquaRow.appendChild(aquaIn);
   col.appendChild(aquaRow);
 
+  // Isofuel in the isovaults (4D2f): traded anywhere once the isobank stands.
+  let isoIn = null;
+  if (_onlineSnapshot && _onlineSnapshot.m4 && _onlineSnapshot.isobank && (owner.isovault | 0) > 0) {
+    const row = document.createElement('label');
+    row.className = 'mp-trade-field';
+    row.innerHTML = `<span>🟡 Isovault (${owner.isovault | 0})</span>`;
+    isoIn = document.createElement('input');
+    isoIn.type = 'number'; isoIn.min = '0'; isoIn.value = '0'; isoIn.max = String(owner.isovault | 0);
+    row.appendChild(isoIn);
+    col.appendChild(row);
+  }
   // Fuel (tank water) - only when meeting at a colocated site (out at LEO,
   // fuel is just aqua, so it isn't a separate thing to trade there).
   let waterIn = null;
@@ -3127,6 +3139,7 @@ function buildTradeColumn(title, owner, context, opts = {}) {
       contractIds: contractChecks.filter((c) => c.checked).map((c) => c.value),
       abilities: [],
       lunaGrant: !!(lunaChk && lunaChk.checked),
+      isovault: isoIn ? intv(isoIn) : 0,
     };
     if (abSel && abSel.value) {
       const t = termIn && termIn.value !== '' ? Math.floor(Number(termIn.value)) : 0;
@@ -3262,7 +3275,7 @@ function openTradeBuilder(opts = {}) {
     send.addEventListener('click', async () => {
       const give = giveCol.read();
       const receive = recvCol.read();
-      const empty = (s) => !s.aqua && !s.water && !s.handCardIds.length && !s.cargoCardIds.length && !s.leoCardIds.length && !s.abilities.length && !s.lunaGrant && !(s.contractIds || []).length;
+      const empty = (s) => !s.aqua && !s.water && !s.handCardIds.length && !s.cargoCardIds.length && !s.leoCardIds.length && !s.abilities.length && !s.lunaGrant && !(s.contractIds || []).length && !s.isovault;
       const entTrade = opts.isCounter && _onlineSnapshot && _onlineSnapshot.trade && _onlineSnapshot.trade.enterprise;
       if (empty(give) && empty(receive) && !entTrade) { err.textContent = 'Put at least one item on the table.'; return; }
       send.disabled = true;
@@ -3298,6 +3311,7 @@ function tradeSideText(side) {
     parts.push(`${abilityLabel(g.ability)} (${g.turns == null ? 'permanent' : g.turns + ' turns'})`);
   }
   if (side.lunaGrant) parts.push('Luna prospecting access');
+  if (side.isovault) parts.push(`${side.isovault} isofuel`);
   return parts.length ? parts.join(' + ') : 'nothing';
 }
 
@@ -3322,6 +3336,7 @@ function tradeSideEl(side) {
     nodes.push(document.createTextNode(`${abilityLabel(g.ability)} (${g.turns == null ? 'permanent' : g.turns + ' turns'})`));
   }
   if (side.lunaGrant) nodes.push(document.createTextNode('🌙 Luna prospecting access'));
+  if (side.isovault) nodes.push(document.createTextNode(`🟡 ${side.isovault} isofuel`));
   if (!nodes.length) { el.appendChild(document.createTextNode('nothing')); return el; }
   nodes.forEach((n, i) => { if (i) el.appendChild(document.createTextNode(' + ')); el.appendChild(n); });
   return el;
@@ -6698,6 +6713,17 @@ function openExomigrateModal(me) {
     modal.appendChild(row);
   }
 
+  // Deep Freeze (Exodus contract): may discard the queue's top card first.
+  let freezeCb = null;
+  if (myContractAbility('exomigrateDiscard')) {
+    const row = document.createElement('label');
+    row.style.cssText = 'display:flex;gap:6px;align-items:center;margin:0 0 10px';
+    freezeCb = document.createElement('input');
+    freezeCb.type = 'checkbox'; freezeCb.className = 'exo-deep-freeze';
+    row.append(freezeCb, document.createTextNode('❄ Deep Freeze: discard the top card first'));
+    modal.appendChild(row);
+  }
+
   const btns = document.createElement('div');
   btns.className = 'mp-trade-btns';
   const go = document.createElement('button');
@@ -6713,10 +6739,17 @@ function openExomigrateModal(me) {
     if (delegateRow && !delegateRow._cb.checked) op.placeDelegate = false;
     if (specialtySel && specialtySel.value) op.specialty = specialtySel.value;
     if (queueSel) op.queue = queueSel.value;
+    if (freezeCb && freezeCb.checked) op.discardTop = true;
     const ok = await submitOnlineOp(op);
     if (ok) {
       const after = mySnapshotPlayer();
-      if (after) showExomigrateGains(after, beforeHand, beforeHeld);
+      // 4C2b: several Robots drawn from the spaceborn queue - keep one first.
+      if (after && after.robotPick && (after.robotPick.ids || []).length) {
+        openRobotKeepPicker(() => {
+          const now = mySnapshotPlayer();
+          if (now) showExomigrateGains(now, beforeHand, beforeHeld);
+        });
+      } else if (after) showExomigrateGains(after, beforeHand, beforeHeld);
       renderColonists();
     }
   });
@@ -6772,6 +6805,48 @@ function showExomigrateGains(after, beforeHand, beforeHeld) {
   modal.appendChild(btns);
   back.appendChild(modal);
   back.addEventListener('click', (e) => { if (e.target === back) close(); });
+  document.body.appendChild(back);
+}
+
+// Keep one Robot (4C2b): a spaceborn draw that turned up several Robots sets
+// them aside; the player keeps one in hand and the rest go back to the
+// spaceborn queue. `after` runs once the keep lands.
+function openRobotKeepPicker(after = null) {
+  const me = mySnapshotPlayer();
+  const ids = (me && me.robotPick && me.robotPick.ids) || [];
+  if (!ids.length || document.querySelector('.robot-keep-modal')) return;
+  const back = document.createElement('div');
+  back.className = 'mp-modal-back';
+  const modal = document.createElement('div');
+  modal.className = 'mp-trade-builder-modal robot-keep-modal';
+  modal.style.maxWidth = '780px';
+  const close = () => back.remove();
+  const h = document.createElement('div');
+  h.className = 'mp-trade-head';
+  h.innerHTML = `<h3>🤖 Keep one Robot</h3>`;
+  modal.appendChild(h);
+  let picked = null;
+  const commit = document.createElement('button');
+  modal.appendChild(cardPickGrid(ids.map((id) => ({ id, card: cardById(id), kind: 'colonist', face: 'primary' })).filter((e) => e.card),
+    () => picked, (id) => { picked = (picked === id) ? null : id; commit.disabled = !picked; }));
+  const btns = document.createElement('div');
+  btns.className = 'mp-trade-btns';
+  commit.type = 'button'; commit.className = 'modal-btn primary';
+  commit.textContent = 'Keep';
+  commit.disabled = true;
+  commit.addEventListener('click', async () => {
+    const v = picked; if (!v) return;
+    close();
+    const ok = await submitOnlineOp({ kind: 'KEEP_ROBOT', cardId: v });
+    renderColonists();
+    if (ok && after) after();
+  });
+  const later = document.createElement('button');
+  later.type = 'button'; later.className = 'modal-btn'; later.textContent = 'Later';
+  later.addEventListener('click', close);
+  btns.append(commit, later);
+  modal.appendChild(btns);
+  back.appendChild(modal);
   document.body.appendChild(back);
 }
 
@@ -7041,7 +7116,13 @@ function buildColonyMissions(wrap, me, futures) {
         if (attempt.disabled) return;
         const choice = await hazardConfirmModal([{ site: { name: gname }, glyph: '🌟', label: 'Epic Hazard' }]);
         if (choice === 'cancel' || choice == null) { setStatus('Epic Hazard attempt cancelled.'); return; }
-        const ok = await submitOnlineOp({ kind: 'EPIC_HAZARD', cardId: f.id, hazardPay: choice === 'pay' });
+        // INTERSTELLAR EXPLORATION: the research grant takes the top card of a deck you name.
+        let grantDeck;
+        if (((futureGoalForCard(f.id) || {}).effects || []).includes('researchGrant')) {
+          grantDeck = await pickGrantDeck();
+          if (grantDeck === null) { setStatus('Epic Hazard attempt cancelled.'); return; }
+        }
+        const ok = await submitOnlineOp({ kind: 'EPIC_HAZARD', cardId: f.id, hazardPay: choice === 'pay', ...(grantDeck ? { grantDeck } : {}) });
         if (ok) renderColonists();
       });
       box.appendChild(attempt);
@@ -7049,6 +7130,28 @@ function buildColonyMissions(wrap, me, futures) {
     }
   }
   return wrap;
+}
+
+// A patent deck with cards in it, for a research grant. Resolves the deck key
+// or null (cancelled).
+function pickGrantDeck() {
+  const decks = (_onlineSnapshot && _onlineSnapshot.decks) || {};
+  const keys = Object.keys(decks).filter((k) => (Array.isArray(decks[k]) ? decks[k].length : (decks[k] | 0)) > 0);
+  return new Promise((resolve) => {
+    const ov = document.createElement('div');
+    ov.className = 'card-modal-overlay confirm-modal-overlay';
+    ov.innerHTML = `<div class="turn-confirm-panel"><h3>🔬 Research grant</h3>
+      <div class="turn-confirm-actions" style="flex-wrap:wrap">${keys.map((k) => `<button type="button" class="popup-btn" data-deck="${k}">${k[0].toUpperCase()}${k.slice(1)}</button>`).join('')}
+      <button type="button" class="popup-btn" data-cancel>Cancel</button></div></div>`;
+    const done = (v) => { ov.remove(); resolve(v); };
+    ov.addEventListener('click', (e) => {
+      if (e.target === ov) return done(null);
+      const b = e.target.closest('button');
+      if (!b) return;
+      done(b.hasAttribute('data-cancel') ? null : b.dataset.deck);
+    });
+    mountOverlay(ov);
+  });
 }
 
 // Render the Colonists pane: the colony population + missions tracker (online),
@@ -7059,6 +7162,14 @@ function renderColonists() {
   if (!host) return;
   host.innerHTML = '';
   const me = mySnapshotPlayer();
+  if (me && me.robotPick && (me.robotPick.ids || []).length) {
+    const keep = document.createElement('button');
+    keep.type = 'button'; keep.className = 'popup-btn primary';
+    keep.textContent = `🤖 Keep one of ${me.robotPick.ids.length} Robots`;
+    keep.style.margin = '0 0 10px';
+    keep.addEventListener('click', () => openRobotKeepPicker());
+    host.appendChild(keep);
+  }
   if (me && isM2()) host.appendChild(buildColonySection(me));
   const intro = document.createElement('p');
   intro.className = 'muted';
@@ -10107,6 +10218,8 @@ async function submitOnlineOp(op) {
     logBugEvent(op, r);
     // Snap the UI back to the authoritative last-known state.
     if (_onlineSnapshot) applySnapshot(_onlineSnapshot);
+    // End Turn held by the Robot keep pick (4C2b): open the pick.
+    if (r && r.error === 'robot_pick_due') openRobotKeepPicker();
     return false;
   }
   applySnapshot(r.data.game.state, r.data.game.seq);
@@ -10210,6 +10323,9 @@ function humanizeOnlineOpError(code, detail) {
     parenthood_earthborn_only: 'Parenthood: an earthborn Human only.',
     child_pending: 'You already have a child on the Sunspot Cycle.',
     child_choice_due: 'Your child has come of age: choose who takes the parent\'s place.',
+    robot_pick_due: 'Keep one of the Robots you drew first.',
+    no_robot_pick: 'No Robots waiting to be kept.',
+    not_a_drawn_robot: 'Keep one of the Robots you drew.',
     not_in_earthborn_queue: 'Pick an earthborn Human from the Colonist queue.',
     parent_gone: 'The parent is no longer aboard.',
     no_child_due: 'The child has not come of age yet.',
@@ -13130,8 +13246,12 @@ async function runBernalAnchorFlow(bn, onDone) {
   const supportNames = supportCards.map((c) => c.name).join(', ');
   const isHome = (bn.cardId === 'ber_geo_elevator_bernal' && bn.siteId === 'burn-geo')
     || !!(bn.siteId && NODE_TAGS[String(bn.siteId)] && NODE_TAGS[String(bn.siteId)].homeBernal);
-  if (isGeoBuild) {
-    const choice = await hazardConfirmModal([{ site: { name: 'GEO' }, glyph: '🛗', label: 'Epic Hazard: raise the space elevator' }]);
+  // 4A7j: the Lofstrom Loop anchored in a Home Orbit is the same Epic Hazard.
+  const isLofstromHome = bn.cardId === 'ber_l3_lofstrom_loop_microgravity' && isHome;
+  if (isGeoBuild || isLofstromHome) {
+    const choice = await hazardConfirmModal([isGeoBuild
+      ? { site: { name: 'GEO' }, glyph: '🛗', label: 'Epic Hazard: raise the space elevator' }
+      : { site: { name: 'Home Orbit' }, glyph: '⚓', label: 'Epic Hazard: anchor the Lofstrom Loop' }]);
     if (choice === 'cancel' || choice == null) { setStatus('Anchor cancelled.'); return; }
     await submitOnlineOp({ kind: 'ANCHOR_BERNAL', cardId: bn.cardId, hazardPay: choice === 'pay' });
   } else {
@@ -16138,7 +16258,24 @@ function activeThrusterBonusPivots() {
   let n = stats ? (Number(stats.bonusPivots) || 0) : 0;
   const pushed = !!(stats && Array.isArray(stats.modifiers) && stats.modifiers.some((m) => m.from === 'Powersat'));
   if (pushed) n += myCollimatorBonusPivot();
+  // TW Stress Test (Exodus): "Your GW/TW thruster receives a Bonus Pivot."
+  if (stats && stats.isGw && myContractAbility('twBonusPivot')) n += 1;
   return n;
+}
+// Has a completed Future given me this standing effect? (LIC SCAN: 1 isotope of
+// a refuel goes to the Bank.)
+function myFutureEffect(key) {
+  const me = _online && _onlineSnapshot && (_onlineSnapshot.players || []).find((p) => p.profileId === mySeatId());
+  return !!(me && Array.isArray(me.futureEffects) && me.futureEffects.includes(key));
+}
+// Does one of my fulfilled contracts carry this ability (M4)?
+function myContractAbility(key) {
+  if (!_online || !_onlineSnapshot || !_onlineSnapshot.m4) return false;
+  const me = (_onlineSnapshot.players || []).find((p) => p.profileId === mySeatId());
+  return !!(me && (me.fulfilledContracts || []).some((f) => {
+    const face = contractFace(f.id, f.side);
+    return !!(face && face.abilities && face.abilities[key]);
+  }));
 }
 // C3b Synodic Comets: "Exceptionally, a Rocket with an activated TW thruster
 // can enter or exit a Synodic Comet during any season." True only when the
@@ -16193,7 +16330,10 @@ function myFreighterOriginThrustBonus() {
   return bonus;
 }
 function myFreighterThrust() {
-  return freighterNetThrust(playerHasPowersat(mySnapshotPlayer()) || !!playerPowersatBeamedBy(mySnapshotPlayer())) + myFreighterOriginThrustBonus();
+  const me = mySnapshotPlayer();
+  // WARDEN STARSHOT FUTURE (Shipbrain): Freighter / Mobile Factories +1 thrust.
+  const shipbrain = (me && Array.isArray(me.futureEffects) && me.futureEffects.includes('freighterThrustPlus1')) ? 1 : 0;
+  return freighterNetThrust(playerHasPowersat(me) || !!playerPowersatBeamedBy(me)) + myFreighterOriginThrustBonus() + shipbrain;
 }
 // Enter the manual route plotter. opts.unit selects the mover:
 //   'rocket'    (default) - budget = active thruster thrust, pivots = thruster
@@ -16203,7 +16343,7 @@ function myFreighterThrust() {
 //                 freighter card's Bonus Pivots (N), origin = the freighter's
 //                 site. The route commits as a MOVE with unit:'freighter'.
 function enterManualMoveMode(opts = {}) {
-  const unit = (opts.unit === 'freighter' || opts.unit === 'factory') ? opts.unit : 'rocket';
+  const unit = (opts.unit === 'freighter' || opts.unit === 'factory' || opts.unit === 'starship') ? opts.unit : 'rocket';
   _manualUnit = unit;
   _plannedRouteUnit = unit;   // this plot belongs to the chosen vehicle
   _plannedFactoryId = unit === 'factory' ? (opts.factoryId || null) : null;
@@ -16216,7 +16356,15 @@ function enterManualMoveMode(opts = {}) {
   _manualPivotsUsed = 0;
   _manualBonus = 0;
   _manualUndo = [];
-  if (unit === 'freighter' || unit === 'factory') {
+  if (unit === 'starship') {
+    // 4D3d: the starship's TW thruster gives net thrust 1, 2 on afterburn (1
+    // isotope), with 3 Bonus Pivots; it tracks no fuel.
+    _manualBudget = 2;
+    _manualBudgetMax = 2;
+    _manualPirouettes = 3;
+    const sh = _onlineSnapshot && _onlineSnapshot.starship;
+    _manualOriginId = sh ? (toPlannerId(_onlineMaps, sh.siteId) || sh.siteId) : null;
+  } else if (unit === 'freighter' || unit === 'factory') {
     // A Freighter counts as 1 thrust (2 with Powersat) burn spaces per turn and
     // uses the Freighter card's Bonus Pivots (1B6a); a Mobile Factory still
     // crawls one burn space per turn.
@@ -18217,6 +18365,7 @@ async function mountMapFor() {
     _renderer.onMpRocketClick = (profileId) => openPlayerRocketModalById(profileId);
     _renderer.onFreighterClick = (profileId) => openPlayerFreighterModalById(profileId);
     _renderer.onBernalClick = (profileId, index) => openPlayerBernalModalById(profileId, index);
+    _renderer.onStarshipClick = () => openBankTab();
     _renderer.onSiteNotes = (siteId, siteName) => openSiteNotesModal(siteId, siteName);
     // Belts my Tourism Cycler waives read as safe on my planned route.
     if (typeof _renderer.setBeltWaiverTest === 'function') {
@@ -20058,7 +20207,8 @@ function finaoPer() {
   const me = mySnapshotPlayer();
   let per = (me && playerHasPrivilege(me, 'OPEN_SOURCE_FINAO')) ? 3 : HAZARD_COST_PER;
   // Isotope monetization doubles FINAO for everyone (3B5a; M4 rooms).
-  if (_onlineSnapshot && _onlineSnapshot.m4 && _onlineSnapshot.isotopeMonetized) per *= 2;
+  // Isotope monetization doubles FINAO (3B5a); mirror of finaoDoubled.
+  if (_onlineSnapshot && _onlineSnapshot.isotopeMonetized && _onlineSnapshot.m4) per *= 2;
   if (_onlineSnapshot && _onlineSnapshot.internationalAssistance) per = Math.floor(per / 2);
   if (me && snapshotColonistSlots(me).some((e) => {
     const c = e.card;
@@ -26608,7 +26758,29 @@ function computeBernalLayout(snapshot) {
   }
   return { local, opponents };
 }
+// M4: the starship chit stands at the isobank once it is founded (4D2),
+// showing every isovault. Only in an M4 game.
+function syncStarshipChit(snapshot) {
+  if (!_renderer || typeof _renderer.setStarshipChit !== 'function') return;
+  // The flying starship (4D3): its token at its space until it leaves or is lost.
+  if (typeof _renderer.setStarshipToken === 'function') {
+    const sh = _online && snapshot && snapshot.m4 && snapshot.starship;
+    const fly = sh && !sh.exited && !sh.destroyed;
+    const at = fly ? mpRocketCoords(sh.siteId) : null;
+    const cmd = fly && (snapshot.players || []).find((p) => p.profileId === sh.commanderId);
+    _renderer.setStarshipToken(at ? { x: at.x, y: at.y, svg: starshipTokenSvg((cmd && cmd.color) || '#c9a227') } : null);
+  }
+  const ib = _online && snapshot && snapshot.m4 && snapshot.isobank;
+  const pos = ib ? mpRocketCoords(ib.siteId) : null;
+  if (!pos) { _renderer.setStarshipChit(null); return; }
+  const players = (snapshot.players || []).map((p) => ({ color: p.color, isovault: p.isovault }));
+  // The rim is the isobanker's seat colour.
+  const banker = (snapshot.players || []).find((p) => p.profileId === ib.ownerId);
+  const rim = (banker && banker.color) || '#c9a227';
+  _renderer.setStarshipChit({ x: pos.x, y: pos.y, rim, svg: starshipHexSvg(players, snapshot.earthMarket, rim) });
+}
 function syncBernalUnits(snapshot) {
+  syncStarshipChit(snapshot);
   if (!_renderer || typeof _renderer.setBernalUnits !== 'function') return;
   if (!_online || !snapshot || !Array.isArray(snapshot.players) || !_onlineMe) {
     _renderer.setBernalUnits(null);
@@ -27708,6 +27880,30 @@ async function runPlannedMoveSimulation() {
 // size-1 / aerobrake-landable site (size > 1 needs a factory assist), generic +
 // FINAO hazards as normal, and a non-payable rad roll that glitches (then
 // destroys) the unit. The server resolves every die authoritatively.
+// 4D3d: fly the desperation starship (the commander's). One burn, two on
+// afterburn (1 isotope off your isovault); hazards cost double FINAO to skip.
+async function commitStarshipMoveOnline() {
+  const built = buildTurn1MoveOp();
+  if (built.error) { _onlineToast(built.error, 'error'); return false; }
+  const burns = built.segments.reduce((n, sg) => n + (Number(sg.burns) || 0), 0);
+  if (burns > 2) { _onlineToast('The starship has net thrust 1, or 2 on afterburn.', 'error'); return false; }
+  const afterburn = burns === 2;
+  // Crash / aerobrake hazards roll (or pay FINAO); belts roll on their own.
+  const hazards = routeHazards(built.turn1Segs).filter((h) => h.glyph !== '☢');
+  let payFinao = false;
+  if (hazards.length) {
+    const choice = await hazardConfirmModal(hazards);
+    if (choice === 'cancel' || choice == null) return false;
+    payFinao = choice === 'pay';
+  }
+  if (afterburn) {
+    const ok = await confirmModal({ title: '🔥 Afterburn', body: 'Burn 1 isotope from your isovault for a second burn this turn?', yes: 'Afterburn', no: 'Cancel' });
+    if (!ok) return false;
+  }
+  const done = await submitOnlineOp({ kind: 'STARSHIP_MOVE', segments: built.segments, afterburn, payFinao });
+  if (done) { clearRoute(); _plannedRouteUnit = 'rocket'; }
+  return !!done;
+}
 async function commitFreighterMoveOnline() {
   const built = buildTurn1MoveOp();
   if (built.error) { _onlineToast(built.error, 'error'); return false; }
@@ -28296,6 +28492,7 @@ async function moveRocket() {
     // hazards). The server (applyMoveFreighter) is authoritative. Dispatch on
     // the route's OWNER so a popup-planned freighter route (never in manual
     // mode) still commits down the freighter path.
+    if (_plannedRouteUnit === 'starship') return await commitStarshipMoveOnline();
     if (_plannedRouteUnit === 'freighter') return await commitFreighterMoveOnline();
     if (ownerIsBernal) return await commitBernalMoveOnline(Number(_plannedRouteUnit.slice('bernal'.length)) || 0);
     // Execute ONLY this turn's segments - a multi-turn Hohmann transfer's
@@ -30611,7 +30808,7 @@ function showSitePopupFor(site) {
             if (!ok) return;
             const sid = toServerId(_onlineMaps, site.id);
             if (!sid) { _onlineToast('That site is not on the map.', 'error'); return; }
-            submitOnlineOp({ kind: 'SITE_REFUEL', siteId: sid, mode: 'isotope' });
+            submitOnlineOp({ kind: 'SITE_REFUEL', siteId: sid, mode: 'isotope', ...(myFutureEffect('isotopeToBank') ? { licToBank: true } : {}) });
             _renderer.clearSitePopup();
           },
         });
@@ -30642,7 +30839,7 @@ function showSitePopupFor(site) {
         onClick: () => {
           if (!ok) return;
           if (!serverSiteId) { _onlineToast('That site is not on the map.', 'error'); return; }
-          submitOnlineOp({ kind: 'SITE_REFUEL', siteId: serverSiteId, mode: 'isotope', outpost: letter });
+          submitOnlineOp({ kind: 'SITE_REFUEL', siteId: serverSiteId, mode: 'isotope', outpost: letter, ...(myFutureEffect('isotopeToBank') ? { licToBank: true } : {}) });
           _renderer.clearSitePopup();
         },
       });
@@ -35414,7 +35611,7 @@ const MP_LOG_ICONS = {
   // M4 contracts (4B): the auction is in years, the timepiece is a clock.
   AUCTION_CONTRACT_START: '📜', AUCTION_CONTRACT_BID: '⏳', AUCTION_CONTRACT_PASS: '🚫', AUCTION_CONTRACT_CLOSE: '⏱',
   // M4 isotope monetization (4D1d): gold beads at the Bank, sold / bought at Earth.
-  ISOTOPE_EXCHANGE: '🟡', CHILD_COMES_OF_AGE: '👶',
+  ISOTOPE_EXCHANGE: '🟡', CHILD_COMES_OF_AGE: '👶', KEEP_ROBOT: '🤖',
   FULFILL_CONTRACT: '🏁', PAY_LATE_FEE: '⏰', IMPLANT: '🦾', ABANDON_CONTRACT: '🗑', INSIGHT: '🔎',
   AUCTION_RESET: '↺', AUCTION_SELL: '✅',
   PICK_CREW: '🧑‍🚀', SET_SPECIES: '\u{1F9DC}', SET_FIRST_PLAYER: '🥇', FREE_CUBE: '🧊',
@@ -36351,6 +36548,8 @@ initContractsUi({
   myTurn: () => isOnlineMyTurn(),
   submitTurnOp: (op) => submitOnlineOp(op),
   submitAuctionOp: (op) => submitMpAuctionOp(op),
+  // Plot the desperation starship's flight on the map planner.
+  planStarship: () => enterManualMoveMode({ unit: 'starship' }),
   // A rules dry run of an op (nothing changes): { ok, log } or { ok:false, error }.
   dryRun: async (op) => {
     if (!_online || !_onlineGameId || !_onlineMe) return null;
