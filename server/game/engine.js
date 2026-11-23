@@ -1824,15 +1824,14 @@ function colonistSizeRollModAt(state, player, siteId) {
 // season-blue event), halved again (fractions dropped) by a Frankenstein
 // Navigator / Josephson Implants colonist in play. Mirror the client's
 // finaoPer (browse.js) if the order ever changes.
+// M4 rooms only (owner answer to R8, 2026-11-19): an M1 / M2 game never doubles.
 export function finaoDoubled(state) {
-  return !!(state && state.isotopeMonetized && (state.m4 || state.finaoDoubled));
+  return !!(state && state.isotopeMonetized && state.m4);
 }
 export function finaoPerFor(state, player) {
   let per = hasPrivilege(state, player, 'OPEN_SOURCE_FINAO') ? 3 : HAZARD_COST_PER;
   // 3B5a / 4D1a: once isotope is monetized, FINAO costs are permanently doubled
-  // for everyone, Open Source included (owner 2026-11-23: every game). An M1
-  // game that monetized before this change carries no finaoDoubled flag, so it
-  // never doubles mid-game.
+  // for everyone, Open Source included. M4 rooms only (R8).
   if (finaoDoubled(state)) per *= 2;
   if (state.internationalAssistance) per = Math.floor(per / 2);
   if (playerHasColonistPower(state, player, 'finaoHalved')) per = Math.floor(per / 2);
@@ -7543,9 +7542,8 @@ function applyCashWater(state, op, player) {
 function monetizeIsotope(state) {
   if (state.isotopeMonetized) return '';
   state.isotopeMonetized = true;
-  state.finaoDoubled = true;
-  let note = ' Isotope is now monetized. FINAO costs double.';
-  if (state.m4) note += contractUpheaval(state);
+  let note = ' Isotope is now monetized.';
+  if (state.m4) note += ' FINAO costs double.' + contractUpheaval(state);
   return note;
 }
 function contractUpheaval(state) {

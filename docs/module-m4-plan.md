@@ -298,8 +298,8 @@ BUILT 2026-11-22 (Stage 3, isotope monetization + the isobank):
   in the Bank tab's Starship Stack box; Fly plots with the route planner
   (budget 2, 3 Bonus Pivots); a starship token on the map.
 - **Spaceborn colonist Futures (16), 2026-11-23** in `data/future-goals.js`.
-- **FINAO doubles on monetization in every game** (owner 2026-11-23,
-  `finaoDoubled`), and the Lofstrom Loop Home anchor rolls the Epic Hazard (4A7j).
+- **FINAO doubles on monetization in M4 rooms only** (R8, `finaoDoubled`), and
+  the Lofstrom Loop Home anchor rolls the Epic Hazard (4A7j).
 - **Colony contracts** play on colony domes without M2, on anchored Bernals with
   M2 (owner 2026-11-23): `colony` / `isobank` step verbs.
 

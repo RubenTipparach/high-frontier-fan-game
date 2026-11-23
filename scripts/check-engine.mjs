@@ -4570,7 +4570,7 @@ check('a crew in an outpost founds the colony with the rocket elsewhere', () => 
 // 4A7j + 3B5a: anchoring the Lofstrom Loop in a Home Orbit is an Epic Hazard,
 // and anchoring it as a Home Bernal monetizes isotope (FINAO doubles) in any
 // M1+M2 game, not only M4.
-check('Lofstrom Loop as a Home Bernal: Epic Hazard roll, monetizes isotope, FINAO doubles (M1+M2, no M4)', () => {
+check('Lofstrom Loop as a Home Bernal: Epic Hazard roll, monetizes isotope (M1+M2, no M4); FINAO stays single', () => {
   const BN = 'ber_l3_lofstrom_loop_microgravity';
   const GEN = 'gen_photon_tether_rectenna';
   const build = (cursor) => {
@@ -4590,10 +4590,10 @@ check('Lofstrom Loop as a Home Bernal: Epic Hazard roll, monetizes isotope, FINA
   }
   assert(failed && passed, `rolls: ${first && (first.error || first.log)}`);
   assert(!failed.state.players[0].bernals[0].anchored && !failed.state.isotopeMonetized, 'a failed roll anchors and monetizes nothing');
-  assert(passed.rolled && passed.state.players[0].bernals[0].anchored && passed.state.isotopeMonetized && passed.state.finaoDoubled, `success: ${passed.log}`);
+  assert(passed.rolled && passed.state.players[0].bernals[0].anchored && passed.state.isotopeMonetized, `success: ${passed.log}`);
   const before = JSON.parse(JSON.stringify(passed.state)); before.isotopeMonetized = false;
   const a = finaoPerFor(before, before.players[0]), b = finaoPerFor(passed.state, passed.state.players[0]);
-  assert(b === 2 * a, `FINAO ${a} -> ${b}`);
+  assert(b === a, `FINAO ${a} -> ${b} (M4 rooms only)`);
   assert(!passed.state.contractSide, 'no contract upheaval without M4');
   return passed.log;
 });
@@ -12411,13 +12411,10 @@ check('M4: the first gold bead refined monetizes isotope and flips the contract 
   const plain = setup(false);
   const r2 = applyOperation(plain.st, { kind: 'SITE_REFUEL', siteId: SITE, mode: 'isotope' }, { profileId: plain.me.profileId });
   assert(r2.ok && r2.state.isotopeMonetized && !r2.state.contractSide && !/Upheaval/.test(r2.log), `without M4: ${r2.error} ${r2.log}`);
-  // FINAO doubles in every game once monetized (owner 2026-11-23), but an M1
-  // game that monetized before the flag existed does not double mid-game.
+  // FINAO doubles in M4 rooms only (R8): an M1 + M2 game keeps single FINAO.
   const per0 = finaoPerFor(plain.st, plain.me), per1 = finaoPerFor(r2.state, pl(r2.state, plain.me.profileId));
-  assert(per1 === per0 * 2 && /FINAO costs double/.test(r2.log), `M1 FINAO ${per0} -> ${per1}`);
-  const legacy = JSON.parse(JSON.stringify(r2.state)); delete legacy.finaoDoubled;
-  assert(finaoPerFor(legacy, pl(legacy, plain.me.profileId)) === per0, 'a game monetized before the change keeps single FINAO');
-  return `monetized + decks flipped to gold (${Object.values(r.state.contractDecks).map((d) => d.length).join('/')} cards)${open.ok ? '; the next auction deals gold' : ''}; M1+M2 alone: no decks, FINAO doubles`;
+  assert(per1 === per0 && !/FINAO/.test(r2.log), `M1 FINAO ${per0} -> ${per1}`);
+  return `monetized + decks flipped to gold (${Object.values(r.state.contractDecks).map((d) => d.length).join('/')} cards)${open.ok ? '; the next auction deals gold' : ''}; M1+M2 alone untouched`;
 });
 
 check('M4 + M2 Spacer Union (4C2): spaceborn needs a BEO Colony, joining discards earthborns, members cannot draw earthborn', () => {

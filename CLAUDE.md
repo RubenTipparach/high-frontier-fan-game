@@ -258,8 +258,7 @@ per room and carried into the game state as a boolean (`state.m0`,
   M2 (its Colonist is a Crew) and ONLY on anchored Bernals with M2 unless the
   card says colony dome (a BEO Colony = an anchored non-Home Bernal); the step
   verbs are `colony` / `isobank` (owner 2026-11-23). FINAO doubles on isotope
-  monetization in every game (`finaoDoubled`, set at monetization so a game
-  monetized before 2026-11-23 is not doubled mid-game). Lagrange ring
+  monetization in M4 rooms only (`finaoDoubled`; owner answer to R8). Lagrange ring
   numbers (L1-L5) read off the board live in `data/lagrange-labels.js`.
   Without M2 the Augment operation (IMPLANT, `applyImplantOnCrew`) puts a chit
   on a Crew card standing at a BEO Colony (owner 2026-11-18, replacing the

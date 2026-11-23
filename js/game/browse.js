@@ -19923,7 +19923,7 @@ function finaoPer() {
   let per = (me && playerHasPrivilege(me, 'OPEN_SOURCE_FINAO')) ? 3 : HAZARD_COST_PER;
   // Isotope monetization doubles FINAO for everyone (3B5a; M4 rooms).
   // Isotope monetization doubles FINAO (3B5a); mirror of finaoDoubled.
-  if (_onlineSnapshot && _onlineSnapshot.isotopeMonetized && (_onlineSnapshot.m4 || _onlineSnapshot.finaoDoubled)) per *= 2;
+  if (_onlineSnapshot && _onlineSnapshot.isotopeMonetized && _onlineSnapshot.m4) per *= 2;
   if (_onlineSnapshot && _onlineSnapshot.internationalAssistance) per = Math.floor(per / 2);
   if (me && snapshotColonistSlots(me).some((e) => {
     const c = e.card;
