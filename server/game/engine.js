@@ -1591,7 +1591,9 @@ function spacerUnionGame(state) {
 export function inSpacerUnion(state, player) {
   if (!spacerUnionGame(state) || state.spacerUnionDissolved || !player) return false;
   for (const e of colonistLocations(player)) if (isSpacebornColonist(e.slot.id)) return true;
-  return (player.hand || []).some((id) => isSpacebornColonist(id) && (COLONISTS_BY_ID[id] || {}).colonistKind === 'Robot');
+  // A Robot set aside for the keep pick (4C2b) is on its way to the hand.
+  const held = [...(player.hand || []), ...((player.robotPick && player.robotPick.ids) || [])];
+  return held.some((id) => isSpacebornColonist(id) && (COLONISTS_BY_ID[id] || {}).colonistKind === 'Robot');
 }
 // Joining (4C2c): discard every earthborn Colonist the player has in play (not a
 // Felony). They go under the earthborn queue.
@@ -9504,23 +9506,21 @@ function exomigrateDrawTop(state, player, opts = {}) {
     cardId = id; card = c;
     break;
   }
-  // M4 + M2 (4C2b): several Robots drawn in one spaceborn exomigration: keep
-  // one, the rest go back and the spaceborn queue is shuffled.
-  let robotsBack = [];
+  // M4 + M2 (4C2b): several Robots drawn in one spaceborn exomigration: the
+  // player keeps ONE of their choice (KEEP_ROBOT), the rest go back and the
+  // spaceborn queue is shuffled. Until then they wait set aside, and End Turn
+  // waits on the pick.
+  let robotsAside = false;
   if (state.m4 && Array.isArray(state.spacebornQueue) && queue === state.spacebornQueue && robotsDrawn.length > 1) {
-    const kept = player.hand.splice(player.hand.length - robotIds.length, robotIds.length);
-    player.hand.push(kept[0]);
-    robotsBack = kept.slice(1);
-    queue.push(...robotsBack);
-    const gen = makeRng(state.seed, state.rng.cursor);
-    const mixed = shuffle(gen, queue.slice());
-    state.rng.cursor = gen.cursor;
-    queue.splice(0, queue.length, ...mixed);
-    robotsDrawn.splice(1);
+    const aside = player.hand.splice(player.hand.length - robotIds.length, robotIds.length);
+    player.robotPick = { ids: aside };
+    robotsAside = true;
   }
-  const robotNote = immigrantNote + (robotsDrawn.length
-    ? `${robotsDrawn.join(' and ')} (Robot${robotsDrawn.length === 1 ? '' : 's'}) to the hand${robotsBack.length ? ` (${robotsBack.length} other Robot${robotsBack.length === 1 ? '' : 's'} back to the spaceborn queue)` : ''}; `
-    : '');
+  const robotNote = immigrantNote + (robotsAside
+    ? `drew ${robotsDrawn.length} Robots (${robotsDrawn.join(', ')}): one to keep, the rest back to the spaceborn queue; `
+    : robotsDrawn.length
+      ? `${robotsDrawn.join(' and ')} (Robot${robotsDrawn.length === 1 ? '' : 's'}) to the hand; `
+      : '');
   if (!cardId) {
     // The queue drained mid-draw (Handy skimmed the rest to hand). This is the
     // empty-queue exomigration, so Robot Emancipation fires: one freed Robot
@@ -14462,6 +14462,7 @@ const FUNCTIONAL = {
   STARSHIP_BOARD: applyStarshipBoard,
   STARSHIP_MOVE: applyStarshipMove,
   CHILD_COMES_OF_AGE: applyChildComesOfAge,
+  KEEP_ROBOT: applyKeepRobot,
   DUMP: applyDump,
   CAN_FUEL: applyCanFuel,
   LOAD_FUEL: applyLoadFuel,
@@ -14551,6 +14552,7 @@ function pickPayload(op) {
       ...(op.cardId != null ? { cardId: op.cardId, holder: op.holder } : {}) };
     case 'DUMP': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
     case 'CHILD_COMES_OF_AGE': return { colonistId: op.colonistId };
+    case 'KEEP_ROBOT': return { cardId: op.cardId };
     case 'ISOTOPE_EXCHANGE': return { action: op.action, amount: op.amount, ...(op.spectral ? { spectral: op.spectral } : {}), ...(op.cardId != null ? { cardId: op.cardId, holder: op.holder } : {}) };
     case 'CAN_FUEL': return { amount: op.amount, ...(op.unit ? { unit: op.unit } : {}) };
     // TRANSFER_FUEL_CARD and LOAD_FREIGHTER_WATER were MISSING here, so they
@@ -15105,6 +15107,8 @@ function applyEndTurn(state, _op, player) {
   if (player.insightPending) return fail('insight_auction_due');
   // Parenthood: a grown child is chosen before the turn ends.
   if (childChoiceDue(state, player)) return fail('child_choice_due');
+  // 4C2b: the Robots set aside by a spaceborn draw wait on the keep pick.
+  if (player.robotPick && (player.robotPick.ids || []).length) return fail('robot_pick_due');
   if (mustExomigrate(state, player)) return fail('must_exomigrate');
   // 4D2a: the isobank is founded on your Turn once you qualify.
   const isobankNote = maybeFoundIsobank(state, player) + starshipTurnEnd(state, player);
@@ -17750,6 +17754,28 @@ function childChoiceDue(state, player) {
   if (!c || !c.grown) return false;
   if (![...playerStacks(player)].some((st) => st.slots.some((sl) => isColonistSlot(sl) && sl.id === c.parentId))) return false;
   return (state.colonistQueue || []).some((id) => { const k = COLONISTS_BY_ID[id]; return k && k.colonistKind === 'Human' && !k.spaceborn; });
+}
+// KEEP_ROBOT op = { cardId } (4C2b): of the Robots set aside by one spaceborn
+// draw, this one goes to the hand; the others return to the spaceborn queue,
+// which is shuffled.
+function applyKeepRobot(state, op, player) {
+  if (!state.m4) return fail('not_m4');
+  const pick = player.robotPick;
+  if (!pick || !Array.isArray(pick.ids) || !pick.ids.length) return fail('no_robot_pick');
+  const keep = String(op.cardId || '');
+  if (!pick.ids.includes(keep)) return fail('not_a_drawn_robot');
+  const back = pick.ids.filter((id) => id !== keep);
+  (player.hand = player.hand || []).push(keep);
+  const queue = state.spacebornQueue = state.spacebornQueue || [];
+  queue.push(...back);
+  const gen = makeRng(state.seed, state.rng.cursor);
+  const mixed = shuffle(gen, queue.slice());
+  state.rng.cursor = gen.cursor;
+  queue.splice(0, queue.length, ...mixed);
+  delete player.robotPick;
+  const nm = (id) => (PATENTS_BY_ID[id] || {}).name || id;
+  return { ok: true, state, noUndo: true,
+    log: `${player.name} keeps ${nm(keep)} (Robot) in hand; ${back.map(nm).join(', ')} back to the spaceborn queue, shuffled.` };
 }
 // CHILD_COMES_OF_AGE op = { colonistId }: the earthborn chosen as the child.
 function applyChildComesOfAge(state, op, player) {

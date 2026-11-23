@@ -6693,7 +6693,13 @@ function openExomigrateModal(me) {
     const ok = await submitOnlineOp(op);
     if (ok) {
       const after = mySnapshotPlayer();
-      if (after) showExomigrateGains(after, beforeHand, beforeHeld);
+      // 4C2b: several Robots drawn from the spaceborn queue - keep one first.
+      if (after && after.robotPick && (after.robotPick.ids || []).length) {
+        openRobotKeepPicker(() => {
+          const now = mySnapshotPlayer();
+          if (now) showExomigrateGains(now, beforeHand, beforeHeld);
+        });
+      } else if (after) showExomigrateGains(after, beforeHand, beforeHeld);
       renderColonists();
     }
   });
@@ -6749,6 +6755,48 @@ function showExomigrateGains(after, beforeHand, beforeHeld) {
   modal.appendChild(btns);
   back.appendChild(modal);
   back.addEventListener('click', (e) => { if (e.target === back) close(); });
+  document.body.appendChild(back);
+}
+
+// Keep one Robot (4C2b): a spaceborn draw that turned up several Robots sets
+// them aside; the player keeps one in hand and the rest go back to the
+// spaceborn queue. `after` runs once the keep lands.
+function openRobotKeepPicker(after = null) {
+  const me = mySnapshotPlayer();
+  const ids = (me && me.robotPick && me.robotPick.ids) || [];
+  if (!ids.length || document.querySelector('.robot-keep-modal')) return;
+  const back = document.createElement('div');
+  back.className = 'mp-modal-back';
+  const modal = document.createElement('div');
+  modal.className = 'mp-trade-builder-modal robot-keep-modal';
+  modal.style.maxWidth = '780px';
+  const close = () => back.remove();
+  const h = document.createElement('div');
+  h.className = 'mp-trade-head';
+  h.innerHTML = `<h3>🤖 Keep one Robot</h3>`;
+  modal.appendChild(h);
+  let picked = null;
+  const commit = document.createElement('button');
+  modal.appendChild(cardPickGrid(ids.map((id) => ({ id, card: cardById(id), kind: 'colonist', face: 'primary' })).filter((e) => e.card),
+    () => picked, (id) => { picked = (picked === id) ? null : id; commit.disabled = !picked; }));
+  const btns = document.createElement('div');
+  btns.className = 'mp-trade-btns';
+  commit.type = 'button'; commit.className = 'modal-btn primary';
+  commit.textContent = 'Keep';
+  commit.disabled = true;
+  commit.addEventListener('click', async () => {
+    const v = picked; if (!v) return;
+    close();
+    const ok = await submitOnlineOp({ kind: 'KEEP_ROBOT', cardId: v });
+    renderColonists();
+    if (ok && after) after();
+  });
+  const later = document.createElement('button');
+  later.type = 'button'; later.className = 'modal-btn'; later.textContent = 'Later';
+  later.addEventListener('click', close);
+  btns.append(commit, later);
+  modal.appendChild(btns);
+  back.appendChild(modal);
   document.body.appendChild(back);
 }
 
@@ -7064,6 +7112,14 @@ function renderColonists() {
   if (!host) return;
   host.innerHTML = '';
   const me = mySnapshotPlayer();
+  if (me && me.robotPick && (me.robotPick.ids || []).length) {
+    const keep = document.createElement('button');
+    keep.type = 'button'; keep.className = 'popup-btn primary';
+    keep.textContent = `🤖 Keep one of ${me.robotPick.ids.length} Robots`;
+    keep.style.margin = '0 0 10px';
+    keep.addEventListener('click', () => openRobotKeepPicker());
+    host.appendChild(keep);
+  }
   if (me && isM2()) host.appendChild(buildColonySection(me));
   const intro = document.createElement('p');
   intro.className = 'muted';
@@ -9985,6 +10041,8 @@ async function submitOnlineOp(op) {
     logBugEvent(op, r);
     // Snap the UI back to the authoritative last-known state.
     if (_onlineSnapshot) applySnapshot(_onlineSnapshot);
+    // End Turn held by the Robot keep pick (4C2b): open the pick.
+    if (r && r.error === 'robot_pick_due') openRobotKeepPicker();
     return false;
   }
   applySnapshot(r.data.game.state, r.data.game.seq);
@@ -10088,6 +10146,9 @@ function humanizeOnlineOpError(code, detail) {
     parenthood_earthborn_only: 'Parenthood: an earthborn Human only.',
     child_pending: 'You already have a child on the Sunspot Cycle.',
     child_choice_due: 'Your child has come of age: choose who takes the parent\'s place.',
+    robot_pick_due: 'Keep one of the Robots you drew first.',
+    no_robot_pick: 'No Robots waiting to be kept.',
+    not_a_drawn_robot: 'Keep one of the Robots you drew.',
     not_in_earthborn_queue: 'Pick an earthborn Human from the Colonist queue.',
     parent_gone: 'The parent is no longer aboard.',
     no_child_due: 'The child has not come of age yet.',
@@ -35365,7 +35426,7 @@ const MP_LOG_ICONS = {
   // M4 contracts (4B): the auction is in years, the timepiece is a clock.
   AUCTION_CONTRACT_START: '📜', AUCTION_CONTRACT_BID: '⏳', AUCTION_CONTRACT_PASS: '🚫', AUCTION_CONTRACT_CLOSE: '⏱',
   // M4 isotope monetization (4D1d): gold beads at the Bank, sold / bought at Earth.
-  ISOTOPE_EXCHANGE: '🟡', CHILD_COMES_OF_AGE: '👶',
+  ISOTOPE_EXCHANGE: '🟡', CHILD_COMES_OF_AGE: '👶', KEEP_ROBOT: '🤖',
   FULFILL_CONTRACT: '🏁', PAY_LATE_FEE: '⏰', IMPLANT: '🦾', ABANDON_CONTRACT: '🗑', INSIGHT: '🔎',
   AUCTION_RESET: '↺', AUCTION_SELL: '✅',
   PICK_CREW: '🧑‍🚀', SET_SPECIES: '\u{1F9DC}', SET_FIRST_PLAYER: '🥇', FREE_CUBE: '🧊',

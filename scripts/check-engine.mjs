@@ -12443,7 +12443,7 @@ check('M4 + M2 Spacer Union (4C2): spaceborn needs a BEO Colony, joining discard
   return `refused without BEO; ${COLONISTS_BY_ID[human].name} joined, Biomechs discarded; earthborn refused to a member; M2 alone untouched`;
 });
 
-check('M4 + M2 Robots (4C2b): several Robots drawn in one spaceborn exomigration, keep one, the rest go back', () => {
+check('M4 + M2 Robots (4C2b): several Robots drawn in one spaceborn exomigration, the player picks one, the rest go back', () => {
   const { st, P } = augGame({ colonists: [] });
   const isRobot = (id) => (COLONISTS_BY_ID[id] || {}).colonistKind === 'Robot';
   const robots = st.spacebornQueue.filter(isRobot).slice(0, 3);
@@ -12453,12 +12453,33 @@ check('M4 + M2 Robots (4C2b): several Robots drawn in one spaceborn exomigration
   P.beoAtTurnStart = true; P.hand = [];
   const r = op(st, 'EXOMIGRATE', P.profileId, { queue: 'spaceborn', placeDelegate: false });
   assert(r.ok, `spaceborn draw: ${r.error}`);
-  const Q = pl(r.state, P.profileId);
-  const handRobots = Q.hand.filter(isRobot);
-  assert(handRobots.length === 1 && handRobots[0] === robots[0], `kept robots: ${handRobots}`);
-  assert(robots.slice(1).every((id) => r.state.spacebornQueue.includes(id)), 'the other Robots went back to the spaceborn queue');
+  let Q = pl(r.state, P.profileId);
+  assert(Q.hand.filter(isRobot).length === 0, 'no Robot in hand before the pick');
+  assert(Q.robotPick && Q.robotPick.ids.length === 3 && robots.every((id) => Q.robotPick.ids.includes(id)), `set aside: ${JSON.stringify(Q.robotPick)}`);
   assert(Q.bernals.some((bn) => (bn.stack || []).some((x) => x.id === human)), 'the Human boarded');
-  return r.log;
+  const end = op(r.state, 'END_TURN', P.profileId);
+  assert(!end.ok && end.error === 'robot_pick_due', `End Turn waits: ${end.error}`);
+  const bad = op(r.state, 'KEEP_ROBOT', P.profileId, { cardId: human });
+  assert(!bad.ok, 'kept a card that was not drawn');
+  const k = op(r.state, 'KEEP_ROBOT', P.profileId, { cardId: robots[2] });
+  assert(k.ok, `keep: ${k.error}`);
+  Q = pl(k.state, P.profileId);
+  const handRobots = Q.hand.filter(isRobot);
+  assert(handRobots.length === 1 && handRobots[0] === robots[2], `kept robots: ${handRobots}`);
+  assert(!Q.robotPick, 'pick cleared');
+  assert(robots.slice(0, 2).every((id) => k.state.spacebornQueue.includes(id)), 'the other Robots went back to the spaceborn queue');
+  const end2 = op(k.state, 'END_TURN', P.profileId);
+  assert(end2.ok || end2.error !== 'robot_pick_due', `End Turn after the pick: ${end2.error}`);
+  // One Robot drawn: straight to the hand, no pick.
+  const g = augGame({ colonists: [] });
+  const one = g.st.spacebornQueue.filter(isRobot)[0];
+  const hum = g.st.spacebornQueue.find((id) => !isRobot(id));
+  g.st.spacebornQueue.splice(0, g.st.spacebornQueue.length, one, hum, ...g.st.spacebornQueue.filter((id) => id !== one && id !== hum));
+  g.P.beoAtTurnStart = true; g.P.hand = [];
+  const r1 = op(g.st, 'EXOMIGRATE', g.P.profileId, { queue: 'spaceborn', placeDelegate: false });
+  const Q1 = pl(r1.state, g.P.profileId);
+  assert(r1.ok && Q1.hand.includes(one) && !Q1.robotPick, 'a lone Robot goes straight to the hand');
+  return `${r.log} | ${k.log}`;
 });
 
 check('M4 + M2 Parenthood (4C5): heart side 1 on an earthborn, the child comes of age 9 years on and inherits', () => {
