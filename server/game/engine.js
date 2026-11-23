@@ -1816,12 +1816,16 @@ function colonistSizeRollModAt(state, player, siteId) {
 // season-blue event), halved again (fractions dropped) by a Frankenstein
 // Navigator / Josephson Implants colonist in play. Mirror the client's
 // finaoPer (browse.js) if the order ever changes.
+export function finaoDoubled(state) {
+  return !!(state && state.isotopeMonetized && (state.m4 || state.finaoDoubled));
+}
 export function finaoPerFor(state, player) {
   let per = hasPrivilege(state, player, 'OPEN_SOURCE_FINAO') ? 3 : HAZARD_COST_PER;
   // 3B5a / 4D1a: once isotope is monetized, FINAO costs are permanently doubled
-  // for everyone, Open Source included. Wired for M4 rooms only for now, so an
-  // M1 game already in flight does not double mid-game.
-  if (state.m4 && state.isotopeMonetized) per *= 2;
+  // for everyone, Open Source included (owner 2026-11-23: every game). An M1
+  // game that monetized before this change carries no finaoDoubled flag, so it
+  // never doubles mid-game.
+  if (finaoDoubled(state)) per *= 2;
   if (state.internationalAssistance) per = Math.floor(per / 2);
   if (playerHasColonistPower(state, player, 'finaoHalved')) per = Math.floor(per / 2);
   return Math.max(1, per);
@@ -7519,8 +7523,9 @@ function applyCashWater(state, op, player) {
 function monetizeIsotope(state) {
   if (state.isotopeMonetized) return '';
   state.isotopeMonetized = true;
-  let note = ' Isotope is now monetized.';
-  if (state.m4) note += ' FINAO costs double.' + contractUpheaval(state);
+  state.finaoDoubled = true;
+  let note = ' Isotope is now monetized. FINAO costs double.';
+  if (state.m4) note += contractUpheaval(state);
   return note;
 }
 function contractUpheaval(state) {
@@ -9721,8 +9726,11 @@ function applyAnchorBernal(state, op, player) {
   // species-scoped above, so this can only fire at a Uranus-zone space.
   const isUranusElevatorBuild = !!state.sirens && isSirenPlayer(state, player) && homeOrbit
     && (cardId === GEO_ELEVATOR_BERNAL_ID || cardId === LOFSTROM_LOOP_BERNAL_ID);
+  // 4A7j (Module 2 living rule): anchoring the Lofstrom Loop Microgravity in a
+  // Home Orbit is the same Epic Hazard that risks the Bernal's supports.
+  const isLofstromHomeAnchor = cardId === LOFSTROM_LOOP_BERNAL_ID && homeOrbit;
   const isGeoElevatorBuild = (cardId === GEO_ELEVATOR_BERNAL_ID && slug === GEO_NODE)
-    || isUranusElevatorBuild;
+    || isUranusElevatorBuild || isLofstromHomeAnchor;
   let opSpent = false;
   let didRoll = false;
   let hazardNote = '';
@@ -9774,7 +9782,9 @@ function applyAnchorBernal(state, op, player) {
           : '';
         return {
           ok: true, state, rolled: true,
-          log: `${player.name}'s attempt to anchor the ${name0} at GEO failed the Epic Hazard (rolled a 1); the space elevator was not raised, so the Bernal stays mobile.${lostNote} Try again next turn.`,
+          log: isLofstromHomeAnchor && !isUranusElevatorBuild
+            ? `${player.name}'s attempt to anchor the ${name0} failed the Epic Hazard (rolled a 1), so the Bernal stays mobile.${lostNote} Try again next turn.`
+            : `${player.name}'s attempt to anchor the ${name0} at GEO failed the Epic Hazard (rolled a 1); the space elevator was not raised, so the Bernal stays mobile.${lostNote} Try again next turn.`,
         };
       }
       hazardNote = ` (Epic Hazard rolled ${d6})`;
@@ -9839,7 +9849,9 @@ function applyAnchorBernal(state, op, player) {
   if (crewMoved) log += ` ${crewMoved} crew boarded the Home Bernal from LEO.`;
   // 4D1a: anchoring the Lofstrom Loop, or the GEO Space Elevator at GEO, as a
   // Home Bernal monetizes isotope (and sets off the contract upheaval).
-  if (state.m4 && homeOrbit && (cardId === LOFSTROM_LOOP_BERNAL_ID || (cardId === GEO_ELEVATOR_BERNAL_ID && slug === GEO_NODE))) {
+  // A rule of the M1+M2 books too (3B5a), so it is not gated on M4; the
+  // contract upheaval inside monetizeIsotope still is.
+  if (state.m1 && homeOrbit && (cardId === LOFSTROM_LOOP_BERNAL_ID || (cardId === GEO_ELEVATOR_BERNAL_ID && slug === GEO_NODE))) {
     log += monetizeIsotope(state);
   }
   log += maybeFoundIsobank(state, player);

@@ -12966,8 +12966,12 @@ async function runBernalAnchorFlow(bn, onDone) {
   const supportNames = supportCards.map((c) => c.name).join(', ');
   const isHome = (bn.cardId === 'ber_geo_elevator_bernal' && bn.siteId === 'burn-geo')
     || !!(bn.siteId && NODE_TAGS[String(bn.siteId)] && NODE_TAGS[String(bn.siteId)].homeBernal);
-  if (isGeoBuild) {
-    const choice = await hazardConfirmModal([{ site: { name: 'GEO' }, glyph: '🛗', label: 'Epic Hazard: raise the space elevator' }]);
+  // 4A7j: the Lofstrom Loop anchored in a Home Orbit is the same Epic Hazard.
+  const isLofstromHome = bn.cardId === 'ber_l3_lofstrom_loop_microgravity' && isHome;
+  if (isGeoBuild || isLofstromHome) {
+    const choice = await hazardConfirmModal([isGeoBuild
+      ? { site: { name: 'GEO' }, glyph: '🛗', label: 'Epic Hazard: raise the space elevator' }
+      : { site: { name: 'Home Orbit' }, glyph: '⚓', label: 'Epic Hazard: anchor the Lofstrom Loop' }]);
     if (choice === 'cancel' || choice == null) { setStatus('Anchor cancelled.'); return; }
     await submitOnlineOp({ kind: 'ANCHOR_BERNAL', cardId: bn.cardId, hazardPay: choice === 'pay' });
   } else {
@@ -19901,7 +19905,8 @@ function finaoPer() {
   const me = mySnapshotPlayer();
   let per = (me && playerHasPrivilege(me, 'OPEN_SOURCE_FINAO')) ? 3 : HAZARD_COST_PER;
   // Isotope monetization doubles FINAO for everyone (3B5a; M4 rooms).
-  if (_onlineSnapshot && _onlineSnapshot.m4 && _onlineSnapshot.isotopeMonetized) per *= 2;
+  // Isotope monetization doubles FINAO (3B5a); mirror of finaoDoubled.
+  if (_onlineSnapshot && _onlineSnapshot.isotopeMonetized && (_onlineSnapshot.m4 || _onlineSnapshot.finaoDoubled)) per *= 2;
   if (_onlineSnapshot && _onlineSnapshot.internationalAssistance) per = Math.floor(per / 2);
   if (me && snapshotColonistSlots(me).some((e) => {
     const c = e.card;
