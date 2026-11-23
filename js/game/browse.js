@@ -3001,6 +3001,17 @@ function buildTradeColumn(title, owner, context, opts = {}) {
   aquaRow.appendChild(aquaIn);
   col.appendChild(aquaRow);
 
+  // Isofuel in the isovaults (4D2f): traded anywhere once the isobank stands.
+  let isoIn = null;
+  if (_onlineSnapshot && _onlineSnapshot.m4 && _onlineSnapshot.isobank && (owner.isovault | 0) > 0) {
+    const row = document.createElement('label');
+    row.className = 'mp-trade-field';
+    row.innerHTML = `<span>🟡 Isovault (${owner.isovault | 0})</span>`;
+    isoIn = document.createElement('input');
+    isoIn.type = 'number'; isoIn.min = '0'; isoIn.value = '0'; isoIn.max = String(owner.isovault | 0);
+    row.appendChild(isoIn);
+    col.appendChild(row);
+  }
   // Fuel (tank water) - only when meeting at a colocated site (out at LEO,
   // fuel is just aqua, so it isn't a separate thing to trade there).
   let waterIn = null;
@@ -3128,6 +3139,7 @@ function buildTradeColumn(title, owner, context, opts = {}) {
       contractIds: contractChecks.filter((c) => c.checked).map((c) => c.value),
       abilities: [],
       lunaGrant: !!(lunaChk && lunaChk.checked),
+      isovault: isoIn ? intv(isoIn) : 0,
     };
     if (abSel && abSel.value) {
       const t = termIn && termIn.value !== '' ? Math.floor(Number(termIn.value)) : 0;
@@ -3263,7 +3275,7 @@ function openTradeBuilder(opts = {}) {
     send.addEventListener('click', async () => {
       const give = giveCol.read();
       const receive = recvCol.read();
-      const empty = (s) => !s.aqua && !s.water && !s.handCardIds.length && !s.cargoCardIds.length && !s.leoCardIds.length && !s.abilities.length && !s.lunaGrant && !(s.contractIds || []).length;
+      const empty = (s) => !s.aqua && !s.water && !s.handCardIds.length && !s.cargoCardIds.length && !s.leoCardIds.length && !s.abilities.length && !s.lunaGrant && !(s.contractIds || []).length && !s.isovault;
       const entTrade = opts.isCounter && _onlineSnapshot && _onlineSnapshot.trade && _onlineSnapshot.trade.enterprise;
       if (empty(give) && empty(receive) && !entTrade) { err.textContent = 'Put at least one item on the table.'; return; }
       send.disabled = true;
@@ -3299,6 +3311,7 @@ function tradeSideText(side) {
     parts.push(`${abilityLabel(g.ability)} (${g.turns == null ? 'permanent' : g.turns + ' turns'})`);
   }
   if (side.lunaGrant) parts.push('Luna prospecting access');
+  if (side.isovault) parts.push(`${side.isovault} isofuel`);
   return parts.length ? parts.join(' + ') : 'nothing';
 }
 
@@ -3323,6 +3336,7 @@ function tradeSideEl(side) {
     nodes.push(document.createTextNode(`${abilityLabel(g.ability)} (${g.turns == null ? 'permanent' : g.turns + ' turns'})`));
   }
   if (side.lunaGrant) nodes.push(document.createTextNode('🌙 Luna prospecting access'));
+  if (side.isovault) nodes.push(document.createTextNode(`🟡 ${side.isovault} isofuel`));
   if (!nodes.length) { el.appendChild(document.createTextNode('nothing')); return el; }
   nodes.forEach((n, i) => { if (i) el.appendChild(document.createTextNode(' + ')); el.appendChild(n); });
   return el;
@@ -7004,7 +7018,13 @@ function buildColonyMissions(wrap, me, futures) {
         if (attempt.disabled) return;
         const choice = await hazardConfirmModal([{ site: { name: gname }, glyph: '🌟', label: 'Epic Hazard' }]);
         if (choice === 'cancel' || choice == null) { setStatus('Epic Hazard attempt cancelled.'); return; }
-        const ok = await submitOnlineOp({ kind: 'EPIC_HAZARD', cardId: f.id, hazardPay: choice === 'pay' });
+        // INTERSTELLAR EXPLORATION: the research grant takes the top card of a deck you name.
+        let grantDeck;
+        if (((futureGoalForCard(f.id) || {}).effects || []).includes('researchGrant')) {
+          grantDeck = await pickGrantDeck();
+          if (grantDeck === null) { setStatus('Epic Hazard attempt cancelled.'); return; }
+        }
+        const ok = await submitOnlineOp({ kind: 'EPIC_HAZARD', cardId: f.id, hazardPay: choice === 'pay', ...(grantDeck ? { grantDeck } : {}) });
         if (ok) renderColonists();
       });
       box.appendChild(attempt);
@@ -7012,6 +7032,28 @@ function buildColonyMissions(wrap, me, futures) {
     }
   }
   return wrap;
+}
+
+// A patent deck with cards in it, for a research grant. Resolves the deck key
+// or null (cancelled).
+function pickGrantDeck() {
+  const decks = (_onlineSnapshot && _onlineSnapshot.decks) || {};
+  const keys = Object.keys(decks).filter((k) => (Array.isArray(decks[k]) ? decks[k].length : (decks[k] | 0)) > 0);
+  return new Promise((resolve) => {
+    const ov = document.createElement('div');
+    ov.className = 'card-modal-overlay confirm-modal-overlay';
+    ov.innerHTML = `<div class="turn-confirm-panel"><h3>🔬 Research grant</h3>
+      <div class="turn-confirm-actions" style="flex-wrap:wrap">${keys.map((k) => `<button type="button" class="popup-btn" data-deck="${k}">${k[0].toUpperCase()}${k.slice(1)}</button>`).join('')}
+      <button type="button" class="popup-btn" data-cancel>Cancel</button></div></div>`;
+    const done = (v) => { ov.remove(); resolve(v); };
+    ov.addEventListener('click', (e) => {
+      if (e.target === ov) return done(null);
+      const b = e.target.closest('button');
+      if (!b) return;
+      done(b.hasAttribute('data-cancel') ? null : b.dataset.deck);
+    });
+    mountOverlay(ov);
+  });
 }
 
 // Render the Colonists pane: the colony population + missions tracker (online),

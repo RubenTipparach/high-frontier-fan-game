@@ -17570,11 +17570,13 @@ function applyPayLateFee(state, op, player) {
   // per turn.
   const paidNow = player.lateFeePaidThisTurn | 0;
   if (!meta.default && paidNow + amount > face.lateFee) return fail('over_late_fee', { max: face.lateFee - paidNow });
-  if (amount > (player.aqua | 0)) return fail('insufficient_aqua');
+  // 4D1b: gold beads at the Bank pay like aqua once monetized.
+  if (amount > bankFunds(state, player)) return fail('insufficient_aqua');
+  const beads = coverFromBeads(state, player, amount);
   player.aqua -= amount;
   if (!meta.default) player.lateFeePaidThisTurn = paidNow + amount;
   meta.paid += amount;
-  let log = `${player.name} paid ${amount} aqua toward ${face.name} (${meta.paid} of ${contractDebt(player, cardId)} paid).`;
+  let log = `${player.name} paid ${amount} aqua toward ${face.name} (${meta.paid} of ${contractDebt(player, cardId)} paid)${beadNote(beads)}.`;
   log += maybeRepayDebt(state, player, cardId);
   return { ok: true, state, log };
 }
@@ -18070,6 +18072,9 @@ function normTradeSide(raw) {
     // party permission to prospect Luna as an atomic trade term (sealed with the
     // rest of the deal on accept). Abstract, so it trades anywhere (not in-space).
     lunaGrant: !!raw.lunaGrant,
+    // 4D2f: isofuel negotiated / purchased between two isovaults (abstract:
+    // it never leaves the isobank, so it trades anywhere).
+    isovault: ints(raw.isovault),
   };
 }
 
@@ -18079,7 +18084,7 @@ function sideHasInSpace(side) {
 function sideIsEmpty(side) {
   return !side.aqua && !side.water && !side.handCardIds.length
     && !side.cargoCardIds.length && !(side.leoCardIds || []).length && !side.abilities.length && !side.lunaGrant
-    && !(side.contractIds || []).length;
+    && !(side.contractIds || []).length && !side.isovault;
 }
 // Where a contract the giver trades sits: 'hand' | 'leo' | null.
 function contractTradeWhere(giver, id) {
@@ -18162,6 +18167,10 @@ function validateTradeSide(state, owner, side) {
     if (meta.default) return 'contract_in_default';
     if (!contractTradeWhere(owner, id)) return 'contract_not_in_hand_or_leo';
   }
+  if (side.isovault) {
+    if (!state.m4 || !state.isobank) return 'no_isobank';
+    if ((owner.isovault | 0) < side.isovault) return 'insufficient_isofuel';
+  }
   // Only the first player can grant Luna prospecting access (Luna Treaty), so a
   // lunaGrant term is deliverable only from the first player's side of the deal.
   if (side.lunaGrant) {
@@ -18211,6 +18220,10 @@ function reconcileRocketAfterTrade(player) {
 
 // Move one side's items from `giver` to `receiver`. Mutates both players.
 function executeTradeSide(giver, receiver, side) {
+  if (side.isovault) {
+    giver.isovault = Math.max(0, (giver.isovault | 0) - side.isovault);
+    receiver.isovault = Math.max(0, receiver.isovault | 0) + side.isovault;
+  }
   if (side.aqua) {
     // Pay aqua from the bank first; at LEO any shortfall comes from tank water
     // (1:1 at the bank). The receiver always banks it as aqua.
@@ -18311,6 +18324,7 @@ function tradeSideSummary(state, side) {
     parts.push(`${abilityLabel(g.ability)} (${g.turns == null ? 'permanent' : g.turns + ' turns'})`);
   }
   if (side.lunaGrant) parts.push('Luna prospecting access');
+  if (side.isovault) parts.push(`${side.isovault} isofuel (isovault)`);
   return parts.length ? parts.join(' + ') : 'nothing';
 }
 

@@ -1060,6 +1060,13 @@ function pickIdeology(title) {
     document.body.appendChild(ov);
   });
 }
+// Aqua plus gold beads at the Bank once monetized (4D1b), mirror of the
+// engine's bankFunds.
+function bankAqua(p) {
+  const s = snap();
+  const beads = (s && s.m4 && s.isotopeMonetized) ? Math.max(0, p.isotopes | 0) * ((s.isotopeRate | 0) || 10) : 0;
+  return (p.aqua | 0) + beads;
+}
 export async function payContractFee(id) {
   const p = me();
   const f = p && faceOf(p, id);
@@ -1069,7 +1076,7 @@ export async function payContractFee(id) {
   if (left <= 0) return;
   // In default: no per-turn cap, pay off as much as the aqua covers.
   if (meta.default) {
-    const amt = Math.min(left, p.aqua | 0);
+    const amt = Math.min(left, bankAqua(p));
     if (amt <= 0) { D.toast('No aqua to pay with.', 'info'); return; }
     await D.submitTurnOp({ kind: 'PAY_LATE_FEE', cardId: id, amount: amt });
     return;
@@ -1077,7 +1084,7 @@ export async function payContractFee(id) {
   const owedTurn = f.lateFee - ((p.lateFeePaidThisTurn) | 0);
   if (owedTurn <= 0) { D.toast('You have paid this turn\'s late fee.', 'info'); return; }
   const cap = Math.max(1, Math.min(owedTurn, left));
-  await D.submitTurnOp({ kind: 'PAY_LATE_FEE', cardId: id, amount: Math.min(cap, p.aqua | 0) || cap });
+  await D.submitTurnOp({ kind: 'PAY_LATE_FEE', cardId: id, amount: Math.min(cap, bankAqua(p)) || cap });
 }
 export async function abandonContract(id) {
   const p = me();

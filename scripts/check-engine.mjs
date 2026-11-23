@@ -12829,6 +12829,25 @@ check('Exodus backs: TW Evaluation Committee delegates; Life Support Test Protoc
   assert(t.done(r) && pl(r.state, t.P.profileId).freighter.face === 'secondary' && pl(r.state, t.P.profileId).isotopes === 3, `Warden: ${r.error} ${r.log}`);
   return 'delegates placed; Quaoar needs a Promoted Bernal; Freighter promoted';
 });
+check('Isovault: isofuel trades between isovaults (4D2f); gold beads pay a late fee', () => {
+  const { st, me, rival } = starshotGame();
+  rival.aqua = 30;
+  let r = applyOperation(st, { kind: 'TRADE_OFFER', partnerId: rival.profileId, give: { isovault: 4 }, receive: { aqua: 20 } }, { profileId: me.profileId });
+  assert(r.ok, `offer: ${r.error}`);
+  r = applyOperation(r.state, { kind: 'TRADE_ACCEPT', version: r.state.trade.version }, { profileId: rival.profileId });
+  assert(r.ok && pl(r.state, me.profileId).isovault === 5 && pl(r.state, rival.profileId).isovault === 7, `accept: ${r.error}`);
+  const big = applyOperation(st, { kind: 'TRADE_OFFER', partnerId: rival.profileId, give: { isovault: 99 }, receive: { aqua: 1 } }, { profileId: me.profileId });
+  assert(!big.ok && big.error === 'insufficient_isofuel', `too much: ${big.error}`);
+  // A late fee paid partly in gold beads.
+  const t = colonyContract('M4N250F', { m0: true, m1: true, m2: true });
+  const P = t.P; const meta = P.contractMeta[t.c.id];
+  P.timepiece = { contractId: t.c.id, due: 0, deadbeat: true };
+  t.st.isotopeMonetized = true; P.aqua = 1; P.isotopes = 1;
+  const fee = Math.min(t.c.faces.primary.lateFee, 3);
+  r = applyOperation(t.st, { kind: 'PAY_LATE_FEE', cardId: t.c.id, amount: fee }, { profileId: P.profileId });
+  assert(r.ok && /gold bead/.test(r.log) && pl(r.state, P.profileId).isotopes === 0, `late fee: ${r.error} ${r.log}`);
+  return `4 isofuel for 20 aqua; ${r.log}`;
+});
 check('Isovault: storing with no amount stores everything carried', () => {
   const { st, me, SITE } = starshotGame();
   me.rocket.tank = 4; me.rocket.tankGrade = 'isotope'; me.rocket.tankSpectral = 'S';

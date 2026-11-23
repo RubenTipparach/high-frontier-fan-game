@@ -303,9 +303,13 @@ BUILT 2026-11-22 (Stage 3, isotope monetization + the isobank):
 - **Colony contracts** play on colony domes without M2, on anchored Bernals with
   M2 (owner 2026-11-23): `colony` / `isobank` step verbs.
 
-STILL TO DO in Stage 3: trading isofuel between isovaults, beads in contract
-payments other than FINAO and research auctions, the Exodus back faces, the
-Atmospheric Iso-Refinery isotope for Freighter / Bernal GW moves (rocket only
-today), the starship's combined-game cargo (Promoted Freighter / Bernal), and
-a deck picker for the Interstellar Exploration research grant (it takes the
-first deck with cards).
+- **2026-11-23 follow-ups:** the six Exodus back faces are built (side
+  `exodusBack`) but not dealt until R9 says which face is auctioned; isofuel
+  trades between isovaults (an `isovault` trade term, 4D2f); gold beads pay late
+  fees and contract debt; a deck picker for the Interstellar Exploration research
+  grant; storing in the isovault with no amount stores everything carried.
+  Atmospheric Iso-Refinery stays rocket-only by the rules (Freighters and Bernals
+  never fly under a GW thruster).
+
+STILL TO DO in Stage 3: the starship's combined-game cargo (Promoted Freighter /
+Bernal, 4E5c), and whatever R9 decides for the Exodus back faces.
