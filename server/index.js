@@ -19,6 +19,7 @@ import { WebSocketServer } from 'ws';
 import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
 import { CONTRACTS_BY_ID } from '../data/contracts.js';
+import { CREW_BY_ID } from '../data/crew.js';
 import { contractStepPlaces, applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, reconstructTurnActions, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, liveScoreboard, rocketSolarZone, auctionWaitingOn, inSpacerUnion, driveTutorialBots, migrateGloryCrewBindings, elevatorConnectedFactorySet, pinnedFactorySlugs, playerHasColonistPower, playerCrewReactorKinds, decksFor, repairSpeciesDeckSplit, repairSirensAssembly, autoFixGlitches, canLooseOutpostWater, outpostWater } from './game/engine.js';
 import { randomSeed, makeRng, shuffle } from './game/rng.js';
 import { COLONISTS } from '../data/colonists.js';
@@ -2189,8 +2190,11 @@ function gameView(gameId, viewerId = null) {
 // a normal op - no second state model.
 
 function cardLabel(id) {
-  const c = PATENTS_BY_ID[id];
-  return (c && c.name) || String(id);
+  const c = PATENTS_BY_ID[id] || CONTRACTS_BY_ID[id];
+  if (c && c.name) return c.name;
+  const crew = CREW_BY_ID[id];
+  if (crew && crew.faces) return crew.faces.primary.name + ' / ' + crew.faces.secondary.name;
+  return String(id);
 }
 function slotInfo(slot) {
   const c = PATENTS_BY_ID[slot.id];
@@ -2391,6 +2395,16 @@ function adminGameStateView(gameId) {
         ...(!p.freighter && p.freighterPromotion && p.freighterPromotion.inHand && p.freighterPromotion.cardId === id
           ? { face: 'secondary' } : {}) })),
       freighterPromotion: p.freighterPromotion || null,
+      // M4: the contract hand (unboosted, or sent back by a decommission) and
+      // the fulfilled pile. Read-only in the editor.
+      contractHand: (p.contractHand || []).map((id) => {
+        const meta = (p.contractMeta || {})[id] || {};
+        return { id, name: cardLabel(id), side: meta.side || null, default: !!meta.default };
+      }),
+      fulfilledContracts: (p.fulfilledContracts || []).map((e) => {
+        const id = typeof e === 'string' ? e : (e && (e.id || e.cardId));
+        return { id, name: cardLabel(id) };
+      }),
     };
   });
   const assembly = (state.m0 && state.assembly) ? adminAssemblyView(state) : null;
@@ -7726,6 +7740,15 @@ document.addEventListener('click', function (ev) {
       html += '<div class="ge-teleport">⚡ Powersat: <strong>' + (hasPS ? 'granted' : 'no') + '</strong>'
         + '<button data-act="grant_powersat"' + (hasPS ? ' disabled' : '') + '>Grant Powersat</button>'
         + '<button data-act="revoke_powersat"' + (hasPS ? '' : ' disabled') + '>Revoke</button></div>';
+      if ((p.contractHand || []).length || (p.fulfilledContracts || []).length) {
+        html += '<div class="ge-teleport">📜 Contracts: '
+          + ((p.contractHand || []).map(function (c) {
+              return esc(c.name) + (c.side ? ' (' + esc(c.side) + ')' : '') + (c.default ? ' <strong>default</strong>' : '');
+            }).join(', ') || 'none in hand')
+          + ((p.fulfilledContracts || []).length
+            ? ' &middot; fulfilled: ' + p.fulfilledContracts.map(function (c) { return esc(c.name); }).join(', ') : '')
+          + '</div>';
+      }
       // Relaunch a LOST Freighter from the hand (no big cube on the map), with
       // any hand cards as its cargo. Promoted by default when the promotion is
       // on record: a Freighter's promotion is permanent.
