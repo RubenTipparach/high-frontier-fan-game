@@ -19,7 +19,7 @@ import { WebSocketServer } from 'ws';
 import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
 import { CONTRACTS_BY_ID } from '../data/contracts.js';
-import { contractStepPlaces, applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, liveScoreboard, rocketSolarZone, auctionWaitingOn, inSpacerUnion, driveTutorialBots, migrateGloryCrewBindings, elevatorConnectedFactorySet, pinnedFactorySlugs, playerHasColonistPower, playerCrewReactorKinds, decksFor, repairSpeciesDeckSplit, repairSirensAssembly, autoFixGlitches, canLooseOutpostWater, outpostWater } from './game/engine.js';
+import { contractStepPlaces, applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, reconstructTurnActions, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, liveScoreboard, rocketSolarZone, auctionWaitingOn, inSpacerUnion, driveTutorialBots, migrateGloryCrewBindings, elevatorConnectedFactorySet, pinnedFactorySlugs, playerHasColonistPower, playerCrewReactorKinds, decksFor, repairSpeciesDeckSplit, repairSirensAssembly, autoFixGlitches, canLooseOutpostWater, outpostWater } from './game/engine.js';
 import { randomSeed, makeRng, shuffle } from './game/rng.js';
 import { COLONISTS } from '../data/colonists.js';
 import { siteBySlug, nodeBySlug, resolveNodeRef, leoSlug } from './game/planner-graph.js';
@@ -75,7 +75,7 @@ import {
   sendWebhook, webhookEnabled, isWebhookUrl, defaultWebhookUrl,
   oauthEnabled, oauthClientId, buildAuthorizeUrl, completeOauth,
   oauthIdentifyEnabled, buildIdentifyAuthorizeUrl, identifyOauth,
-  botChannels, sendChannelMessage, isChannelId,
+  botChannels, sendChannelMessage, sendChannelFile, isChannelId,
 } from './discord.js';
 import { ensureLeaderboardTables, recordGame, recordCancel, clearCancel, startBackfill, leaderboards, summaryMessages } from './leaderboard.js';
 
@@ -258,6 +258,9 @@ app.get('/healthz', (_req, res) => {
 // counts as one - it is a scripted scenario in every way that matters here.
 // Keep in step with docs/variants-tracker.md when a new variant lands.
 const VARIANT_KEYS = ['ceoSolo', 'tutorial', 'sirens', 'hermes', 'altruism'];
+// The variants Module 4 combines with (owner 2026-11-22): all but The Sirens
+// and the tutorial.
+const M4_VARIANTS_OK = new Set(['ceoSolo', 'altruism', 'hermes']);
 
 function profileIsAdmin(profile, req) {
   if (profile && isRatAdmin(profile.name)) return true;
@@ -729,8 +732,11 @@ app.post('/admin/leaderboard/channel', requireAdmin, (req, res) => {
   const id = String((req.body && req.body.id) || '').trim();
   if (!isChannelId(id)) return res.status(400).json({ error: 'bad_channel' });
   const label = String((req.body && req.body.label) || '').slice(0, 120);
-  setLeaderboardSetting('leaderboard_channel_id', id);
-  setLeaderboardSetting('leaderboard_channel_label', label);
+  // which: 'stack' saves the channel stack shares post to; otherwise the
+  // leaderboard's.
+  const key = (req.body && req.body.which === 'stack') ? 'stack_post_channel' : 'leaderboard_channel';
+  setLeaderboardSetting(`${key}_id`, id);
+  setLeaderboardSetting(`${key}_label`, label);
   res.json({ ok: true, id, label });
 });
 
@@ -1089,13 +1095,14 @@ app.post('/lobbies', requireProfile, (req, res) => {
   const m2 = body.m2 ? 1 : 0;
   // Opt-in Module 4 (Exodus). A PREVIEW for admins and playtesters (user
   // 2026-11-15 admin-only; opened to testers 2026-11-18, docs/module-m4-plan.md):
-  // anyone else's request is forced to 0 regardless of what the client sends. M4 requires M0 (4A1a), so it turns M0 on. It does not
-  // combine with a variant yet (CEO Solitaire's own M4 rules are not wired), so
-  // that combination is refused rather than quietly narrowed.
+  // anyone else's request is forced to 0 regardless of what the client sends. M4 requires M0 (4A1a), so it turns M0 on. It
+  // combines with CEO Solitaire, Altruism and Hermes Fall, but not with The
+  // Sirens or the tutorial: those are refused rather than quietly narrowed.
   const m4 = (body.m4 && m4Allowed(req)) ? 1 : 0;
   if (m4) {
-    const withVariant = VARIANT_KEYS.filter((k) => k !== 'ceoSolo' && body[k]);
-    // CEO Solitaire takes M4 (owner 2026-11-23: its 4G rules are built).
+    // CEO Solitaire (V6, whose 4G rules are in), V4 Altruism and V5 Hermes Fall
+    // play with M4 (owner 2026-11-22); The Sirens and the tutorial do not.
+    const withVariant = VARIANT_KEYS.filter((k) => body[k] && !M4_VARIANTS_OK.has(k));
     if (withVariant.length) {
       return res.status(400).json({ error: 'm4_no_variants', detail: withVariant });
     }
@@ -1745,9 +1752,10 @@ app.post('/lobbies/:id/settings', requireProfile, (req, res) => {
   // carry it too - Futures in solo).
   // M4 combines with M1 and M2 (owner 2026-11-23).
   const m4After = (body.m4 !== undefined && m4Allowed(req)) ? !!body.m4 : !!lobby.m4;
-  // M4 does not combine with a variant (V9 Sirens included, owner 2026-11-18):
-  // the same refusal the create route gives.
-  if (m4After && (lobby.sirens || lobby.hermes || lobby.altruism || lobby.tutorial)) {
+  // M4 does not combine with The Sirens (owner 2026-11-18) or the tutorial;
+  // CEO Solitaire, Altruism and Hermes Fall are fine (owner 2026-11-22). The
+  // same refusal the create route gives.
+  if (m4After && (lobby.sirens || lobby.tutorial)) {
     return res.status(400).json({ error: 'm4_no_variants' });
   }
   if (body.m2 !== undefined) { sets.push('m2 = ?'); args.push(body.m2 ? 1 : 0); }
@@ -2014,6 +2022,35 @@ function redactRoutes(rawState, viewerId) {
   return clone;
 }
 
+// A short-lived build (2026-11-22) made a Sunspot event answer COMMIT the turn,
+// locking the moves taken before it and emptying the undo stack (room wyk9hp).
+// When a game's undo base is such an answer and nothing is left to undo,
+// rebuild the turn's undo stack from the op log since the previous real base,
+// kept only if replaying it reproduces the current board exactly. Returns
+// { actions, base, baseSeq } or null. Cached per game + seq: the game view asks
+// on every poll (so the Undo button lights up), the op route when it is pressed.
+const _undoRepairCache = new Map();
+function stuckUndoRepair(gameId, committedSeq, state) {
+  if (!state || ((state.turnActions || []).length)) return null;
+  const baseOp = db.prepare('SELECT kind FROM game_operations WHERE game_id = ? AND seq = ?').get(gameId, committedSeq);
+  if (!baseOp || baseOp.kind !== 'EVENT_CHOICE') return null;
+  const key = `${gameId}:${committedSeq}:${state.turn}:${state.round}:${JSON.stringify(state.pendingEvent || null)}`;
+  if (_undoRepairCache.has(key)) return _undoRepairCache.get(key);
+  let out = null;
+  const prior = db.prepare('SELECT seq, kind FROM game_operations WHERE game_id = ? AND seq < ? ORDER BY seq DESC LIMIT 400')
+    .all(gameId, committedSeq).find((r) => isCommitKind(r.kind));
+  const base = prior ? stateAtSeq(gameId, prior.seq) : null;
+  if (base) {
+    const since = db.prepare('SELECT kind, payload FROM game_operations WHERE game_id = ? AND seq > ? ORDER BY seq')
+      .all(gameId, prior.seq).map((r) => { let p = {}; try { p = JSON.parse(r.payload || '{}'); } catch { /* none */ } return { kind: r.kind, payload: p }; });
+    const actions = reconstructTurnActions(base, since, state);
+    if (actions) out = { actions, base, baseSeq: prior.seq };
+  }
+  if (_undoRepairCache.size > 200) _undoRepairCache.clear();
+  _undoRepairCache.set(key, out);
+  return out;
+}
+
 function gameView(gameId, viewerId = null) {
   const g = db
     .prepare('SELECT id, lobby_id, status, seed, committed_seq, created_at, finished_at FROM games WHERE id = ?')
@@ -2022,6 +2059,12 @@ function gameView(gameId, viewerId = null) {
   const st = db.prepare('SELECT state, seq, updated_at FROM game_states WHERE game_id = ?').get(gameId);
   const rawState = st ? JSON.parse(st.state) : null;
   const viewState = redactRoutes(rawState, viewerId);
+  // A turn the event-commit build locked shows its rebuilt undo stack, so the
+  // Undo button lights up (pressing it runs the same repair in the op route).
+  if (viewState && g.status === 'active') {
+    const fix = stuckUndoRepair(gameId, g.committed_seq, rawState);
+    if (fix) viewState.turnActions = fix.actions;
+  }
   // Display-only: bind any ownerless (in-progress) glory chit to its rocket crew
   // so the client draws the chit ON that crew card right away, before the next op
   // persists the binding. Bind only here (no scoring) - the op path commits.
@@ -3342,11 +3385,23 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
   // start of the active player's turn, i.e. the committed_seq op's
   // snapshot (the END_TURN that handed them the turn, or the seq-0
   // START for the opening turn).
+  let opState = prevState;
+  let repairBaseSeq = null;
   if (NEEDS_TURN_BASE.has(kind)) {
     ctx.turnBaseState = stateAtSeq(id, meta.committed_seq);
     if (!ctx.turnBaseState) return res.status(409).json({ error: 'no_turn_base' });
+    // A short-lived build (2026-11-22) committed the turn on a Sunspot event
+    // answer, locking the moves before it (room wyk9hp): rebuild the undo stack
+    // and move the base back (see stuckUndoRepair).
+    const fix = stuckUndoRepair(id, meta.committed_seq, prevState);
+    if (fix) {
+      opState = { ...prevState, turnActions: fix.actions, turnRedo: [] };
+      ctx.turnBaseState = fix.base;
+      repairBaseSeq = fix.baseSeq;
+      console.log(`[undo-repair] game ${id}: rebuilt ${fix.actions.length} undoable action(s) back to op ${fix.baseSeq}`);
+    }
   }
-  const result = applyOperation(prevState, op, ctx);
+  const result = applyOperation(opState, op, ctx);
   // Debug dry-run: with debug:true the client previews what an op WOULD do
   // (the human-readable log carries the fuel-step cost + origin/dest, plus
   // the actor's tank before/after) WITHOUT persisting or broadcasting it.
@@ -3429,6 +3484,8 @@ app.post('/games/:id/ops', requireProfile, (req, res) => {
       commitsTurn ? stateJson : encodeForStorage(id, meta.committed_seq, stateJson), now);
     if (commitsTurn) {
       db.prepare('UPDATE games SET committed_seq = ? WHERE id = ?').run(nextSeq, id);
+    } else if (repairBaseSeq != null) {
+      db.prepare('UPDATE games SET committed_seq = ? WHERE id = ?').run(repairBaseSeq, id);
     }
     if (result.state.status === 'finished') {
       db.prepare("UPDATE games SET status = 'finished', finished_at = ? WHERE id = ?").run(now, id);
@@ -3594,6 +3651,41 @@ app.post('/games/:id/clone', requireProfile, (req, res) => {
 // target per REMIND_COOLDOWN_MS window (auctions included). Not a game op
 // (no board mutation, no seq bump) - just a DM + a cooldown row the gameView
 // surfaces so every client can show who was nudged and when.
+// Share a stack: a player posts a picture of one of the stack windows to the
+// Discord channel the bot posts the leaderboard in. The browser draws the PNG
+// and sends it raw (image/png). Once an hour per player (owner 2026-11-22), and
+// only for players in that game.
+const STACK_POST_COOLDOWN_MS = 60 * 60 * 1000;
+app.post('/games/:id/stack-post', requireProfile, express.raw({ type: 'image/png', limit: '8mb' }), async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
+  if (!isGamePlayer(id, req.profile.id)) return res.status(403).json({ error: 'not_a_player' });
+  if (!discordEnabled()) return res.status(409).json({ error: 'discord_disabled' });
+  // Its own channel when one is picked on /admin, else the leaderboard's.
+  const own = leaderboardSetting('stack_post_channel_id');
+  const channelId = isChannelId(own) ? own : leaderboardSetting('leaderboard_channel_id');
+  if (!isChannelId(channelId)) return res.status(409).json({ error: 'no_channel' });
+  const buf = Buffer.isBuffer(req.body) ? req.body : null;
+  // A PNG starts with its 8-byte signature.
+  if (!buf || buf.length < 64 || buf.readUInt32BE(0) !== 0x89504e47) return res.status(400).json({ error: 'bad_image' });
+  const key = `stack_post_at:${req.profile.id}`;
+  const last = Number(leaderboardSetting(key, '0')) || 0;
+  const wait = last + STACK_POST_COOLDOWN_MS - nowMs();
+  if (wait > 0) return res.status(429).json({ error: 'stack_post_cooldown', retryInMs: wait });
+  const title = String(req.query.title || 'Stack').replace(/[\r\n*_`~|<>@]/g, '').slice(0, 60) || 'Stack';
+  const room = gameDisplayName(id);
+  const url = gameRoomUrl(id);
+  const payload = { content: `📷 **${req.profile.name}**'s ${title}${room ? ` · ${room}` : ''}` };
+  if (url) payload.components = [{ type: 1, components: [{ type: 2, style: 5, label: 'Open the game', emoji: { name: '🚀' }, url }] }];
+  const r = await sendChannelFile(channelId, payload, 'stack.png', buf);
+  if (!r.ok) {
+    console.warn(`[stack-post] game ${id} by ${req.profile.name}: ${r.error}`);
+    return res.status(502).json({ error: 'discord_failed' });
+  }
+  setLeaderboardSetting(key, nowMs());
+  res.json({ ok: true });
+});
+
 app.post('/games/:id/remind', requireProfile, (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_id' });
@@ -6128,6 +6220,8 @@ app.get('/admin', (req, res) => {
     const chanId = leaderboardSetting('leaderboard_channel_id');
     const chanLabel = leaderboardSetting('leaderboard_channel_label');
     const chanNow = isChannelId(chanId) ? (chanLabel || 'channel ' + chanId) : '';
+    const spId = leaderboardSetting('stack_post_channel_id');
+    const spNow = isChannelId(spId) ? (leaderboardSetting('stack_post_channel_label') || 'channel ' + spId) : '';
     const opts = Array.from({ length: 24 }, (_, h) => `<option value="${h}"${h === hour ? ' selected' : ''}>${String(h).padStart(2, '0')}:00 UTC</option>`).join('');
     const boardHtml = boards.length ? boards.map((b) => `
       <div style="border:1px solid #2a2740;border-radius:8px;padding:8px 10px;min-width:220px;flex:1">
@@ -6145,6 +6239,11 @@ app.get('/admin', (req, res) => {
     <button type="button" onclick="loadLeaderboardChannels()" id="lb-chans">Load channels</button>
     <button type="button" onclick="saveLeaderboardChannel()" id="lb-chan-save" disabled>Save channel</button>
     <span id="lb-chan-status" class="muted"></span>
+  </div>
+  <div style="margin:6px 0">
+    Stack shares channel: <select id="sp-chan"><option value="">${esc(spNow || (chanNow ? 'Same as the leaderboard (' + chanNow + ')' : 'Load the channels to pick one'))}</option></select>
+    <button type="button" onclick="saveStackChannel()" id="sp-chan-save" disabled>Save channel</button>
+    <span id="sp-chan-status" class="muted">Where the 📤 Share - Post to Discord pictures go (once an hour per player).</span>
   </div>` : ''}
   <div style="margin:6px 0">
     <label><input type="checkbox" id="lb-daily"${sched.on ? ' checked' : ''}> Post the leaderboard to Discord once a week, on</label>
@@ -6198,11 +6297,32 @@ app.get('/admin', (req, res) => {
             return o.outerHTML;
           }).join('') : '<option value="">The bot sees no text channels: add it to your server first</option>';
           document.getElementById('lb-chan-save').disabled = !list.length;
+          var sp = document.getElementById('sp-chan');
+          if (sp) {
+            var spCur = ${JSON.stringify(isChannelId(leaderboardSetting('stack_post_channel_id')) ? leaderboardSetting('stack_post_channel_id') : '')};
+            sp.innerHTML = list.map(function (c) {
+              var label = c.server + ' # ' + c.name;
+              var o = document.createElement('option'); o.value = c.id; o.textContent = label;
+              if (c.id === spCur) o.selected = true;
+              return o.outerHTML;
+            }).join('');
+            document.getElementById('sp-chan-save').disabled = !list.length;
+          }
         })
         .catch(function (e) {
           clearTimeout(timer); done();
           out.textContent = (e && e.name === 'AbortError') ? 'Discord took too long to answer. Try again in a moment.' : 'Failed.';
         });
+    }
+    function saveStackChannel() {
+      var sel = document.getElementById('sp-chan'), out = document.getElementById('sp-chan-status');
+      var opt = sel.options[sel.selectedIndex];
+      out.textContent = 'Saving…';
+      fetch('/admin/leaderboard/channel', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: sel.value, label: opt ? opt.textContent : '', which: 'stack' }) })
+        .then(function (r) { return r.json(); })
+        .then(function (j) { out.textContent = j.ok ? 'Saved: stack shares go to ' + (j.label || j.id) + '.' : 'Failed: ' + (j.error || 'unknown'); })
+        .catch(function () { out.textContent = 'Failed.'; });
     }
     function saveLeaderboardChannel() {
       var sel = document.getElementById('lb-chan'), out = document.getElementById('lb-chan-status');

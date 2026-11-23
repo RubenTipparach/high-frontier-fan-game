@@ -136,6 +136,33 @@ export async function sendChannelMessage(channelId, payload) {
   }
 }
 
+// Post a message with one attached file (a PNG) to a channel as the bot. Same
+// rules as sendChannelMessage: never pings anyone. `buffer` is the file bytes.
+export async function sendChannelFile(channelId, payload, filename, buffer, contentType = 'image/png') {
+  if (!TOKEN) return { ok: false, error: 'discord_disabled' };
+  if (!isChannelId(channelId)) return { ok: false, error: 'no_channel' };
+  try {
+    const form = new FormData();
+    form.append('payload_json', JSON.stringify({
+      content: '', ...payload, allowed_mentions: { parse: [] },
+      attachments: [{ id: 0, filename }],
+    }));
+    form.append('files[0]', new Blob([buffer], { type: contentType }), filename);
+    const r = await fetch(`${API}/channels/${channelId}/messages`, {
+      method: 'POST',
+      headers: { Authorization: `Bot ${TOKEN}` },
+      body: form,
+    });
+    if (!r.ok) {
+      const body = await r.text().catch(() => '');
+      return { ok: false, error: `discord ${r.status}: ${body.slice(0, 200)}` };
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
+  }
+}
+
 // ----- channel webhooks -----
 //
 // A second, simpler notification path that needs NO bot: a Discord
