@@ -7611,7 +7611,7 @@ function maybeFoundIsobank(state, player) {
     state.isobank = { ownerId: player.profileId, bernalId: bn.cardId, siteId: bn.siteId };
     // 4D2c: the starship token comes off the Exodus deck, which opens for auction.
     // C4: the Exodus contracts are shuffled "randomizing which side of each is
-    // faceup" - the blue front ('exodus') or the gold back ('exodusBack'), and
+    // faceup" - the front ('exodus') or the back ('exodusBack'), both purple, and
     // that face is the one auctioned. A face this game cannot play turns over.
     const mods = { m1: state.m1, m2: state.m2 };
     const gen = makeRng(state.seed, state.rng.cursor);
@@ -17218,7 +17218,7 @@ export function contractStepPlaces(state, cardId, side, viewerId = null) {
 function claimDefaultChit(state, player, cardId) {
   const meta = contractMetaOf(player, cardId);
   // An Exodus contract's back is its gold side.
-  state.defaultChit = { profileId: player.profileId, side: meta && (meta.side === 'gold' || meta.side === 'exodusBack') ? 'gold' : 'blue' };
+  state.defaultChit = { profileId: player.profileId, side: meta && meta.side === 'gold' ? 'gold' : 'blue' };
 }
 // Take a contract off whatever it is on (hand or a stack).
 function pullContract(state, player, cardId) {
