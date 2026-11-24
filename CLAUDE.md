@@ -294,7 +294,10 @@ per room and carried into the game state as a boolean (`state.m0`,
   needs a choice, and checks in `scripts/check-crew-abilities.mjs` (see
   `docs/crew-ability-audit.md`). Under M2, like every faction privilege, a promo
   privilege stays locked until its holder anchors a Home Bernal; outside M2 it
-  works from the start.
+  works from the start. Other promo packs' printed rules (Pack 3 Ground Crew:
+  memory icon, ground crew icon, flipping) are transcribed in
+  `docs/promo-pack-rules.md`, card by card; which faces carry the icons is
+  still open.
 - **Futures gate on `state.m2`.** The Futures deck physically ships in M1, but a
   Future is not playable until M2 (it needs Bernals / anchoring / the Epic-Hazard
   economy), so in this implementation futures are an M2 mechanic: every futures

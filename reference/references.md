@@ -14,6 +14,7 @@ shipped product and the static GH Pages site does not link to them.
 | `HF4-branching-manuals-v0.3.zip` | Branching rulebooks (Core, QS, M0…M4, Futures, Sirens, AgeOfPiracy, Exodus, Panspermia). Reference for the rule details the engine will need in Stage 3+. |
 | `HF4-victory-point-tracker.pdf` | Published end-of-game Victory Point tracker / scoring mat. Source for the scoring tab: the per-spectral exploitation track (factories built per spectral, marker steps 8 / 5 / 4), the glory-chit ticker tape (earn on first landing in a zone, flip for more on return home), and the VP category list. Expansion-module rows are out of scope. |
 | `HF4-player-aid.pdf` | Community player aid by Geoff Speare (2019-04-29 revision), the single-sheet action reference. Canonical breakdown of the turn structure (move, any free actions, one operation), every Operation vs Free Action, felonies, the thrust / movement steps, map-space rules, threats, events, scoring, and the module summaries. Source for the "Operations & free actions" table in `CLAUDE.md` and the op-vs-free-action line the engine enforces. |
+| `promo-pack-3/` | Photos of the Promo Card Pack 3 (Ground Crew) pack card and its three rules cards. Transcribed, with implementation notes, in `docs/promo-pack-rules.md`. |
 
 ## External reference links
 
