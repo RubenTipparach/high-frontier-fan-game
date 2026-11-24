@@ -26,7 +26,7 @@ import { applyOperation, autoFixGlitches, resolveSunspotEvent } from '../server/
 import { CREW, CREW_BY_ID, PROMO_CREW } from '../data/crew.js';
 import { PATENTS, PATENTS_BY_ID } from '../data/patents.js';
 import { COLONISTS_BY_ID } from '../data/colonists.js';
-import { lineOfSightSites, leoSlug, neighborSlugs, siteBySlug } from '../server/game/planner-graph.js';
+import { lineOfSightSites, leoSlug, neighborSlugs, siteBySlug, hazardKind } from '../server/game/planner-graph.js';
 import { FACTION_BANK_AQUA } from '../data/altruism.js';
 import { NODE_LABELS, NODE_LABEL_KINDS } from '../data/map-labels.js';
 
@@ -1106,6 +1106,18 @@ check('LIFE RAFT: another seat and a stack without the crew cannot; Anarchy susp
   eq(raft('primary', { anarchy: true }).error, 'no_life_raft', 'Anarchy');
   eq(raft('secondary', { game: PROMO }).error, 'no_life_raft', 'promo game, no Home Bernal');
   assert(raft('secondary', { game: PROMO, home: true }).ok, 'promo game, Home Bernal anchored');
+});
+
+check("LIFEBOAT: the stack's own working thruster shields it in a radiation belt while it moves as a Freighter", () => {
+  eq(hazardKind('rad-zkdhz'), 'rad', 'the Van Allen belt next to GEO');
+  const { st, me } = promoSeat('crew_space_force', 'secondary');
+  me.rocket.siteId = 'burn-geo';
+  const r = op(st, 0, { kind: 'MOVE', asFreighter: true, hazardPay: true,
+    segments: [{ from: 'burn-geo', to: 'rad-zkdhz', burns: 0, turn: 1 }, { from: 'rad-zkdhz', to: 'burn-3ylxe', burns: 1, turn: 1 }] });
+  assert(r.ok, `Lifeboat move refused: ${r.error}`);
+  const radRolls = rollsOf(r).filter((x) => x.kind === 'rad');
+  assert(radRolls.length && radRolls.every((x) => x.bypassed && x.thrust > 6), `rad rolls: ${JSON.stringify(radRolls)}`);
+  eq(r.state.players[0].rocket.stack.length, 1, 'Space Force still aboard');
 });
 
 // ---- WEAK STABILITY BOUNDARY (Heliocentricity, white) ----

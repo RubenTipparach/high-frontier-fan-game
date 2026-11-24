@@ -6254,10 +6254,15 @@ function applyMove(state, op, player) {
   // every stack card whose rad-hardness is below it.
   let decommissioned = [];
   const degradedRadiators = [];
+  // Life Raft / Lifeboat: a stack moving as a Freighter still carries its own
+  // working thruster, and that thrust shields it in a belt (owner 2026-11-23).
+  const radThrust = (asFreighter && engineLive)
+    ? Math.max(thrust, activeNetThrust(player.rocket, powersatPush, solarBonus, powersatFutureBonus, playerCrewReactorKinds(player)))
+    : thrust;
   if (rad.length) {
-    if (thrust > RAD_BYPASS_THRUST) {
-      for (const slug of rad) rolls.push({ slug, kind: 'rad', bypassed: true, thrust });
-    } else if (!someCardAtRadRisk(player, player.rocket.stack, thrust + contractShield(state, player), state)) {
+    if (radThrust > RAD_BYPASS_THRUST) {
+      for (const slug of rad) rolls.push({ slug, kind: 'rad', bypassed: true, thrust: radThrust });
+    } else if (!someCardAtRadRisk(player, player.rocket.stack, radThrust + contractShield(state, player), state)) {
       // Nothing in the stack can be lost regardless of the roll (every rad-
       // sensitive card out-hardens the worst possible result), so skip the roll:
       // no die is spent, so the move stays UNDOABLE. (User: bypass the rad roll +
@@ -6379,8 +6384,8 @@ function applyMove(state, op, player) {
       && hasPrivilege(state, player, 'ROCKETEERS') ? 2 : 0;
     // Shielded contracts (4B2f): -2 per copy.
     const shielded = contractShield(state, player);
-    const radVal = Math.max(0, d6 - thrust - rocketeers - shielded);
-    rolls.push({ slug, kind: 'rad', d6, rad: radVal, thrust, ...(rocketeers ? { rocketeers } : {}), ...(shielded ? { shielded } : {}) });
+    const radVal = Math.max(0, d6 - radThrust - rocketeers - shielded);
+    rolls.push({ slug, kind: 'rad', d6, rad: radVal, thrust: radThrust, ...(rocketeers ? { rocketeers } : {}), ...(shielded ? { shielded } : {}) });
     // The guided tutorial never decommissions or degrades a card to a
     // radiation belt roll - the rolls play, but the ship rides through
     // unscathed. (User 2026-07-10.)

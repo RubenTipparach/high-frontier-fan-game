@@ -10912,3 +10912,44 @@ html.battery-save.theme-holiday .browse-map::after { animation: none; }
 }
 /* Menu toggle, active state (evergreen, like Battery saver's green). */
 #btn-holiday.is-active { background: #166534; color: #fff; border-color: #14532d; }
+
+/* Crew picker colour tabs: one per faction colour, the swatch is the seat
+   colour. */
+.crew-colour-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: center;
+  padding: 0 14px 8px;
+}
+.crew-colour-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.crew-colour-tab:hover { background: rgba(255, 255, 255, 0.09); }
+.crew-colour-tab.is-active {
+  border-color: var(--tab-color);
+  background: color-mix(in srgb, var(--tab-color) 22%, transparent);
+  font-weight: 600;
+}
+.crew-colour-tab:focus-visible { outline: 2px solid var(--tab-color); outline-offset: 2px; }
+.crew-colour-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--tab-color);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+}
+.crew-colour-count {
+  font-size: 11px;
+  opacity: 0.7;
+}

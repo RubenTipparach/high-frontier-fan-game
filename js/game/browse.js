@@ -7190,31 +7190,42 @@ function renderColonists() {
     ?? (queueIds ? queueIds.length : 0))) || queueCards.length;
   const decksHost = document.createElement('div');
   decksHost.className = 'cart-decks';
-  if (queueCards.length) {
+  const addQueue = (type, label, cards, remaining) => {
+    if (!cards.length && !remaining) return;
     const section = document.createElement('section');
     section.className = 'cart-deck';
-    section.dataset.type = 'earthborne';
+    section.dataset.type = type;
     const title = document.createElement('h4');
     title.className = 'cart-deck-title';
-    title.innerHTML = `Earthborne <em>(${queueRemaining} in the queue)</em>`;
+    title.innerHTML = `${label} <em>(${remaining} in the queue)</em>`;
     section.appendChild(title);
     const body = document.createElement('div');
     body.className = 'cart-deck-body';
     const deckArt = document.createElement('div');
     deckArt.className = 'cart-deck-art';
-    deckArt.appendChild(renderDeckThicknessSvg(Math.max(1, queueRemaining)));
+    deckArt.appendChild(renderDeckThicknessSvg(Math.max(1, remaining)));
     body.appendChild(deckArt);
-    const cardSlot = document.createElement('div');
-    cardSlot.className = 'cart-deck-topcard';
-    const top = queueCards[0];
-    const ce = renderCard(top, { face: 'primary' });
-    ce.classList.add('cart-deck-topcard-click', 'is-colonist-tile');
-    // Tap the top card to inspect it + flip through the rest of the queue.
-    makeCardViewable(ce, top, 'patent', 'primary', { siblings: queueCards, index: 0 });
-    cardSlot.appendChild(ce);
-    body.appendChild(cardSlot);
+    if (cards.length) {
+      const cardSlot = document.createElement('div');
+      cardSlot.className = 'cart-deck-topcard';
+      const top = cards[0];
+      const ce = renderCard(top, { face: 'primary' });
+      ce.classList.add('cart-deck-topcard-click', 'is-colonist-tile');
+      // Tap the top card to inspect it + flip through the rest of the queue.
+      makeCardViewable(ce, top, 'patent', 'primary', { siblings: cards, index: 0 });
+      cardSlot.appendChild(ce);
+      body.appendChild(cardSlot);
+    }
     section.appendChild(body);
     decksHost.appendChild(section);
+  };
+  addQueue('earthborne', 'Earthborne', queueCards, queueRemaining);
+  // M4 + M2 (4C2): the spaceborn queue sits beside the earthborn one.
+  const snap = _onlineSnapshot;
+  if (snap && snap.m4 && snap.m2 && Array.isArray(snap.spacebornQueue)) {
+    const spaceCards = snap.spacebornQueue.map((id) => cardById(id)).filter(Boolean);
+    const spaceRemaining = Number(snap.spacebornQueueCount ?? snap.spacebornQueue.length) || 0;
+    addQueue('spaceborne', 'Spaceborne', spaceCards, spaceRemaining);
   }
   host.appendChild(decksHost);
   // Missions (Futures) sit at the BOTTOM of the pane, below all the colonist
@@ -36175,6 +36186,13 @@ function bankNoteFor(face, factionBank) {
 //     and the wizard skips all local side effects, handing the
 //     selection off so the caller can dispatch PICK_CREW. onDone
 //     still fires for both modes.
+// The crew picker's colour tabs, named the way the Colonist cards print an
+// Ideology colour.
+const CREW_COLOUR_NAMES = {
+  '#fccc00': 'Yellow', '#c09cc0': 'Purple', '#e3e0d4': 'White',
+  '#a8d8c0': 'Green', '#b40054': 'Red', '#9c9c9c': 'Grey',
+};
+
 export function openCrewWizard(arg, maybeOnDone) {
   // Back-compat: openCrewWizard(onDoneFn) keeps working.
   const opts = typeof arg === 'function' ? { onDone: arg } : (arg || {});
@@ -36191,6 +36209,7 @@ export function openCrewWizard(arg, maybeOnDone) {
 
   document.querySelector('.crew-wizard-overlay')?.remove();
   let selected = null; // { cardId, face }
+  let activeColour = null; // the colour tab on show
 
   const overlay = document.createElement('div');
   overlay.className = 'card-modal-overlay crew-wizard-overlay';
@@ -36266,6 +36285,7 @@ export function openCrewWizard(arg, maybeOnDone) {
       <div class="card-modal-actions">
         <button type="button" class="modal-btn primary crew-confirm" ${selected ? '' : 'disabled'}>🚀 Start with ${selName}</button>
       </div>
+      <div class="crew-colour-tabs" role="tablist"></div>
       <div class="crew-faction-grid"></div>
     `;
     for (const b of dialog.querySelectorAll('.crew-species-opt')) {
@@ -36299,7 +36319,42 @@ export function openCrewWizard(arg, maybeOnDone) {
     // Pickable sides first; taken and Coming-soon sides after a divider, so
     // what you can choose is never mixed in with what you can't.
     const unpickable = (c) => takenSet.has(c.srcId) || !!c.requiresModule || crewFaceMissingModules(c).length > 0;
-    const faces = [...byColour.filter((c) => !unpickable(c)), ...byColour.filter(unpickable)];
+    // One tab per faction colour, so a long list (promo crew in solo) is read a
+    // colour at a time. Opens on the picked card's colour, else the first.
+    const colours = [...new Set(byColour.map((c) => c.color))];
+    const tabsEl = dialog.querySelector('.crew-colour-tabs');
+    if (colours.length > 1) {
+      if (!colours.includes(activeColour)) {
+        const selColour = selected && CREW_BY_ID[selected.cardId]?.color;
+        activeColour = colours.includes(selColour) ? selColour : colours[0];
+      }
+      for (const col of colours) {
+        const n = byColour.filter((c) => c.color === col && !unpickable(c)).length;
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'crew-colour-tab' + (col === activeColour ? ' is-active' : '');
+        b.setAttribute('role', 'tab');
+        b.setAttribute('aria-selected', col === activeColour ? 'true' : 'false');
+        b.style.setProperty('--tab-color', col);
+        const name = CREW_COLOUR_NAMES[col] || col;
+        b.innerHTML = `<span class="crew-colour-swatch"></span>${esc(name)}<span class="crew-colour-count">${n}</span>`;
+        b.addEventListener('click', () => { activeColour = col; render(); dialog.querySelector('.crew-colour-tab.is-active')?.focus(); });
+        b.addEventListener('keydown', (e) => {
+          if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+          e.preventDefault();
+          const i = colours.indexOf(activeColour) + (e.key === 'ArrowRight' ? 1 : -1);
+          activeColour = colours[(i + colours.length) % colours.length];
+          render();
+          dialog.querySelector('.crew-colour-tab.is-active')?.focus();
+        });
+        tabsEl.appendChild(b);
+      }
+    } else {
+      tabsEl.remove();
+      activeColour = null;
+    }
+    const shown = activeColour ? byColour.filter((c) => c.color === activeColour) : byColour;
+    const faces = [...shown.filter((c) => !unpickable(c)), ...shown.filter(unpickable)];
     const firstUnpickable = faces.find(unpickable);
     for (const c of faces) {
       if (c === firstUnpickable) grid.appendChild(crewSectionHeading('Not available to pick'));
