@@ -288,7 +288,9 @@ per room and carried into the game state as a boolean (`state.m0`,
   face the room lacks a module for is refused (`crew_face_needs_modules`, with
   the missing list) and the crew picker shows it greyed under "Not available to
   pick" with a "Needs M1" badge. A face tagged `requiresModule` M4 / M5 ("Coming
-  soon") is refused outright (`crew_face_needs_module`). `ctx.allowPromoCrew`
+  soon") is refused outright (`crew_face_needs_module`). JAXA (FUTURISTS: "Win at
+  6" in the Fundraise contract step; STARCHILD: ignore BEO Colony requirements +
+  the 1/turn free `FLIP_AUGMENT`) is `needsModules: ['M4']` since 2026-11-24. `ctx.allowPromoCrew`
   (admin) now only keeps the solo "Test drive promo crew" swap AFTER the draft
   closed. Every in-scope promo face has an engine rule, a client control where it
   needs a choice, and checks in `scripts/check-crew-abilities.mjs` (see

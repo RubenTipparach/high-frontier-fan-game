@@ -781,14 +781,24 @@ check('promo crew: any player may pick a face whose modules the room runs', () =
   eq(pick('crew_galahad_group', 'secondary', { m0: true, m1: true }).error, 'crew_face_needs_modules', 'Quest without M2');
   assert(pick('crew_galahad_group', 'primary', {}).ok, 'Heroic in a core game');
 });
-check('promo crew: an M4 / M5 face ("Coming soon") is refused; its in-scope card-mate is not', () => {
+check('promo crew: JAXA (Futurists / Starchild) needs M4', () => {
+  const pick = (face, opts, ctx = {}) => {
+    const st = freshGame(2, opts);
+    st.players[0].color = colorOf('crew_jaxa');
+    return op(st, 0, { kind: 'PICK_CREW', cardId: 'crew_jaxa', face }, ctx);
+  };
+  const no = pick('primary', PROMO, { allowPromoCrew: true });
+  eq(no.error, 'crew_face_needs_modules', 'Futurists without M4, admin too');
+  eq(pick('secondary', PROMO).error, 'crew_face_needs_modules', 'Starchild without M4');
+  assert(pick('primary', { m0: true, m4: true }).ok, 'Futurists in an M4 room');
+  assert(pick('secondary', { m0: true, m4: true }).ok, 'Starchild in an M4 room');
+});
+check('promo crew: an M5 face ("Coming soon") is refused; its in-scope card-mate is not', () => {
   const pick = (cardId, face, ctx = {}) => {
     const st = freshGame(2, PROMO);
     st.players[0].color = colorOf(cardId);
     return op(st, 0, { kind: 'PICK_CREW', cardId, face }, ctx);
   };
-  eq(pick('crew_jaxa', 'primary').error, 'crew_face_needs_module', 'JAXA Futurists (M4)');
-  eq(pick('crew_jaxa', 'secondary', { allowPromoCrew: true }).error, 'crew_face_needs_module', 'JAXA Starchild (M4), admin too');
   eq(pick('crew_utopia_inc', 'primary').error, 'crew_face_needs_module', 'Utopia Executive Discount (M5)');
   assert(pick('crew_utopia_inc', 'secondary').ok, 'Utopia Piggyback refused');
   assert(pick('crew_verisai', 'secondary').ok, 'VerisAI Cavitation Engineers refused');

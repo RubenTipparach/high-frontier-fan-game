@@ -11916,6 +11916,73 @@ check('Augment operation (no M2): chits go on a Crew at a Colony, follow it, jug
   return 'refused away from a Colony; on the Crew at Ceres; follows it; survives a death; Jar off + Triangle on in one op; freed by settling';
 });
 
+check('JAXA Futurists: start a contract auction at 6 years and win it at once', () => {
+  let st = m4Game();
+  const ini = currentPlayerOf(st);
+  let r = fundraise(st, ini.profileId);
+  assert(r.ok, r.error); st = r.state;
+  st.activeLawStar = 'honor';
+  const c = stackDeck(st, CONTRACTS.find((x) => x.pair === 'HU' && st.contractDecks.HU.includes(x.id)).faces.primary.code);
+  const no = op(st, 'AUCTION_CONTRACT_START', ini.profileId, { pair: 'HU', futurists: true });
+  assert(!no.ok && no.error === 'no_futurists', `without the privilege: ${no.error || 'accepted'}`);
+  pl(st, ini.profileId).faction = { cardId: 'crew_jaxa', face: 'primary' };
+  const aqua0 = pl(st, ini.profileId).aqua | 0;
+  r = op(st, 'AUCTION_CONTRACT_START', ini.profileId, { pair: 'HU', futurists: true });
+  assert(r.ok, `Futurists: ${r.error}`);
+  const P = pl(r.state, ini.profileId);
+  assert(!r.state.auction, 'an auction was left open');
+  assert(P.contractHand.includes(c.id), `contract not won: ${JSON.stringify(P.contractHand)}`);
+  assert(P.timepiece && P.timepiece.due === (st.clockTicks | 0) + 6, `timepiece: ${JSON.stringify(P.timepiece)}`);
+  const face = c.faces.primary;
+  assert((P.aqua | 0) === aqua0 + (face.advance | 0), `advance: ${P.aqua} vs ${aqua0}+${face.advance}`);
+  const again = op(r.state, 'AUCTION_CONTRACT_START', ini.profileId, { pair: 'HU' });
+  assert(!again.ok, 'a second contract auction this turn');
+  return `won ${face.name} at 6 years, ${face.advance} aqua advance; refused without Futurists`;
+});
+
+check('JAXA Starchild: augment a Crew away from any Colony; flip one chit 1/turn as a free action', () => {
+  const withShape = (sh) => conFace((f) => (f.cybernetics || []).includes(sh));
+  const st = startedGame({ m4: true });
+  st.activeIndex = 0;
+  const me = st.players[0];
+  me.faction = { cardId: 'crew_jaxa', face: 'secondary' };
+  const crewId = me.faction.cardId;
+  fulfilledWith(me, withShape('jar'), withShape('heart'));
+  st.colonies = {};
+  me.rocket.siteId = 'vesta';
+  me.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }, { id: crewId, kind: 'crew', face: 'secondary' }];
+  me.rocket.activeThrusterId = thruster.id;
+  me.opsRemaining = 4;
+  let r = applyOperation(st, { kind: 'IMPLANT', implants: [{ shape: 'jar', side: 2, crewId }, { shape: 'heart', side: 2, crewId }] }, { profileId: me.profileId });
+  assert(r.ok, `implant away from a Colony: ${r.error}`);
+  let P = pl(r.state, me.profileId);
+  assert(P.augments.jar.side === 2 && !P.rocket.stack.find((x) => x.id === crewId).massless, 'Jar 2 marked the Crew massless');
+  const ops0 = P.opsRemaining;
+  r = op(r.state, 'FLIP_AUGMENT', me.profileId, { shape: 'jar' });
+  assert(r.ok, `flip: ${r.error}`);
+  P = pl(r.state, me.profileId);
+  assert(P.augments.jar.side === 1 && P.rocket.stack.find((x) => x.id === crewId).massless, 'the flip did not take Jar to side 1');
+  assert(P.opsRemaining === ops0, 'the flip spent an operation');
+  const twice = op(r.state, 'FLIP_AUGMENT', me.profileId, { shape: 'jar' });
+  assert(!twice.ok && twice.error === 'starchild_used', `second flip: ${twice.error || 'accepted'}`);
+  // Next turn: the heart may not flip to Parenthood without M2.
+  const nx = JSON.parse(JSON.stringify(r.state));
+  delete pl(nx, me.profileId).starchildUsed;
+  const heart = op(nx, 'FLIP_AUGMENT', me.profileId, { shape: 'heart' });
+  assert(!heart.ok && heart.error === 'parenthood_not_yet', `heart to side 1: ${heart.error || 'accepted'}`);
+  // Undo takes the flip back.
+  const u = applyOperation(r.state, { kind: 'UNDO' }, { profileId: me.profileId, turnBaseState: JSON.parse(JSON.stringify(st)) });
+  assert(u.ok && pl(u.state, me.profileId).augments.jar.side === 2 && !pl(u.state, me.profileId).starchildUsed, `undo: ${u.error} ${JSON.stringify(u.ok && pl(u.state, me.profileId).augments)}`);
+  // Without the privilege it is refused, and the Colony requirement is back.
+  const plain = JSON.parse(JSON.stringify(st));
+  pl(plain, me.profileId).faction = { cardId: 'crew_jaxa', face: 'primary' };
+  const away = applyOperation(plain, { kind: 'IMPLANT', implants: [{ shape: 'jar', side: 2, crewId }] }, { profileId: me.profileId });
+  assert(!away.ok && away.error === 'crew_not_at_colony', `Futurists face away from a Colony: ${away.error || 'accepted'}`);
+  const nf = op(plain, 'FLIP_AUGMENT', me.profileId, { shape: 'jar' });
+  assert(!nf.ok, 'flip without Starchild');
+  return 'implanted at Vesta with no Colony; Jar flipped 2 to 1 for free; 1/turn; heart side 1 needs M2; undoable; refused without Starchild';
+});
+
 check('contract abilities are read off the printed Fulfilled Ability text', () => {
   const count = {};
   for (const c of CONTRACTS) for (const f of [c.faces.primary, c.faces.secondary]) {

@@ -9366,7 +9366,7 @@ function exomigrateOne(state, player, opts = {}) {
     const forced = state.spacerUnionDissolved && (earthEmpty || spaceEmpty);
     if (which === 'earthborn' && member && countColonists(player) > 0) return { ok: false, error: 'spacer_union' };
     // 4C2a: a BEO Colony owned since the beginning of the turn.
-    if (which === 'spaceborn' && !forced && !player.beoAtTurnStart) return { ok: false, error: 'needs_beo_colony_since_turn_start' };
+    if (which === 'spaceborn' && !forced && !player.beoAtTurnStart && !hasStarchild(state, player)) return { ok: false, error: 'needs_beo_colony_since_turn_start' };
     joining = which === 'spaceborn' && !member && !state.spacerUnionDissolved;
   }
   const res = exomigrateDraw(state, player, { ...opts, which });
@@ -14426,6 +14426,7 @@ const FUNCTIONAL = {
   FULFILL_CONTRACT: applyFulfillContract,
   ABANDON_CONTRACT: applyAbandonContract,
   IMPLANT: applyImplant,
+  FLIP_AUGMENT: applyFlipAugment,
   INSIGHT: applyInsight,
   PAY_LATE_FEE: applyPayLateFee,
   FUNDRAISE: applyFundraise,
@@ -14613,6 +14614,7 @@ function pickPayload(op) {
     case 'SET_CARD_GROUPS': return { groups: op.groups };
     case 'FULFILL_CONTRACT': return { cardId: op.cardId, ...(op.ideology ? { ideology: op.ideology, delegates: op.delegates } : {}) };
     case 'ABANDON_CONTRACT': return { cardId: op.cardId };
+    case 'FLIP_AUGMENT': return { shape: op.shape };
     case 'IMPLANT': return { bernal: op.bernal, colony: op.colony, implants: op.implants, remove: op.remove };
     case 'PAY_LATE_FEE': return { cardId: op.cardId, amount: op.amount };
     case 'CLEAR_ROUTE': return op.unit ? { unit: op.unit } : {};
@@ -14791,6 +14793,7 @@ function openTurnFor(state, player) {
   player.shuttlesUsed = false;
   player.cavitationUsed = false;
   if (player.tophatUsed) delete player.tophatUsed;   // M4 tophat: once per turn
+  if (player.starchildUsed) delete player.starchildUsed;   // M4 Starchild flip: once per turn
   if (player.newHorizonsUsed) delete player.newHorizonsUsed;   // M4 New Horizons: 1/spacecraft/turn
   delete player.insightUsed;                          // M4 Insight: once per auction turn
   delete player.insightPending;
@@ -17297,6 +17300,7 @@ function maybeRepayDebt(state, player, cardId) {
 // AUCTION_CONTRACT_START (4B3): the final step of a Fundraise. Pick a pair deck
 // sharing an ideology with an Active Law, optionally discard its top card, then
 // auction the top card (or walk away with `abandon`).
+const FUTURISTS_YEARS = 6;
 function applyContractAuctionStart(state, op, ctx) {
   if (!state.m4) return fail('not_m4');
   if (state.auction) return fail('auction_in_progress');
@@ -17306,6 +17310,8 @@ function applyContractAuctionStart(state, op, ctx) {
   if (player.contractAuctionDone) return fail('contract_auction_done');
   if (player.timepiece) return fail('timepiece_in_use');
   if (state.anarchy || state.war) return fail('contract_auction_prohibited');
+  // FUTURISTS (JAXA promo): bid 6 years and win at once, no rival bidding.
+  if (op.futurists && !hasPrivilege(state, player, 'FUTURISTS')) return fail('no_futurists');
   const pair = String(op.pair || '');
   if (!CONTRACT_PAIRS[pair] && !(pair === 'EX' && state.isobank)) return fail('bad_deck');
   if (!contractPairsOpenTo(state, player).includes(pair)) return fail('deck_not_open', { open: contractPairsOpenTo(state, player) });
@@ -17343,6 +17349,12 @@ function applyContractAuctionStart(state, op, ctx) {
   };
   // Nobody else may bid (every rival's timepiece is out, or none are seated):
   // the initiator wins at 10 years unopposed.
+  if (op.futurists) {
+    state.auction.bids = { [player.profileId]: FUTURISTS_YEARS };
+    state.auction.low = FUTURISTS_YEARS;
+    const res = resolveContractAuction(state, player.profileId);
+    return { ok: true, state, log: `${log}Futurists:${res}` };
+  }
   const rivals = state.players.filter((p) => p.profileId !== player.profileId && !contractBidBlock(state, p, cardId));
   log += `${player.name} put the ${face.name} contract up for auction at ${CONTRACT_BID_MAX} years`
     + ` (advance ${face.advance} aqua, late fee ${face.lateFee}, ${face.vp} VP).`;
@@ -17876,11 +17888,16 @@ function portfolioShapes(state, player) {
   }
   return out;
 }
+// STARCHILD (JAXA promo, M4): ignore BEO Colony requirements.
+function hasStarchild(state, player) {
+  return !!(state && state.m4 && player && hasPrivilege(state, player, 'STARCHILD'));
+}
 // "At least one BEO Colony (4C2a)". With Module 2 that is a Bernal anchored
 // Dirtside: an anchored Bernal of yours that is NOT your Home Bernal (user
 // 2026-11-15: "BEO colony is different with m2, I believe it has to be a dirt
 // side anchored bernal").
 function hasBeoColony(state, player) {
+  if (hasStarchild(state, player)) return true;
   return (player.bernals || []).some((bn) => bn && bn.anchored && !isHomeBernal(bn));
 }
 // M4 + M2 (4C7e): the different augmentation chits on your Colonists at a site,
@@ -18035,13 +18052,43 @@ function applyImplantOnCrew(state, op, player) {
     if (!CREW_BY_ID[crewId]) return fail('not_a_crew');
     const at = augHolderSite(player, crewId);
     if (at === undefined) return fail('not_your_crew');
-    if (at === 'leo' || !(state.colonies || {})[at]) return fail('crew_not_at_colony');
+    if (!hasStarchild(state, player) && (at === 'leo' || !(state.colonies || {})[at])) return fail('crew_not_at_colony');
     player.augments[shape] = { crewId, side, colonySite: at };
-    parts.push(`augmented ${cardNameOf(crewId)} with ${shape} (side ${side}) at the ${(siteById(at) || {}).name || at} Colony`);
+    const atName = at === 'leo' ? 'LEO' : ((siteById(at) || {}).name || at);
+    parts.push(`augmented ${cardNameOf(crewId)} with ${shape} (side ${side}) at ${(state.colonies || {})[at] ? `the ${atName} Colony` : atName}`);
   }
   player.opsRemaining -= 1;
   syncCrewAugmentMarks(state);
   return { ok: true, state, log: `${player.name} ${parts.join('; ')}.` };
+}
+// FLIP_AUGMENT (STARCHILD, JAXA promo): a 1/turn free action that flips one of
+// your augmentation chits to its other side, where it sits. op = { shape }.
+function applyFlipAugment(state, op, player) {
+  if (!state.m4) return fail('not_m4');
+  if (!hasPrivilege(state, player, 'STARCHILD')) return fail('no_starchild');
+  if (player.starchildUsed) return fail('starchild_used');
+  const shape = String(op.shape || '');
+  const a = (player.augments || {})[shape];
+  if (!a) return fail('no_such_chit', { shape });
+  const side = a.side === 1 ? 2 : 1;
+  // Parenthood (heart side 1) needs Module 2.
+  if (shape === 'heart' && side === 1 && !state.m2) return fail('parenthood_not_yet');
+  // The child is part of the heart while it is a preteen (4C5b).
+  if (shape === 'heart' && player.childChit) return fail('child_pending');
+  if (shape === 'heart' && side === 1) {
+    const pc = COLONISTS_BY_ID[a.colonistId] || {};
+    if (pc.spaceborn || pc.colonistKind !== 'Human') return fail('parenthood_earthborn_only');
+  }
+  a.side = side;
+  player.starchildUsed = true;
+  const parts = [];
+  if (shape === 'heart' && side === 1) {
+    player.childChit = { parentId: a.colonistId, due: (state.clockTicks | 0) + CHILD_YEARS, slot: (state.turn + CHILD_YEARS) % SLOTS };
+    parts.push(` A child is on the way (${CHILD_YEARS} years).`);
+  }
+  syncCrewAugmentMarks(state);
+  const holder = a.crewId || a.colonistId;
+  return { ok: true, state, log: `${player.name} (Starchild) flipped the ${shape} chit${holder ? ` on ${cardNameOf(holder)}` : ''} to side ${side}.${parts.join('')}` };
 }
 // ===== end Module 4 augmentations ============================================
 

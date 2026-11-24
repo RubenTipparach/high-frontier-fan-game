@@ -10331,6 +10331,9 @@ function humanizeOnlineOpError(code, detail) {
     chit_in_use: 'You only have one chit of that shape, and it is implanted elsewhere: juggle it off a Colonist aboard first.',
     chit_not_colocated: 'That chit is on a Colonist who is not aboard this Bernal.',
     parenthood_not_yet: 'Parenthood needs M2: implant the heart\'s other side.',
+    no_futurists: 'Only Futurists may win a contract outright.',
+    no_starchild: 'Only Starchild may flip a chit.',
+    starchild_used: 'You already flipped a chit this turn.',
     parenthood_earthborn_only: 'Parenthood: an earthborn Human only.',
     child_pending: 'You already have a child on the Sunspot Cycle.',
     child_choice_due: 'Your child has come of age: choose who takes the parent\'s place.',
@@ -35623,7 +35626,7 @@ const MP_LOG_ICONS = {
   AUCTION_CONTRACT_START: '📜', AUCTION_CONTRACT_BID: '⏳', AUCTION_CONTRACT_PASS: '🚫', AUCTION_CONTRACT_CLOSE: '⏱',
   // M4 isotope monetization (4D1d): gold beads at the Bank, sold / bought at Earth.
   ISOTOPE_EXCHANGE: '🟡', CHILD_COMES_OF_AGE: '👶', KEEP_ROBOT: '🤖',
-  FULFILL_CONTRACT: '🏁', PAY_LATE_FEE: '⏰', IMPLANT: '🦾', ABANDON_CONTRACT: '🗑', INSIGHT: '🔎',
+  FULFILL_CONTRACT: '🏁', PAY_LATE_FEE: '⏰', IMPLANT: '🦾', FLIP_AUGMENT: '🔄', ABANDON_CONTRACT: '🗑', INSIGHT: '🔎',
   AUCTION_RESET: '↺', AUCTION_SELL: '✅',
   PICK_CREW: '🧑‍🚀', SET_SPECIES: '\u{1F9DC}', SET_FIRST_PLAYER: '🥇', FREE_CUBE: '🧊',
   END_TURN: '⏭', MOVE: '🛸', BURN: '🔥',
@@ -36601,6 +36604,8 @@ initContractsUi({
   snapshot: () => _onlineSnapshot,
   me: () => mySnapshotPlayer(),
   myTurn: () => isOnlineMyTurn(),
+  // Does this seat hold a privilege (faction, grant, borrowed, Bernal, contract)?
+  hasPrivilege: (player, key) => playerHasPrivilege(player, key),
   submitTurnOp: (op) => submitOnlineOp(op),
   submitAuctionOp: (op) => submitMpAuctionOp(op),
   // Plot the desperation starship's flight on the map planner.

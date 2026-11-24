@@ -139,8 +139,8 @@ export const PROMO_CREW = [
     id: 'crew_jaxa',
     color: '#c09cc0',
     faces: {
-      primary:   { requiresModule: 'M4', name: 'JAXA', role: 'Faction C', bonus: 'FUTURISTS', blurb: 'When you start a contract auction, you may bid 6 years and immediately win the auction.', mass: 1, radHardness: 4, isru: 4, prospector: 'missile', thruster: { name: 'Omicron-S', thrustMN: 1.62, specImpKs: 0.46, thrust: 12, fuelPerBurn: 8, afterburn: 2 } },
-      secondary: { requiresModule: 'M4', name: 'JAXA', role: 'Faction C', bonus: 'STARCHILD', blurb: 'Ignore BEO Colony requirements. As a 1/turn free action, flip one of your augmentations to its other side.', mass: 1, radHardness: 4, isru: 4, prospector: 'missile', thruster: { name: 'Omicron-S', thrustMN: 1.62, specImpKs: 0.46, thrust: 12, fuelPerBurn: 8, afterburn: 2 } },
+      primary:   { needsModules: ['M4'], name: 'JAXA', role: 'Faction C', bonus: 'FUTURISTS', blurb: 'When you start a contract auction, you may bid 6 years and immediately win the auction.', mass: 1, radHardness: 4, isru: 4, prospector: 'missile', thruster: { name: 'Omicron-S', thrustMN: 1.62, specImpKs: 0.46, thrust: 12, fuelPerBurn: 8, afterburn: 2 } },
+      secondary: { needsModules: ['M4'], name: 'JAXA', role: 'Faction C', bonus: 'STARCHILD', blurb: 'Ignore BEO Colony requirements. As a 1/turn free action, flip one of your augmentations to its other side.', mass: 1, radHardness: 4, isru: 4, prospector: 'missile', thruster: { name: 'Omicron-S', thrustMN: 1.62, specImpKs: 0.46, thrust: 12, fuelPerBurn: 8, afterburn: 2 } },
     },
   },
   {
