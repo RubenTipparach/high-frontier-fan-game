@@ -469,7 +469,7 @@ function decksHtml(s, p, auctionOpen) {
     const deck = (s.contractDecks || {})[pair] || [];
     const exodus = pair === 'EX';
     const byLaw = exodus || CONTRACT_PAIRS[pair].some((k) => laws.has(k));
-    const byConnections = !byLaw && hasContractAbility(p, 'connections')
+    const byConnections = !byLaw && (hasContractAbility(p, 'connections') || hasPriv(p, 'COURIER'))
       && CONTRACT_PAIRS[pair].some((k) => delegateIn(s, k, p.profileId));
     const discarded = auctionOpen && _discardPair === pair && deck.length > 1;
     // With the top card set aside, the next card is the one on offer.

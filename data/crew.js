@@ -123,7 +123,7 @@ export const PROMO_CREW = [
     id: 'crew_the_sea_peoples',
     color: '#fccc00',
     faces: {
-      primary:   { requiresModule: 'M4', name: 'The Sea Peoples', role: 'Faction H', bonus: 'COURIER', blurb: 'Connections (4B2f).', mass: 1, radHardness: 4, isru: 4, prospector: 'buggy', thruster: { name: 'Fúú S010', thrustMN: 0.45, specImpKs: 0.46, thrust: 14, fuelPerBurn: 8, afterburn: 2 } },
+      primary:   { needsModules: ['M4'], name: 'The Sea Peoples', role: 'Faction H', bonus: 'COURIER', blurb: 'Connections (4B2f).', mass: 1, radHardness: 4, isru: 4, prospector: 'buggy', thruster: { name: 'Fúú S010', thrustMN: 0.45, specImpKs: 0.46, thrust: 14, fuelPerBurn: 8, afterburn: 2 } },
       secondary: { needsModules: ['M0'], name: 'The Sea Peoples', role: 'Faction H', bonus: 'POWER BROKERS', blurb: 'After you pay FINAO, gain 1 Aqua per Seniority Disk on the Assembly (max half FINAO paid, round down).', mass: 1, radHardness: 4, isru: 4, prospector: 'buggy', thruster: { name: 'Fúú S010', thrustMN: 0.45, specImpKs: 0.46, thrust: 14, fuelPerBurn: 8, afterburn: 2 } },
     },
   },

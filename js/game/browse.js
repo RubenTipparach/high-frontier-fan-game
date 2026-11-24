@@ -73,25 +73,32 @@ const BASE_CREW_IDS = new Set(CREW.map((c) => c.id));
 // notRecommendedWithModule face is pickable, just cautioned against.
 function crewModuleBadge(face) {
   const badge = document.createElement('div');
+  // In a game, a caution shows only when the game runs that module.
+  const caution = face.notRecommendedWithModule
+    && (!_onlineSnapshot || _onlineSnapshot[String(face.notRecommendedWithModule).toLowerCase()])
+    ? face.notRecommendedWithModule : null;
   if (face.requiresModule) {
     const n = face.requiresModule.slice(1);
     badge.className = 'card-module-badge is-required';
     badge.textContent = `Coming soon · ${face.requiresModule}`;
     badge.setAttribute('data-tip', `Coming soon: this side needs Module ${n}, which isn't available yet, so it can't be picked.`);
-  } else if (face.needsModules && face.needsModules.length) {
+  } else if (face.needsModules && face.needsModules.length
+    // In a game, the label shows only when this game lacks a module the side
+    // needs (owner 2026-11-24); outside a game (no setup yet) it always shows.
+    && (!_onlineSnapshot || crewFaceMissingModules(face).length)) {
     const missing = crewFaceMissingModules(face);
     const mods = face.needsModules.join(' + ');
     badge.className = 'card-module-badge ' + (missing.length ? 'is-required' : 'is-needs');
-    badge.textContent = `Needs ${mods}${face.notRecommendedWithModule ? ` · ⚠ ${face.notRecommendedWithModule}` : ''}`;
+    badge.textContent = `Needs ${mods}${caution ? ` · ⚠ ${caution}` : ''}`;
     const names = { M0: 'Module 0 (Politics)', M1: 'Module 1 (Terawatt)', M2: 'Module 2 (Futures)' };
     badge.setAttribute('data-tip', (missing.length
       ? `This side needs ${missing.map((m) => names[m] || m).join(' and ')}, which this game is not using, so it can't be picked here.`
       : `This side's ability uses ${face.needsModules.map((m) => names[m] || m).join(' and ')}.`)
-      + (face.notRecommendedWithModule ? ` Not recommended with Module ${face.notRecommendedWithModule.slice(1)}.` : ''));
-  } else if (face.notRecommendedWithModule) {
-    const n = face.notRecommendedWithModule.slice(1);
+      + (caution ? ` Not recommended with Module ${caution.slice(1)}.` : ''));
+  } else if (caution) {
+    const n = caution.slice(1);
     badge.className = 'card-module-badge is-caution';
-    badge.textContent = `⚠ ${face.notRecommendedWithModule}`;
+    badge.textContent = `⚠ ${caution}`;
     badge.setAttribute('data-tip', `Playable, but not recommended with Module ${n}: this ability moves Aqua, and Module ${n} changes how Aqua flows, so it would be too strong there.`);
   } else return null;
   // attachTipsTo binds every [data-tip] UNDER a root, so bind through a

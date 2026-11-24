@@ -12123,10 +12123,11 @@ check('contract decks open by the laws in force: each ideology, Centrist, Anarch
 
 check('Connections opens a contract deck where you hold a delegate', () => {
   const con = conFace((f) => f.abilities && f.abilities.connections);
-  const start = (connections) => {
+  const start = (connections, courier = false) => {
     let st = startedGame({ seats: 2, m4: true });
     const me = currentPlayerOf(st);
     if (connections) fulfilledWith(me, con);
+    if (courier) me.faction = { cardId: 'crew_the_sea_peoples', face: 'primary' };
     const r = fundraise(st, me.profileId);
     assert(r.ok, `fundraise: ${r.error}`);
     st = r.state;
@@ -12138,7 +12139,10 @@ check('Connections opens a contract deck where you hold a delegate', () => {
   assert(!ctl.ok && ctl.error === 'deck_not_open', `HU opened without Connections: ${ctl.error || ctl.log}`);
   const conn = start(true);
   assert(conn.ok, `Connections did not open HU: ${conn.error} ${JSON.stringify(conn.detail || '')}`);
-  return `${con.face.name}: Honor / Unity opens through the Honor delegate`;
+  // COURIER (The Sea Peoples promo, M4) is the same ability.
+  const cour = start(false, true);
+  assert(cour.ok, `Courier did not open HU: ${cour.error}`);
+  return `${con.face.name} and the Courier face: Honor / Unity opens through the Honor delegate`;
 });
 
 check('Insight sends one patent deck top card to the bottom before the auction', () => {

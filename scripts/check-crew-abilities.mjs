@@ -781,7 +781,7 @@ check('promo crew: any player may pick a face whose modules the room runs', () =
   eq(pick('crew_galahad_group', 'secondary', { m0: true, m1: true }).error, 'crew_face_needs_modules', 'Quest without M2');
   assert(pick('crew_galahad_group', 'primary', {}).ok, 'Heroic in a core game');
 });
-check('promo crew: JAXA (Futurists / Starchild) needs M4', () => {
+check('promo crew: JAXA (Futurists / Starchild) and Courier need M4', () => {
   const pick = (face, opts, ctx = {}) => {
     const st = freshGame(2, opts);
     st.players[0].color = colorOf('crew_jaxa');
@@ -792,6 +792,10 @@ check('promo crew: JAXA (Futurists / Starchild) needs M4', () => {
   eq(pick('secondary', PROMO).error, 'crew_face_needs_modules', 'Starchild without M4');
   assert(pick('primary', { m0: true, m4: true }).ok, 'Futurists in an M4 room');
   assert(pick('secondary', { m0: true, m4: true }).ok, 'Starchild in an M4 room');
+  // The Sea Peoples' Courier face (Connections) needs M4 too.
+  const sea = (opts) => { const st = freshGame(2, opts); st.players[0].color = colorOf('crew_the_sea_peoples'); return op(st, 0, { kind: 'PICK_CREW', cardId: 'crew_the_sea_peoples', face: 'primary' }); };
+  eq(sea(PROMO).error, 'crew_face_needs_modules', 'Courier without M4');
+  assert(sea({ m0: true, m4: true }).ok, 'Courier in an M4 room');
 });
 check('promo crew: an M5 face ("Coming soon") is refused; its in-scope card-mate is not', () => {
   const pick = (cardId, face, ctx = {}) => {

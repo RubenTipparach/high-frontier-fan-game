@@ -17081,7 +17081,8 @@ function contractDebt(player, cardId) {
 function contractPairsOpenTo(state, player) {
   // Connections contract ability (4B2f): also any deck where you have a
   // delegate in one of its two ideologies.
-  const connections = contractAbilityCount(state, player, 'connections') > 0;
+  // COURIER (The Sea Peoples promo, M4) is the same Connections ability.
+  const connections = contractAbilityCount(state, player, 'connections') > 0 || hasPrivilege(state, player, 'COURIER');
   const asm = connections ? assemblyOf(state) : null;
   // EXONET FUTURE: choose any contract deck when fundraising.
   const anyDeck = hasFutureEffect(player, 'anyContractDeck');

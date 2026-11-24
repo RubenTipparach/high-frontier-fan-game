@@ -5,8 +5,9 @@ Every crew faction privilege (the `bonus` / `blurb` on each face in
 
 **Status: every playable crew face is Implemented and Verified, with no known
 bugs.** "Playable" means the 12 core faces plus every promo face not tagged
-`requiresModule` M4 / M5 (38 faces in all: 12 core + 26 promo; the 5 faces
-still tagged M4 / M5 are out of scope; JAXA's two M4 faces joined 2026-11-24). The second pass on 2026-11-14 built the 21 promo faces
+`requiresModule` M4 / M5 (39 faces in all: 12 core + 27 promo; the 4 faces
+still tagged M5 are out of scope; JAXA's two M4 faces and Courier joined
+2026-11-24). The second pass on 2026-11-14 built the 21 promo faces
 that had no engine rule and fixed the 4 bugs the first pass found.
 
 - Tests: `scripts/check-crew-abilities.mjs`, beside the CI engine smoke
@@ -88,13 +89,18 @@ an m0+m1+m2 game:
   game-start +2 (it is paid when the draft closes, before any anchor is
   possible), and Refugee's shared Factory use (pinned to the Factory, because
   the card says "even if this card is flipped").
-- **M4 (JAXA, enabled 2026-11-24):** FUTURISTS and STARCHILD are tagged
-  `needsModules: ['M4']`, so they are pickable in an M4 room only.
-- **Out of scope** (tagged `requiresModule` M4 / M5): COURIER, EXECUTIVE
-  DISCOUNT, SILENT PARTNER, CHAIRMAN'S CUT, INCUBATOR.
+- **M4 (enabled 2026-11-24):** FUTURISTS, STARCHILD (JAXA) and COURIER (The
+  Sea Peoples) are tagged `needsModules: ['M4']`, so they are pickable in an M4
+  room only.
+- **Out of scope** (tagged `requiresModule` M5): EXECUTIVE DISCOUNT, SILENT
+  PARTNER, CHAIRMAN'S CUT, INCUBATOR.
+- **Picker labels:** in a game a "Needs Mn" / "⚠ Mn" label shows only when the
+  game lacks (or, for the caution, runs) that module; outside a game they
+  always show.
 
 | Card / privilege | Engine (`server/game/engine.js`) | Client control (`js/game/browse.js`) | Implemented? | Verified? | Bug? | Tests / note |
 |---|---|---|---|---|---|---|
+| The Sea Peoples / COURIER (M4) | `contractPairsOpenTo`: Connections when `hasPrivilege(COURIER)` | the Fundraise contract step opens that deck ("Connections") | Yes | Yes | No | Same as the Connections contract ability (4B2f). Engine check. |
 | JAXA / FUTURISTS (M4) | `applyContractAuctionStart` (`op.futurists`, `FUTURISTS_YEARS` 6) then `resolveContractAuction` | "Win at 6" beside Auction on each open deck in the Fundraise window's contract step | Yes | Yes | No | Wins the top card at 6 years at once, no rival bids, advance paid; `no_futurists` without it. Engine check + driven in a browser. |
 | JAXA / STARCHILD (M4) | `hasStarchild`: `hasBeoColony` true, `applyImplantOnCrew` skips `crew_not_at_colony`, spaceborn exomigration skips 4C2a; `applyFlipAugment` (`FLIP_AUGMENT`, `starchildUsed` 1/turn) | Augment wizard lists every Crew; "🔄 <chit>" flip buttons in Augmentations | Yes | Yes | No | Free, 1/turn, undoable; heart to Parenthood needs M2. Engine check + driven in a browser. |
 | BRIN / THERMAL RESEARCH | `:3641` (`effectiveRadHardness`, key at `:3677`) | at-risk preview mirror | Yes | Yes | No | Seeded Earth belt roll. |
