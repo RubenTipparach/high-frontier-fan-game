@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { db, nowMs } from './db.js';
 import { createInitialState } from './game/state.js';
-import { CONTRACTS_BY_ID } from '../data/contracts.js';
+import { CONTRACTS_BY_ID, sideFace as contractSideFace } from '../data/contracts.js';
 import { CREW_BY_ID } from '../data/crew.js';
 import { contractStepPlaces, applyOperation, SUPPORTED_OPS, NEEDS_TURN_BASE, reconstructTurnActions, slotMass, activeNetThrust, thrusterFuelPerBurn, rocketDryMass, ceoSoloView, bernalVpByPlayer, bernalRowsByPlayer, assemblyVpByPlayer, liveScoreboard, rocketSolarZone, auctionWaitingOn, inSpacerUnion, driveTutorialBots, migrateGloryCrewBindings, elevatorConnectedFactorySet, pinnedFactorySlugs, playerHasColonistPower, playerCrewReactorKinds, decksFor, repairSpeciesDeckSplit, repairSirensAssembly, autoFixGlitches, canLooseOutpostWater, outpostWater } from './game/engine.js';
 import { randomSeed, makeRng, shuffle } from './game/rng.js';
@@ -2208,7 +2208,7 @@ function slotInfo(slot) {
     kind: slot.kind || 'patent',
     // Card type (thruster / colonist / gw-thruster / ...) so the editor can
     // pick the right flip label (black side vs purple promotion).
-    type: (c && c.type) || '',
+    type: (c && c.type) || (CONTRACTS_BY_ID[slot.id] ? 'contract' : ''),
     // Installed-face mass of this card, so the admin breakdown can show each
     // card's mass contribution and the per-unit dry/wet totals.
     mass: slotMass(slot),
@@ -2225,6 +2225,7 @@ function cardModule(card) {
 // The slot kind a card carries when it enters a stack (the engine tags
 // colonist and crew slots so per-kind reads work).
 function slotKindFor(cardId) {
+  if (CONTRACTS_BY_ID[cardId]) return 'contract';
   const c = PATENTS_BY_ID[cardId];
   if (c && c.type === 'colonist') return 'colonist';
   if (c && c.type === 'crew') return 'crew';
@@ -2246,6 +2247,7 @@ function siteNameOf(slug) {
 }
 function locLabel(loc) {
   if (loc === 'hand') return 'Hand';
+  if (loc === 'contracts') return 'Contracts';
   if (loc === 'leo') return 'LEO';
   if (loc === 'rocket') return 'Rocket';
   if (loc === 'freighter') return 'Freighter';
@@ -2281,6 +2283,15 @@ function listFor(player, loc) {
 // Remove ONE card matching cardId from a location; returns a normalized slot
 // {id, kind, face} or null when not present.
 function takeCardFrom(player, loc, cardId) {
+  // M4 contract hand: ids, like the patent hand. A contract leaves it on the
+  // side it was auctioned on (4B2b).
+  if (loc === 'contracts') {
+    const i = (player.contractHand || []).indexOf(cardId);
+    if (i < 0) return null;
+    player.contractHand.splice(i, 1);
+    const meta = (player.contractMeta || {})[cardId] || {};
+    return { id: cardId, kind: 'contract', face: contractSideFace(meta.side) };
+  }
   if (loc === 'hand') {
     const i = (player.hand || []).indexOf(cardId);
     if (i < 0) return null;
@@ -2297,7 +2308,24 @@ function takeCardFrom(player, loc, cardId) {
   return { id: slot.id, kind: slot.kind || 'patent', face: slot.face || 'primary' };
 }
 function addCardTo(player, loc, entry) {
-  if (loc === 'hand') { (player.hand = player.hand || []).push(entry.id); return true; }
+  // Contracts live in the contract hand, never the patent hand, and only
+  // contracts go there.
+  const isCon = !!CONTRACTS_BY_ID[entry.id];
+  if (loc === 'contracts') {
+    if (!isCon) return false;
+    (player.contractHand = player.contractHand || []).push(entry.id);
+    return true;
+  }
+  if (loc === 'hand') {
+    if (isCon) return false;
+    (player.hand = player.hand || []).push(entry.id);
+    return true;
+  }
+  if (isCon) {
+    // Into a stack: it is in play now, as after a boost.
+    const meta = (player.contractMeta = player.contractMeta || {})[entry.id];
+    if (meta) meta.boosted = true;
+  }
   const arr = listFor(player, loc);
   if (!arr) return false;
   arr.push({ id: entry.id, kind: entry.kind || 'patent', face: entry.face || 'primary' });
@@ -2402,7 +2430,7 @@ function adminGameStateView(gameId) {
       // the fulfilled pile. Read-only in the editor.
       contractHand: (p.contractHand || []).map((id) => {
         const meta = (p.contractMeta || {})[id] || {};
-        return { id, name: cardLabel(id), side: meta.side || null, default: !!meta.default };
+        return { id, name: cardLabel(id) + ' (' + (meta.side || 'blue') + (meta.default ? ', default' : '') + ')', type: 'contract', side: meta.side || null, default: !!meta.default };
       }),
       fulfilledContracts: (p.fulfilledContracts || []).map((e) => {
         const id = typeof e === 'string' ? e : (e && (e.id || e.cardId));
@@ -7371,6 +7399,7 @@ document.addEventListener('click', function (ev) {
   }
   function locsFor(p) {
     var arr = ['hand', 'leo', 'rocket'];
+    if (current.state && current.state.m4) arr.splice(1, 0, 'contracts');
     if (p.freighter) arr.push('freighter');
     (p.bernals || []).forEach(function (bn, i) { arr.push('bernal:' + i); });
     Object.keys(p.outposts || {}).forEach(function (k) { arr.push('outpost:' + k); });
@@ -7378,6 +7407,7 @@ document.addEventListener('click', function (ev) {
   }
   function locLabel(loc, p) {
     if (loc === 'hand') return 'Hand';
+    if (loc === 'contracts') return '📜 Contracts';
     if (loc === 'leo') return 'LEO';
     if (loc === 'rocket') return 'Rocket' + (p && p.rocket ? ' (' + esc(p.rocket.siteName) + ')' : '');
     if (loc === 'freighter') {
@@ -7400,6 +7430,7 @@ document.addEventListener('click', function (ev) {
   }
   function cardsAt(p, loc) {
     if (loc === 'hand') return p.hand || [];
+    if (loc === 'contracts') return p.contractHand || [];
     if (loc === 'leo') return p.leo || [];
     if (loc === 'rocket') return (p.rocket && p.rocket.stack) || [];
     if (loc === 'freighter') return (p.freighter && p.freighter.stack) || [];
@@ -7409,8 +7440,11 @@ document.addEventListener('click', function (ev) {
     if (m) { var o = (p.outposts || {})[m[1]]; return o ? (o.cards || []) : []; }
     return [];
   }
-  function moveOptions(locs, cur, p) {
-    return locs.filter(function (l) { return l !== cur; }).map(function (l) {
+  function moveOptions(locs, cur, p, c) {
+    var isCon = !!(c && (c.type === 'contract' || cur === 'contracts'));
+    return locs.filter(function (l) {
+      return l !== cur && (isCon ? l !== 'hand' : l !== 'contracts');
+    }).map(function (l) {
       return '<option value="' + l + '">' + esc(locLabel(l, p)) + '</option>';
     }).join('');
   }
@@ -7743,14 +7777,9 @@ document.addEventListener('click', function (ev) {
       html += '<div class="ge-teleport">⚡ Powersat: <strong>' + (hasPS ? 'granted' : 'no') + '</strong>'
         + '<button data-act="grant_powersat"' + (hasPS ? ' disabled' : '') + '>Grant Powersat</button>'
         + '<button data-act="revoke_powersat"' + (hasPS ? '' : ' disabled') + '>Revoke</button></div>';
-      if ((p.contractHand || []).length || (p.fulfilledContracts || []).length) {
-        html += '<div class="ge-teleport">📜 Contracts: '
-          + ((p.contractHand || []).map(function (c) {
-              return esc(c.name) + (c.side ? ' (' + esc(c.side) + ')' : '') + (c.default ? ' <strong>default</strong>' : '');
-            }).join(', ') || 'none in hand')
-          + ((p.fulfilledContracts || []).length
-            ? ' &middot; fulfilled: ' + p.fulfilledContracts.map(function (c) { return esc(c.name); }).join(', ') : '')
-          + '</div>';
+      if ((p.fulfilledContracts || []).length) {
+        html += '<div class="ge-teleport">📜 Fulfilled: '
+          + p.fulfilledContracts.map(function (c) { return esc(c.name); }).join(', ') + '</div>';
       }
       // Relaunch a LOST Freighter from the hand (no big cube on the map), with
       // any hand cards as its cargo. Promoted by default when the promotion is
@@ -7799,13 +7828,13 @@ document.addEventListener('click', function (ev) {
           var isSec = c.face === 'secondary';
           var badge = isSec ? (promoMod ? ' 🟣' : ' ⬛') : '';
           var flipBtn = '';
-          if (loc !== 'hand' && modOk) {
+          if (loc !== 'hand' && loc !== 'contracts' && c.type !== 'contract' && modOk) {
             var flabel = promoMod ? (isSec ? '⚪ Demote' : '🟣 Promote') : (isSec ? '⬜ White' : '⬛ Black');
             flipBtn = '<button data-act="flip" title="Flip the card face">' + flabel + '</button>';
           }
           html += '<div class="ge-card" data-cid="' + esc(c.id) + '" data-loc="' + loc + '">'
             + '<span class="ge-name">' + esc(c.name || c.id) + badge + (c.mass != null ? ' <span class="ge-card-mass" title="card mass">⚖' + c.mass + '</span>' : '') + '</span>'
-            + '<select class="ge-move">' + moveOptions(locs, loc, p) + '</select>'
+            + '<select class="ge-move">' + moveOptions(locs, loc, p, c) + '</select>'
             + '<button data-act="move">Move</button>'
             + flipBtn
             + '<button data-act="remove" class="danger">&times;</button></div>';
