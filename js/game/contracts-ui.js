@@ -139,7 +139,8 @@ setContractDebtSource((id) => {
     const f = contractFace(id, meta.side || 'blue');
     if (!f) return null;
     const debt = (f.advance | 0) * (meta.boosted ? 1 : 2);
-    return { paid: meta.paid | 0, debt, pay: payNow(s, q, id, f, debt - (meta.paid | 0)) };
+    const mine = me() && q.profileId === me().profileId;
+    return { paid: meta.paid | 0, debt, pay: payNow(s, q, id, f, debt - (meta.paid | 0)), mishap: mine ? mishapOption(id) : null };
   }
   return null;
 });
@@ -190,6 +191,16 @@ document.addEventListener('click', (e) => {
   b.disabled = true;
   document.querySelectorAll('.card-modal-overlay .modal-x').forEach((x) => { try { x.click(); } catch { /* ignore */ } });
   payContractFee(b.dataset.pay).finally(() => { b.disabled = false; });
+}, true);
+document.addEventListener('click', (e) => {
+  const b = e.target.closest && e.target.closest('.m4-mishap-btn');
+  if (!b) return;
+  e.preventDefault();
+  e.stopPropagation();
+  b.disabled = true;
+  document.querySelectorAll('.card-modal-overlay .modal-x').forEach((x) => { try { x.click(); } catch { /* ignore */ } });
+  Promise.resolve(D.submitTurnOp({ kind: 'LOBBY', ideology: 'centrist' }))
+    .finally(() => { b.disabled = false; if (_panelOpen) renderPanel(); });
 }, true);
 document.addEventListener('click', (e) => {
   const b = e.target.closest && e.target.closest('.m4-fulfill-btn');
