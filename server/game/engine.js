@@ -10457,6 +10457,7 @@ function applyDecommission(state, op, player) {
   let humansHome = 0;
   let fuelDestroyed = 0;        // total fuel units lost (water / isotope)
   let fuelCardsDestroyed = 0;   // how many fuel cargo cards were scrapped
+  const tragedies = [];         // glory chits settled low side up (G5, Lb)
   for (const id of ids) {
     const idx = src.findIndex((s) => s.id === id);
     if (idx < 0) continue;
@@ -10471,6 +10472,11 @@ function applyDecommission(state, op, player) {
       const atHome = from === 'leo' || (from === 'bernal' && srcBernal && isHomeBernal(srcBernal));
       if (!mayCommitMurder(state, player) || atHome) { blocked++; continue; }
       src.splice(idx, 1);
+      // Tragedy (G5, Lb): a chit on a decommissioned card goes to LEO LOW side
+      // up. Settle it before the crew lands in the LEO Stack, or the home sweep
+      // reads the recall as a ticker tape parade and scores the back side.
+      const tragedy = resolveDeadCrewChits(state, player, slot.id, 'decommissioned');
+      if (tragedy) tragedies.push(tragedy);
       (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face === 'secondary' ? 'secondary' : 'primary' });
       if (player.rocket.activeThrusterId === id) player.rocket.activeThrusterId = null;
       if (player.rocket.activeProspectorId === id) player.rocket.activeProspectorId = null;
@@ -10493,6 +10499,8 @@ function applyDecommission(state, op, player) {
       } else {
         if (!mayCommitMurder(state, player)) { blocked++; continue; }
         src.splice(idx, 1);
+        const tragedy = resolveDeadCrewChits(state, player, slot.id, 'decommissioned');
+        if (tragedy) tragedies.push(tragedy);
         const home = (player.bernals || []).find((b) => b && b.anchored && isHomeBernal(b));
         const targetArr = home ? (home.stack = home.stack || []) : (player.leo = player.leo || []);
         targetArr.push({ id: slot.id, kind: 'colonist', face: 'primary' });
@@ -10536,6 +10544,7 @@ function applyDecommission(state, op, player) {
   }
   let log = `${player.name} decommissioned ${parts.join(' and ')}.`;
   if (blocked) log += ` (${blocked} stayed - a Human decommission is a felony needing Anarchy, and crew already home at LEO / the Home Bernal cannot be recalled.)`;
+  if (tragedies.length) log += ` ${tragedies.join(' ')}`;
   return { ok: true, state, log };
 }
 
@@ -15739,10 +15748,10 @@ function crewDeathToLeo(state, owner, slot) {
 // homeOrphanedGloryChits / migrateGloryCrewBindings, but keyed on the specific
 // dead carrier rather than "carriers all gone" (a death-respawn keeps the card
 // in play, so the orphan check would never fire for it).
-function resolveDeadCrewChits(state, owner, deadId) {
-  if (!deadId || !owner.glory || !Array.isArray(owner.glory.chits)) return;
+function resolveDeadCrewChits(state, owner, deadId, why = 'died') {
+  if (!deadId || !owner.glory || !Array.isArray(owner.glory.chits)) return '';
   const dead = owner.glory.chits.filter((c) => c && c.crewId === deadId);
-  if (!dead.length) return;
+  if (!dead.length) return '';
   owner.glory.claimed = owner.glory.claimed || [];
   let vps = 0;
   const zones = [];
@@ -15754,8 +15763,9 @@ function resolveDeadCrewChits(state, owner, deadId) {
   }
   owner.glory.vps = (owner.glory.vps | 0) + vps;
   owner.glory.chits = owner.glory.chits.filter((c) => !dead.includes(c));
-  const note = `${owner.name}'s glory chit${zones.length === 1 ? '' : 's'} (${zones.join(', ')}) scored at front value (+${vps} VP) - the crew died carrying ${zones.length === 1 ? 'it' : 'them'} (tragedy).`;
+  const note = `${owner.name}'s glory chit${zones.length === 1 ? '' : 's'} (${zones.join(', ')}) scored at front value (+${vps} VP) - the crew ${why === 'decommissioned' ? 'was decommissioned' : 'died'} carrying ${zones.length === 1 ? 'it' : 'them'} (tragedy).`;
   pushNews(state, '🎖', note);
+  return note;
 }
 
 // The tally rows the board-meeting screen reads out one by one, and the same

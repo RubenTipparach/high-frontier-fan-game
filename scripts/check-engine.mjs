@@ -12353,6 +12353,25 @@ check('the remaining blue Fulfilled Abilities (Inner Tour, New Horizons, Sun-fir
   };
   assert(!scrapCrew(null), 'a Crew was let go with no Murder/Suicide allowance');
   assert(scrapCrew(byName('Rescue Team')), 'Rescue Team did not let a Crew go to LEO');
+  // Tragedy (G5, Lb): a chit on the decommissioned Crew lands LOW side up, not
+  // in a ticker tape parade because the Crew now stands at LEO.
+  {
+    const st = startedGame({ seats: 2, m4: true });
+    const me = st.players[0];
+    st.activeIndex = 0;
+    fulfilledWith(me, byName('Rescue Team'));
+    const crewId = me.faction.cardId;
+    me.leo = (me.leo || []).filter((x) => x.id !== crewId);
+    me.rocket.siteId = 'vesta';
+    me.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }, { id: crewId, kind: 'crew', face: 'primary' }];
+    me.glory = { chits: [{ zone: 'Ceres', crewId }], claimed: [], visited: ['Ceres'], vps: 0 };
+    const r = applyOperation(st, { kind: 'DECOMMISSION', cardIds: [crewId], from: 'rocket' }, { profileId: me.profileId });
+    assert(r.ok, `decommission: ${r.error}`);
+    const g = r.state.players[0].glory;
+    assert(!g.chits.length, 'the chit is still carried');
+    assert(g.claimed.length === 1 && g.claimed[0].side === 'front', `the chit scored ${JSON.stringify(g.claimed)}, not low side up`);
+    assert(/tragedy/.test(r.log), `the log does not say so: ${r.log}`);
+  }
   notes.push('Rescue Team');
   // Tsiolkovsky Elevator Lab: factory-assist through lander burns at Elevator Sites only.
   const tsio = byName('Tsiolkovsky Elevator Lab');
