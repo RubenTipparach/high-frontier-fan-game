@@ -14067,6 +14067,7 @@ function mountStackTransfer(cardsHost, footerHost, stackId, opts = {}) {
       // Bernal"). Both are boost / boarding stations (2A6) and the server takes
       // the sale from either.
       if (_online && !isFuel && slot.kind !== 'crew' && !slot.promoted && card
+          && !CONTRACTS_BY_ID[slot.id]
           && typeof stackId === 'string' && stackId.startsWith('bernal')
           && slot.face === blackSideFaceClient(card)) {
         const homeBn = myHomeBernal();
@@ -14777,6 +14778,7 @@ function openUnifiedStackInspector(stackId) {
         const sellsFromHere = stackId === 'leo'
           || (homeBn && stackId === `bernal${getMyBernals().indexOf(homeBn)}`);
         if (sellsFromHere && _online && slot.kind !== 'crew' && !slot.promoted
+            && !CONTRACTS_BY_ID[slot.id]
             && slot.face === blackSideFaceClient(card)) {
           const sellVal = leoBlackSideValue(card);
           const sellBtn = document.createElement('button');
@@ -25741,6 +25743,8 @@ function stationSaleEntries() {
   const out = [];
   for (const slot of slots) {
     if (!slot || slot.kind === 'crew' || slot.kind === 'fuel' || slot.promoted) continue;
+    // A boosted contract is not a market good.
+    if (CONTRACTS_BY_ID[slot.id]) continue;
     const card = PATENTS_BY_ID[slot.id];
     if (!card || card.type === 'colonist') continue;
     if (slot.face !== blackSideFaceClient(card)) continue;
