@@ -274,7 +274,10 @@ per room and carried into the game state as a boolean (`state.m0`,
   chit you hold in the Contracts panel to open the Augment wizard; the chits
   (`js/game/augment-sides.js`, the side's picture inside the shape) are drawn on
   the Crew card's right edge (`card-ui.js#setAugChitHook`), fading on hover with
-  a tip. The contract auction is ONLY the last step of the Fundraise window (no
+  a tip. A contract with the humans-on-board icon (a manned contract) counts as
+  a Human for Glitch repair and for glory chits (load, carry, parade, Tragedy),
+  and for nothing else yet (owner 2026-11-25; `engine.js#isGloryHuman`,
+  `stackCanFixGlitch`). The contract auction is ONLY the last step of the Fundraise window (no
   toolbar or Market button starts it); the turn bar
   carries a timepiece badge ("N turns left") that opens the contract and where
   it is.
