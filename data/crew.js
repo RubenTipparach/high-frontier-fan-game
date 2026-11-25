@@ -123,7 +123,7 @@ export const PROMO_CREW = [
     id: 'crew_the_sea_peoples',
     color: '#fccc00',
     faces: {
-      primary:   { requiresModule: 'M4', name: 'The Sea Peoples', role: 'Faction H', bonus: 'COURIER', blurb: 'Connections (4B2f).', mass: 1, radHardness: 4, isru: 4, prospector: 'buggy', thruster: { name: 'Fúú S010', thrustMN: 0.45, specImpKs: 0.46, thrust: 14, fuelPerBurn: 8, afterburn: 2 } },
+      primary:   { needsModules: ['M4'], name: 'The Sea Peoples', role: 'Faction H', bonus: 'COURIER', blurb: 'Connections (4B2f).', mass: 1, radHardness: 4, isru: 4, prospector: 'buggy', thruster: { name: 'Fúú S010', thrustMN: 0.45, specImpKs: 0.46, thrust: 14, fuelPerBurn: 8, afterburn: 2 } },
       secondary: { needsModules: ['M0'], name: 'The Sea Peoples', role: 'Faction H', bonus: 'POWER BROKERS', blurb: 'After you pay FINAO, gain 1 Aqua per Seniority Disk on the Assembly (max half FINAO paid, round down).', mass: 1, radHardness: 4, isru: 4, prospector: 'buggy', thruster: { name: 'Fúú S010', thrustMN: 0.45, specImpKs: 0.46, thrust: 14, fuelPerBurn: 8, afterburn: 2 } },
     },
   },
@@ -139,8 +139,8 @@ export const PROMO_CREW = [
     id: 'crew_jaxa',
     color: '#c09cc0',
     faces: {
-      primary:   { requiresModule: 'M4', name: 'JAXA', role: 'Faction C', bonus: 'FUTURISTS', blurb: 'When you start a contract auction, you may bid 6 years and immediately win the auction.', mass: 1, radHardness: 4, isru: 4, prospector: 'missile', thruster: { name: 'Omicron-S', thrustMN: 1.62, specImpKs: 0.46, thrust: 12, fuelPerBurn: 8, afterburn: 2 } },
-      secondary: { requiresModule: 'M4', name: 'JAXA', role: 'Faction C', bonus: 'STARCHILD', blurb: 'Ignore BEO Colony requirements. As a 1/turn free action, flip one of your augmentations to its other side.', mass: 1, radHardness: 4, isru: 4, prospector: 'missile', thruster: { name: 'Omicron-S', thrustMN: 1.62, specImpKs: 0.46, thrust: 12, fuelPerBurn: 8, afterburn: 2 } },
+      primary:   { needsModules: ['M4'], name: 'JAXA', role: 'Faction C', bonus: 'FUTURISTS', blurb: 'When you start a contract auction, you may bid 6 years and immediately win the auction.', mass: 1, radHardness: 4, isru: 4, prospector: 'missile', thruster: { name: 'Omicron-S', thrustMN: 1.62, specImpKs: 0.46, thrust: 12, fuelPerBurn: 8, afterburn: 2 } },
+      secondary: { needsModules: ['M4'], name: 'JAXA', role: 'Faction C', bonus: 'STARCHILD', blurb: 'Ignore BEO Colony requirements. As a 1/turn free action, flip one of your augmentations to its other side.', mass: 1, radHardness: 4, isru: 4, prospector: 'missile', thruster: { name: 'Omicron-S', thrustMN: 1.62, specImpKs: 0.46, thrust: 12, fuelPerBurn: 8, afterburn: 2 } },
     },
   },
   {

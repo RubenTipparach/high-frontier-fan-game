@@ -5,8 +5,9 @@ Every crew faction privilege (the `bonus` / `blurb` on each face in
 
 **Status: every playable crew face is Implemented and Verified, with no known
 bugs.** "Playable" means the 12 core faces plus every promo face not tagged
-`requiresModule` M4 / M5 (36 faces in all: 12 core + 24 promo; the 7 M4 / M5
-faces are out of scope). The second pass on 2026-11-14 built the 21 promo faces
+`requiresModule` M4 / M5 (39 faces in all: 12 core + 27 promo; the 4 faces
+still tagged M5 are out of scope; JAXA's two M4 faces and Courier joined
+2026-11-24). The second pass on 2026-11-14 built the 21 promo faces
 that had no engine rule and fixed the 4 bugs the first pass found.
 
 - Tests: `scripts/check-crew-abilities.mjs`, beside the CI engine smoke
@@ -88,11 +89,20 @@ an m0+m1+m2 game:
   game-start +2 (it is paid when the draft closes, before any anchor is
   possible), and Refugee's shared Factory use (pinned to the Factory, because
   the card says "even if this card is flipped").
-- **Out of scope** (tagged `requiresModule` M4 / M5): COURIER, FUTURISTS,
-  STARCHILD, EXECUTIVE DISCOUNT, SILENT PARTNER, CHAIRMAN'S CUT, INCUBATOR.
+- **M4 (enabled 2026-11-24):** FUTURISTS, STARCHILD (JAXA) and COURIER (The
+  Sea Peoples) are tagged `needsModules: ['M4']`, so they are pickable in an M4
+  room only.
+- **Out of scope** (tagged `requiresModule` M5): EXECUTIVE DISCOUNT, SILENT
+  PARTNER, CHAIRMAN'S CUT, INCUBATOR.
+- **Picker labels:** in a game a "Needs Mn" / "⚠ Mn" label shows only when the
+  game lacks (or, for the caution, runs) that module; outside a game they
+  always show.
 
 | Card / privilege | Engine (`server/game/engine.js`) | Client control (`js/game/browse.js`) | Implemented? | Verified? | Bug? | Tests / note |
 |---|---|---|---|---|---|---|
+| The Sea Peoples / COURIER (M4) | `contractPairsOpenTo`: Connections when `hasPrivilege(COURIER)` | the Fundraise contract step opens that deck ("Connections") | Yes | Yes | No | Same as the Connections contract ability (4B2f). Engine check. |
+| JAXA / FUTURISTS (M4) | `applyContractAuctionStart` (`op.futurists`, `FUTURISTS_YEARS` 6) then `resolveContractAuction` | "Win at 6" beside Auction on each open deck in the Fundraise window's contract step | Yes | Yes | No | Wins the top card at 6 years at once, no rival bids, advance paid; `no_futurists` without it. Engine check + driven in a browser. |
+| JAXA / STARCHILD (M4) | `hasStarchild`: `hasBeoColony` true, `applyImplantOnCrew` skips `crew_not_at_colony`, spaceborn exomigration skips 4C2a; `applyFlipAugment` (`FLIP_AUGMENT`, `starchildUsed` 1/turn) | Augment wizard lists every Crew; "🔄 <chit>" flip buttons in Augmentations | Yes | Yes | No | Free, 1/turn, undoable; heart to Parenthood needs M2. Engine check + driven in a browser. |
 | BRIN / THERMAL RESEARCH | `:3641` (`effectiveRadHardness`, key at `:3677`) | at-risk preview mirror | Yes | Yes | No | Seeded Earth belt roll. |
 | BRIN / THERMAL LABS | `:9716` `thermalLabsSite`, `:9729` `applyThermalLabsFlip` (via `SET_RADIATOR_SIDE radSide:'heavy'`) | "Open to heavy (Thermal Labs)" beside "Fold to light" | Yes | Yes | No | Free, 1/turn, radiator at your Colony or Bernal. Holder vs Thermal Research face; 1/turn cap; Anarchy; M2 lock. Driven in a browser. |
 | The Sea Peoples / POWER BROKERS | `:1596` `payFinao` (key at `:1608`); every FINAO charge goes through it | none needed | Yes | Yes | No | +1 per Seniority Disk on the Assembly, capped at half the FINAO paid. Checks for 1 disk, the cap, 0 disks, the Courier face, Anarchy and the M2 lock. |
@@ -259,3 +269,9 @@ can be flipped):
     a Human only after Robot Emancipation.
 25. **Refugee:** the Claim owner's share is not revocable. It rides the ordinary
     Factory-use grant and ends if the Factory cube relocates.
+26. **Murder/Suicide (Collective Bargaining, Rescue Team):** covers every Human,
+    Crew as well as Colonist (G6a: Workforce is "neither a Felony nor Murder",
+    so any other Human decommission is). A Crew recalls to the LEO Stack, a
+    Human Colonist goes home. It grants that one felony only: no Claim Jump,
+    Luna prospecting or Factory Hijack. (2026-11-25; before this only
+    Colonists were covered.)

@@ -840,7 +840,7 @@ function maybeAwardGlory(state, player, site, turn, stack = player.rocket.stack)
   // can carry a Human just as well. Mirror of the client's willAwardChit
   // `crewAboard` gate - a Human-less stack leaves the chit on the site for a
   // later, crewed visit to load.
-  if (!stackHasHuman(state, stack)) return null;
+  if (!stackHasGloryHuman(state, player, stack)) return null;
   // Glory Carry Limit (rule a): each Crew or Colonist carries at most ONE glory
   // chit, so the number of carried chits can't exceed the Humans aboard. When
   // every carrier already holds a chit there is no free hand to take this one,
@@ -873,7 +873,7 @@ function heroicCarrierId(state, player) {
 function gloryCarriers(state, player) {
   if (heroicCarrierId(state, player)) return Infinity;
   let n = 0;
-  const count = (slots) => { for (const s of (slots || [])) if (isHumanSlot(state, s)) n += 1; };
+  const count = (slots) => { for (const s of (slots || [])) if (isGloryHuman(state, player, s)) n += 1; };
   count(player.leo);
   count(player.rocket && player.rocket.stack);
   for (const o of Object.values(player.outposts || {})) if (o) count(o.cards);
@@ -894,7 +894,7 @@ function pickGloryCarrier(state, player, stack = player.rocket && player.rocket.
   const taken = new Set(((player.glory && player.glory.chits) || [])
     .map((c) => c && c.crewId).filter(Boolean));
   for (const s of (stack || [])) {
-    if (isHumanSlot(state, s) && !taken.has(s.id)) return s.id;
+    if (isGloryHuman(state, player, s) && !taken.has(s.id)) return s.id;
   }
   // Heroic: the Galahad crew may take another chit on top of the ones it holds.
   const hero = heroicCarrierId(state, player);
@@ -908,7 +908,7 @@ function pickGloryCarrier(state, player, stack = player.rocket && player.rocket.
 // decommissioned (in which case the chit is orphaned home at front value).
 function humanCardInPlay(state, player, cardId) {
   if (!cardId) return false;
-  const inArr = (slots) => (slots || []).some((s) => s && s.id === cardId && isHumanSlot(state, s));
+  const inArr = (slots) => (slots || []).some((s) => s && s.id === cardId && isGloryHuman(state, player, s));
   if (inArr(player.leo)) return true;
   if (inArr(player.rocket && player.rocket.stack)) return true;
   for (const o of Object.values(player.outposts || {})) if (o && inArr(o.cards)) return true;
@@ -1150,7 +1150,7 @@ export function migrateGloryCrewBindings(state, { commit = false } = {}) {
     if (!p.glory || !Array.isArray(p.glory.chits) || !p.glory.chits.length) continue;
     const taken = new Set(p.glory.chits.map((c) => c && c.crewId).filter(Boolean));
     const rocketHumans = ((p.rocket && p.rocket.stack) || [])
-      .filter((s) => isHumanSlot(state, s)).map((s) => s.id);
+      .filter((s) => isGloryHuman(state, p, s)).map((s) => s.id);
     const unbound = [];
     for (const c of p.glory.chits) {
       if (!c || c.crewId) continue;                 // already bound: leave it
@@ -1212,7 +1212,7 @@ function applyLoadGlory(state, op, player) {
     && !sirenGloryBlocked(state, c.site.id)
     && !player.glory.visited.includes(c.site.solarZone)
     && !zoneChitTaken(state, c.site.solarZone)
-    && stackHasHuman(state, c.stack));
+    && stackHasGloryHuman(state, player, c.stack));
   if (!eligible) return fail('no_chit_to_load');
   // Glory Carry Limit (rule a): if every Human aboard already carries a chit,
   // there is no free carrier for another - report it distinctly so the client
@@ -1505,6 +1505,17 @@ function isHumanColonistSlot(state, slot) {
 // Human Colonist").
 function isHumanSlot(state, slot) {
   return isCrewSlot(slot) || isHumanColonistSlot(state, slot);
+}
+// Glory chits (G5): a manned contract carries the same "humans on board" icon a
+// Crew does, so it can load, carry and parade a chit like any other Human (owner
+// 2026-11-25). Glory rules only; other Human rules still read isHumanSlot.
+function isGloryHuman(state, player, slot) {
+  if (isHumanSlot(state, slot)) return true;
+  return !!(state && state.m4 && player && slot && CONTRACTS_BY_ID[slot.id]
+    && (contractFaceOf(player, slot.id) || {}).manned);
+}
+function stackHasGloryHuman(state, player, slots) {
+  return (slots || []).some((s) => isGloryHuman(state, player, s));
 }
 function stackHasHuman(state, slots) {
   return (slots || []).some((s) => isHumanSlot(state, s));
@@ -1983,6 +1994,18 @@ function siteRefuelGate(state, player, siteId) {
 // Humans co-located with a site: a colony dome, any player's rocket
 // parked there with crew (or a Human colonist) aboard, any outpost there
 // holding one, or an M1/M2 vehicle stack (freighter / Bernal) holding one.
+// M4 manned contract (4B2d): the card carries the same "humans on board" icon a
+// Crew does, so it has people aboard who can clear a Glitch (G7). Read off the
+// owner's side of the card. Glitch rules only: it is not a Crew elsewhere.
+function stackHasMannedContract(state, owner, slots) {
+  if (!state || !state.m4 || !owner) return false;
+  return (slots || []).some((s) => s && CONTRACTS_BY_ID[s.id] && (contractFaceOf(owner, s.id) || {}).manned);
+}
+// Anyone aboard this stack who can fix a Glitch: a Crew, a Human Colonist, or a
+// manned contract.
+function stackCanFixGlitch(state, owner, slots) {
+  return stackHasCrew(slots) || stackHasHuman(state, slots) || stackHasMannedContract(state, owner, slots);
+}
 function humansAtSite(state, siteId) {
   if (!siteId) return true; // LEO: mission control is right there
   // ...and so is a Siren's. Cordelia IS their LEO (V9c) - the same launch
@@ -1995,14 +2018,12 @@ function humansAtSite(state, siteId) {
   if (state && state.sirens && String(siteId) === SIREN_HOME_SITE) return true;
   if (state.colonies[siteId]) return true;
   for (const p of state.players) {
-    if (p.rocket.siteId === siteId
-        && (stackHasCrew(p.rocket.stack) || stackHasHuman(state, p.rocket.stack))) return true;
+    if (p.rocket.siteId === siteId && stackCanFixGlitch(state, p, p.rocket.stack)) return true;
     for (const o of Object.values(p.outposts || {})) {
-      if (o && o.siteId === siteId
-          && (stackHasCrew(o.cards) || stackHasHuman(state, o.cards))) return true;
+      if (o && o.siteId === siteId && stackCanFixGlitch(state, p, o.cards)) return true;
     }
     if (p.freighter && p.freighter.siteId === siteId
-        && stackHasHuman(state, p.freighter.stack)) return true;
+        && stackCanFixGlitch(state, p, p.freighter.stack)) return true;
     for (const bn of (p.bernals || [])) {
       if (!bn || bn.siteId !== siteId) continue;
       // An ANCHORED Bernal is a Colony dome (2B3 places one when it anchors,
@@ -2013,7 +2034,7 @@ function humansAtSite(state, siteId) {
       // aboard like any other vehicle. Without this a glitch sat forever next to
       // a player's own anchored station (user 2026-09-02).
       if (bn.anchored) return true;
-      if (stackHasHuman(state, bn.stack)) return true;
+      if (stackCanFixGlitch(state, p, bn.stack)) return true;
     }
   }
   return false;
@@ -2568,13 +2589,13 @@ export function autoFixGlitches(state) {
     const scrum = hasPrivilege(state, p, 'SCRUM_TROUBLESHOOTERS');
     const fixWord = scrum ? 'cleared remotely (Scrum Troubleshooters)' : 'fixed by nearby humans';
     if (p.rocket.glitch
-        && (scrum || stackHasCrew(p.rocket.stack) || humansAtSite(state, p.rocket.siteId))) {
+        && (scrum || stackCanFixGlitch(state, p, p.rocket.stack) || humansAtSite(state, p.rocket.siteId))) {
       p.rocket.glitch = false;
       notes.push(`${p.name}'s rocket glitch was ${fixWord}.`);
     }
     for (const o of Object.values(p.outposts || {})) {
       if (o && o.glitch
-          && (scrum || stackHasCrew(o.cards) || humansAtSite(state, o.siteId))) {
+          && (scrum || stackCanFixGlitch(state, p, o.cards) || humansAtSite(state, o.siteId))) {
         o.glitch = false;
         notes.push(`${p.name}'s Outpost ${o.letter} glitch was ${fixWord}.`);
       }
@@ -2584,13 +2605,13 @@ export function autoFixGlitches(state) {
     // humansAtSite already applies to them - a colonist riding the cargo, or
     // anyone (any player's) colocated at the unit's site.
     if (p.freighter && p.freighter.glitched
-        && (scrum || stackHasHuman(state, p.freighter.stack) || humansAtSite(state, p.freighter.siteId))) {
+        && (scrum || stackCanFixGlitch(state, p, p.freighter.stack) || humansAtSite(state, p.freighter.siteId))) {
       p.freighter.glitched = false;
       notes.push(`${p.name}'s Freighter glitch was ${fixWord}.`);
     }
     for (const bn of (p.bernals || [])) {
       if (bn && bn.glitched
-          && (scrum || stackHasHuman(state, bn.stack) || humansAtSite(state, bn.siteId))) {
+          && (scrum || stackCanFixGlitch(state, p, bn.stack) || humansAtSite(state, bn.siteId))) {
         bn.glitched = false;
         notes.push(`${p.name}'s Bernal glitch was ${fixWord}.`);
       }
@@ -2697,7 +2718,7 @@ function cashHomeGloryChits(state, player) {
   const out = { scored: 0, vps: 0, side: null };
   if (!player.glory || !Array.isArray(player.glory.chits) || !player.glory.chits.length) return out;
   const aboard = new Set((player.rocket.stack || [])
-    .filter((s) => isHumanSlot(state, s)).map((s) => s.id));
+    .filter((s) => isGloryHuman(state, player, s)).map((s) => s.id));
   const anyCrewAboard = (player.rocket.stack || []).some(isCrewSlot);
   player.glory.claimed = player.glory.claimed || [];
   const kept = [];
@@ -2749,7 +2770,7 @@ function cashGloryAtHomeBernal(state) {
     // have to physically move the crew onto the station for it to count home).
     const atHome = new Set();
     const addHumans = (arr) => {
-      for (const s of (arr || [])) if (isHumanSlot(state, s)) atHome.add(s.id);
+      for (const s of (arr || [])) if (isGloryHuman(state, p, s)) atHome.add(s.id);
     };
     for (const bn of homeBernals) addHumans(bn.stack);
     const homeSites = new Set(homeBernals.map((bn) => bn.siteId));
@@ -2832,12 +2853,12 @@ function glitchTargetFor(state, p) {
   if (playerHasColonistPower(state, p, 'glitchFree')) return null;
   const candidates = [];
   if (p.rocket.stack.length && !p.rocket.glitch
-      && !stackHasCrew(p.rocket.stack) && !humansAtSite(state, p.rocket.siteId)) {
+      && !stackCanFixGlitch(state, p, p.rocket.stack) && !humansAtSite(state, p.rocket.siteId)) {
     candidates.push({ count: p.rocket.stack.length, apply: () => { p.rocket.glitch = true; }, label: `${p.name}'s rocket` });
   }
   for (const o of Object.values(p.outposts || {})) {
     if (o && (o.cards || []).length && !o.glitch
-        && !stackHasCrew(o.cards) && !humansAtSite(state, o.siteId)) {
+        && !stackCanFixGlitch(state, p, o.cards) && !humansAtSite(state, o.siteId)) {
       candidates.push({ count: o.cards.length, apply: () => { o.glitch = true; }, label: `${p.name}'s Outpost ${o.letter}` });
     }
   }
@@ -9366,7 +9387,7 @@ function exomigrateOne(state, player, opts = {}) {
     const forced = state.spacerUnionDissolved && (earthEmpty || spaceEmpty);
     if (which === 'earthborn' && member && countColonists(player) > 0) return { ok: false, error: 'spacer_union' };
     // 4C2a: a BEO Colony owned since the beginning of the turn.
-    if (which === 'spaceborn' && !forced && !player.beoAtTurnStart) return { ok: false, error: 'needs_beo_colony_since_turn_start' };
+    if (which === 'spaceborn' && !forced && !player.beoAtTurnStart && !hasStarchild(state, player)) return { ok: false, error: 'needs_beo_colony_since_turn_start' };
     joining = which === 'spaceborn' && !member && !state.spacerUnionDissolved;
   }
   const res = exomigrateDraw(state, player, { ...opts, which });
@@ -10374,6 +10395,19 @@ function recallIfEmpty(player) {
 // LEO Stack) back to the HAND (mirror of browse.js#decommissionSelectedToHand).
 // Crew never enters the hand, so any crew in the selection is skipped.
 // op = { cardIds: [...], from: 'rocket' | 'leo' }. Turn-gated (functional).
+// Murder/Suicide: voluntarily decommissioning a Human, Crew OR Colonist (G6:
+// Workforce is "neither a Felony nor Murder", so any other Human decommission
+// is). Any Felony allows it. Collective Bargaining (LEO Workers' Union promo
+// crew, "You may commit Murder/Suicide") and Rescue Team (M4 contract ability,
+// "You are allowed Murder/Suicide") grant JUST this one felony, not the full
+// Felonious privilege: they must NOT unlock Claim Jump, Luna prospecting or
+// Factory Hijack, so they are not folded into mayCommitFelony.
+function mayCommitMurder(state, player) {
+  return mayCommitFelony(state, player)
+    || hasPrivilege(state, player, 'COLLECTIVE_BARGAINING')
+    || contractAbilityCount(state, player, 'murderSuicide') > 0;
+}
+
 function applyDecommission(state, op, player) {
   const fromRaw = String(op.from || 'rocket');
   // Recall the Freighter UNIT itself back to hand: the big cube leaves the map
@@ -10444,6 +10478,7 @@ function applyDecommission(state, op, player) {
   let humansHome = 0;
   let fuelDestroyed = 0;        // total fuel units lost (water / isotope)
   let fuelCardsDestroyed = 0;   // how many fuel cargo cards were scrapped
+  const tragedies = [];         // glory chits settled low side up (G5, Lb)
   for (const id of ids) {
     const idx = src.findIndex((s) => s.id === id);
     if (idx < 0) continue;
@@ -10456,8 +10491,13 @@ function applyDecommission(state, op, player) {
     // non-Home-Bernal stack during a felony.)
     if (isCrewSlot(slot)) {
       const atHome = from === 'leo' || (from === 'bernal' && srcBernal && isHomeBernal(srcBernal));
-      if (!mayCommitFelony(state, player) || atHome) { blocked++; continue; }
+      if (!mayCommitMurder(state, player) || atHome) { blocked++; continue; }
       src.splice(idx, 1);
+      // Tragedy (G5, Lb): a chit on a decommissioned card goes to LEO LOW side
+      // up. Settle it before the crew lands in the LEO Stack, or the home sweep
+      // reads the recall as a ticker tape parade and scores the back side.
+      const tragedy = resolveDeadCrewChits(state, player, slot.id, 'decommissioned');
+      if (tragedy) tragedies.push(tragedy);
       (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face === 'secondary' ? 'secondary' : 'primary' });
       if (player.rocket.activeThrusterId === id) player.rocket.activeThrusterId = null;
       if (player.rocket.activeProspectorId === id) player.rocket.activeProspectorId = null;
@@ -10478,17 +10518,10 @@ function applyDecommission(state, op, player) {
         robotsToHand++;
         robotIds.push(slot.id);
       } else {
-        // Collective Bargaining (LEO Workers' Union promo crew): "You may
-        // commit Murder/Suicide" grants JUST this one felony (2C2a), not the
-        // full Felonious privilege - it must NOT also unlock Claim Jump, Luna
-        // prospecting, Factory Hijack, or Crew (Human) decommission above, so
-        // it's checked here directly rather than folded into mayCommitFelony.
-        // Rescue Team (M4 contract ability) allows Murder/Suicide the same way.
-        if (!mayCommitFelony(state, player) && !hasPrivilege(state, player, 'COLLECTIVE_BARGAINING')
-          && !contractAbilityCount(state, player, 'murderSuicide')) {
-          blocked++; continue;
-        }
+        if (!mayCommitMurder(state, player)) { blocked++; continue; }
         src.splice(idx, 1);
+        const tragedy = resolveDeadCrewChits(state, player, slot.id, 'decommissioned');
+        if (tragedy) tragedies.push(tragedy);
         const home = (player.bernals || []).find((b) => b && b.anchored && isHomeBernal(b));
         const targetArr = home ? (home.stack = home.stack || []) : (player.leo = player.leo || []);
         targetArr.push({ id: slot.id, kind: 'colonist', face: 'primary' });
@@ -10532,6 +10565,7 @@ function applyDecommission(state, op, player) {
   }
   let log = `${player.name} decommissioned ${parts.join(' and ')}.`;
   if (blocked) log += ` (${blocked} stayed - a Human decommission is a felony needing Anarchy, and crew already home at LEO / the Home Bernal cannot be recalled.)`;
+  if (tragedies.length) log += ` ${tragedies.join(' ')}`;
   return { ok: true, state, log };
 }
 
@@ -14426,6 +14460,7 @@ const FUNCTIONAL = {
   FULFILL_CONTRACT: applyFulfillContract,
   ABANDON_CONTRACT: applyAbandonContract,
   IMPLANT: applyImplant,
+  FLIP_AUGMENT: applyFlipAugment,
   INSIGHT: applyInsight,
   PAY_LATE_FEE: applyPayLateFee,
   FUNDRAISE: applyFundraise,
@@ -14613,6 +14648,7 @@ function pickPayload(op) {
     case 'SET_CARD_GROUPS': return { groups: op.groups };
     case 'FULFILL_CONTRACT': return { cardId: op.cardId, ...(op.ideology ? { ideology: op.ideology, delegates: op.delegates } : {}) };
     case 'ABANDON_CONTRACT': return { cardId: op.cardId };
+    case 'FLIP_AUGMENT': return { shape: op.shape };
     case 'IMPLANT': return { bernal: op.bernal, colony: op.colony, implants: op.implants, remove: op.remove };
     case 'PAY_LATE_FEE': return { cardId: op.cardId, amount: op.amount };
     case 'CLEAR_ROUTE': return op.unit ? { unit: op.unit } : {};
@@ -14791,6 +14827,7 @@ function openTurnFor(state, player) {
   player.shuttlesUsed = false;
   player.cavitationUsed = false;
   if (player.tophatUsed) delete player.tophatUsed;   // M4 tophat: once per turn
+  if (player.starchildUsed) delete player.starchildUsed;   // M4 Starchild flip: once per turn
   if (player.newHorizonsUsed) delete player.newHorizonsUsed;   // M4 New Horizons: 1/spacecraft/turn
   delete player.insightUsed;                          // M4 Insight: once per auction turn
   delete player.insightPending;
@@ -15732,10 +15769,10 @@ function crewDeathToLeo(state, owner, slot) {
 // homeOrphanedGloryChits / migrateGloryCrewBindings, but keyed on the specific
 // dead carrier rather than "carriers all gone" (a death-respawn keeps the card
 // in play, so the orphan check would never fire for it).
-function resolveDeadCrewChits(state, owner, deadId) {
-  if (!deadId || !owner.glory || !Array.isArray(owner.glory.chits)) return;
+function resolveDeadCrewChits(state, owner, deadId, why = 'died') {
+  if (!deadId || !owner.glory || !Array.isArray(owner.glory.chits)) return '';
   const dead = owner.glory.chits.filter((c) => c && c.crewId === deadId);
-  if (!dead.length) return;
+  if (!dead.length) return '';
   owner.glory.claimed = owner.glory.claimed || [];
   let vps = 0;
   const zones = [];
@@ -15747,8 +15784,9 @@ function resolveDeadCrewChits(state, owner, deadId) {
   }
   owner.glory.vps = (owner.glory.vps | 0) + vps;
   owner.glory.chits = owner.glory.chits.filter((c) => !dead.includes(c));
-  const note = `${owner.name}'s glory chit${zones.length === 1 ? '' : 's'} (${zones.join(', ')}) scored at front value (+${vps} VP) - the crew died carrying ${zones.length === 1 ? 'it' : 'them'} (tragedy).`;
+  const note = `${owner.name}'s glory chit${zones.length === 1 ? '' : 's'} (${zones.join(', ')}) scored at front value (+${vps} VP) - the crew ${why === 'decommissioned' ? 'was decommissioned' : 'died'} carrying ${zones.length === 1 ? 'it' : 'them'} (tragedy).`;
   pushNews(state, '🎖', note);
+  return note;
 }
 
 // The tally rows the board-meeting screen reads out one by one, and the same
@@ -17078,7 +17116,8 @@ function contractDebt(player, cardId) {
 function contractPairsOpenTo(state, player) {
   // Connections contract ability (4B2f): also any deck where you have a
   // delegate in one of its two ideologies.
-  const connections = contractAbilityCount(state, player, 'connections') > 0;
+  // COURIER (The Sea Peoples promo, M4) is the same Connections ability.
+  const connections = contractAbilityCount(state, player, 'connections') > 0 || hasPrivilege(state, player, 'COURIER');
   const asm = connections ? assemblyOf(state) : null;
   // EXONET FUTURE: choose any contract deck when fundraising.
   const anyDeck = hasFutureEffect(player, 'anyContractDeck');
@@ -17102,7 +17141,10 @@ function contractBidBlock(state, player, cardId) {
 // Every stack location a contract card can sit in, with where that stack is.
 function findContractSlot(state, player, cardId) {
   const inLeo = (player.leo || []).findIndex((s) => s.id === cardId);
-  if (inLeo >= 0) return { arr: player.leo, idx: inLeo, where: { siteId: null, atLeo: true, entered: [], stack: player.leo }, label: 'LEO' };
+  if (inLeo >= 0) return { arr: player.leo, idx: inLeo, where: { siteId: null, atLeo: true, atHome: true, entered: [], stack: player.leo }, label: 'LEO' };
+  // atHome: LEO or one of your anchored Home Bernals, where a Return step ends
+  // (your Bank reaches both, like the aqua bank and the ticker tape parade).
+  const homeAt = (siteId, atLeo) => atLeo || siteIsRefuelDepot(player, siteId);
   const st = (player.rocket && player.rocket.stack) || [];
   const inRocket = st.findIndex((s) => s.id === cardId);
   if (inRocket >= 0) {
@@ -17110,7 +17152,7 @@ function findContractSlot(state, player, cardId) {
     return {
       arr: st, idx: inRocket, label: 'rocket',
       where: {
-        siteId: atLeo ? null : player.rocket.siteId, atLeo, entered: player.rocket.enteredThisTurn || [],
+        siteId: atLeo ? null : player.rocket.siteId, atLeo, atHome: homeAt(player.rocket.siteId, atLeo), entered: player.rocket.enteredThisTurn || [],
         stack: st, glitched: !!player.rocket.glitch, rolled: !!player.rocket.hazardRolledThisTurn,
       },
     };
@@ -17122,7 +17164,7 @@ function findContractSlot(state, player, cardId) {
     const i = (o.cards || []).findIndex((s) => s.id === cardId);
     if (i >= 0) {
       return { arr: o.cards, idx: i, label: `Outpost ${o.letter}`,
-        where: { siteId: o.siteId, atLeo: false, entered: [], stack: o.cards, glitched: !!o.glitch } };
+        where: { siteId: o.siteId, atLeo: false, atHome: homeAt(o.siteId, false), entered: [], stack: o.cards, glitched: !!o.glitch } };
     }
   }
   const fr = player.freighter;
@@ -17131,8 +17173,19 @@ function findContractSlot(state, player, cardId) {
     if (i >= 0) {
       const atLeo = fr.siteId == null || fr.siteId === leoSlug();
       return { arr: fr.stack, idx: i, label: 'Freighter',
-        where: { siteId: atLeo ? null : fr.siteId, atLeo, entered: [], stack: fr.stack, glitched: !!fr.glitched } };
+        where: { siteId: atLeo ? null : fr.siteId, atLeo, atHome: homeAt(fr.siteId, atLeo), entered: [], stack: fr.stack, glitched: !!fr.glitched } };
     }
+  }
+  // A Bernal's own stack (M2). Aboard your anchored Home Bernal is home.
+  for (const [bi, bn] of (player.bernals || []).entries()) {
+    const bst = (bn && bn.stack) || [];
+    const i = bst.findIndex((s) => s.id === cardId);
+    if (i < 0) continue;
+    const atLeo = bn.siteId == null || bn.siteId === leoSlug();
+    return { arr: bst, idx: i, label: `Bernal ${bi + 1}`,
+      where: { siteId: atLeo ? null : bn.siteId, atLeo,
+        atHome: atLeo || (bn.anchored && isHomeBernal(bn)) || siteIsRefuelDepot(player, bn.siteId),
+        entered: [], stack: bst, glitched: !!bn.glitched } };
   }
   return null;
 }
@@ -17297,6 +17350,7 @@ function maybeRepayDebt(state, player, cardId) {
 // AUCTION_CONTRACT_START (4B3): the final step of a Fundraise. Pick a pair deck
 // sharing an ideology with an Active Law, optionally discard its top card, then
 // auction the top card (or walk away with `abandon`).
+const FUTURISTS_YEARS = 6;
 function applyContractAuctionStart(state, op, ctx) {
   if (!state.m4) return fail('not_m4');
   if (state.auction) return fail('auction_in_progress');
@@ -17306,6 +17360,8 @@ function applyContractAuctionStart(state, op, ctx) {
   if (player.contractAuctionDone) return fail('contract_auction_done');
   if (player.timepiece) return fail('timepiece_in_use');
   if (state.anarchy || state.war) return fail('contract_auction_prohibited');
+  // FUTURISTS (JAXA promo): bid 6 years and win at once, no rival bidding.
+  if (op.futurists && !hasPrivilege(state, player, 'FUTURISTS')) return fail('no_futurists');
   const pair = String(op.pair || '');
   if (!CONTRACT_PAIRS[pair] && !(pair === 'EX' && state.isobank)) return fail('bad_deck');
   if (!contractPairsOpenTo(state, player).includes(pair)) return fail('deck_not_open', { open: contractPairsOpenTo(state, player) });
@@ -17343,6 +17399,12 @@ function applyContractAuctionStart(state, op, ctx) {
   };
   // Nobody else may bid (every rival's timepiece is out, or none are seated):
   // the initiator wins at 10 years unopposed.
+  if (op.futurists) {
+    state.auction.bids = { [player.profileId]: FUTURISTS_YEARS };
+    state.auction.low = FUTURISTS_YEARS;
+    const res = resolveContractAuction(state, player.profileId);
+    return { ok: true, state, log: `${log}Futurists:${res}` };
+  }
   const rivals = state.players.filter((p) => p.profileId !== player.profileId && !contractBidBlock(state, p, cardId));
   log += `${player.name} put the ${face.name} contract up for auction at ${CONTRACT_BID_MAX} years`
     + ` (advance ${face.advance} aqua, late fee ${face.lateFee}, ${face.vp} VP).`;
@@ -17876,11 +17938,16 @@ function portfolioShapes(state, player) {
   }
   return out;
 }
+// STARCHILD (JAXA promo, M4): ignore BEO Colony requirements.
+function hasStarchild(state, player) {
+  return !!(state && state.m4 && player && hasPrivilege(state, player, 'STARCHILD'));
+}
 // "At least one BEO Colony (4C2a)". With Module 2 that is a Bernal anchored
 // Dirtside: an anchored Bernal of yours that is NOT your Home Bernal (user
 // 2026-11-15: "BEO colony is different with m2, I believe it has to be a dirt
 // side anchored bernal").
 function hasBeoColony(state, player) {
+  if (hasStarchild(state, player)) return true;
   return (player.bernals || []).some((bn) => bn && bn.anchored && !isHomeBernal(bn));
 }
 // M4 + M2 (4C7e): the different augmentation chits on your Colonists at a site,
@@ -18035,13 +18102,43 @@ function applyImplantOnCrew(state, op, player) {
     if (!CREW_BY_ID[crewId]) return fail('not_a_crew');
     const at = augHolderSite(player, crewId);
     if (at === undefined) return fail('not_your_crew');
-    if (at === 'leo' || !(state.colonies || {})[at]) return fail('crew_not_at_colony');
+    if (!hasStarchild(state, player) && (at === 'leo' || !(state.colonies || {})[at])) return fail('crew_not_at_colony');
     player.augments[shape] = { crewId, side, colonySite: at };
-    parts.push(`augmented ${cardNameOf(crewId)} with ${shape} (side ${side}) at the ${(siteById(at) || {}).name || at} Colony`);
+    const atName = at === 'leo' ? 'LEO' : ((siteById(at) || {}).name || at);
+    parts.push(`augmented ${cardNameOf(crewId)} with ${shape} (side ${side}) at ${(state.colonies || {})[at] ? `the ${atName} Colony` : atName}`);
   }
   player.opsRemaining -= 1;
   syncCrewAugmentMarks(state);
   return { ok: true, state, log: `${player.name} ${parts.join('; ')}.` };
+}
+// FLIP_AUGMENT (STARCHILD, JAXA promo): a 1/turn free action that flips one of
+// your augmentation chits to its other side, where it sits. op = { shape }.
+function applyFlipAugment(state, op, player) {
+  if (!state.m4) return fail('not_m4');
+  if (!hasPrivilege(state, player, 'STARCHILD')) return fail('no_starchild');
+  if (player.starchildUsed) return fail('starchild_used');
+  const shape = String(op.shape || '');
+  const a = (player.augments || {})[shape];
+  if (!a) return fail('no_such_chit', { shape });
+  const side = a.side === 1 ? 2 : 1;
+  // Parenthood (heart side 1) needs Module 2.
+  if (shape === 'heart' && side === 1 && !state.m2) return fail('parenthood_not_yet');
+  // The child is part of the heart while it is a preteen (4C5b).
+  if (shape === 'heart' && player.childChit) return fail('child_pending');
+  if (shape === 'heart' && side === 1) {
+    const pc = COLONISTS_BY_ID[a.colonistId] || {};
+    if (pc.spaceborn || pc.colonistKind !== 'Human') return fail('parenthood_earthborn_only');
+  }
+  a.side = side;
+  player.starchildUsed = true;
+  const parts = [];
+  if (shape === 'heart' && side === 1) {
+    player.childChit = { parentId: a.colonistId, due: (state.clockTicks | 0) + CHILD_YEARS, slot: (state.turn + CHILD_YEARS) % SLOTS };
+    parts.push(` A child is on the way (${CHILD_YEARS} years).`);
+  }
+  syncCrewAugmentMarks(state);
+  const holder = a.crewId || a.colonistId;
+  return { ok: true, state, log: `${player.name} (Starchild) flipped the ${shape} chit${holder ? ` on ${cardNameOf(holder)}` : ''} to side ${side}.${parts.join('')}` };
 }
 // ===== end Module 4 augmentations ============================================
 

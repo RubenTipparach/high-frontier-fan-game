@@ -274,7 +274,10 @@ per room and carried into the game state as a boolean (`state.m0`,
   chit you hold in the Contracts panel to open the Augment wizard; the chits
   (`js/game/augment-sides.js`, the side's picture inside the shape) are drawn on
   the Crew card's right edge (`card-ui.js#setAugChitHook`), fading on hover with
-  a tip. The contract auction is ONLY the last step of the Fundraise window (no
+  a tip. A contract with the humans-on-board icon (a manned contract) counts as
+  a Human for Glitch repair and for glory chits (load, carry, parade, Tragedy),
+  and for nothing else yet (owner 2026-11-25; `engine.js#isGloryHuman`,
+  `stackCanFixGlitch`). The contract auction is ONLY the last step of the Fundraise window (no
   toolbar or Market button starts it); the turn bar
   carries a timepiece badge ("N turns left") that opens the contract and where
   it is.
@@ -288,7 +291,12 @@ per room and carried into the game state as a boolean (`state.m0`,
   face the room lacks a module for is refused (`crew_face_needs_modules`, with
   the missing list) and the crew picker shows it greyed under "Not available to
   pick" with a "Needs M1" badge. A face tagged `requiresModule` M4 / M5 ("Coming
-  soon") is refused outright (`crew_face_needs_module`). `ctx.allowPromoCrew`
+  soon") is refused outright (`crew_face_needs_module`). JAXA (FUTURISTS: "Win at
+  6" in the Fundraise contract step; STARCHILD: ignore BEO Colony requirements +
+  the 1/turn free `FLIP_AUGMENT`) and COURIER (The Sea Peoples: Connections) are
+  `needsModules: ['M4']` since 2026-11-24; only M5 faces are still "Coming
+  soon". In a game the picker's "Needs Mn" label shows only when the game lacks
+  that module. `ctx.allowPromoCrew`
   (admin) now only keeps the solo "Test drive promo crew" swap AFTER the draft
   closed. Every in-scope promo face has an engine rule, a client control where it
   needs a choice, and checks in `scripts/check-crew-abilities.mjs` (see

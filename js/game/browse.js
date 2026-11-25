@@ -73,25 +73,32 @@ const BASE_CREW_IDS = new Set(CREW.map((c) => c.id));
 // notRecommendedWithModule face is pickable, just cautioned against.
 function crewModuleBadge(face) {
   const badge = document.createElement('div');
+  // In a game, a caution shows only when the game runs that module.
+  const caution = face.notRecommendedWithModule
+    && (!_onlineSnapshot || _onlineSnapshot[String(face.notRecommendedWithModule).toLowerCase()])
+    ? face.notRecommendedWithModule : null;
   if (face.requiresModule) {
     const n = face.requiresModule.slice(1);
     badge.className = 'card-module-badge is-required';
     badge.textContent = `Coming soon · ${face.requiresModule}`;
     badge.setAttribute('data-tip', `Coming soon: this side needs Module ${n}, which isn't available yet, so it can't be picked.`);
-  } else if (face.needsModules && face.needsModules.length) {
+  } else if (face.needsModules && face.needsModules.length
+    // In a game, the label shows only when this game lacks a module the side
+    // needs (owner 2026-11-24); outside a game (no setup yet) it always shows.
+    && (!_onlineSnapshot || crewFaceMissingModules(face).length)) {
     const missing = crewFaceMissingModules(face);
     const mods = face.needsModules.join(' + ');
     badge.className = 'card-module-badge ' + (missing.length ? 'is-required' : 'is-needs');
-    badge.textContent = `Needs ${mods}${face.notRecommendedWithModule ? ` · ⚠ ${face.notRecommendedWithModule}` : ''}`;
+    badge.textContent = `Needs ${mods}${caution ? ` · ⚠ ${caution}` : ''}`;
     const names = { M0: 'Module 0 (Politics)', M1: 'Module 1 (Terawatt)', M2: 'Module 2 (Futures)' };
     badge.setAttribute('data-tip', (missing.length
       ? `This side needs ${missing.map((m) => names[m] || m).join(' and ')}, which this game is not using, so it can't be picked here.`
       : `This side's ability uses ${face.needsModules.map((m) => names[m] || m).join(' and ')}.`)
-      + (face.notRecommendedWithModule ? ` Not recommended with Module ${face.notRecommendedWithModule.slice(1)}.` : ''));
-  } else if (face.notRecommendedWithModule) {
-    const n = face.notRecommendedWithModule.slice(1);
+      + (caution ? ` Not recommended with Module ${caution.slice(1)}.` : ''));
+  } else if (caution) {
+    const n = caution.slice(1);
     badge.className = 'card-module-badge is-caution';
-    badge.textContent = `⚠ ${face.notRecommendedWithModule}`;
+    badge.textContent = `⚠ ${caution}`;
     badge.setAttribute('data-tip', `Playable, but not recommended with Module ${n}: this ability moves Aqua, and Module ${n} changes how Aqua flows, so it would be too strong there.`);
   } else return null;
   // attachTipsTo binds every [data-tip] UNDER a root, so bind through a
@@ -4245,6 +4252,14 @@ function myFactionPrivilege() {
 // privilege (Taikonauts). Mirrors the engine's mayCommitFelony.
 function canCommitFelony() {
   return isAnarchy() || myFactionPrivilege() === 'FELONIOUS';
+}
+// Murder/Suicide (decommissioning a Human, Crew or Colonist): any felony, or
+// allowed outright by Collective Bargaining / Rescue Team. Mirrors the
+// engine's mayCommitMurder.
+function canCommitMurder() {
+  const me = mySnapshotPlayer();
+  return canCommitFelony() || playerHasPrivilege(me, 'COLLECTIVE_BARGAINING')
+    || contractAbilityListOf(me, 'murderSuicide').length > 0;
 }
 // Push Factory (Powersat rule c): do I own a Factory on a push-icon Site? That
 // Factory yields the Powersat Ability. It is an ABILITY, not a faction
@@ -9051,7 +9066,16 @@ function renderMpPlayer(p, isMe, isActive) {
   // aqua-chip-balance widget), so use it the same way here. Tank water
   // lives in the expanded detail so the icon means the same thing
   // everywhere.
-  stats.textContent = `${onlineSiteLabel(rkt.siteId)} · 💧${p.aqua || 0} · ${vp}vp`;
+  // The site name shortens with an ellipsis on a narrow roster; aqua + VP stay.
+  const siteLbl = onlineSiteLabel(rkt.siteId);
+  const siteEl = document.createElement('span');
+  siteEl.className = 'mp-stats-site';
+  siteEl.textContent = siteLbl;
+  siteEl.title = siteLbl;
+  const restEl = document.createElement('span');
+  restEl.className = 'mp-stats-rest';
+  restEl.textContent = `· 💧${p.aqua || 0} · ${vp}vp`;
+  stats.append(siteEl, restEl);
   head.append(dot, name);
   // M4 + M2 (4C2): Spaceborn (Spacer Union) or Earthborn, beside the name.
   if (_onlineSnapshot && _onlineSnapshot.m4 && _onlineSnapshot.m2 && Array.isArray(_onlineSnapshot.spacebornQueue)) {
@@ -10308,7 +10332,7 @@ function humanizeOnlineOpError(code, detail) {
     not_entered_this_turn: 'The stack has to ENTER that space this turn.',
     not_enough_flybys: `Not enough different flyby spaces entered this turn${detail ? ` (${detail.have} of ${detail.need})` : ''}.`,
     not_lifted_off: 'Lift off from that site first.',
-    not_returned: 'Bring the contract back to LEO to finish it.',
+    not_returned: 'Bring the contract back to LEO or a Home Bernal to finish it.',
     destination_not_yet_supported: `This destination step is not playable yet${detail && detail.step ? `: ${detail.step}` : ''}.`,
     not_late: 'That contract is not late.',
     over_late_fee: `You cannot pay more than the late fee this turn${detail && detail.max != null ? ` (${detail.max} more)` : ''}.`,
@@ -10331,6 +10355,9 @@ function humanizeOnlineOpError(code, detail) {
     chit_in_use: 'You only have one chit of that shape, and it is implanted elsewhere: juggle it off a Colonist aboard first.',
     chit_not_colocated: 'That chit is on a Colonist who is not aboard this Bernal.',
     parenthood_not_yet: 'Parenthood needs M2: implant the heart\'s other side.',
+    no_futurists: 'Only Futurists may win a contract outright.',
+    no_starchild: 'Only Starchild may flip a chit.',
+    starchild_used: 'You already flipped a chit this turn.',
     parenthood_earthborn_only: 'Parenthood: an earthborn Human only.',
     child_pending: 'You already have a child on the Sunspot Cycle.',
     child_choice_due: 'Your child has come of age: choose who takes the parent\'s place.',
@@ -12589,7 +12616,7 @@ async function decommissionSelectedToHand(stackId, ids, onDone) {
     else if (s.kind === 'fuel') { fuelCards++; fuelUnits += Math.max(0, Math.floor(Number(s.amount) || 0)); }
   }
   const others = list.length - crew - humanCol - fuelCards;
-  const felony = canCommitFelony();
+  const felony = canCommitMurder();
   const crewAtHome = stackId === 'leo'
     || (stackId.startsWith('bernal')
         && getMyBernals()[Number(stackId.slice('bernal'.length)) || 0] === myHomeBernal());
@@ -12601,11 +12628,7 @@ async function decommissionSelectedToHand(stackId, ids, onDone) {
     else parts.push(`<strong>${crew}</strong> crew stay put (a felony needs Anarchy)`);
   }
   if (humanCol) {
-    // Murder/Suicide: a felony, or allowed outright (Collective Bargaining,
-    // Rescue Team).
-    const murder = felony || playerHasPrivilege(mySnapshotPlayer(), 'COLLECTIVE_BARGAINING')
-      || contractAbilityListOf(mySnapshotPlayer(), 'murderSuicide').length > 0;
-    if (murder) parts.push(`<strong>${humanCol}</strong> Human colonist${humanCol === 1 ? '' : 's'} recall${humanCol === 1 ? 's' : ''} home to LEO / your Home Bernal (felony)`);
+    if (felony) parts.push(`<strong>${humanCol}</strong> Human colonist${humanCol === 1 ? '' : 's'} recall${humanCol === 1 ? 's' : ''} home to LEO / your Home Bernal (felony)`);
     else parts.push(`<strong>${humanCol}</strong> Human colonist${humanCol === 1 ? '' : 's'} stay${humanCol === 1 ? 's' : ''} put (a felony needs Anarchy)`);
   }
   if (fuelCards) {
@@ -19935,7 +19958,7 @@ function openRocketStackModal() {
           addToHand(card);
         });
         actions.appendChild(back);
-      } else if ((isCrewSlot || isHumanColonistSlot(slot)) && _online && canCommitFelony()) {
+      } else if ((isCrewSlot || isHumanColonistSlot(slot)) && _online && canCommitMurder()) {
         // Decommissioning a Human (Crew OR a Human colonist) is a felony, legal
         // only during Anarchy (or with the Felonious privilege): they leave the
         // rocket and recall to your LEO Stack (a Human colonist settles in your
@@ -19951,7 +19974,7 @@ function openRocketStackModal() {
         felon.disabled = lockedFelon;
         felon.title = lockedFelon
           ? 'Wait for your turn.'
-          : 'Anarchy felony: send this Human off the rocket. They recall to your LEO Stack (no replacement).';
+          : 'Murder/Suicide: send this Human off the rocket. They recall to your LEO Stack (no replacement).';
         felon.addEventListener('click', () => {
           if (felon.disabled) return;
           selected.delete(slot.id);
@@ -20118,7 +20141,7 @@ function openRocketStackModal() {
         if (selected.has(s.id) && (isCrewSlot(s) || isHumanColonistSlot(s))) decomHumans++;
       }
       const decomOthers = nSel - decomHumans;
-      const felonyOk = canCommitFelony();
+      const felonyOk = canCommitMurder();
       let decomLabel = `♻ Decommission to hand${nSel ? ` (${nSel})` : ''}`;
       let decomTitle = 'Return the selected cards to your hand';
       if (decomHumans > 0 && decomOthers === 0) {
@@ -27171,7 +27194,7 @@ function gloryUnitOf(me, unit) {
 // The first Human aboard `stack` not already carrying a chit (one per Human).
 function freeGloryCarrierIn(stack, me) {
   const taken = new Set(((me && me.glory && me.glory.chits) || []).map((c) => c && c.crewId).filter(Boolean));
-  const slot = (stack || []).find((sl) => (isCrewSlot(sl) || isHumanColonistSlot(sl)) && !taken.has(sl.id));
+  const slot = (stack || []).find((sl) => isGloryHumanSlot(sl, me) && !taken.has(sl.id));
   return slot ? slot.id : null;
 }
 async function maybePromptChitAfterMove(unit = 'rocket') {
@@ -27187,7 +27210,7 @@ async function maybePromptChitAfterMove(unit = 'rocket') {
   const zone = site.solarZone;
   if (zoneChitTaken(zone)) return;                     // already claimed by someone
   if (getChits().some((c) => c.zone === zone)) return; // already carrying this zone
-  if (!stackHasHuman(u.stack)) return;                 // needs a Crew or Human colonist to carry it
+  if (!stackHasGloryHuman(u.stack, me)) return;       // needs a Human (Crew, colonist, manned contract)
   // Glory Carry Limit (rule a): every Human carries at most one chit. With no
   // free Human aboard this unit there is no hand for this one, so don't offer
   // it (it would be refused); the chit stays on its site for a later visit.
@@ -29009,7 +29032,7 @@ async function moveRocket() {
   // A chit is only retrieved if a crew is aboard to carry it. On
   // return to LEO any carried chits resolve: BACK (flipped) if a crew
   // brought them home, FRONT (face-up) if no crew is aboard.
-  const crewAboard = stackHasHuman();
+  const crewAboard = stackHasGloryHuman();
   // Pick up the zone's glory chit only when the rocket LANDS at a real site
   // (not a coasting waypoint) with a crew aboard, and isn't already carrying
   // that zone's chit (so coasting through / re-landing doesn't re-prompt).
@@ -31616,7 +31639,7 @@ function showSitePopupFor(site) {
     });
   }
   const gloryMe = _online ? mySnapshotPlayer() : null;
-  const gloryUnit = gloryUnits.find((g) => stackHasHuman(g.stack)
+  const gloryUnit = gloryUnits.find((g) => stackHasGloryHuman(g.stack)
     && (!gloryMe || freeGloryCarrierIn(g.stack, gloryMe)));
   if (gloryUnit
       && site.solarZone && !isLeoSite(site)
@@ -33945,6 +33968,18 @@ function isHumanColonistSlot(s) {
 function stackHasHuman(stack = getRocketStack()) {
   return (stack || []).some((s) => isCrewSlot(s) || isHumanColonistSlot(s));
 }
+// Glory chits (G5): a manned contract (the humans-on-board icon) loads, carries
+// and parades a chit like a Crew. Mirrors the server's isGloryHuman. `owner` is
+// the player whose card it is (side lives in their contract records).
+function isGloryHumanSlot(s, owner = mySnapshotPlayer()) {
+  if (isCrewSlot(s) || isHumanColonistSlot(s)) return true;
+  if (!s || !CONTRACTS_BY_ID[s.id] || !(_onlineSnapshot && _onlineSnapshot.m4)) return false;
+  const meta = owner && owner.contractMeta && owner.contractMeta[s.id];
+  return !!(contractFace(s.id, (meta && meta.side) || 'blue') || {}).manned;
+}
+function stackHasGloryHuman(stack = getRocketStack(), owner = mySnapshotPlayer()) {
+  return (stack || []).some((s) => isGloryHumanSlot(s, owner));
+}
 // Is my Freighter parked at this (planner-id) site? Mirrors the rocket-site
 // comparison the glory-chit / Human-presence gates already use, converting
 // the freighter's snapshot siteId (a server slug) to the same planner-id
@@ -33962,7 +33997,7 @@ function freighterAtClientSite(siteId) {
 // (decommissioned / colonised) orphans its chit.
 function crewInPlay(crewId) {
   if (!crewId) return false;
-  const carries = (s) => s.id === crewId && (isCrewSlot(s) || isHumanColonistSlot(s));
+  const carries = (s) => s.id === crewId && isGloryHumanSlot(s);
   if (getRocketStack().some(carries)) return true;
   const outs = getOutposts() || {};
   for (const letter of Object.keys(outs)) {
@@ -33999,7 +34034,7 @@ function chitsOnOutpostCount(letter) {
 // chit to the first crew aboard; its fate (returns home vs. leaves)
 // then drives that chit's front/back resolution.
 function firstCrewId() {
-  const slot = getRocketStack().find((s) => isCrewSlot(s) || isHumanColonistSlot(s));
+  const slot = getRocketStack().find((s) => isGloryHumanSlot(s));
   return slot ? slot.id : null;
 }
 // Display name for a crew id (primary face), for chit-token owner tags.
@@ -34008,7 +34043,10 @@ function crewDisplayName(crewId) {
   if (c) return (c.faces && c.faces.primary && c.faces.primary.name) || crewId;
   // A Human colonist carries a chit too: name it by its card.
   const col = crewId ? (COLONISTS_BY_ID[crewId] || PATENTS_BY_ID[crewId]) : null;
-  return (col && col.name) || crewId || '';
+  if (col && col.name) return col.name;
+  // ...and so does a manned contract: name it by its card.
+  const con = crewId ? CONTRACTS_BY_ID[crewId] : null;
+  return (con && con.faces && con.faces.primary && con.faces.primary.name) || crewId || '';
 }
 // Suppress reconciliation during the colonize commit, which removes
 // the crew then re-adds it on a rollback path; colonize resolves its
@@ -34828,7 +34866,7 @@ function snapshotGloryCarriers(player) {
       || (player.bernals || []).some((bn) => bn && has(bn.stack))) return Infinity;
   }
   let n = 0;
-  const count = (slots) => { for (const s of (slots || [])) if (isCrewSlot(s) || isHumanColonistSlot(s)) n += 1; };
+  const count = (slots) => { for (const s of (slots || [])) if (isGloryHumanSlot(s, player)) n += 1; };
   count(player.leo);
   count(player.rocket && player.rocket.stack);
   for (const o of Object.values(player.outposts || {})) if (o) count(o.cards);
@@ -35623,7 +35661,7 @@ const MP_LOG_ICONS = {
   AUCTION_CONTRACT_START: '📜', AUCTION_CONTRACT_BID: '⏳', AUCTION_CONTRACT_PASS: '🚫', AUCTION_CONTRACT_CLOSE: '⏱',
   // M4 isotope monetization (4D1d): gold beads at the Bank, sold / bought at Earth.
   ISOTOPE_EXCHANGE: '🟡', CHILD_COMES_OF_AGE: '👶', KEEP_ROBOT: '🤖',
-  FULFILL_CONTRACT: '🏁', PAY_LATE_FEE: '⏰', IMPLANT: '🦾', ABANDON_CONTRACT: '🗑', INSIGHT: '🔎',
+  FULFILL_CONTRACT: '🏁', PAY_LATE_FEE: '⏰', IMPLANT: '🦾', FLIP_AUGMENT: '🔄', ABANDON_CONTRACT: '🗑', INSIGHT: '🔎',
   AUCTION_RESET: '↺', AUCTION_SELL: '✅',
   PICK_CREW: '🧑‍🚀', SET_SPECIES: '\u{1F9DC}', SET_FIRST_PLAYER: '🥇', FREE_CUBE: '🧊',
   END_TURN: '⏭', MOVE: '🛸', BURN: '🔥',
@@ -36601,6 +36639,8 @@ initContractsUi({
   snapshot: () => _onlineSnapshot,
   me: () => mySnapshotPlayer(),
   myTurn: () => isOnlineMyTurn(),
+  // Does this seat hold a privilege (faction, grant, borrowed, Bernal, contract)?
+  hasPrivilege: (player, key) => playerHasPrivilege(player, key),
   submitTurnOp: (op) => submitOnlineOp(op),
   submitAuctionOp: (op) => submitMpAuctionOp(op),
   // Plot the desperation starship's flight on the map planner.

@@ -28,7 +28,7 @@
 //   isobank [augmented] [spaceborn] the stack is at the isobank (M4 + M2)
 //   belt [beyond=Zone]              the stack entered a Radiation Belt space this turn
 //                                   (a different one from earlier belt steps)
-//   return                          the contract is back at LEO / your Bank
+//   return                          the contract is back at LEO / your Bank (a Home Bernal)
 //   manual:<why>                    not engine-checkable yet (refused until it is)
 // Site filters: unexplored, size>=N, atmospheric, submarine, astrobiology,
 // synodic, elevator, spectral=X, hydration=N, body=Name, zone=Name,
@@ -408,7 +408,7 @@ export function stepLabel(step, nameOf = (s) => s) {
       return `Reach ${who} ${kind}${bits.length ? ' ' + bits.join(', ') : ''}`;
     }
     case 'isobank': return `Reach the isobank${f.augmented ? ' with an augmented Colonist' : ''}${f.spaceborn ? ' with a spaceborn or Promoted Colonist' : ''}`;
-    case 'return': return 'Return to LEO';
+    case 'return': return 'Return to LEO / Home Bernal';
     default: return step.why || step.raw;
   }
 }
@@ -516,7 +516,8 @@ export function stepSatisfied(step, where, progress, ctx, prev = null) {
       return last && where.siteId !== last ? { ok: true } : { ok: false, why: 'not_lifted_off' };
     }
     case 'return':
-      return where.atLeo ? { ok: true } : { ok: false, why: 'not_returned' };
+      // Back at your Bank: LEO, or one of your anchored Home Bernals.
+      return (where.atLeo || where.atHome) ? { ok: true } : { ok: false, why: 'not_returned' };
     default:
       return { ok: false, why: 'destination_not_yet_supported', detail: { step: step.why || step.raw } };
   }

@@ -10835,7 +10835,29 @@ check('a "& Return" contract announces the destination, then fulfils back at LEO
   pl(st, res.winner).rocket.siteId = null;
   r = op(st, 'FULFILL_CONTRACT', P.profileId, { cardId: c.id });
   assert(r.ok && pl(r.state, res.winner).fulfilledContracts.length === 1, `return: ${r.error}`);
-  return 'Mars North Pole announced, refused away from LEO, fulfilled on return';
+  // ...or back at an anchored Home Bernal: your Bank reaches it too.
+  {
+    let s2 = m4Game();
+    const r2 = winContract(s2, 'M4N226F', { by: 'initiator' });
+    s2 = r2.st;
+    const Q = pl(s2, r2.winner);
+    Q.contractHand = Q.contractHand.filter((x) => x !== r2.c.id);
+    Q.contractMeta[r2.c.id].boosted = true;
+    Q.rocket.stack.push({ id: r2.c.id, kind: 'contract', face: 'primary' });
+    Q.rocket.siteId = 'mars-north-pole';
+    let q = op(s2, 'FULFILL_CONTRACT', Q.profileId, { cardId: r2.c.id });
+    assert(q.ok, `step 1 (Home Bernal run): ${q.error}`);
+    s2 = q.state;
+    const Q2 = pl(s2, r2.winner);
+    Q2.bernals = [{ cardId: null, figure: 'kalpana', face: 'primary', anchored: true, home: true, siteId: 'burn-geo', stack: [] }];
+    Q2.rocket.siteId = 'burn-geo';
+    q = op(s2, 'FULFILL_CONTRACT', Q.profileId, { cardId: r2.c.id });
+    assert(q.ok && pl(q.state, r2.winner).fulfilledContracts.length === 1, `return to a Home Bernal: ${q.error}`);
+    Q2.bernals[0].home = false;
+    q = op(s2, 'FULFILL_CONTRACT', Q.profileId, { cardId: r2.c.id });
+    assert(!q.ok && q.error === 'not_returned', `a non-Home Bernal counted as home: ${q.error || 'fulfilled'}`);
+  }
+  return 'Mars North Pole announced, refused away from LEO, fulfilled on return (LEO or a Home Bernal, not another Bernal)';
 });
 
 // The ten destinations the owner approved on the destinations page (2026-11-17):
@@ -11916,6 +11938,73 @@ check('Augment operation (no M2): chits go on a Crew at a Colony, follow it, jug
   return 'refused away from a Colony; on the Crew at Ceres; follows it; survives a death; Jar off + Triangle on in one op; freed by settling';
 });
 
+check('JAXA Futurists: start a contract auction at 6 years and win it at once', () => {
+  let st = m4Game();
+  const ini = currentPlayerOf(st);
+  let r = fundraise(st, ini.profileId);
+  assert(r.ok, r.error); st = r.state;
+  st.activeLawStar = 'honor';
+  const c = stackDeck(st, CONTRACTS.find((x) => x.pair === 'HU' && st.contractDecks.HU.includes(x.id)).faces.primary.code);
+  const no = op(st, 'AUCTION_CONTRACT_START', ini.profileId, { pair: 'HU', futurists: true });
+  assert(!no.ok && no.error === 'no_futurists', `without the privilege: ${no.error || 'accepted'}`);
+  pl(st, ini.profileId).faction = { cardId: 'crew_jaxa', face: 'primary' };
+  const aqua0 = pl(st, ini.profileId).aqua | 0;
+  r = op(st, 'AUCTION_CONTRACT_START', ini.profileId, { pair: 'HU', futurists: true });
+  assert(r.ok, `Futurists: ${r.error}`);
+  const P = pl(r.state, ini.profileId);
+  assert(!r.state.auction, 'an auction was left open');
+  assert(P.contractHand.includes(c.id), `contract not won: ${JSON.stringify(P.contractHand)}`);
+  assert(P.timepiece && P.timepiece.due === (st.clockTicks | 0) + 6, `timepiece: ${JSON.stringify(P.timepiece)}`);
+  const face = c.faces.primary;
+  assert((P.aqua | 0) === aqua0 + (face.advance | 0), `advance: ${P.aqua} vs ${aqua0}+${face.advance}`);
+  const again = op(r.state, 'AUCTION_CONTRACT_START', ini.profileId, { pair: 'HU' });
+  assert(!again.ok, 'a second contract auction this turn');
+  return `won ${face.name} at 6 years, ${face.advance} aqua advance; refused without Futurists`;
+});
+
+check('JAXA Starchild: augment a Crew away from any Colony; flip one chit 1/turn as a free action', () => {
+  const withShape = (sh) => conFace((f) => (f.cybernetics || []).includes(sh));
+  const st = startedGame({ m4: true });
+  st.activeIndex = 0;
+  const me = st.players[0];
+  me.faction = { cardId: 'crew_jaxa', face: 'secondary' };
+  const crewId = me.faction.cardId;
+  fulfilledWith(me, withShape('jar'), withShape('heart'));
+  st.colonies = {};
+  me.rocket.siteId = 'vesta';
+  me.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }, { id: crewId, kind: 'crew', face: 'secondary' }];
+  me.rocket.activeThrusterId = thruster.id;
+  me.opsRemaining = 4;
+  let r = applyOperation(st, { kind: 'IMPLANT', implants: [{ shape: 'jar', side: 2, crewId }, { shape: 'heart', side: 2, crewId }] }, { profileId: me.profileId });
+  assert(r.ok, `implant away from a Colony: ${r.error}`);
+  let P = pl(r.state, me.profileId);
+  assert(P.augments.jar.side === 2 && !P.rocket.stack.find((x) => x.id === crewId).massless, 'Jar 2 marked the Crew massless');
+  const ops0 = P.opsRemaining;
+  r = op(r.state, 'FLIP_AUGMENT', me.profileId, { shape: 'jar' });
+  assert(r.ok, `flip: ${r.error}`);
+  P = pl(r.state, me.profileId);
+  assert(P.augments.jar.side === 1 && P.rocket.stack.find((x) => x.id === crewId).massless, 'the flip did not take Jar to side 1');
+  assert(P.opsRemaining === ops0, 'the flip spent an operation');
+  const twice = op(r.state, 'FLIP_AUGMENT', me.profileId, { shape: 'jar' });
+  assert(!twice.ok && twice.error === 'starchild_used', `second flip: ${twice.error || 'accepted'}`);
+  // Next turn: the heart may not flip to Parenthood without M2.
+  const nx = JSON.parse(JSON.stringify(r.state));
+  delete pl(nx, me.profileId).starchildUsed;
+  const heart = op(nx, 'FLIP_AUGMENT', me.profileId, { shape: 'heart' });
+  assert(!heart.ok && heart.error === 'parenthood_not_yet', `heart to side 1: ${heart.error || 'accepted'}`);
+  // Undo takes the flip back.
+  const u = applyOperation(r.state, { kind: 'UNDO' }, { profileId: me.profileId, turnBaseState: JSON.parse(JSON.stringify(st)) });
+  assert(u.ok && pl(u.state, me.profileId).augments.jar.side === 2 && !pl(u.state, me.profileId).starchildUsed, `undo: ${u.error} ${JSON.stringify(u.ok && pl(u.state, me.profileId).augments)}`);
+  // Without the privilege it is refused, and the Colony requirement is back.
+  const plain = JSON.parse(JSON.stringify(st));
+  pl(plain, me.profileId).faction = { cardId: 'crew_jaxa', face: 'primary' };
+  const away = applyOperation(plain, { kind: 'IMPLANT', implants: [{ shape: 'jar', side: 2, crewId }] }, { profileId: me.profileId });
+  assert(!away.ok && away.error === 'crew_not_at_colony', `Futurists face away from a Colony: ${away.error || 'accepted'}`);
+  const nf = op(plain, 'FLIP_AUGMENT', me.profileId, { shape: 'jar' });
+  assert(!nf.ok, 'flip without Starchild');
+  return 'implanted at Vesta with no Colony; Jar flipped 2 to 1 for free; 1/turn; heart side 1 needs M2; undoable; refused without Starchild';
+});
+
 check('contract abilities are read off the printed Fulfilled Ability text', () => {
   const count = {};
   for (const c of CONTRACTS) for (const f of [c.faces.primary, c.faces.secondary]) {
@@ -12056,10 +12145,11 @@ check('contract decks open by the laws in force: each ideology, Centrist, Anarch
 
 check('Connections opens a contract deck where you hold a delegate', () => {
   const con = conFace((f) => f.abilities && f.abilities.connections);
-  const start = (connections) => {
+  const start = (connections, courier = false) => {
     let st = startedGame({ seats: 2, m4: true });
     const me = currentPlayerOf(st);
     if (connections) fulfilledWith(me, con);
+    if (courier) me.faction = { cardId: 'crew_the_sea_peoples', face: 'primary' };
     const r = fundraise(st, me.profileId);
     assert(r.ok, `fundraise: ${r.error}`);
     st = r.state;
@@ -12071,7 +12161,10 @@ check('Connections opens a contract deck where you hold a delegate', () => {
   assert(!ctl.ok && ctl.error === 'deck_not_open', `HU opened without Connections: ${ctl.error || ctl.log}`);
   const conn = start(true);
   assert(conn.ok, `Connections did not open HU: ${conn.error} ${JSON.stringify(conn.detail || '')}`);
-  return `${con.face.name}: Honor / Unity opens through the Honor delegate`;
+  // COURIER (The Sea Peoples promo, M4) is the same ability.
+  const cour = start(false, true);
+  assert(cour.ok, `Courier did not open HU: ${cour.error}`);
+  return `${con.face.name} and the Courier face: Honor / Unity opens through the Honor delegate`;
 });
 
 check('Insight sends one patent deck top card to the bottom before the auction', () => {
@@ -12266,6 +12359,93 @@ check('the remaining blue Fulfilled Abilities (Inner Tour, New Horizons, Sun-fir
   };
   assert(!scrap(null), 'a Human was let go with no Murder/Suicide allowance');
   assert(scrap(byName('Rescue Team')), 'Rescue Team did not allow Murder/Suicide');
+  // A Crew is a Human too: Rescue Team recalls it off the rocket to LEO.
+  const scrapCrew = (con) => {
+    const st = startedGame({ seats: 2, m4: true });
+    const me = st.players[0];
+    st.activeIndex = 0;
+    if (con) fulfilledWith(me, con);
+    const crewId = me.faction.cardId;
+    me.leo = (me.leo || []).filter((x) => x.id !== crewId);
+    me.rocket.siteId = 'vesta';
+    me.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }, { id: crewId, kind: 'crew', face: 'primary' }];
+    const r = applyOperation(st, { kind: 'DECOMMISSION', cardIds: [crewId], from: 'rocket' }, { profileId: me.profileId });
+    return r.ok && !(r.state.players[0].rocket.stack || []).some((x) => x.id === crewId)
+      && (r.state.players[0].leo || []).some((x) => x.id === crewId);
+  };
+  assert(!scrapCrew(null), 'a Crew was let go with no Murder/Suicide allowance');
+  assert(scrapCrew(byName('Rescue Team')), 'Rescue Team did not let a Crew go to LEO');
+  // Tragedy (G5, Lb): a chit on the decommissioned Crew lands LOW side up, not
+  // in a ticker tape parade because the Crew now stands at LEO.
+  {
+    const st = startedGame({ seats: 2, m4: true });
+    const me = st.players[0];
+    st.activeIndex = 0;
+    fulfilledWith(me, byName('Rescue Team'));
+    const crewId = me.faction.cardId;
+    me.leo = (me.leo || []).filter((x) => x.id !== crewId);
+    me.rocket.siteId = 'vesta';
+    me.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }, { id: crewId, kind: 'crew', face: 'primary' }];
+    me.glory = { chits: [{ zone: 'Ceres', crewId }], claimed: [], visited: ['Ceres'], vps: 0 };
+    const r = applyOperation(st, { kind: 'DECOMMISSION', cardIds: [crewId], from: 'rocket' }, { profileId: me.profileId });
+    assert(r.ok, `decommission: ${r.error}`);
+    const g = r.state.players[0].glory;
+    assert(!g.chits.length, 'the chit is still carried');
+    assert(g.claimed.length === 1 && g.claimed[0].side === 'front', `the chit scored ${JSON.stringify(g.claimed)}, not low side up`);
+    assert(/tragedy/.test(r.log), `the log does not say so: ${r.log}`);
+  }
+  // A manned contract (humans-on-board icon) clears a Glitch (G7) like a Crew.
+  {
+    const manned = CONTRACTS.find((c) => c.faces.primary.manned && !faceUnplayable(c.faces.primary, { m1: true, m2: true }));
+    const unmanned = CONTRACTS.find((c) => !c.faces.primary.manned && !c.faces.primary.military);
+    const fixed = (con) => {
+      const st = startedGame({ seats: 2, m4: true });
+      const me = st.players[0];
+      st.activeIndex = 0;
+      me.contractMeta = { [con.id]: { side: 'blue', boosted: true } };
+      me.rocket.siteId = 'vesta';
+      me.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }, { id: con.id, kind: 'contract', face: 'primary' }];
+      me.rocket.glitch = true;
+      autoFixGlitches(st);
+      return !me.rocket.glitch;
+    };
+    assert(fixed(manned), `a manned contract (${manned.name}) did not clear the rocket glitch`);
+    assert(!fixed(unmanned), `an unmanned contract (${unmanned.name}) cleared the rocket glitch`);
+  }
+  // Glory chits: a manned contract loads, carries and parades one like a Crew.
+  {
+    const manned = CONTRACTS.find((c) => c.faces.primary.manned && !faceUnplayable(c.faces.primary, { m1: true, m2: true }));
+    const unmanned = CONTRACTS.find((c) => !c.faces.primary.manned && !c.faces.primary.military);
+    const atCeres = (con) => {
+      const st = startedGame({ seats: 2, m4: true });
+      const me = st.players[0];
+      st.activeIndex = 0;
+      me.contractMeta = { [con.id]: { side: 'blue', paid: 0, boosted: true, default: false, progress: { sites: [], done: 0 } } };
+      me.glory = { chits: [], claimed: [], visited: [], vps: 0 };
+      me.leo = (me.leo || []).filter((x) => x.id !== me.faction.cardId);
+      me.rocket.siteId = 'ceres';
+      me.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }, { id: con.id, kind: 'contract', face: 'primary' }];
+      return { st, me, r: applyOperation(st, { kind: 'LOAD_GLORY' }, { profileId: me.profileId }) };
+    };
+    const no = atCeres(unmanned);
+    assert(!no.r.ok, `an unmanned contract loaded a glory chit`);
+    const yes = atCeres(manned);
+    assert(yes.r.ok, `a manned contract could not load a glory chit: ${yes.r.error}`);
+    let g = yes.r.state.players[0].glory;
+    assert(g.chits.length === 1 && g.chits[0].crewId === manned.id, `the chit is not on the contract: ${JSON.stringify(g.chits)}`);
+    // Back at LEO it parades at back value.
+    const home = JSON.parse(JSON.stringify(yes.r.state));
+    home.players[0].rocket.siteId = null;
+    const h = applyOperation(home, { kind: 'SET_WIRING', wiring: {} }, { profileId: home.players[0].profileId });
+    assert(h.ok, `SET_WIRING: ${h.error}`);
+    g = h.state.players[0].glory;
+    assert(!g.chits.length && g.claimed[0] && g.claimed[0].side === 'back', `no parade at LEO: ${JSON.stringify(g)}`);
+    // Decommissioned (default) out in space: the chit lands low side up.
+    const lost = applyOperation(yes.r.state, { kind: 'DECOMMISSION', cardIds: [manned.id], from: 'rocket' }, { profileId: yes.r.state.players[0].profileId });
+    assert(lost.ok, `decommission: ${lost.error}`);
+    g = lost.state.players[0].glory;
+    assert(!g.chits.length && g.claimed[0] && g.claimed[0].side === 'front', `the chit did not land low side up: ${JSON.stringify(g)}`);
+  }
   notes.push('Rescue Team');
   // Tsiolkovsky Elevator Lab: factory-assist through lander burns at Elevator Sites only.
   const tsio = byName('Tsiolkovsky Elevator Lab');

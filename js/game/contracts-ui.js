@@ -88,6 +88,7 @@ const hasContractAbility = (p, key) => (p && p.fulfilledContracts || [])
   .some((f) => { const face = contractFace(f.id, f.side); return !!(face && face.abilities && face.abilities[key]); });
 // Connections (4B2f): a deck is also open when you have a delegate in either
 // of its ideologies.
+const hasPriv = (p, key) => !!(D && D.hasPrivilege && p && D.hasPrivilege(p, key));
 const delegateIn = (s, k, pid) => (((s && s.assembly && s.assembly.delegates) || {})[k] || {})[pid] > 0;
 // Mishap Insurance (4B5a): one late fee per late contract, on any late turn
 // while this turn's fee is unpaid. Free to use while the law is in force,
@@ -460,6 +461,7 @@ function canAuctionNow(s, p, myTurn) {
 let _discardPair = null;
 function decksHtml(s, p, auctionOpen) {
   const laws = lawKeys(s, p);
+  const futurists = auctionOpen && hasPriv(p, 'FUTURISTS');
   const side = s.contractSide === 'gold' ? 'gold' : 'blue';
   // The Exodus deck joins once the isobank is founded (4D2c), open to everyone.
   const pairs = [...Object.keys(CONTRACT_PAIRS), ...(s.isobank && (s.contractDecks || {}).EX ? ['EX'] : [])];
@@ -467,7 +469,7 @@ function decksHtml(s, p, auctionOpen) {
     const deck = (s.contractDecks || {})[pair] || [];
     const exodus = pair === 'EX';
     const byLaw = exodus || CONTRACT_PAIRS[pair].some((k) => laws.has(k));
-    const byConnections = !byLaw && hasContractAbility(p, 'connections')
+    const byConnections = !byLaw && (hasContractAbility(p, 'connections') || hasPriv(p, 'COURIER'))
       && CONTRACT_PAIRS[pair].some((k) => delegateIn(s, k, p.profileId));
     const discarded = auctionOpen && _discardPair === pair && deck.length > 1;
     // With the top card set aside, the next card is the one on offer.
@@ -479,10 +481,12 @@ function decksHtml(s, p, auctionOpen) {
     const stigma = !!(topFace && topFace.manned && s.defaultChit && s.defaultChit.profileId === p.profileId);
     const noManned = stigma ? 'disabled title="Default chit: no manned contracts."' : '';
     let btn = '';
+    // FUTURISTS (JAXA): bid 6 years and win at once.
+    const fut = futurists ? `<button type="button" data-act="auction" data-pair="${pair}" data-futurists="1"${discarded ? ' data-discard="1"' : ''} ${noManned} data-tip="Futurists">Win at 6</button>` : '';
     if (auctionOpen && open && discarded) {
-      btn = `<div class="m4c-btns"><button type="button" data-act="auction" data-pair="${pair}" data-discard="1" ${noManned}>Auction</button></div>`;
+      btn = `<div class="m4c-btns"><button type="button" data-act="auction" data-pair="${pair}" data-discard="1" ${noManned}>Auction</button>${fut}</div>`;
     } else if (auctionOpen && open && !_discardPair) {
-      btn = `<div class="m4c-btns"><button type="button" data-act="auction" data-pair="${pair}" ${noManned}>Auction</button>
+      btn = `<div class="m4c-btns"><button type="button" data-act="auction" data-pair="${pair}" ${noManned}>Auction</button>${fut}
         ${deck.length > 1 ? `<button type="button" data-act="cycle" data-pair="${pair}">Cycle</button>` : ''}</div>`;
     }
     return `<div class="m4c-deck ${open ? 'open' : 'closed'}" ${open ? '' : 'aria-disabled="true"'}>
@@ -520,9 +524,10 @@ export function renderContractAuctionStep(host, done) {
     <div class="m4c-btns m4c-fr-skip"><button type="button" data-skip>No auction</button></div>`;
   wrap.querySelectorAll('button[data-act="auction"]').forEach((b) => b.addEventListener('click', async () => {
     const discardTop = !!b.dataset.discard;
+    const futurists = !!b.dataset.futurists;
     _discardPair = null;
     done();
-    await D.submitTurnOp({ kind: 'AUCTION_CONTRACT_START', pair: b.dataset.pair, ...(discardTop ? { discardTop: true } : {}) });
+    await D.submitTurnOp({ kind: 'AUCTION_CONTRACT_START', pair: b.dataset.pair, ...(discardTop ? { discardTop: true } : {}), ...(futurists ? { futurists: true } : {}) });
   }));
   // Proposal Review (4B3d): cycle the top card to the bottom (once) and look at
   // the next one. Leaving without an auction still sends the cycled card down.
@@ -911,13 +916,18 @@ function augmentationsHtml(s, p, myTurn) {
     const act = click ? 'augment' : 'chit-view';
     return `<button type="button" data-act="${act}" data-shape="${sh}" class="m4c-aug ${have ? 'have' : 'lack'}${a ? ' on' : ''}"${a ? ` data-tip="${esc(sideText(sh, a.side))}"` : ''}>${glyph}<span><b>${AUGMENTS[sh].name}</b> ${st}</span></button>`;
   }).join('');
+  // STARCHILD (JAXA): a 1/turn free flip of one of your chits.
+  const canFlip = myTurn && hasPriv(p, 'STARCHILD') && !p.starchildUsed;
+  const flips = canFlip ? SHAPES.filter((sh) => aug[sh] && !(sh === 'heart' && (p.childChit || (aug[sh].side === 2 && !s.m2))))
+    .map((sh) => `<button type="button" data-act="flip-aug" data-shape="${sh}" data-tip="Starchild: flip to side ${aug[sh].side === 1 ? 2 : 1}">🔄 ${AUGMENTS[sh].name}</button>`).join('') : '';
+  const flipRow = flips ? `<div class="m4c-btns m4c-flips">${flips}</div>` : '';
   const opts = [...portfolio].map((sh) => `<option value="${sh}">${AUGMENTS[sh].name}</option>`).join('');
   const controls = (key, attrs) => (myTurn && opts ? `<div class="m4c-controls"><select data-shape-for="${key}">${opts}</select>
     <select data-side-for="${key}"><option value="2">side 2</option><option value="1">side 1</option></select>
     <button type="button" data-act="implant" ${attrs}>Implant</button></div>` : '');
   // Without Module 2 a chit goes on a Crew at a BEO Colony (owner 2026-11-18):
   // click a chit you hold to start the Augment operation.
-  if (!s.m2) return `<h4>Augmentations</h4><div class="m4c-augs">${chips}</div>`;
+  if (!s.m2) return `<h4>Augmentations</h4><div class="m4c-augs">${chips}</div>${flipRow}`;
   const bns = (p.bernals || []).map((bn, i) => ({ bn, i })).filter((x) => x.bn.anchored);
   let station = '<p class="muted">No anchored Bernal.</p>';
   if (bns.length) {
@@ -932,7 +942,7 @@ function augmentationsHtml(s, p, myTurn) {
     }).join('') : '<p class="muted">No Colonists aboard.</p>';
   }
   return `<h4>Augmentations</h4>
-    <div class="m4c-augs">${chips}</div>${station}${childHtml(s, p, myTurn)}`;
+    <div class="m4c-augs">${chips}</div>${flipRow}${station}${childHtml(s, p, myTurn)}`;
 }
 // Parenthood (4C5): the child chit sits on the Sunspot Cycle 9 years on. Once it
 // is passed, pick an earthborn Human from the queue to take the parent's place.
@@ -983,6 +993,7 @@ async function onAct(b) {
     if (v && v.value) await D.submitTurnOp({ kind: 'CHILD_COMES_OF_AGE', colonistId: v.value });
   }
   else if (act === 'augment') { openAugmentWizard(b.dataset.shape); return; }
+  else if (act === 'flip-aug') await D.submitTurnOp({ kind: 'FLIP_AUGMENT', shape: b.dataset.shape });
   else if (act === 'chit-view') { openChitSides(b.dataset.shape); return; }
   else if (act === 'iso-trade-sell' || act === 'iso-trade-buy') {
     const action = act === 'iso-trade-sell' ? 'sell' : 'buy';
@@ -1346,12 +1357,14 @@ function renderAugmentWizard() {
     return `<button type="button" class="m4c-aw-chit${sh === shape ? ' sel' : ''}${pl ? ' on' : ''}${changes.includes(sh) ? ' changed' : ''}" data-aw-shape="${sh}">
       ${augmentGlyph(sh, { size: 30 })}<span>${AUGMENTS[sh].name}</span>${pl ? `<small>${esc(tag)}</small>` : ''}</button>`;
   }).join('');
-  // Targets: Crew at a Colony (not LEO). The chit's current Crew stays listed.
-  const crews = crewSlotsOf(p).filter((x) => x.site !== 'leo' && (s.colonies || {})[x.site]);
+  // Targets: Crew at a Colony (not LEO); with Starchild (JAXA), any Crew.
+  const anyCrew = hasPriv(p, 'STARCHILD');
+  const atColony = (x) => x.site !== 'leo' && (s.colonies || {})[x.site];
+  const crews = crewSlotsOf(p).filter((x) => anyCrew || atColony(x));
   const pl = plan[shape] || null;
   const targets = crews.map((x) => `<button type="button" class="m4c-aw-target${pl && pl.crewId === x.slot.id ? ' sel' : ''}" data-aw-crew="${esc(x.slot.id)}">
-      <b>${esc(crewName(x.slot.id))}</b><small>${esc(x.where)} · ${esc(spaceName(x.site))} Colony</small></button>`).join('')
-    || '<p class="muted">No Crew at a Colony.</p>';
+      <b>${esc(crewName(x.slot.id))}</b><small>${esc(x.where)} · ${x.site === 'leo' ? 'LEO' : esc(spaceName(x.site))}${atColony(x) ? ' Colony' : ''}</small></button>`).join('')
+    || `<p class="muted">${anyCrew ? 'No Crew.' : 'No Crew at a Colony.'}</p>`;
   const sides = [1, 2].map((n) => {
     const blocked = shape === 'heart' && n === 1;   // Parenthood needs M2
     return `<button type="button" class="m4c-aw-side${pl && pl.side === n ? ' sel' : ''}" data-aw-side="${n}" ${!pl || blocked ? 'disabled' : ''}${blocked ? ' data-tip="Needs M2"' : ''}>
