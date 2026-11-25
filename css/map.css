@@ -8182,7 +8182,22 @@ html.battery-save *::after {
   color: var(--ink-dim, #8b90b8);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  /* Its two parts sit in the header row directly, so the site name can take an
+     ellipsis before anything runs under the row's 📚 / 🤝 buttons; the aqua +
+     VP never truncate. */
+  display: contents;
 }
+.mp-stats-site {
+  margin-left: auto;
+  flex: 0 1000 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mp-stats-rest { flex: 0 0 auto; margin-left: -4px; }
+.mp-player-head > :not(.mp-name):not(.mp-stats-site) { flex-shrink: 0; }
+/* The name gives way only once the site name is used up. */
+.mp-player-head > .mp-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mp-player-detail { padding: 4px 10px 10px; border-top: 1px solid var(--border); }
 .mp-section { margin-bottom: 6px; }
 .mp-detail-label {

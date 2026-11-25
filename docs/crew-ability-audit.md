@@ -269,3 +269,9 @@ can be flipped):
     a Human only after Robot Emancipation.
 25. **Refugee:** the Claim owner's share is not revocable. It rides the ordinary
     Factory-use grant and ends if the Factory cube relocates.
+26. **Murder/Suicide (Collective Bargaining, Rescue Team):** covers every Human,
+    Crew as well as Colonist (G6a: Workforce is "neither a Felony nor Murder",
+    so any other Human decommission is). A Crew recalls to the LEO Stack, a
+    Human Colonist goes home. It grants that one felony only: no Claim Jump,
+    Luna prospecting or Factory Hijack. (2026-11-25; before this only
+    Colonists were covered.)

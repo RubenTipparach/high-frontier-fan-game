@@ -12337,6 +12337,22 @@ check('the remaining blue Fulfilled Abilities (Inner Tour, New Horizons, Sun-fir
   };
   assert(!scrap(null), 'a Human was let go with no Murder/Suicide allowance');
   assert(scrap(byName('Rescue Team')), 'Rescue Team did not allow Murder/Suicide');
+  // A Crew is a Human too: Rescue Team recalls it off the rocket to LEO.
+  const scrapCrew = (con) => {
+    const st = startedGame({ seats: 2, m4: true });
+    const me = st.players[0];
+    st.activeIndex = 0;
+    if (con) fulfilledWith(me, con);
+    const crewId = me.faction.cardId;
+    me.leo = (me.leo || []).filter((x) => x.id !== crewId);
+    me.rocket.siteId = 'vesta';
+    me.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }, { id: crewId, kind: 'crew', face: 'primary' }];
+    const r = applyOperation(st, { kind: 'DECOMMISSION', cardIds: [crewId], from: 'rocket' }, { profileId: me.profileId });
+    return r.ok && !(r.state.players[0].rocket.stack || []).some((x) => x.id === crewId)
+      && (r.state.players[0].leo || []).some((x) => x.id === crewId);
+  };
+  assert(!scrapCrew(null), 'a Crew was let go with no Murder/Suicide allowance');
+  assert(scrapCrew(byName('Rescue Team')), 'Rescue Team did not let a Crew go to LEO');
   notes.push('Rescue Team');
   // Tsiolkovsky Elevator Lab: factory-assist through lander burns at Elevator Sites only.
   const tsio = byName('Tsiolkovsky Elevator Lab');

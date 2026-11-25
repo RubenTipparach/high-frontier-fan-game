@@ -4253,6 +4253,14 @@ function myFactionPrivilege() {
 function canCommitFelony() {
   return isAnarchy() || myFactionPrivilege() === 'FELONIOUS';
 }
+// Murder/Suicide (decommissioning a Human, Crew or Colonist): any felony, or
+// allowed outright by Collective Bargaining / Rescue Team. Mirrors the
+// engine's mayCommitMurder.
+function canCommitMurder() {
+  const me = mySnapshotPlayer();
+  return canCommitFelony() || playerHasPrivilege(me, 'COLLECTIVE_BARGAINING')
+    || contractAbilityListOf(me, 'murderSuicide').length > 0;
+}
 // Push Factory (Powersat rule c): do I own a Factory on a push-icon Site? That
 // Factory yields the Powersat Ability. It is an ABILITY, not a faction
 // privilege, so Anarchy does NOT suspend it (rule h). Mirrors the server's
@@ -9058,7 +9066,16 @@ function renderMpPlayer(p, isMe, isActive) {
   // aqua-chip-balance widget), so use it the same way here. Tank water
   // lives in the expanded detail so the icon means the same thing
   // everywhere.
-  stats.textContent = `${onlineSiteLabel(rkt.siteId)} · 💧${p.aqua || 0} · ${vp}vp`;
+  // The site name shortens with an ellipsis on a narrow roster; aqua + VP stay.
+  const siteLbl = onlineSiteLabel(rkt.siteId);
+  const siteEl = document.createElement('span');
+  siteEl.className = 'mp-stats-site';
+  siteEl.textContent = siteLbl;
+  siteEl.title = siteLbl;
+  const restEl = document.createElement('span');
+  restEl.className = 'mp-stats-rest';
+  restEl.textContent = `· 💧${p.aqua || 0} · ${vp}vp`;
+  stats.append(siteEl, restEl);
   head.append(dot, name);
   // M4 + M2 (4C2): Spaceborn (Spacer Union) or Earthborn, beside the name.
   if (_onlineSnapshot && _onlineSnapshot.m4 && _onlineSnapshot.m2 && Array.isArray(_onlineSnapshot.spacebornQueue)) {
@@ -12599,7 +12616,7 @@ async function decommissionSelectedToHand(stackId, ids, onDone) {
     else if (s.kind === 'fuel') { fuelCards++; fuelUnits += Math.max(0, Math.floor(Number(s.amount) || 0)); }
   }
   const others = list.length - crew - humanCol - fuelCards;
-  const felony = canCommitFelony();
+  const felony = canCommitMurder();
   const crewAtHome = stackId === 'leo'
     || (stackId.startsWith('bernal')
         && getMyBernals()[Number(stackId.slice('bernal'.length)) || 0] === myHomeBernal());
@@ -12611,11 +12628,7 @@ async function decommissionSelectedToHand(stackId, ids, onDone) {
     else parts.push(`<strong>${crew}</strong> crew stay put (a felony needs Anarchy)`);
   }
   if (humanCol) {
-    // Murder/Suicide: a felony, or allowed outright (Collective Bargaining,
-    // Rescue Team).
-    const murder = felony || playerHasPrivilege(mySnapshotPlayer(), 'COLLECTIVE_BARGAINING')
-      || contractAbilityListOf(mySnapshotPlayer(), 'murderSuicide').length > 0;
-    if (murder) parts.push(`<strong>${humanCol}</strong> Human colonist${humanCol === 1 ? '' : 's'} recall${humanCol === 1 ? 's' : ''} home to LEO / your Home Bernal (felony)`);
+    if (felony) parts.push(`<strong>${humanCol}</strong> Human colonist${humanCol === 1 ? '' : 's'} recall${humanCol === 1 ? 's' : ''} home to LEO / your Home Bernal (felony)`);
     else parts.push(`<strong>${humanCol}</strong> Human colonist${humanCol === 1 ? '' : 's'} stay${humanCol === 1 ? 's' : ''} put (a felony needs Anarchy)`);
   }
   if (fuelCards) {
@@ -19945,7 +19958,7 @@ function openRocketStackModal() {
           addToHand(card);
         });
         actions.appendChild(back);
-      } else if ((isCrewSlot || isHumanColonistSlot(slot)) && _online && canCommitFelony()) {
+      } else if ((isCrewSlot || isHumanColonistSlot(slot)) && _online && canCommitMurder()) {
         // Decommissioning a Human (Crew OR a Human colonist) is a felony, legal
         // only during Anarchy (or with the Felonious privilege): they leave the
         // rocket and recall to your LEO Stack (a Human colonist settles in your
@@ -19961,7 +19974,7 @@ function openRocketStackModal() {
         felon.disabled = lockedFelon;
         felon.title = lockedFelon
           ? 'Wait for your turn.'
-          : 'Anarchy felony: send this Human off the rocket. They recall to your LEO Stack (no replacement).';
+          : 'Murder/Suicide: send this Human off the rocket. They recall to your LEO Stack (no replacement).';
         felon.addEventListener('click', () => {
           if (felon.disabled) return;
           selected.delete(slot.id);
@@ -20128,7 +20141,7 @@ function openRocketStackModal() {
         if (selected.has(s.id) && (isCrewSlot(s) || isHumanColonistSlot(s))) decomHumans++;
       }
       const decomOthers = nSel - decomHumans;
-      const felonyOk = canCommitFelony();
+      const felonyOk = canCommitMurder();
       let decomLabel = `♻ Decommission to hand${nSel ? ` (${nSel})` : ''}`;
       let decomTitle = 'Return the selected cards to your hand';
       if (decomHumans > 0 && decomOthers === 0) {

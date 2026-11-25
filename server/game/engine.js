@@ -10374,6 +10374,19 @@ function recallIfEmpty(player) {
 // LEO Stack) back to the HAND (mirror of browse.js#decommissionSelectedToHand).
 // Crew never enters the hand, so any crew in the selection is skipped.
 // op = { cardIds: [...], from: 'rocket' | 'leo' }. Turn-gated (functional).
+// Murder/Suicide: voluntarily decommissioning a Human, Crew OR Colonist (G6:
+// Workforce is "neither a Felony nor Murder", so any other Human decommission
+// is). Any Felony allows it. Collective Bargaining (LEO Workers' Union promo
+// crew, "You may commit Murder/Suicide") and Rescue Team (M4 contract ability,
+// "You are allowed Murder/Suicide") grant JUST this one felony, not the full
+// Felonious privilege: they must NOT unlock Claim Jump, Luna prospecting or
+// Factory Hijack, so they are not folded into mayCommitFelony.
+function mayCommitMurder(state, player) {
+  return mayCommitFelony(state, player)
+    || hasPrivilege(state, player, 'COLLECTIVE_BARGAINING')
+    || contractAbilityCount(state, player, 'murderSuicide') > 0;
+}
+
 function applyDecommission(state, op, player) {
   const fromRaw = String(op.from || 'rocket');
   // Recall the Freighter UNIT itself back to hand: the big cube leaves the map
@@ -10456,7 +10469,7 @@ function applyDecommission(state, op, player) {
     // non-Home-Bernal stack during a felony.)
     if (isCrewSlot(slot)) {
       const atHome = from === 'leo' || (from === 'bernal' && srcBernal && isHomeBernal(srcBernal));
-      if (!mayCommitFelony(state, player) || atHome) { blocked++; continue; }
+      if (!mayCommitMurder(state, player) || atHome) { blocked++; continue; }
       src.splice(idx, 1);
       (player.leo = player.leo || []).push({ id: slot.id, kind: 'crew', face: slot.face === 'secondary' ? 'secondary' : 'primary' });
       if (player.rocket.activeThrusterId === id) player.rocket.activeThrusterId = null;
@@ -10478,16 +10491,7 @@ function applyDecommission(state, op, player) {
         robotsToHand++;
         robotIds.push(slot.id);
       } else {
-        // Collective Bargaining (LEO Workers' Union promo crew): "You may
-        // commit Murder/Suicide" grants JUST this one felony (2C2a), not the
-        // full Felonious privilege - it must NOT also unlock Claim Jump, Luna
-        // prospecting, Factory Hijack, or Crew (Human) decommission above, so
-        // it's checked here directly rather than folded into mayCommitFelony.
-        // Rescue Team (M4 contract ability) allows Murder/Suicide the same way.
-        if (!mayCommitFelony(state, player) && !hasPrivilege(state, player, 'COLLECTIVE_BARGAINING')
-          && !contractAbilityCount(state, player, 'murderSuicide')) {
-          blocked++; continue;
-        }
+        if (!mayCommitMurder(state, player)) { blocked++; continue; }
         src.splice(idx, 1);
         const home = (player.bernals || []).find((b) => b && b.anchored && isHomeBernal(b));
         const targetArr = home ? (home.stack = home.stack || []) : (player.leo = player.leo || []);
