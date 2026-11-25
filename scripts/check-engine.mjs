@@ -12412,6 +12412,40 @@ check('the remaining blue Fulfilled Abilities (Inner Tour, New Horizons, Sun-fir
     assert(fixed(manned), `a manned contract (${manned.name}) did not clear the rocket glitch`);
     assert(!fixed(unmanned), `an unmanned contract (${unmanned.name}) cleared the rocket glitch`);
   }
+  // Glory chits: a manned contract loads, carries and parades one like a Crew.
+  {
+    const manned = CONTRACTS.find((c) => c.faces.primary.manned && !faceUnplayable(c.faces.primary, { m1: true, m2: true }));
+    const unmanned = CONTRACTS.find((c) => !c.faces.primary.manned && !c.faces.primary.military);
+    const atCeres = (con) => {
+      const st = startedGame({ seats: 2, m4: true });
+      const me = st.players[0];
+      st.activeIndex = 0;
+      me.contractMeta = { [con.id]: { side: 'blue', paid: 0, boosted: true, default: false, progress: { sites: [], done: 0 } } };
+      me.glory = { chits: [], claimed: [], visited: [], vps: 0 };
+      me.leo = (me.leo || []).filter((x) => x.id !== me.faction.cardId);
+      me.rocket.siteId = 'ceres';
+      me.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }, { id: con.id, kind: 'contract', face: 'primary' }];
+      return { st, me, r: applyOperation(st, { kind: 'LOAD_GLORY' }, { profileId: me.profileId }) };
+    };
+    const no = atCeres(unmanned);
+    assert(!no.r.ok, `an unmanned contract loaded a glory chit`);
+    const yes = atCeres(manned);
+    assert(yes.r.ok, `a manned contract could not load a glory chit: ${yes.r.error}`);
+    let g = yes.r.state.players[0].glory;
+    assert(g.chits.length === 1 && g.chits[0].crewId === manned.id, `the chit is not on the contract: ${JSON.stringify(g.chits)}`);
+    // Back at LEO it parades at back value.
+    const home = JSON.parse(JSON.stringify(yes.r.state));
+    home.players[0].rocket.siteId = null;
+    const h = applyOperation(home, { kind: 'SET_WIRING', wiring: {} }, { profileId: home.players[0].profileId });
+    assert(h.ok, `SET_WIRING: ${h.error}`);
+    g = h.state.players[0].glory;
+    assert(!g.chits.length && g.claimed[0] && g.claimed[0].side === 'back', `no parade at LEO: ${JSON.stringify(g)}`);
+    // Decommissioned (default) out in space: the chit lands low side up.
+    const lost = applyOperation(yes.r.state, { kind: 'DECOMMISSION', cardIds: [manned.id], from: 'rocket' }, { profileId: yes.r.state.players[0].profileId });
+    assert(lost.ok, `decommission: ${lost.error}`);
+    g = lost.state.players[0].glory;
+    assert(!g.chits.length && g.claimed[0] && g.claimed[0].side === 'front', `the chit did not land low side up: ${JSON.stringify(g)}`);
+  }
   notes.push('Rescue Team');
   // Tsiolkovsky Elevator Lab: factory-assist through lander burns at Elevator Sites only.
   const tsio = byName('Tsiolkovsky Elevator Lab');

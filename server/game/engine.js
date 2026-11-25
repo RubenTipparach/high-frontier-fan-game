@@ -840,7 +840,7 @@ function maybeAwardGlory(state, player, site, turn, stack = player.rocket.stack)
   // can carry a Human just as well. Mirror of the client's willAwardChit
   // `crewAboard` gate - a Human-less stack leaves the chit on the site for a
   // later, crewed visit to load.
-  if (!stackHasHuman(state, stack)) return null;
+  if (!stackHasGloryHuman(state, player, stack)) return null;
   // Glory Carry Limit (rule a): each Crew or Colonist carries at most ONE glory
   // chit, so the number of carried chits can't exceed the Humans aboard. When
   // every carrier already holds a chit there is no free hand to take this one,
@@ -873,7 +873,7 @@ function heroicCarrierId(state, player) {
 function gloryCarriers(state, player) {
   if (heroicCarrierId(state, player)) return Infinity;
   let n = 0;
-  const count = (slots) => { for (const s of (slots || [])) if (isHumanSlot(state, s)) n += 1; };
+  const count = (slots) => { for (const s of (slots || [])) if (isGloryHuman(state, player, s)) n += 1; };
   count(player.leo);
   count(player.rocket && player.rocket.stack);
   for (const o of Object.values(player.outposts || {})) if (o) count(o.cards);
@@ -894,7 +894,7 @@ function pickGloryCarrier(state, player, stack = player.rocket && player.rocket.
   const taken = new Set(((player.glory && player.glory.chits) || [])
     .map((c) => c && c.crewId).filter(Boolean));
   for (const s of (stack || [])) {
-    if (isHumanSlot(state, s) && !taken.has(s.id)) return s.id;
+    if (isGloryHuman(state, player, s) && !taken.has(s.id)) return s.id;
   }
   // Heroic: the Galahad crew may take another chit on top of the ones it holds.
   const hero = heroicCarrierId(state, player);
@@ -908,7 +908,7 @@ function pickGloryCarrier(state, player, stack = player.rocket && player.rocket.
 // decommissioned (in which case the chit is orphaned home at front value).
 function humanCardInPlay(state, player, cardId) {
   if (!cardId) return false;
-  const inArr = (slots) => (slots || []).some((s) => s && s.id === cardId && isHumanSlot(state, s));
+  const inArr = (slots) => (slots || []).some((s) => s && s.id === cardId && isGloryHuman(state, player, s));
   if (inArr(player.leo)) return true;
   if (inArr(player.rocket && player.rocket.stack)) return true;
   for (const o of Object.values(player.outposts || {})) if (o && inArr(o.cards)) return true;
@@ -1150,7 +1150,7 @@ export function migrateGloryCrewBindings(state, { commit = false } = {}) {
     if (!p.glory || !Array.isArray(p.glory.chits) || !p.glory.chits.length) continue;
     const taken = new Set(p.glory.chits.map((c) => c && c.crewId).filter(Boolean));
     const rocketHumans = ((p.rocket && p.rocket.stack) || [])
-      .filter((s) => isHumanSlot(state, s)).map((s) => s.id);
+      .filter((s) => isGloryHuman(state, p, s)).map((s) => s.id);
     const unbound = [];
     for (const c of p.glory.chits) {
       if (!c || c.crewId) continue;                 // already bound: leave it
@@ -1212,7 +1212,7 @@ function applyLoadGlory(state, op, player) {
     && !sirenGloryBlocked(state, c.site.id)
     && !player.glory.visited.includes(c.site.solarZone)
     && !zoneChitTaken(state, c.site.solarZone)
-    && stackHasHuman(state, c.stack));
+    && stackHasGloryHuman(state, player, c.stack));
   if (!eligible) return fail('no_chit_to_load');
   // Glory Carry Limit (rule a): if every Human aboard already carries a chit,
   // there is no free carrier for another - report it distinctly so the client
@@ -1505,6 +1505,17 @@ function isHumanColonistSlot(state, slot) {
 // Human Colonist").
 function isHumanSlot(state, slot) {
   return isCrewSlot(slot) || isHumanColonistSlot(state, slot);
+}
+// Glory chits (G5): a manned contract carries the same "humans on board" icon a
+// Crew does, so it can load, carry and parade a chit like any other Human (owner
+// 2026-11-25). Glory rules only; other Human rules still read isHumanSlot.
+function isGloryHuman(state, player, slot) {
+  if (isHumanSlot(state, slot)) return true;
+  return !!(state && state.m4 && player && slot && CONTRACTS_BY_ID[slot.id]
+    && (contractFaceOf(player, slot.id) || {}).manned);
+}
+function stackHasGloryHuman(state, player, slots) {
+  return (slots || []).some((s) => isGloryHuman(state, player, s));
 }
 function stackHasHuman(state, slots) {
   return (slots || []).some((s) => isHumanSlot(state, s));
@@ -2707,7 +2718,7 @@ function cashHomeGloryChits(state, player) {
   const out = { scored: 0, vps: 0, side: null };
   if (!player.glory || !Array.isArray(player.glory.chits) || !player.glory.chits.length) return out;
   const aboard = new Set((player.rocket.stack || [])
-    .filter((s) => isHumanSlot(state, s)).map((s) => s.id));
+    .filter((s) => isGloryHuman(state, player, s)).map((s) => s.id));
   const anyCrewAboard = (player.rocket.stack || []).some(isCrewSlot);
   player.glory.claimed = player.glory.claimed || [];
   const kept = [];
@@ -2759,7 +2770,7 @@ function cashGloryAtHomeBernal(state) {
     // have to physically move the crew onto the station for it to count home).
     const atHome = new Set();
     const addHumans = (arr) => {
-      for (const s of (arr || [])) if (isHumanSlot(state, s)) atHome.add(s.id);
+      for (const s of (arr || [])) if (isGloryHuman(state, p, s)) atHome.add(s.id);
     };
     for (const bn of homeBernals) addHumans(bn.stack);
     const homeSites = new Set(homeBernals.map((bn) => bn.siteId));

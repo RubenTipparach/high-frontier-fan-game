@@ -27194,7 +27194,7 @@ function gloryUnitOf(me, unit) {
 // The first Human aboard `stack` not already carrying a chit (one per Human).
 function freeGloryCarrierIn(stack, me) {
   const taken = new Set(((me && me.glory && me.glory.chits) || []).map((c) => c && c.crewId).filter(Boolean));
-  const slot = (stack || []).find((sl) => (isCrewSlot(sl) || isHumanColonistSlot(sl)) && !taken.has(sl.id));
+  const slot = (stack || []).find((sl) => isGloryHumanSlot(sl, me) && !taken.has(sl.id));
   return slot ? slot.id : null;
 }
 async function maybePromptChitAfterMove(unit = 'rocket') {
@@ -27210,7 +27210,7 @@ async function maybePromptChitAfterMove(unit = 'rocket') {
   const zone = site.solarZone;
   if (zoneChitTaken(zone)) return;                     // already claimed by someone
   if (getChits().some((c) => c.zone === zone)) return; // already carrying this zone
-  if (!stackHasHuman(u.stack)) return;                 // needs a Crew or Human colonist to carry it
+  if (!stackHasGloryHuman(u.stack, me)) return;       // needs a Human (Crew, colonist, manned contract)
   // Glory Carry Limit (rule a): every Human carries at most one chit. With no
   // free Human aboard this unit there is no hand for this one, so don't offer
   // it (it would be refused); the chit stays on its site for a later visit.
@@ -29032,7 +29032,7 @@ async function moveRocket() {
   // A chit is only retrieved if a crew is aboard to carry it. On
   // return to LEO any carried chits resolve: BACK (flipped) if a crew
   // brought them home, FRONT (face-up) if no crew is aboard.
-  const crewAboard = stackHasHuman();
+  const crewAboard = stackHasGloryHuman();
   // Pick up the zone's glory chit only when the rocket LANDS at a real site
   // (not a coasting waypoint) with a crew aboard, and isn't already carrying
   // that zone's chit (so coasting through / re-landing doesn't re-prompt).
@@ -31639,7 +31639,7 @@ function showSitePopupFor(site) {
     });
   }
   const gloryMe = _online ? mySnapshotPlayer() : null;
-  const gloryUnit = gloryUnits.find((g) => stackHasHuman(g.stack)
+  const gloryUnit = gloryUnits.find((g) => stackHasGloryHuman(g.stack)
     && (!gloryMe || freeGloryCarrierIn(g.stack, gloryMe)));
   if (gloryUnit
       && site.solarZone && !isLeoSite(site)
@@ -33968,6 +33968,18 @@ function isHumanColonistSlot(s) {
 function stackHasHuman(stack = getRocketStack()) {
   return (stack || []).some((s) => isCrewSlot(s) || isHumanColonistSlot(s));
 }
+// Glory chits (G5): a manned contract (the humans-on-board icon) loads, carries
+// and parades a chit like a Crew. Mirrors the server's isGloryHuman. `owner` is
+// the player whose card it is (side lives in their contract records).
+function isGloryHumanSlot(s, owner = mySnapshotPlayer()) {
+  if (isCrewSlot(s) || isHumanColonistSlot(s)) return true;
+  if (!s || !CONTRACTS_BY_ID[s.id] || !(_onlineSnapshot && _onlineSnapshot.m4)) return false;
+  const meta = owner && owner.contractMeta && owner.contractMeta[s.id];
+  return !!(contractFace(s.id, (meta && meta.side) || 'blue') || {}).manned;
+}
+function stackHasGloryHuman(stack = getRocketStack(), owner = mySnapshotPlayer()) {
+  return (stack || []).some((s) => isGloryHumanSlot(s, owner));
+}
 // Is my Freighter parked at this (planner-id) site? Mirrors the rocket-site
 // comparison the glory-chit / Human-presence gates already use, converting
 // the freighter's snapshot siteId (a server slug) to the same planner-id
@@ -33985,7 +33997,7 @@ function freighterAtClientSite(siteId) {
 // (decommissioned / colonised) orphans its chit.
 function crewInPlay(crewId) {
   if (!crewId) return false;
-  const carries = (s) => s.id === crewId && (isCrewSlot(s) || isHumanColonistSlot(s));
+  const carries = (s) => s.id === crewId && isGloryHumanSlot(s);
   if (getRocketStack().some(carries)) return true;
   const outs = getOutposts() || {};
   for (const letter of Object.keys(outs)) {
@@ -34022,7 +34034,7 @@ function chitsOnOutpostCount(letter) {
 // chit to the first crew aboard; its fate (returns home vs. leaves)
 // then drives that chit's front/back resolution.
 function firstCrewId() {
-  const slot = getRocketStack().find((s) => isCrewSlot(s) || isHumanColonistSlot(s));
+  const slot = getRocketStack().find((s) => isGloryHumanSlot(s));
   return slot ? slot.id : null;
 }
 // Display name for a crew id (primary face), for chit-token owner tags.
@@ -34031,7 +34043,10 @@ function crewDisplayName(crewId) {
   if (c) return (c.faces && c.faces.primary && c.faces.primary.name) || crewId;
   // A Human colonist carries a chit too: name it by its card.
   const col = crewId ? (COLONISTS_BY_ID[crewId] || PATENTS_BY_ID[crewId]) : null;
-  return (col && col.name) || crewId || '';
+  if (col && col.name) return col.name;
+  // ...and so does a manned contract: name it by its card.
+  const con = crewId ? CONTRACTS_BY_ID[crewId] : null;
+  return (con && con.faces && con.faces.primary && con.faces.primary.name) || crewId || '';
 }
 // Suppress reconciliation during the colonize commit, which removes
 // the crew then re-adds it on a rollback path; colonize resolves its
@@ -34851,7 +34866,7 @@ function snapshotGloryCarriers(player) {
       || (player.bernals || []).some((bn) => bn && has(bn.stack))) return Infinity;
   }
   let n = 0;
-  const count = (slots) => { for (const s of (slots || [])) if (isCrewSlot(s) || isHumanColonistSlot(s)) n += 1; };
+  const count = (slots) => { for (const s of (slots || [])) if (isGloryHumanSlot(s, player)) n += 1; };
   count(player.leo);
   count(player.rocket && player.rocket.stack);
   for (const o of Object.values(player.outposts || {})) if (o) count(o.cards);
