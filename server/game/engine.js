@@ -17130,7 +17130,10 @@ function contractBidBlock(state, player, cardId) {
 // Every stack location a contract card can sit in, with where that stack is.
 function findContractSlot(state, player, cardId) {
   const inLeo = (player.leo || []).findIndex((s) => s.id === cardId);
-  if (inLeo >= 0) return { arr: player.leo, idx: inLeo, where: { siteId: null, atLeo: true, entered: [], stack: player.leo }, label: 'LEO' };
+  if (inLeo >= 0) return { arr: player.leo, idx: inLeo, where: { siteId: null, atLeo: true, atHome: true, entered: [], stack: player.leo }, label: 'LEO' };
+  // atHome: LEO or one of your anchored Home Bernals, where a Return step ends
+  // (your Bank reaches both, like the aqua bank and the ticker tape parade).
+  const homeAt = (siteId, atLeo) => atLeo || siteIsRefuelDepot(player, siteId);
   const st = (player.rocket && player.rocket.stack) || [];
   const inRocket = st.findIndex((s) => s.id === cardId);
   if (inRocket >= 0) {
@@ -17138,7 +17141,7 @@ function findContractSlot(state, player, cardId) {
     return {
       arr: st, idx: inRocket, label: 'rocket',
       where: {
-        siteId: atLeo ? null : player.rocket.siteId, atLeo, entered: player.rocket.enteredThisTurn || [],
+        siteId: atLeo ? null : player.rocket.siteId, atLeo, atHome: homeAt(player.rocket.siteId, atLeo), entered: player.rocket.enteredThisTurn || [],
         stack: st, glitched: !!player.rocket.glitch, rolled: !!player.rocket.hazardRolledThisTurn,
       },
     };
@@ -17150,7 +17153,7 @@ function findContractSlot(state, player, cardId) {
     const i = (o.cards || []).findIndex((s) => s.id === cardId);
     if (i >= 0) {
       return { arr: o.cards, idx: i, label: `Outpost ${o.letter}`,
-        where: { siteId: o.siteId, atLeo: false, entered: [], stack: o.cards, glitched: !!o.glitch } };
+        where: { siteId: o.siteId, atLeo: false, atHome: homeAt(o.siteId, false), entered: [], stack: o.cards, glitched: !!o.glitch } };
     }
   }
   const fr = player.freighter;
@@ -17159,8 +17162,19 @@ function findContractSlot(state, player, cardId) {
     if (i >= 0) {
       const atLeo = fr.siteId == null || fr.siteId === leoSlug();
       return { arr: fr.stack, idx: i, label: 'Freighter',
-        where: { siteId: atLeo ? null : fr.siteId, atLeo, entered: [], stack: fr.stack, glitched: !!fr.glitched } };
+        where: { siteId: atLeo ? null : fr.siteId, atLeo, atHome: homeAt(fr.siteId, atLeo), entered: [], stack: fr.stack, glitched: !!fr.glitched } };
     }
+  }
+  // A Bernal's own stack (M2). Aboard your anchored Home Bernal is home.
+  for (const [bi, bn] of (player.bernals || []).entries()) {
+    const bst = (bn && bn.stack) || [];
+    const i = bst.findIndex((s) => s.id === cardId);
+    if (i < 0) continue;
+    const atLeo = bn.siteId == null || bn.siteId === leoSlug();
+    return { arr: bst, idx: i, label: `Bernal ${bi + 1}`,
+      where: { siteId: atLeo ? null : bn.siteId, atLeo,
+        atHome: atLeo || (bn.anchored && isHomeBernal(bn)) || siteIsRefuelDepot(player, bn.siteId),
+        entered: [], stack: bst, glitched: !!bn.glitched } };
   }
   return null;
 }

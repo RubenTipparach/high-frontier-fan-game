@@ -10332,7 +10332,7 @@ function humanizeOnlineOpError(code, detail) {
     not_entered_this_turn: 'The stack has to ENTER that space this turn.',
     not_enough_flybys: `Not enough different flyby spaces entered this turn${detail ? ` (${detail.have} of ${detail.need})` : ''}.`,
     not_lifted_off: 'Lift off from that site first.',
-    not_returned: 'Bring the contract back to LEO to finish it.',
+    not_returned: 'Bring the contract back to LEO or a Home Bernal to finish it.',
     destination_not_yet_supported: `This destination step is not playable yet${detail && detail.step ? `: ${detail.step}` : ''}.`,
     not_late: 'That contract is not late.',
     over_late_fee: `You cannot pay more than the late fee this turn${detail && detail.max != null ? ` (${detail.max} more)` : ''}.`,

@@ -10835,7 +10835,29 @@ check('a "& Return" contract announces the destination, then fulfils back at LEO
   pl(st, res.winner).rocket.siteId = null;
   r = op(st, 'FULFILL_CONTRACT', P.profileId, { cardId: c.id });
   assert(r.ok && pl(r.state, res.winner).fulfilledContracts.length === 1, `return: ${r.error}`);
-  return 'Mars North Pole announced, refused away from LEO, fulfilled on return';
+  // ...or back at an anchored Home Bernal: your Bank reaches it too.
+  {
+    let s2 = m4Game();
+    const r2 = winContract(s2, 'M4N226F', { by: 'initiator' });
+    s2 = r2.st;
+    const Q = pl(s2, r2.winner);
+    Q.contractHand = Q.contractHand.filter((x) => x !== r2.c.id);
+    Q.contractMeta[r2.c.id].boosted = true;
+    Q.rocket.stack.push({ id: r2.c.id, kind: 'contract', face: 'primary' });
+    Q.rocket.siteId = 'mars-north-pole';
+    let q = op(s2, 'FULFILL_CONTRACT', Q.profileId, { cardId: r2.c.id });
+    assert(q.ok, `step 1 (Home Bernal run): ${q.error}`);
+    s2 = q.state;
+    const Q2 = pl(s2, r2.winner);
+    Q2.bernals = [{ cardId: null, figure: 'kalpana', face: 'primary', anchored: true, home: true, siteId: 'burn-geo', stack: [] }];
+    Q2.rocket.siteId = 'burn-geo';
+    q = op(s2, 'FULFILL_CONTRACT', Q.profileId, { cardId: r2.c.id });
+    assert(q.ok && pl(q.state, r2.winner).fulfilledContracts.length === 1, `return to a Home Bernal: ${q.error}`);
+    Q2.bernals[0].home = false;
+    q = op(s2, 'FULFILL_CONTRACT', Q.profileId, { cardId: r2.c.id });
+    assert(!q.ok && q.error === 'not_returned', `a non-Home Bernal counted as home: ${q.error || 'fulfilled'}`);
+  }
+  return 'Mars North Pole announced, refused away from LEO, fulfilled on return (LEO or a Home Bernal, not another Bernal)';
 });
 
 // The ten destinations the owner approved on the destinations page (2026-11-17):
