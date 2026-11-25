@@ -1983,6 +1983,18 @@ function siteRefuelGate(state, player, siteId) {
 // Humans co-located with a site: a colony dome, any player's rocket
 // parked there with crew (or a Human colonist) aboard, any outpost there
 // holding one, or an M1/M2 vehicle stack (freighter / Bernal) holding one.
+// M4 manned contract (4B2d): the card carries the same "humans on board" icon a
+// Crew does, so it has people aboard who can clear a Glitch (G7). Read off the
+// owner's side of the card. Glitch rules only: it is not a Crew elsewhere.
+function stackHasMannedContract(state, owner, slots) {
+  if (!state || !state.m4 || !owner) return false;
+  return (slots || []).some((s) => s && CONTRACTS_BY_ID[s.id] && (contractFaceOf(owner, s.id) || {}).manned);
+}
+// Anyone aboard this stack who can fix a Glitch: a Crew, a Human Colonist, or a
+// manned contract.
+function stackCanFixGlitch(state, owner, slots) {
+  return stackHasCrew(slots) || stackHasHuman(state, slots) || stackHasMannedContract(state, owner, slots);
+}
 function humansAtSite(state, siteId) {
   if (!siteId) return true; // LEO: mission control is right there
   // ...and so is a Siren's. Cordelia IS their LEO (V9c) - the same launch
@@ -1995,14 +2007,12 @@ function humansAtSite(state, siteId) {
   if (state && state.sirens && String(siteId) === SIREN_HOME_SITE) return true;
   if (state.colonies[siteId]) return true;
   for (const p of state.players) {
-    if (p.rocket.siteId === siteId
-        && (stackHasCrew(p.rocket.stack) || stackHasHuman(state, p.rocket.stack))) return true;
+    if (p.rocket.siteId === siteId && stackCanFixGlitch(state, p, p.rocket.stack)) return true;
     for (const o of Object.values(p.outposts || {})) {
-      if (o && o.siteId === siteId
-          && (stackHasCrew(o.cards) || stackHasHuman(state, o.cards))) return true;
+      if (o && o.siteId === siteId && stackCanFixGlitch(state, p, o.cards)) return true;
     }
     if (p.freighter && p.freighter.siteId === siteId
-        && stackHasHuman(state, p.freighter.stack)) return true;
+        && stackCanFixGlitch(state, p, p.freighter.stack)) return true;
     for (const bn of (p.bernals || [])) {
       if (!bn || bn.siteId !== siteId) continue;
       // An ANCHORED Bernal is a Colony dome (2B3 places one when it anchors,
@@ -2013,7 +2023,7 @@ function humansAtSite(state, siteId) {
       // aboard like any other vehicle. Without this a glitch sat forever next to
       // a player's own anchored station (user 2026-09-02).
       if (bn.anchored) return true;
-      if (stackHasHuman(state, bn.stack)) return true;
+      if (stackCanFixGlitch(state, p, bn.stack)) return true;
     }
   }
   return false;
@@ -2568,13 +2578,13 @@ export function autoFixGlitches(state) {
     const scrum = hasPrivilege(state, p, 'SCRUM_TROUBLESHOOTERS');
     const fixWord = scrum ? 'cleared remotely (Scrum Troubleshooters)' : 'fixed by nearby humans';
     if (p.rocket.glitch
-        && (scrum || stackHasCrew(p.rocket.stack) || humansAtSite(state, p.rocket.siteId))) {
+        && (scrum || stackCanFixGlitch(state, p, p.rocket.stack) || humansAtSite(state, p.rocket.siteId))) {
       p.rocket.glitch = false;
       notes.push(`${p.name}'s rocket glitch was ${fixWord}.`);
     }
     for (const o of Object.values(p.outposts || {})) {
       if (o && o.glitch
-          && (scrum || stackHasCrew(o.cards) || humansAtSite(state, o.siteId))) {
+          && (scrum || stackCanFixGlitch(state, p, o.cards) || humansAtSite(state, o.siteId))) {
         o.glitch = false;
         notes.push(`${p.name}'s Outpost ${o.letter} glitch was ${fixWord}.`);
       }
@@ -2584,13 +2594,13 @@ export function autoFixGlitches(state) {
     // humansAtSite already applies to them - a colonist riding the cargo, or
     // anyone (any player's) colocated at the unit's site.
     if (p.freighter && p.freighter.glitched
-        && (scrum || stackHasHuman(state, p.freighter.stack) || humansAtSite(state, p.freighter.siteId))) {
+        && (scrum || stackCanFixGlitch(state, p, p.freighter.stack) || humansAtSite(state, p.freighter.siteId))) {
       p.freighter.glitched = false;
       notes.push(`${p.name}'s Freighter glitch was ${fixWord}.`);
     }
     for (const bn of (p.bernals || [])) {
       if (bn && bn.glitched
-          && (scrum || stackHasHuman(state, bn.stack) || humansAtSite(state, bn.siteId))) {
+          && (scrum || stackCanFixGlitch(state, p, bn.stack) || humansAtSite(state, bn.siteId))) {
         bn.glitched = false;
         notes.push(`${p.name}'s Bernal glitch was ${fixWord}.`);
       }
@@ -2832,12 +2842,12 @@ function glitchTargetFor(state, p) {
   if (playerHasColonistPower(state, p, 'glitchFree')) return null;
   const candidates = [];
   if (p.rocket.stack.length && !p.rocket.glitch
-      && !stackHasCrew(p.rocket.stack) && !humansAtSite(state, p.rocket.siteId)) {
+      && !stackCanFixGlitch(state, p, p.rocket.stack) && !humansAtSite(state, p.rocket.siteId)) {
     candidates.push({ count: p.rocket.stack.length, apply: () => { p.rocket.glitch = true; }, label: `${p.name}'s rocket` });
   }
   for (const o of Object.values(p.outposts || {})) {
     if (o && (o.cards || []).length && !o.glitch
-        && !stackHasCrew(o.cards) && !humansAtSite(state, o.siteId)) {
+        && !stackCanFixGlitch(state, p, o.cards) && !humansAtSite(state, o.siteId)) {
       candidates.push({ count: o.cards.length, apply: () => { o.glitch = true; }, label: `${p.name}'s Outpost ${o.letter}` });
     }
   }

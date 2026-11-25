@@ -12372,6 +12372,24 @@ check('the remaining blue Fulfilled Abilities (Inner Tour, New Horizons, Sun-fir
     assert(g.claimed.length === 1 && g.claimed[0].side === 'front', `the chit scored ${JSON.stringify(g.claimed)}, not low side up`);
     assert(/tragedy/.test(r.log), `the log does not say so: ${r.log}`);
   }
+  // A manned contract (humans-on-board icon) clears a Glitch (G7) like a Crew.
+  {
+    const manned = CONTRACTS.find((c) => c.faces.primary.manned && !faceUnplayable(c.faces.primary, { m1: true, m2: true }));
+    const unmanned = CONTRACTS.find((c) => !c.faces.primary.manned && !c.faces.primary.military);
+    const fixed = (con) => {
+      const st = startedGame({ seats: 2, m4: true });
+      const me = st.players[0];
+      st.activeIndex = 0;
+      me.contractMeta = { [con.id]: { side: 'blue', boosted: true } };
+      me.rocket.siteId = 'vesta';
+      me.rocket.stack = [{ id: thruster.id, kind: 'patent', face: 'primary' }, { id: con.id, kind: 'contract', face: 'primary' }];
+      me.rocket.glitch = true;
+      autoFixGlitches(st);
+      return !me.rocket.glitch;
+    };
+    assert(fixed(manned), `a manned contract (${manned.name}) did not clear the rocket glitch`);
+    assert(!fixed(unmanned), `an unmanned contract (${unmanned.name}) cleared the rocket glitch`);
+  }
   notes.push('Rescue Team');
   // Tsiolkovsky Elevator Lab: factory-assist through lander burns at Elevator Sites only.
   const tsio = byName('Tsiolkovsky Elevator Lab');
